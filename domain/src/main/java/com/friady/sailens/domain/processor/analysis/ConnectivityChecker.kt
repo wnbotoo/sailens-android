@@ -1,0 +1,309 @@
+package com.friady.sailens.domain.processor.analysis
+
+import com.friady.sailens.domain.config.AnalysisConfig
+import com.friady.sailens.domain.model.analysis.WalkPathConnectivity
+import com.friady.sailens.domain.model.common.BinaryMask
+import com.friady.sailens.domain.model.common.DirectionBias
+import com.friady.sailens.domain.model.common.Severity
+import com.friady.sailens.domain.util.BooleanStabilizer
+import com.friady.sailens.domain.util.NullableEnumStabilizer
+
+import kotlin.collections.ArrayDeque
+import kotlin.math.abs
+
+/**
+ * 连通性分析器
+ */
+class ConnectivityChecker(
+    private val config: AnalysisConfig,
+) {
+    private val blockedStabilizer = BooleanStabilizer(config.blockDebounceFrames)
+    private val narrowingStabilizer = BooleanStabilizer(config.narrowDebounceFrames)
+    private val biasStabilizer = NullableEnumStabilizer<DirectionBias>(config.biasDebounceFrames)
+
+    fun analyze(passableMask: BinaryMask): WalkPathConnectivity {
+        // 1. 分层扫描
+        val layerResults = performLayerScan(passableMask)
+        val verticalReachRatio = layerResults.validLayers.toFloat() / config.sampleLayerRatios.size
+
+        // 2.  宽度统计
+        val widthStats = computeWidthRetention(layerResults, passableMask)
+
+        // 3.  洪泛分析
+        val floodResult = performFloodFill(passableMask)
+
+        // 4. 计算置信度
+        val blockageConfidence = calculateBlockageConfidence(
+            verticalReachRatio, floodResult.reachRatio, widthStats.p25
+        )
+        val narrowingConfidence = calculateNarrowingConfidence(
+            widthStats.p25, widthStats.slope
+        )
+
+        // 5.  布尔判定
+        val isBlockedRaw = blockageConfidence >= config.blockageThreshold
+        val isNarrowingRaw = narrowingConfidence >= config.narrowingThreshold && !isBlockedRaw
+
+        // 6. 稳定化
+        val isBlocked = blockedStabilizer.update(isBlockedRaw)
+        val isNarrowing = narrowingStabilizer.update(isNarrowingRaw)
+
+        // 7. 方向建议
+        val suggestedBiasRaw = computeDirectionBias(layerResults, passableMask)
+        val suggestedBias = biasStabilizer.update(suggestedBiasRaw)
+
+        return WalkPathConnectivity(
+            isBlocked = isBlocked,
+            isNarrowing = isNarrowing,
+            suggestedBias = suggestedBias,
+            blockageConfidence = blockageConfidence,
+            narrowingConfidence = narrowingConfidence,
+            blockageSeverity = Severity.fromConfidence(blockageConfidence),
+            narrowingSeverity = Severity.fromConfidence(narrowingConfidence),
+            verticalReachRatio = verticalReachRatio,
+            validLayers = layerResults.validLayers,
+            totalLayers = config.sampleLayerRatios.size,
+            widthRetentionAvg = widthStats.avg,
+            widthRetentionP25 = widthStats.p25,
+            widthSlope = widthStats.slope,
+            floodReachRatio = floodResult.reachRatio,
+            floodWidthRetentionP25 = floodResult.widthP25,
+            floodVisitedRatio = floodResult.visitedRatio
+        )
+    }
+
+    private fun calculateBlockageConfidence(
+        verticalReachRatio: Float,
+        floodReachRatio: Float,
+        widthP25: Float,
+    ): Float {
+        var score = 0f
+
+        if (verticalReachRatio < config.reachRatioThreshold) {
+            score += 0.35f * (1 - verticalReachRatio / config.reachRatioThreshold)
+        }
+        if (floodReachRatio < config.minFloodReachRatio) {
+            score += 0.35f * (1 - floodReachRatio / config.minFloodReachRatio)
+        }
+        if (widthP25 < config.narrowEnterP25 * 0.6f) {
+            score += 0.30f * (1 - widthP25 / (config.narrowEnterP25 * 0.6f))
+        }
+
+        return score.coerceIn(0f, 1f)
+    }
+
+    private fun calculateNarrowingConfidence(widthP25: Float, slope: Float): Float {
+        var score = 0f
+
+        if (widthP25 < config.narrowEnterP25) {
+            score += 0.5f * (1 - widthP25 / config.narrowEnterP25)
+        }
+        if (slope < config.narrowSlopeThreshold) {
+            score += 0.5f * (abs(slope) / abs(config.narrowSlopeThreshold)).coerceAtMost(1f)
+        }
+
+        return score.coerceIn(0f, 1f)
+    }
+
+    private fun performLayerScan(mask: BinaryMask): LayerScanResult {
+        val layers = mutableListOf<LayerInfo>()
+        var validLayers = 0
+
+        for (ratio in config.sampleLayerRatios) {
+            val row = ((1 - ratio) * mask.height).toInt().coerceIn(0, mask.height - 1)
+            var maxRunWidth = 0
+            var maxRunCenter = 0.5f
+
+            for (r in maxOf(0, row - 1)..minOf(mask.height - 1, row + 1)) {
+                val runs = mask.getRowRuns(r)
+                for (run in runs) {
+                    val width = run.last - run.first + 1
+                    if (width > maxRunWidth) {
+                        maxRunWidth = width
+                        maxRunCenter = (run.first + run.last) / 2f / mask.width
+                    }
+                }
+            }
+
+            val widthRatio = maxRunWidth.toFloat() / mask.width
+            val isValid = widthRatio >= config.minRunWidthRatio
+            if (isValid) validLayers++
+
+            layers.add(LayerInfo(row, ratio, maxRunWidth, widthRatio, maxRunCenter, isValid))
+        }
+
+        return LayerScanResult(layers, validLayers)
+    }
+
+    private fun computeWidthRetention(layerResult: LayerScanResult, mask: BinaryMask): WidthStats {
+        val bottomStats = mask.getBottomStats(0.15f)
+        val bottomWidth = bottomStats.maxRunWidth.toFloat()
+
+        if (bottomWidth < 1f) {
+            return WidthStats(0f, 0f, 0f)
+        }
+
+        val retentions = layerResult.layers
+            .filter { it.isValid }
+            .map { it.maxRunWidth / bottomWidth }
+
+        if (retentions.isEmpty()) {
+            return WidthStats(0f, 0f, 0f)
+        }
+
+        val avg = retentions.average().toFloat()
+        val sorted = retentions.sorted()
+        val p25Index = (sorted.size * 0.25).toInt().coerceIn(0, sorted.size - 1)
+        val p25 = sorted[p25Index].toFloat()
+
+        val topRetention = layerResult.layers.lastOrNull()?.let {
+            it.maxRunWidth / bottomWidth
+        } ?: 1f
+        val slope = topRetention - 1f
+
+        return WidthStats(avg, p25, slope)
+    }
+
+    private fun performFloodFill(mask: BinaryMask): FloodResult {
+        val bottomStats = mask.getBottomStats(0.15f)
+
+        if (bottomStats.maxRunWidth < mask.width * config.minRunWidthRatio) {
+            return FloodResult(0f, 0f, 0f)
+        }
+
+        val windowTop = (config.floodWindowTopRatio * mask.height).toInt()
+        val windowBottom = mask.height - 1
+        val windowHeight = windowBottom - windowTop
+
+        if (windowHeight <= 0) {
+            return FloodResult(0f, 0f, 0f)
+        }
+
+        val seedY = mask.height - 1
+        val seedStartX = bottomStats.maxRunStart
+        val seedEndX = bottomStats.maxRunEnd
+        val seedCount = minOf(32, seedEndX - seedStartX + 1)
+        val seedStep = maxOf(1, (seedEndX - seedStartX) / seedCount)
+
+        val seeds = mutableListOf<Pair<Int, Int>>()
+        var x = seedStartX
+        while (x <= seedEndX && seeds.size < seedCount) {
+            if (mask.get(x, seedY)) {
+                seeds.add(Pair(x, seedY))
+            }
+            x += seedStep
+        }
+
+        if (seeds.isEmpty()) {
+            return FloodResult(0f, 0f, 0f)
+        }
+
+        val visited = BinaryMask(mask.width, mask.height)
+        val queue = ArrayDeque<Pair<Int, Int>>()
+        val rowWidths = mutableMapOf<Int, Int>()
+        var visitedCount = 0
+        var minYReached = seedY
+
+        seeds.forEach { queue.addLast(it) }
+
+        val dx = intArrayOf(0, 1, 0, -1, 1, 1, -1, -1)
+        val dy = intArrayOf(-1, 0, 1, 0, -1, 1, 1, -1)
+
+        while (queue.isNotEmpty() && visitedCount < config.maxFloodNodes) {
+            val (cx, cy) = queue.removeFirst()
+
+            if (cx < 0 || cx >= mask.width || cy < windowTop || cy > windowBottom) continue
+            if (visited.get(cx, cy) || !mask.get(cx, cy)) continue
+
+            visited.set(cx, cy, true)
+            visitedCount++
+            minYReached = minOf(minYReached, cy)
+            rowWidths[cy] = (rowWidths[cy] ?: 0) + 1
+
+            for (i in 0..7) {
+                queue.addLast(Pair(cx + dx[i], cy + dy[i]))
+            }
+
+            val currentReach = (seedY - minYReached).toFloat() / windowHeight
+            if (currentReach >= config.floodEarlyStopReachRatio) {
+                val retention = rowWidths.values.average().toFloat() / bottomStats.maxRunWidth
+                if (retention >= config.floodEarlyStopWidthRetention) {
+                    break
+                }
+            }
+        }
+
+        val reachRatio = (seedY - minYReached).toFloat() / windowHeight
+        val windowArea = windowHeight * mask.width
+        val visitedRatio = visitedCount.toFloat() / windowArea
+
+        val widthRetentions = rowWidths.values.map { it.toFloat() / bottomStats.maxRunWidth }
+        val widthP25 = if (widthRetentions.isNotEmpty()) {
+            val sorted = widthRetentions.sorted()
+            sorted[(sorted.size * 0.25).toInt().coerceIn(0, sorted.size - 1)]
+        } else 0f
+
+        return FloodResult(reachRatio, widthP25, visitedRatio)
+    }
+
+    private fun computeDirectionBias(
+        layerResult: LayerScanResult,
+        mask: BinaryMask,
+    ): DirectionBias? {
+        var leftWeight = 0f
+        var rightWeight = 0f
+
+        for ((index, layer) in layerResult.layers.withIndex()) {
+            if (!layer.isValid) continue
+
+            val offset = layer.maxRunCenter - 0.5f
+            val weight = 1f + index * 0.5f
+
+            if (offset < -0.1f) {
+                leftWeight += abs(offset) * weight
+            } else if (offset > 0.1f) {
+                rightWeight += abs(offset) * weight
+            }
+        }
+
+        val threshold = config.directionBiasThreshold
+
+        return when {
+            leftWeight > rightWeight + threshold -> DirectionBias.LEFT
+            rightWeight > leftWeight + threshold -> DirectionBias.RIGHT
+            else -> null
+        }
+    }
+
+    fun reset() {
+        blockedStabilizer.reset()
+        narrowingStabilizer.reset()
+        biasStabilizer.reset()
+    }
+}
+
+data class LayerInfo(
+    val row: Int,
+    val ratio: Float,
+    val maxRunWidth: Int,
+    val maxRunWidthRatio: Float,
+    val maxRunCenter: Float,
+    val isValid: Boolean,
+)
+
+data class LayerScanResult(
+    val layers: List<LayerInfo>,
+    val validLayers: Int,
+)
+
+data class WidthStats(
+    val avg: Float,
+    val p25: Float,
+    val slope: Float,
+)
+
+data class FloodResult(
+    val reachRatio: Float,
+    val widthP25: Float,
+    val visitedRatio: Float,
+)

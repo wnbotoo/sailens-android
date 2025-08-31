@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Navigation -->
+    <string name="permission_camera_required">Camera permission is required</string>
+    <string name="btn_pause">Pause</string>
+    <string name="btn_resume">Resume</string>
+    <string name="btn_settings">Settings</string>
+    <string name="btn_retry">Retry</string>
+    <string name="event_count_format">Events: %d</string>
+    <string name="frame_count_format">Frames: %d</string>
+
+    <!-- Settings -->
+    <string name="title_settings">Settings</string>
+    <string name="label_speech_rate">Speech Rate</string>
+    <string name="label_min_interval">Min Interval</string>
+    <string name="interval_format_ms">%dms</string>
+    <string name="btn_save">Save</string>
+    <string name="btn_reset">Reset</string>
+    <string name="settings_saved">Settings saved</string>
+
+    <!-- 事件消息 -->
+    <string name="event_obstacle_left">Obstacle on the left</string>
+    <string name="event_obstacle_center">Obstacle ahead</string>
+    <string name="event_obstacle_right">Obstacle on the right</string>
+    <string name="event_obstacle_front_left">Obstacle on the front left</string>
+    <string name="event_obstacle_front_right">Obstacle on the front right</string>
+    <string name="event_obstacle_left_center">Obstacles on the left and ahead</string>
+    <string name="event_obstacle_center_right">Obstacles ahead and on the right</string>
+    <string name="event_obstacle_left_right">Obstacles on both sides</string>
+    <string name="event_obstacle_multiple">Obstacles in multiple directions</string>
+    <string name="event_blocked">Path blocked ahead</string>
+    <string name="event_narrowing">Path is narrowing</string>
+    <string name="event_suggest_left">Suggest moving left</string>
+    <string name="event_suggest_right">Suggest moving right</string>
+    <string name="event_intersection">Intersection ahead</string>
+    <string name="event_road_warning">Entering road area, please watch for vehicles</string>
+    <string name="event_road_warning_vehicle">Vehicles detected on road, please be careful</string>
+    <string name="event_road_exit">Left road area</string>
+    <string name="event_ground_change">Road surface changing</string>
+    <string name="event_ground_to_road">Entering road surface</string>
+    <string name="event_ground_to_terrain">Entering unpaved surface</string>
+    <string name="event_ground_to_sidewalk">Entering sidewalk</string>
+    <string name="event_ground_to_indoor">Entering indoor area</string>
+</resources>

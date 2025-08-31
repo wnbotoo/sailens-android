@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Navigation -->
+    <string name="permission_camera_required">需要相机权限才能使用</string>
+    <string name="btn_pause">暂停</string>
+    <string name="btn_resume">恢复</string>
+    <string name="btn_settings">设置</string>
+    <string name="btn_retry">重试</string>
+    <string name="event_count_format">事件: %d</string>
+    <string name="frame_count_format">帧: %d</string>
+
+    <!-- Settings -->
+    <string name="title_settings">设置</string>
+    <string name="label_speech_rate">语音速度</string>
+    <string name="label_min_interval">最小播报间隔</string>
+    <string name="interval_format_ms">%d毫秒</string>
+    <string name="btn_save">保存</string>
+    <string name="btn_reset">重置</string>
+    <string name="settings_saved">设置已保存</string>
+
+    <!-- 事件消息 -->
+    <string name="event_obstacle_left">左侧有障碍</string>
+    <string name="event_obstacle_center">前方有障碍</string>
+    <string name="event_obstacle_right">右侧有障碍</string>
+    <string name="event_obstacle_front_left">左前方有障碍</string>
+    <string name="event_obstacle_front_right">右前方有障碍</string>
+    <string name="event_obstacle_left_center">左侧和前方有障碍</string>
+    <string name="event_obstacle_center_right">前方和右侧有障碍</string>
+    <string name="event_obstacle_left_right">左右两侧都有障碍</string>
+    <string name="event_obstacle_multiple">多个方向有障碍</string>
+    <string name="event_blocked">前方无法通行</string>
+    <string name="event_narrowing">通道正在收窄</string>
+    <string name="event_suggest_left">建议靠左行走</string>
+    <string name="event_suggest_right">建议靠右行走</string>
+    <string name="event_intersection">前方是路口</string>
+    <string name="event_road_warning">进入机动车道区域，请注意来往车辆</string>
+    <string name="event_road_warning_vehicle">检测到机动车道上有车辆，请注意安全</string>
+    <string name="event_road_exit">已离开机动车道</string>
+    <string name="event_ground_change">道路类型即将变化</string>
+    <string name="event_ground_to_road">即将进入机动车道</string>
+    <string name="event_ground_to_terrain">即将进入非铺装路面</string>
+    <string name="event_ground_to_sidewalk">即将进入人行道</string>
+    <string name="event_ground_to_indoor">即将进入室内</string>
+</resources>
