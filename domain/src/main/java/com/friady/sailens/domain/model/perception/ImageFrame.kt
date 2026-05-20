@@ -9,6 +9,7 @@ data class ImageFrame(
     val pixels: IntArray,
     val timestamp: Long,
     val rotationDegrees: Int,
+    val sequenceNumber: Long,
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -16,6 +17,7 @@ data class ImageFrame(
         return width == other.width &&
             height == other.height &&
             rotationDegrees == other.rotationDegrees &&
+            sequenceNumber == other.sequenceNumber &&
             pixels.contentEquals(other.pixels)
     }
 
@@ -24,6 +26,7 @@ data class ImageFrame(
         result = 31 * result + height
         result = 31 * result + pixels.contentHashCode()
         result = 31 * result + rotationDegrees
+        result = 31 * result + sequenceNumber.hashCode()
         return result
     }
 }

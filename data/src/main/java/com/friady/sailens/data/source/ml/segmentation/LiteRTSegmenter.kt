@@ -26,7 +26,7 @@ class LiteRTSegmenter(
     // 使用 LiteRT 处理器
     private val processor = OpenCVImageProcessor(config)
 
-    suspend fun segment(rawFrame: ImageFrame): SegmentationOutput {
+    fun segment(rawFrame: ImageFrame): SegmentationOutput {
         val startTime = SystemClock.uptimeMillis()
 
         // 1. 预处理: Bitmap -> FloatArray (返回新数组，由 TensorBuffer 内部分配)

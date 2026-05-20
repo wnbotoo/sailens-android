@@ -19,6 +19,7 @@ import com.friady.sailens.domain.usecase.perception.AnalyzeSceneUseCase
 import com.friady.sailens.domain.usecase.perception.ProcessFrameUseCase
 import com.friady.sailens.domain.usecase.scene.StartSceneAnalysisUseCase
 import com.friady.sailens.domain.usecase.scene.StopSceneAnalysisUseCase
+import com.friady.sailens.domain.usecase.trace.BuildTraceReplayReportUseCase
 import org.koin.dsl.module
 
 val domainBindingsModule = module {
@@ -73,6 +74,7 @@ val domainBindingsModule = module {
             get(),
             get(),
             get(),
+            get(),
             get()
         )
     }
@@ -91,5 +93,6 @@ val domainBindingsModule = module {
             get()
         )
     }
+    factory { BuildTraceReplayReportUseCase() }
 }
 

@@ -8,9 +8,8 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 
-private const val TAG = "ImageFrameAnalyzer"
-
 class ImageFrameAnalyzer() : ImageAnalysis.Analyzer, ImageFrameProvider {
+    private var nextSequenceNumber = 0L
 
     private val _frames = MutableSharedFlow<ImageFrame>(
         extraBufferCapacity = 8,
@@ -19,22 +18,22 @@ class ImageFrameAnalyzer() : ImageAnalysis.Analyzer, ImageFrameProvider {
     override val frames: SharedFlow<ImageFrame> = _frames.asSharedFlow()
 
     override fun analyze(image: ImageProxy) {
-        try {
+        image.use { image ->
             val bitmap = image.toBitmap()
             val pixels = IntArray(bitmap.width * bitmap.height)
             bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
             bitmap.recycle()
+            val sequenceNumber = nextSequenceNumber++
 
             val frame = ImageFrame(
                 width = image.width,
                 height = image.height,
                 pixels = pixels,
                 rotationDegrees = image.imageInfo.rotationDegrees,
-                timestamp = image.imageInfo.timestamp
+                timestamp = image.imageInfo.timestamp,
+                sequenceNumber = sequenceNumber,
             )
             _frames.tryEmit(frame)
-        } finally {
-            image.close()
         }
     }
 }

@@ -1,6 +1,7 @@
 package com.friady.sailens.data.source.ml
 
 import android.graphics.Bitmap
+import androidx.core.graphics.createBitmap
 import com.friady.sailens.data.source.ml.segmentation.SegmenterConfig
 import com.friady.sailens.domain.model.perception.ImageFrame
 import org.opencv.android.Utils
@@ -134,7 +135,7 @@ class OpenCVImageProcessor(
         }
 
         current?.recycle()
-        return Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also {
+        return createBitmap(width, height, Bitmap.Config.ARGB_8888).also {
             reusableBitmap = it
         }
     }
