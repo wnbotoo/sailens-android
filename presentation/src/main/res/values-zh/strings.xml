@@ -13,6 +13,8 @@
     <string name="title_settings">设置</string>
     <string name="label_speech_rate">语音速度</string>
     <string name="label_min_interval">最小播报间隔</string>
+    <string name="label_feedback_speech">语音反馈</string>
+    <string name="label_feedback_haptics">震动反馈</string>
     <string name="interval_format_ms">%d毫秒</string>
     <string name="btn_save">保存</string>
     <string name="btn_reset">重置</string>

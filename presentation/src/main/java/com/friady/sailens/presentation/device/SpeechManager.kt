@@ -4,6 +4,7 @@ import android.content.Context
 import android.speech.tts.TextToSpeech
 import com.friady.sailens.domain.model.common.EventPriority
 import com.friady.sailens.domain.model.scene.SceneEvent
+import java.util.IllegalFormatException
 import java.util.Locale
 
 /**
@@ -17,13 +18,22 @@ class SpeechManager(
 
     val isReady: Boolean get() = _isReady
 
-    fun initialize(onReady: () -> Unit) {
+    fun initialize(onReady: (() -> Unit)? = null) {
+        if (_isReady) {
+            onReady?.invoke()
+            return
+        }
+
+        if (tts != null) return
+
         tts = TextToSpeech(context) { status ->
             if (status == TextToSpeech.SUCCESS) {
                 tts?.language = Locale.getDefault()
                 tts?.setSpeechRate(1.0f)
                 _isReady = true
-                onReady()
+                onReady?.invoke()
+            } else {
+                _isReady = false
             }
         }
     }
@@ -34,8 +44,7 @@ class SpeechManager(
     fun speak(event: SceneEvent) {
         if (!_isReady) return
 
-        // TODO: replace
-        val text = event.messageKey  // "context.getString(event.messageKey)"
+        val text = resolveMessage(event)
         val queueMode = if (event.priority == EventPriority.CRITICAL) {
             TextToSpeech.QUEUE_FLUSH
         } else {
@@ -50,8 +59,26 @@ class SpeechManager(
     }
 
     fun release() {
+        stop()
         tts?.shutdown()
         tts = null
         _isReady = false
+    }
+
+    @Suppress("DiscouragedApi")
+    private fun resolveMessage(event: SceneEvent): String {
+        val resId = context.resources.getIdentifier(event.messageKey, "string", context.packageName)
+        if (resId == 0) return event.messageKey
+
+        if (event.messageParams.isEmpty()) {
+            return context.getString(resId)
+        }
+
+        val args = event.messageParams.toSortedMap().values.toTypedArray()
+        return try {
+            context.getString(resId, *args)
+        } catch (_: IllegalFormatException) {
+            context.getString(resId)
+        }
     }
 }

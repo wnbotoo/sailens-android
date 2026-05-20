@@ -26,15 +26,19 @@ class StartSceneAnalysisUseCase(
     private val logService: LogService,
 ) {
     suspend operator fun invoke(frameFlow: Flow<ImageFrame>): Flow<SceneResult> {
-        // 初始化
-        perceptionRepository.initialize()
+        if (!perceptionRepository.isInitialized) {
+            perceptionRepository.initialize()
+            logService.info("Navigation", "Perception repository initialized")
+        }
 
         logService.info("Navigation", "Navigation started")
 
         // 2. 初始化实例分割提供者（可选）
         instanceProvider?.let {
-            it.initialize()
-            logService.info("Navigation", "Instance provider initialized")
+            if (!it.isInitialized) {
+                it.initialize()
+                logService.info("Navigation", "Instance provider initialized")
+            }
         }
 
         return frameFlow

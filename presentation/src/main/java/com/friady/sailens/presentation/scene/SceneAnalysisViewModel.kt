@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 
 private const val TAG = "SceneAnalysisViewModel"
 
@@ -43,12 +44,12 @@ class SceneAnalysisViewModel(
     private var analysisJob: Job? = null
     private var frameCount: Long = 0
 
-//    init {
-//        speechManager.initialize {
-//            logger.debug(TAG, "SpeechManager initialized")
-//            _uiState.update { it.copy(isInitializing = true, errorMessage = null) }
-//        }
-//    }
+    init {
+        speechManager.initialize {
+            logger.debug(TAG, "SpeechManager initialized")
+            _uiState.update { it.copy(isSpeechReady = true, errorMessage = null) }
+        }
+    }
 
     fun toggleAnalysis() {
         if (_uiState.value.isRunning) {
@@ -56,6 +57,24 @@ class SceneAnalysisViewModel(
         } else {
             _uiState.update { it.copy(isLoading = true) }
             startSceneAnalysis()
+        }
+    }
+
+    fun setSpeechEnabled(enabled: Boolean) {
+        _uiState.update { it.copy(isSpeechEnabled = enabled) }
+        if (!enabled) {
+            speechManager.stop()
+        } else {
+            speechManager.initialize {
+                _uiState.update { state -> state.copy(isSpeechReady = true) }
+            }
+        }
+    }
+
+    fun setHapticsEnabled(enabled: Boolean) {
+        _uiState.update { it.copy(isHapticsEnabled = enabled) }
+        if (!enabled) {
+            hapticManager.cancel()
         }
     }
 
@@ -71,6 +90,8 @@ class SceneAnalysisViewModel(
                 logger.info(TAG, "Scene analysis started")
             }.catch { e ->
                 logger.error(TAG, "Error in scene analysis", e)
+                speechManager.stop()
+                hapticManager.cancel()
                 _uiState.update {
                     it.copy(
                         isRunning = false, isLoading = false, errorMessage = e.message ?: "Unknown error"
@@ -96,27 +117,45 @@ class SceneAnalysisViewModel(
 
     private fun onSceneEvents(events: List<SceneEvent>) {
         if (events.isEmpty()) return
-        logger.debug(TAG, "Scene events generated, ${events.first().messageKey}", mapOf("count" to events.size))
+        val primaryEvent = events.first()
+        val state = _uiState.value
 
-        // 语音播报最高优先级事件
-//        events.firstOrNull()?.let { event ->
-//            speechManager.speak(event)
-//            hapticManager.trigger(event)
-//        }
+        logger.debug(TAG, "Scene events generated, ${primaryEvent.messageKey}", mapOf("count" to events.size))
+
+        if (state.isSpeechEnabled) {
+            speechManager.speak(primaryEvent)
+        }
+
+        if (state.isHapticsEnabled) {
+            hapticManager.trigger(primaryEvent)
+        }
     }
 
     private fun stopSceneAnalysis() {
         analysisJob?.cancel()
         analysisJob = null
         stopSceneAnalysisUseCase()
+        speechManager.stop()
+        hapticManager.cancel()
         _uiState.update {
             it.copy(isRunning = false, isInitializing = false, isLoading = false, segMask = null)
         }
     }
 
     override fun onCleared() {
-        super.onCleared()
         analysisJob?.cancel()
         analysisJob = null
+        stopSceneAnalysisUseCase()
+        speechManager.stop()
+        hapticManager.cancel()
+        runBlocking {
+            runCatching {
+                stopSceneAnalysisUseCase.release()
+            }.onFailure { error ->
+                logger.error(TAG, "Error releasing scene analysis resources", error)
+            }
+        }
+        speechManager.release()
+        super.onCleared()
     }
 }

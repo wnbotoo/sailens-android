@@ -13,6 +13,8 @@
     <string name="title_settings">Settings</string>
     <string name="label_speech_rate">Speech Rate</string>
     <string name="label_min_interval">Min Interval</string>
+    <string name="label_feedback_speech">Speech feedback</string>
+    <string name="label_feedback_haptics">Haptic feedback</string>
     <string name="interval_format_ms">%dms</string>
     <string name="btn_save">Save</string>
     <string name="btn_reset">Reset</string>

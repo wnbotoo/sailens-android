@@ -82,6 +82,7 @@ val domainModule = module {
     }
     factory {
         StopSceneAnalysisUseCase(
+            get(),
             null,
             get(),
             get(),

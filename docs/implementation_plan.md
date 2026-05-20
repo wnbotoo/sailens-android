@@ -114,6 +114,9 @@
 - `release()` 负责真正释放模型与 delegate 资源
 - ViewModel 销毁时路径清晰、可验证
 
+**当前状态**
+- [x] 已完成
+
 ### 3.2 恢复语音/触觉但加上可控开关
 **涉及文件**
 - `SceneAnalysisViewModel.kt`
@@ -125,6 +128,9 @@
 - 不再播报原始 `messageKey`
 - 优先播报最高优先级事件
 - 支持后续在设置页做 enable/disable
+
+**当前状态**
+- [x] 已完成
 
 ---
 
@@ -181,9 +187,8 @@
 ---
 
 ## 9. 当前建议状态
-- **立即实施**：Phase 1 + Phase 2
-- **下个迭代**：Phase 3
-- **架构升级迭代**：Phase 4
+- **已完成**：Phase 1 + Phase 2 + Phase 3
+- **下个迭代**：Phase 4
 
 ---
 
@@ -195,4 +200,9 @@
 - [x] `CameraViewModel` 分离 preview / analysis 分辨率（`1920x1080` vs `640x360`）
 - [x] `BinaryMask.visualize()` 改为 `setPixels()` 批量写入
 - [x] 移除未使用的 LiteRT Support 依赖与 ML Model Binding，解决构建冲突
+- [x] `StartSceneAnalysisUseCase` 启动初始化改为幂等化
+- [x] `StopSceneAnalysisUseCase` 分离 stop/reset 与 suspend release 语义
+- [x] `SceneAnalysisViewModel` 在 stop/onCleared 中统一停止反馈并释放资源
+- [x] `SpeechManager` 恢复字符串资源解析，不再播报原始 `messageKey`
+- [x] 反馈链路按优先级事件恢复启用，且支持 UI 开关控制语音/震动
 - [x] 验证通过：`:domain:test` 与 `:app:assembleDebug`

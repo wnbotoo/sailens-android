@@ -9,12 +9,14 @@ import com.friady.sailens.domain.processor.decision.EventGenerator
 import com.friady.sailens.domain.processor.perception.ObstacleTracker
 import com.friady.sailens.domain.processor.perception.SegmentationAnalyzer
 import com.friady.sailens.domain.repository.InstanceSegmentationProvider
+import com.friady.sailens.domain.repository.PerceptionRepository
 import com.friady.sailens.domain.service.LogService
 
 /**
  * 停止导航用例
  */
 class StopSceneAnalysisUseCase(
+    private val perceptionRepository: PerceptionRepository,
     private val instanceProvider: InstanceSegmentationProvider?,
     private val segmentationAnalyzer: SegmentationAnalyzer,
     private val obstacleTracker: ObstacleTracker,
@@ -42,7 +44,8 @@ class StopSceneAnalysisUseCase(
         cooldownManager.reset()
     }
 
-    fun release() {
+    suspend fun release() {
+        perceptionRepository.release()
         instanceProvider?.release()
         logService.info("Navigation", "Resources released")
     }

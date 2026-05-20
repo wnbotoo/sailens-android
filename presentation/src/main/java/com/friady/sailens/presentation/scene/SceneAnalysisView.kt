@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.windowsizeclass.WindowHeightSizeClass
 import androidx.compose.material3.windowsizeclass.WindowSizeClass
@@ -32,9 +33,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.friady.sailens.camera.CameraView
+import com.friady.sailens.presentation.R
 import org.koin.androidx.compose.koinViewModel
 
 @Composable
@@ -60,17 +63,23 @@ fun SceneAnalysisView(
     val onToggleClick = {
         viewModel.toggleAnalysis()
     }
+    val onSpeechEnabledChange: (Boolean) -> Unit = viewModel::setSpeechEnabled
+    val onHapticsEnabledChange: (Boolean) -> Unit = viewModel::setHapticsEnabled
 
     if (isLandscape) {
         ContentForLandscape(
             state = state,
             onToggleClick = onToggleClick,
+            onSpeechEnabledChange = onSpeechEnabledChange,
+            onHapticsEnabledChange = onHapticsEnabledChange,
             modifier = modifier
         )
     } else {
         ContentForPortrait(
             state = state,
             onToggleClick = onToggleClick,
+            onSpeechEnabledChange = onSpeechEnabledChange,
+            onHapticsEnabledChange = onHapticsEnabledChange,
             modifier = modifier
         )
     }
@@ -80,6 +89,8 @@ fun SceneAnalysisView(
 private fun ContentForLandscape(
     state: SceneAnalysisUiState,
     onToggleClick: () -> Unit,
+    onSpeechEnabledChange: (Boolean) -> Unit,
+    onHapticsEnabledChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Row(modifier = modifier.fillMaxSize()) {
@@ -100,6 +111,10 @@ private fun ContentForLandscape(
             ControlView(
                 isRunning = state.isRunning,
                 isLoading = state.isLoading,
+                isSpeechEnabled = state.isSpeechEnabled,
+                isHapticsEnabled = state.isHapticsEnabled,
+                onSpeechEnabledChange = onSpeechEnabledChange,
+                onHapticsEnabledChange = onHapticsEnabledChange,
                 onToggleClick = onToggleClick
             )
         }
@@ -112,6 +127,8 @@ private fun ContentForLandscape(
 private fun ContentForPortrait(
     state: SceneAnalysisUiState,
     onToggleClick: () -> Unit,
+    onSpeechEnabledChange: (Boolean) -> Unit,
+    onHapticsEnabledChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(modifier = modifier) {
@@ -132,6 +149,10 @@ private fun ContentForPortrait(
             ControlView(
                 isRunning = state.isRunning,
                 isLoading = state.isLoading,
+                isSpeechEnabled = state.isSpeechEnabled,
+                isHapticsEnabled = state.isHapticsEnabled,
+                onSpeechEnabledChange = onSpeechEnabledChange,
+                onHapticsEnabledChange = onHapticsEnabledChange,
                 onToggleClick = onToggleClick
             )
         }
@@ -172,22 +193,46 @@ private fun CaptureView(
 private fun ControlView(
     isRunning: Boolean,
     isLoading: Boolean,
+    isSpeechEnabled: Boolean,
+    isHapticsEnabled: Boolean,
+    onSpeechEnabledChange: (Boolean) -> Unit,
+    onHapticsEnabledChange: (Boolean) -> Unit,
     onToggleClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Button(
-        onClick = onToggleClick,
-        enabled = !isLoading,
-        modifier = modifier
-    ) {
-        if (isLoading) {
-            CircularProgressIndicator(
-                modifier = Modifier.size(18.dp),
-                strokeWidth = 2.dp,
-                color = MaterialTheme.colorScheme.onPrimary
-            )
-            Spacer(modifier = Modifier.width(8.dp))
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(stringResource(R.string.label_feedback_speech))
+            Switch(checked = isSpeechEnabled, onCheckedChange = onSpeechEnabledChange)
         }
-        Text(if (isRunning) "Stop Image Analyzer" else "Start Image Analyzer")
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(stringResource(R.string.label_feedback_haptics))
+            Switch(checked = isHapticsEnabled, onCheckedChange = onHapticsEnabledChange)
+        }
+
+        Button(
+            onClick = onToggleClick,
+            enabled = !isLoading,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            if (isLoading) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(18.dp),
+                    strokeWidth = 2.dp,
+                    color = MaterialTheme.colorScheme.onPrimary
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+            }
+            Text(if (isRunning) "Stop Image Analyzer" else "Start Image Analyzer")
+        }
     }
 }
