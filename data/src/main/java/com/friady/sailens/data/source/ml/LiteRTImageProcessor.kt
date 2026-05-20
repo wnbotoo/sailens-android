@@ -1,7 +1,7 @@
 package com.friady.sailens.data.source.ml
 
-import android.graphics.Bitmap
 import com.friady.sailens.data.source.ml.segmentation.SegmenterConfig
+import com.friady.sailens.domain.model.perception.ImageFrame
 
 /**
  * LiteRT 图像处理器兼容层。
@@ -12,14 +12,13 @@ class LiteRTImageProcessor(config: SegmenterConfig) : AutoCloseable {
     private val delegate = OpenCVImageProcessor(config)
 
     /**
-     * 预处理：Bitmap -> 旋转 -> 缩放 -> 归一化 -> FloatArray
+     * 预处理：ImageFrame -> 旋转 -> 缩放 -> 归一化 -> FloatArray
      *
-     * @param bitmap 输入的位图
-     * @param rotationDegrees 旋转角度 (0, 90, 180, 270)
+     * @param frame 输入帧
      * @return 模型输入的 FloatArray，大小为 inputHeight * inputWidth * 3
      */
-    fun preprocess(bitmap: Bitmap, rotationDegrees: Int, outputArray: FloatArray) {
-        delegate.preprocess(bitmap, rotationDegrees, outputArray)
+    fun preprocess(frame: ImageFrame, rotationDegrees: Int, outputArray: FloatArray) {
+        delegate.preprocess(frame, rotationDegrees, outputArray)
     }
 
     /**

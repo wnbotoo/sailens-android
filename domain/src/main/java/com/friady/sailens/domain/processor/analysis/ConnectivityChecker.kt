@@ -3,12 +3,16 @@ package com.friady.sailens.domain.processor.analysis
 import com.friady.sailens.domain.config.AnalysisConfig
 import com.friady.sailens.domain.model.analysis.WalkPathConnectivity
 import com.friady.sailens.domain.model.common.BinaryMask
+import com.friady.sailens.domain.model.common.BottomStats
 import com.friady.sailens.domain.model.common.DirectionBias
 import com.friady.sailens.domain.model.common.Severity
 import com.friady.sailens.domain.util.BooleanStabilizer
+import com.friady.sailens.domain.util.IntArrayQueue
 import com.friady.sailens.domain.util.NullableEnumStabilizer
+import com.friady.sailens.domain.util.packCoordinate
+import com.friady.sailens.domain.util.unpackCoordinateX
+import com.friady.sailens.domain.util.unpackCoordinateY
 
-import kotlin.collections.ArrayDeque
 import kotlin.math.abs
 
 /**
@@ -22,15 +26,17 @@ class ConnectivityChecker(
     private val biasStabilizer = NullableEnumStabilizer<DirectionBias>(config.biasDebounceFrames)
 
     fun analyze(passableMask: BinaryMask): WalkPathConnectivity {
+        val bottomStats = passableMask.getBottomStats(0.15f)
+
         // 1. 分层扫描
         val layerResults = performLayerScan(passableMask)
         val verticalReachRatio = layerResults.validLayers.toFloat() / config.sampleLayerRatios.size
 
         // 2.  宽度统计
-        val widthStats = computeWidthRetention(layerResults, passableMask)
+        val widthStats = computeWidthRetention(layerResults, bottomStats)
 
         // 3.  洪泛分析
-        val floodResult = performFloodFill(passableMask)
+        val floodResult = performFloodFill(passableMask, bottomStats)
 
         // 4. 计算置信度
         val blockageConfidence = calculateBlockageConfidence(
@@ -49,7 +55,7 @@ class ConnectivityChecker(
         val isNarrowing = narrowingStabilizer.update(isNarrowingRaw)
 
         // 7. 方向建议
-        val suggestedBiasRaw = computeDirectionBias(layerResults, passableMask)
+        val suggestedBiasRaw = computeDirectionBias(layerResults)
         val suggestedBias = biasStabilizer.update(suggestedBiasRaw)
 
         return WalkPathConnectivity(
@@ -135,8 +141,10 @@ class ConnectivityChecker(
         return LayerScanResult(layers, validLayers)
     }
 
-    private fun computeWidthRetention(layerResult: LayerScanResult, mask: BinaryMask): WidthStats {
-        val bottomStats = mask.getBottomStats(0.15f)
+    private fun computeWidthRetention(
+        layerResult: LayerScanResult,
+        bottomStats: BottomStats,
+    ): WidthStats {
         val bottomWidth = bottomStats.maxRunWidth.toFloat()
 
         if (bottomWidth < 1f) {
@@ -154,7 +162,7 @@ class ConnectivityChecker(
         val avg = retentions.average().toFloat()
         val sorted = retentions.sorted()
         val p25Index = (sorted.size * 0.25).toInt().coerceIn(0, sorted.size - 1)
-        val p25 = sorted[p25Index].toFloat()
+        val p25 = sorted[p25Index]
 
         val topRetention = layerResult.layers.lastOrNull()?.let {
             it.maxRunWidth / bottomWidth
@@ -164,9 +172,7 @@ class ConnectivityChecker(
         return WidthStats(avg, p25, slope)
     }
 
-    private fun performFloodFill(mask: BinaryMask): FloodResult {
-        val bottomStats = mask.getBottomStats(0.15f)
-
+    private fun performFloodFill(mask: BinaryMask, bottomStats: BottomStats): FloodResult {
         if (bottomStats.maxRunWidth < mask.width * config.minRunWidthRatio) {
             return FloodResult(0f, 0f, 0f)
         }
@@ -185,32 +191,33 @@ class ConnectivityChecker(
         val seedCount = minOf(32, seedEndX - seedStartX + 1)
         val seedStep = maxOf(1, (seedEndX - seedStartX) / seedCount)
 
-        val seeds = mutableListOf<Pair<Int, Int>>()
+        val queue = IntArrayQueue()
         var x = seedStartX
-        while (x <= seedEndX && seeds.size < seedCount) {
+        var generatedSeeds = 0
+        while (x <= seedEndX && generatedSeeds < seedCount) {
             if (mask.get(x, seedY)) {
-                seeds.add(Pair(x, seedY))
+                queue.addLast(packCoordinate(x, seedY))
+                generatedSeeds++
             }
             x += seedStep
         }
 
-        if (seeds.isEmpty()) {
+        if (queue.size == 0) {
             return FloodResult(0f, 0f, 0f)
         }
 
         val visited = BinaryMask(mask.width, mask.height)
-        val queue = ArrayDeque<Pair<Int, Int>>()
-        val rowWidths = mutableMapOf<Int, Int>()
+        val rowWidths = IntArray(mask.height)
         var visitedCount = 0
         var minYReached = seedY
-
-        seeds.forEach { queue.addLast(it) }
 
         val dx = intArrayOf(0, 1, 0, -1, 1, 1, -1, -1)
         val dy = intArrayOf(-1, 0, 1, 0, -1, 1, 1, -1)
 
         while (queue.isNotEmpty() && visitedCount < config.maxFloodNodes) {
-            val (cx, cy) = queue.removeFirst()
+            val packed = queue.removeFirst()
+            val cx = unpackCoordinateX(packed)
+            val cy = unpackCoordinateY(packed)
 
             if (cx < 0 || cx >= mask.width || cy < windowTop || cy > windowBottom) continue
             if (visited.get(cx, cy) || !mask.get(cx, cy)) continue
@@ -218,15 +225,25 @@ class ConnectivityChecker(
             visited.set(cx, cy, true)
             visitedCount++
             minYReached = minOf(minYReached, cy)
-            rowWidths[cy] = (rowWidths[cy] ?: 0) + 1
+            rowWidths[cy]++
 
             for (i in 0..7) {
-                queue.addLast(Pair(cx + dx[i], cy + dy[i]))
+                queue.addLast(packCoordinate(cx + dx[i], cy + dy[i]))
             }
 
             val currentReach = (seedY - minYReached).toFloat() / windowHeight
             if (currentReach >= config.floodEarlyStopReachRatio) {
-                val retention = rowWidths.values.average().toFloat() / bottomStats.maxRunWidth
+                var totalRowWidth = 0
+                var activeRows = 0
+                for (row in windowTop..windowBottom) {
+                    val rowWidth = rowWidths[row]
+                    if (rowWidth > 0) {
+                        totalRowWidth += rowWidth
+                        activeRows++
+                    }
+                }
+                val avgRowWidth = if (activeRows > 0) totalRowWidth.toFloat() / activeRows else 0f
+                val retention = avgRowWidth / bottomStats.maxRunWidth
                 if (retention >= config.floodEarlyStopWidthRetention) {
                     break
                 }
@@ -237,7 +254,14 @@ class ConnectivityChecker(
         val windowArea = windowHeight * mask.width
         val visitedRatio = visitedCount.toFloat() / windowArea
 
-        val widthRetentions = rowWidths.values.map { it.toFloat() / bottomStats.maxRunWidth }
+        val widthRetentions = buildList {
+            for (row in windowTop..windowBottom) {
+                val rowWidth = rowWidths[row]
+                if (rowWidth > 0) {
+                    add(rowWidth.toFloat() / bottomStats.maxRunWidth)
+                }
+            }
+        }
         val widthP25 = if (widthRetentions.isNotEmpty()) {
             val sorted = widthRetentions.sorted()
             sorted[(sorted.size * 0.25).toInt().coerceIn(0, sorted.size - 1)]
@@ -246,10 +270,7 @@ class ConnectivityChecker(
         return FloodResult(reachRatio, widthP25, visitedRatio)
     }
 
-    private fun computeDirectionBias(
-        layerResult: LayerScanResult,
-        mask: BinaryMask,
-    ): DirectionBias? {
+    private fun computeDirectionBias(layerResult: LayerScanResult): DirectionBias? {
         var leftWeight = 0f
         var rightWeight = 0f
 

@@ -30,7 +30,7 @@ class LiteRTSegmenter(
         val startTime = SystemClock.uptimeMillis()
 
         // 1. 预处理: Bitmap -> FloatArray (返回新数组，由 TensorBuffer 内部分配)
-        processor.preprocess(rawFrame.bitmap, rawFrame.rotationDegrees, cachedInputFloatArray)
+        processor.preprocess(rawFrame, rawFrame.rotationDegrees, cachedInputFloatArray)
         val afterPreprocessTime = SystemClock.uptimeMillis()
 
         // 2. 推理

@@ -7,7 +7,7 @@ plugins {
 
 android {
     namespace = "com.friady.sailens.presentation"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         minSdk = 34

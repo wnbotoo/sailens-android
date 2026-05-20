@@ -11,6 +11,11 @@ import com.friady.sailens.domain.model.perception.DetectedInstance
 import com.friady.sailens.domain.model.perception.RawObstacle
 import com.friady.sailens.domain.model.perception.SegmentationAnalysis
 import com.friady.sailens.domain.model.perception.SegmentationMask
+import com.friady.sailens.domain.util.IntArrayList
+import com.friady.sailens.domain.util.IntArrayQueue
+import com.friady.sailens.domain.util.packCoordinate
+import com.friady.sailens.domain.util.unpackCoordinateX
+import com.friady.sailens.domain.util.unpackCoordinateY
 
 /**
  * 障碍物提取器
@@ -34,7 +39,7 @@ class ObstacleExtractor(
         val minPixels = (totalPixels * config.minObstacleAreaRatio).toInt()
 
         return components
-            .filter { it.pixels.size >= minPixels }
+            .filter { it.pixelCount >= minPixels }
             .map { component ->
                 val box = NormalizedRect.fromPixels(
                     component.minX, component.minY,
@@ -52,7 +57,7 @@ class ObstacleExtractor(
                     zone = zone,
                     distance = distance,
                     confidence = 1.0f,
-                    areaRatio = component.pixels.size.toFloat() / totalPixels
+                    areaRatio = component.pixelCount.toFloat() / totalPixels
                 )
             }
             .sortedByDescending { it.areaRatio }
@@ -97,7 +102,10 @@ class ObstacleExtractor(
     ): ObstacleCategory {
         val categoryCounts = mutableMapOf<ObstacleCategory, Int>()
 
-        for ((x, y) in component.pixels) {
+        for (index in 0 until component.pixelCount) {
+            val packedPixel = component.pixels[index]
+            val x = unpackCoordinateX(packedPixel)
+            val y = unpackCoordinateY(packedPixel)
             val classId = segmentation.getClassId(x, y)
             val category = classMapper.toObstacleCategory(classId)
             if (category != ObstacleCategory.UNKNOWN) {
@@ -130,9 +138,9 @@ class ObstacleExtractor(
         startX: Int,
         startY: Int,
     ): ConnectedComponent {
-        val pixels = mutableListOf<Pair<Int, Int>>()
-        val queue = ArrayDeque<Pair<Int, Int>>()
-        queue.addLast(Pair(startX, startY))
+        val pixels = IntArrayList()
+        val queue = IntArrayQueue()
+        queue.addLast(packCoordinate(startX, startY))
         visited.set(startX, startY, true)
 
         var minX = startX
@@ -144,8 +152,10 @@ class ObstacleExtractor(
         val dy = intArrayOf(-1, 0, 1, 0)
 
         while (queue.isNotEmpty()) {
-            val (x, y) = queue.removeFirst()
-            pixels.add(Pair(x, y))
+            val packed = queue.removeFirst()
+            val x = unpackCoordinateX(packed)
+            val y = unpackCoordinateY(packed)
+            pixels.add(packed)
 
             minX = minOf(minX, x)
             maxX = maxOf(maxX, x)
@@ -160,13 +170,14 @@ class ObstacleExtractor(
                     mask.get(nx, ny) && !visited.get(nx, ny)
                 ) {
                     visited.set(nx, ny, true)
-                    queue.addLast(Pair(nx, ny))
+                    queue.addLast(packCoordinate(nx, ny))
                 }
             }
         }
 
         return ConnectedComponent(
-            pixels = pixels,
+            pixels = pixels.toIntArray(),
+            pixelCount = pixels.size,
             minX = minX,
             minY = minY,
             maxX = maxX,
@@ -178,8 +189,9 @@ class ObstacleExtractor(
 /**
  * 连通区域
  */
-data class ConnectedComponent(
-    val pixels: List<Pair<Int, Int>>,
+class ConnectedComponent(
+    val pixels: IntArray,
+    val pixelCount: Int,
     val minX: Int,
     val minY: Int,
     val maxX: Int,

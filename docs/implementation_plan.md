@@ -141,6 +141,9 @@
 - `domain/model/perception/ImageFrame.kt` 不再直接持有 `Bitmap`
 - 域层改为平台无关输入模型
 
+**当前状态**
+- [x] 已完成
+
 ### 4.2 Primitive 化 BFS / FloodFill
 **涉及文件**
 - `ObstacleExtractor.kt`
@@ -150,10 +153,16 @@
 - packed coordinate (`Int`) 替代 `Pair<Int, Int>`
 - 自定义 primitive queue/list，减少 GC 压力
 
+**当前状态**
+- [x] 已完成
+
 ### 4.3 将 DI 装配完全移出域层
 **目标**
 - `:domain` 仅保留纯业务对象与接口
 - Koin module 收敛到外层模块
+
+**当前状态**
+- [x] 已完成
 
 ---
 
@@ -187,8 +196,8 @@
 ---
 
 ## 9. 当前建议状态
-- **已完成**：Phase 1 + Phase 2 + Phase 3
-- **下个迭代**：Phase 4
+- **已完成**：Phase 1 + Phase 2 + Phase 3 + Phase 4
+- **下个迭代**：围绕性能与产品策略做专项迭代
 
 ---
 
@@ -205,4 +214,7 @@
 - [x] `SceneAnalysisViewModel` 在 stop/onCleared 中统一停止反馈并释放资源
 - [x] `SpeechManager` 恢复字符串资源解析，不再播报原始 `messageKey`
 - [x] 反馈链路按优先级事件恢复启用，且支持 UI 开关控制语音/震动
+- [x] `ImageFrame` 改为平台无关 `IntArray` 像素缓冲，移除 `Bitmap` 对域层的侵入
+- [x] `ObstacleExtractor` / `ConnectivityChecker` 改为 packed coordinate + primitive queue/list 热路径实现
+- [x] Koin 的 domain 装配迁移到 `app/.../DomainBindingsModule.kt`
 - [x] 验证通过：`:domain:test` 与 `:app:assembleDebug`

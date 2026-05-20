@@ -20,10 +20,15 @@ class ImageFrameAnalyzer() : ImageAnalysis.Analyzer, ImageFrameProvider {
 
     override fun analyze(image: ImageProxy) {
         try {
+            val bitmap = image.toBitmap()
+            val pixels = IntArray(bitmap.width * bitmap.height)
+            bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+            bitmap.recycle()
+
             val frame = ImageFrame(
                 width = image.width,
                 height = image.height,
-                bitmap = image.toBitmap(),
+                pixels = pixels,
                 rotationDegrees = image.imageInfo.rotationDegrees,
                 timestamp = image.imageInfo.timestamp
             )

@@ -2,6 +2,7 @@ package com.friady.sailens.data.source.ml
 
 import android.graphics.Bitmap
 import com.friady.sailens.data.source.ml.segmentation.SegmenterConfig
+import com.friady.sailens.domain.model.perception.ImageFrame
 import org.opencv.android.Utils
 import org.opencv.core.Core
 import org.opencv.core.CvType
@@ -15,6 +16,7 @@ import kotlin.math.min
 class OpenCVImageProcessor(
     private val config: SegmenterConfig,
 ) : AutoCloseable {
+    private var reusableBitmap: Bitmap? = null
 
     init {
         OpenCVNativeLoader().init()
@@ -29,9 +31,12 @@ class OpenCVImageProcessor(
     private val normalizedImage = Mat()
 
     /**
-     * 预处理：Bitmap -> Mat -> Rotate -> Letterbox Resize -> Normalize -> FloatArray
+     * 预处理：ImageFrame -> Bitmap -> Mat -> Rotate -> Letterbox Resize -> Normalize -> FloatArray
      */
-    fun preprocess(bitmap: Bitmap, rotationDegrees: Int, outputArray: FloatArray) {
+    fun preprocess(frame: ImageFrame, rotationDegrees: Int, outputArray: FloatArray) {
+        val bitmap = obtainBitmap(frame.width, frame.height)
+        bitmap.setPixels(frame.pixels, 0, frame.width, 0, 0, frame.width, frame.height)
+
         // 1. Bitmap -> Mat (BGRA)
         Utils.bitmapToMat(bitmap, inputMatAbgr)
 
@@ -112,12 +117,26 @@ class OpenCVImageProcessor(
     }
 
     override fun close() {
+        reusableBitmap?.recycle()
+        reusableBitmap = null
         inputMatAbgr.release()
         inputMatRgb.release()
         rotatedInput.release()
         scaledImage.release()
         paddedImage.release()
         normalizedImage.release()
+    }
+
+    private fun obtainBitmap(width: Int, height: Int): Bitmap {
+        val current = reusableBitmap
+        if (current != null && current.width == width && current.height == height) {
+            return current
+        }
+
+        current?.recycle()
+        return Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also {
+            reusableBitmap = it
+        }
     }
 }
 

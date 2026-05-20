@@ -1,4 +1,4 @@
-package com.friady.sailens.domain.di
+package com.friady.sailens.app
 
 import com.friady.sailens.domain.config.AnalysisConfig
 import com.friady.sailens.domain.config.PerceptionConfig
@@ -21,13 +21,10 @@ import com.friady.sailens.domain.usecase.scene.StartSceneAnalysisUseCase
 import com.friady.sailens.domain.usecase.scene.StopSceneAnalysisUseCase
 import org.koin.dsl.module
 
-val domainModule = module {
-
-    // 配置
+val domainBindingsModule = module {
     single { PerceptionConfig() }
     single { AnalysisConfig() }
 
-    // 处理器（需要 ClassMapper 的都注入）
     single { SegmentationAnalyzer(config = get(), classMapper = get()) }
     single { ObstacleExtractor(config = get(), classMapper = get()) }
     single { ObstacleTracker(config = get()) }
@@ -41,7 +38,6 @@ val domainModule = module {
     single { EventMerger() }
     single { CooldownManager() }
 
-    // 用例
     factory {
         ProcessFrameUseCase(
             get(),
@@ -96,3 +92,4 @@ val domainModule = module {
         )
     }
 }
+
