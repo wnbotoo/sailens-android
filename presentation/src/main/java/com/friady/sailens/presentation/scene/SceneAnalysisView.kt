@@ -161,7 +161,7 @@ private fun CaptureView(
                 bitmap = bmp.asImageBitmap(),
                 contentDescription = "Segmentation mask overlay",
                 modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Fit,
+                contentScale = contentScale,
                 alpha = 0.6f
             )
         }

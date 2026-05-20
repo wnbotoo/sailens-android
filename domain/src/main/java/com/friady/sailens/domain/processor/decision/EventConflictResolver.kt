@@ -60,11 +60,9 @@ class EventConflictResolver {
         val result = events.toMutableList()
 
         for (rule in rules) {
-            val dominant = result.find { it.category == rule.dominant }
-            val suppressed = result.find { it.category == rule.suppressed }
-
-            if (dominant != null && suppressed != null && rule.condition(dominant, suppressed)) {
-                result.remove(suppressed)
+            val dominant = result.find { it.category == rule.dominant } ?: continue
+            result.removeAll { suppressed ->
+                suppressed.category == rule.suppressed && rule.condition(dominant, suppressed)
             }
         }
 

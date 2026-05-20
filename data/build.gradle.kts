@@ -1,5 +1,3 @@
-import org.jetbrains.kotlin.gradle.dsl.JvmTarget
-
 plugins {
     alias(libs.plugins.android.library)
 }
@@ -30,9 +28,6 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    buildFeatures {
-        mlModelBinding = true
-    }
 }
 
 dependencies {
@@ -41,17 +36,6 @@ dependencies {
     implementation(project(":domain"))
     implementation(libs.koin.android)
     implementation(libs.google.litert)
-//    implementation(libs.google.litert.gpu)
-//    implementation(libs.google.mediapipe)
-    // 2. 引入 support 库，但排除它内部引用的旧版 litert-api
-    implementation(libs.google.litert.support) {
-        exclude(group = "com.google.ai.edge.litert", module = "litert-api")
-    }
-
-    // 3. 引入 metadata 库，同样排除掉它内部引用的旧版 litert-api
-    implementation(libs.google.litert.metadata) {
-        exclude(group = "com.google.ai.edge.litert", module = "litert-api")
-    }
     implementation(libs.opencv)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

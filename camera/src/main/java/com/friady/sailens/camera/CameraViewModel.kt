@@ -21,13 +21,15 @@ class CameraViewModel(
     private val camera: Camera,
     private val imageFrameAnalyzer: ImageAnalysis.Analyzer,
 ) : ViewModel() {
+    private companion object {
+        val PREVIEW_SIZE = Size(1920, 1080)
+        val ANALYSIS_SIZE = Size(640, 360)
+    }
+
     private val executor = Executors.newSingleThreadExecutor()
 
     private val _surfaceRequest = MutableStateFlow<SurfaceRequest?>(null)
     val surfaceRequest = _surfaceRequest.asStateFlow()
-
-    // 不主动设置 resolutionStrategy 时，默认的输出大小640*480
-    var preferSize: Size = Size(1920, 1080)
 
     suspend fun bindToCamera(
         appContext: Context,
@@ -37,7 +39,7 @@ class CameraViewModel(
     }
 
     private val previewUseCase = Preview.Builder()
-        .setResolutionSelector(getResolutionSelector()).build().apply {
+        .setResolutionSelector(getResolutionSelector(PREVIEW_SIZE)).build().apply {
             setSurfaceProvider { newSurfaceRequest ->
                 _surfaceRequest.update { newSurfaceRequest }
             }
@@ -46,13 +48,13 @@ class CameraViewModel(
     private val imageAnalysis =
         ImageAnalysis.Builder().setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
             .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
-            .setResolutionSelector(getResolutionSelector()).build().apply {
+            .setResolutionSelector(getResolutionSelector(ANALYSIS_SIZE)).build().apply {
                 setAnalyzer(executor, imageFrameAnalyzer)
             }
 
-    private fun getResolutionSelector(): ResolutionSelector {
+    private fun getResolutionSelector(preferredSize: Size): ResolutionSelector {
         val resolutionStrategy = ResolutionStrategy(
-            preferSize, ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
+            preferredSize, ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
         )
 
         val aspectRatioStrategy = AspectRatioStrategy(

@@ -42,11 +42,12 @@ class LiteRTSegmenter(
         val afterPostprocessTime = SystemClock.uptimeMillis()
 
         // 3. 包装结果
-        // cachedResultMask 此时已经被 processor.postprocess 填充了索引数据
+        // cachedResultMask 会在下一帧继续复用，这里必须做快照，避免下游读取时被后续推理覆盖
+        val stableResultMask = cachedResultMask.clone()
         val mask = SegmentationMask(
             config.outputWidth,
             config.outputHeight,
-            cachedResultMask,
+            stableResultMask,
         )
 
         val preprocessTimeMs = afterPreprocessTime - startTime

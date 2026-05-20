@@ -1,31 +1,24 @@
 package com.friady.sailens.presentation.ext
 
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.graphics.Color
-import android.graphics.ImageFormat
-import android.graphics.Rect
-import android.graphics.YuvImage
 import com.friady.sailens.domain.model.common.BinaryMask
 import androidx.core.graphics.createBitmap
-import androidx.core.graphics.set
-import com.friady.sailens.domain.model.perception.ImageFrame
-import java.io.ByteArrayOutputStream
 
 fun BinaryMask.visualize(
     color: Int = Color.argb((0.7f * 255).toInt(), 0, 255, 0), // 绿色 + 70% 不透明度
 ): Bitmap {
     val bitmap = createBitmap(width, height)
+    val pixels = IntArray(width * height)
 
     for (y in 0 until height) {
+        val rowOffset = y * width
         for (x in 0 until width) {
-            if (get(x, y)) {
-                bitmap[x, y] = color
-            } else {
-                bitmap[x, y] = Color.TRANSPARENT
-            }
+            pixels[rowOffset + x] = if (get(x, y)) color else Color.TRANSPARENT
         }
     }
+
+    bitmap.setPixels(pixels, 0, width, 0, 0, width, height)
     return bitmap
 }
 
