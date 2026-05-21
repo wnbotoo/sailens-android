@@ -40,11 +40,6 @@ interface ClassMapper {
     fun isTrafficLight(classId: Int): Boolean
 
     /**
-     * 映射到统一地面类型
-     */
-//    fun toUnifiedSurfaceType(classId: Int): UnifiedSurfaceType
-
-    /**
      * 映射到细分地面类型
      */
     fun toGroundType(classId: Int): GroundType

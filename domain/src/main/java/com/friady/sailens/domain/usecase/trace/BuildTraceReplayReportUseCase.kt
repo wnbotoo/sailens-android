@@ -13,6 +13,18 @@ class BuildTraceReplayReportUseCase {
         val metadata = session.metadata
         val summary = session.summary ?: buildSummaryFromFrames(session)
         val totalFrames = summary.totalFrames
+        val totalObservedFrames = totalFrames + summary.droppedFrames
+        val droppedFrameRate = if (totalObservedFrames > 0) {
+            summary.droppedFrames.toDouble() / totalObservedFrames
+        } else {
+            0.0
+        }
+        val frames = session.frames
+        val avgNavigationPassableRatio = frames.averageOrZero { it.navigationPassableRatio }
+        val avgBlockageConfidence = frames.averageOrZero { it.blockageConfidence }
+        val avgVerticalReachRatio = frames.averageOrZero { it.verticalReachRatio }
+        val avgFloodReachRatio = frames.averageOrZero { it.floodReachRatio }
+        val avgWidthRetentionP25 = frames.averageOrZero { it.widthRetentionP25 }
 
         return TraceReplayReport(
             sessionId = metadata?.sessionId ?: summary.sessionId,
@@ -20,6 +32,8 @@ class BuildTraceReplayReportUseCase {
             targetHardwareProfile = metadata?.targetHardwareProfile,
             totalFrames = totalFrames,
             droppedFrames = summary.droppedFrames,
+            totalObservedFrames = totalObservedFrames,
+            droppedFrameRate = droppedFrameRate,
             totalEvents = summary.totalEvents,
             blockedFrames = summary.blockedFrames,
             dangerousFrames = summary.dangerousFrames,
@@ -30,6 +44,11 @@ class BuildTraceReplayReportUseCase {
             avgTotalPipelineMs = summary.avgTotalPipelineMs,
             p95TotalPipelineMs = summary.p95TotalPipelineMs,
             maxTotalPipelineMs = summary.maxTotalPipelineMs,
+            avgNavigationPassableRatio = avgNavigationPassableRatio,
+            avgBlockageConfidence = avgBlockageConfidence,
+            avgVerticalReachRatio = avgVerticalReachRatio,
+            avgFloodReachRatio = avgFloodReachRatio,
+            avgWidthRetentionP25 = avgWidthRetentionP25,
             maxDroppedFramesSinceLast = session.frames.maxOfOrNull { it.droppedFramesSinceLast } ?: 0,
             errorCount = session.errors.size,
             uniqueMessageKeys = session.frames
@@ -50,6 +69,11 @@ class BuildTraceReplayReportUseCase {
         ).also { accumulator ->
             session.frames.forEach(accumulator::record)
         }.build(completedAt = completedAt)
+    }
+
+    private inline fun <T> List<T>.averageOrZero(selector: (T) -> Double): Double {
+        if (isEmpty()) return 0.0
+        return sumOf(selector) / size
     }
 }
 

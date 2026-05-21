@@ -8,6 +8,7 @@
 /.idea/navEditor.xml
 /.idea/assetWizardSettings.xml
 /.idea/copilot.*
+/.idea/copilotDiffState.xml
 .DS_Store
 /build
 /captures

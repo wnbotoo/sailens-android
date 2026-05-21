@@ -33,7 +33,7 @@
   - `p95TotalPipelineMs`
   - `maxTotalPipelineMs`
 - 域层已补齐最小离线 replay 能力：
-  - `TraceReplayParser`：解析 `trace_<sessionId>.jsonl`
+  - `TraceReplayParser`：基于 `kotlinx.serialization.json` 结构化解析 `trace_<sessionId>.jsonl`
   - `BuildTraceReplayReportUseCase`：生成 replay 聚合报告
   - `ListTraceSessionsUseCase`：枚举已存储会话
   - `LoadTraceReplayReportUseCase` / `LoadLatestTraceReplayReportUseCase`：加载指定或最新报告
@@ -53,6 +53,13 @@
   - 可加载 latest trace report
   - 可按 session 载入 replay report
   - 可复制当前报告摘要到剪贴板
+  - 可通过系统分享面板导出当前 session 的原始 `trace_<sessionId>.jsonl`
+- Live debug 面板已接入 runtime budget：
+  - 当前 `totalPipelineMs`
+  - 当前 `process / analyze / decision` 耗时拆分
+  - 最近 30 帧 `avg / p95 totalPipelineMs`
+  - 最近 30 帧 dropped frame rate
+  - 与 replay 共用的预算状态
 
 ## 文件位置
 
@@ -75,15 +82,14 @@
 3. 估算 `DROP_OLDEST` 下的帧丢失情况
 4. 对比纯 `DDRNet` 与未来 `YOLO + DDRNet` 双模型模式
 5. 给后续离线 replay 与评估脚本提供输入样本
+6. 将原始 JSONL 分享到电脑、标注工具或批量评估脚本
+7. 在实时运行时提前观察预算是否被击穿
 
 ## 下一步建议
 
-1. 增加 trace 导出 / 分享入口（当前支持查看与复制摘要，但尚未导出原始 JSONL）
-2. 为 replay 输出增加批量对比能力：
+1. 为 replay 输出增加批量对比能力：
    - 多 session 汇总
    - baseline vs experiment A/B 对比
    - 阈值告警（如 `p95TotalPipelineMs`、`droppedFrames`）
-3. 增加更正式的 report 页面或开发者菜单入口
-4. 再开始引入 `YOLO` 并做 A/B 对比
-
-
+2. 采集真实场景 trace 基线
+3. 再开始引入 `YOLO` 并做 A/B 对比

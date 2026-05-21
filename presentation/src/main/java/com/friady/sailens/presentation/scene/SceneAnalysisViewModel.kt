@@ -2,8 +2,10 @@ package com.friady.sailens.presentation.scene
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import android.graphics.Bitmap
 import com.friady.sailens.camera.ImageFrameProvider
 import com.friady.sailens.domain.model.scene.SceneEvent
+import com.friady.sailens.domain.model.scene.SceneResult
 import com.friady.sailens.domain.model.trace.TraceReplayReport
 import com.friady.sailens.domain.model.trace.TraceSessionDescriptor
 import com.friady.sailens.domain.service.LogService
@@ -15,9 +17,13 @@ import com.friady.sailens.domain.usecase.trace.LoadLatestTraceReplayReportUseCas
 import com.friady.sailens.domain.usecase.trace.LoadTraceReplayReportUseCase
 import com.friady.sailens.presentation.device.HapticManager
 import com.friady.sailens.presentation.device.SpeechManager
+import com.friady.sailens.presentation.ext.visualizeSemanticClasses
 import com.friady.sailens.presentation.ext.visualize
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -28,8 +34,8 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 
 private const val TAG = "SceneAnalysisViewModel"
@@ -54,7 +60,14 @@ class SceneAnalysisViewModel(
     val uiEffect: SharedFlow<SceneAnalysisUiEffect> = _uiEffect.asSharedFlow()
 
     private var analysisJob: Job? = null
+    private var releaseJob: Job? = null
+    private val releaseScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var frameCount: Long = 0
+    private var latestSceneResult: SceneResult? = null
+
+    // State machine to prevent concurrent release/analysis initialization
+    @Volatile
+    private var isReleasingResources = false
 
     init {
         speechManager.initialize {
@@ -88,6 +101,15 @@ class SceneAnalysisViewModel(
         _uiState.update { it.copy(isHapticsEnabled = enabled) }
         if (!enabled) {
             hapticManager.cancel()
+        }
+    }
+
+    fun setOverlayMode(overlayMode: SegmentationOverlayMode) {
+        _uiState.update {
+            it.copy(
+                overlayMode = overlayMode,
+                segMask = latestSceneResult?.toOverlayBitmap(overlayMode),
+            )
         }
     }
 
@@ -204,10 +226,31 @@ class SceneAnalysisViewModel(
         }
     }
 
+    fun shareTraceReplayFile() {
+        val sessionId = _uiState.value.traceReplayReport?.sessionId
+            ?: _uiState.value.selectedTraceSessionId
+            ?: return
+
+        viewModelScope.launch {
+            _uiEffect.emit(SceneAnalysisUiEffect.ShareTraceFile(sessionId))
+        }
+    }
+
     private fun startSceneAnalysis() {
         frameCount = 0
         analysisJob?.cancel()
         analysisJob = viewModelScope.launch {
+            // Wait for ongoing resource release to complete (with timeout protection)
+            var waitTime = 0L
+            val maxWaitMs = 2000L
+            while (isReleasingResources && waitTime < maxWaitMs) {
+                delay(50)
+                waitTime += 50
+            }
+            if (isReleasingResources) {
+                logger.warning(TAG, "Resource release timeout; proceeding with analysis anyway")
+            }
+
             // collectLatest is often used for high-frequency data, discarding previous incomplete processing
             startSceneAnalysisUseCase(imageFrameProvider.frames).onStart {
                 _uiState.update {
@@ -218,6 +261,7 @@ class SceneAnalysisViewModel(
                 logger.error(TAG, "Error in scene analysis", e)
                 speechManager.stop()
                 hapticManager.cancel()
+                latestSceneResult = null
                 _uiState.update {
                     it.copy(
                         isRunning = false, isLoading = false, errorMessage = e.message ?: "Unknown error"
@@ -226,11 +270,14 @@ class SceneAnalysisViewModel(
                 _uiEffect.emit(SceneAnalysisUiEffect.ShowToast(e.message ?: "Unknown error"))
             }.collectLatest { result ->
                 frameCount++
-                val mask = result.passableMask?.visualize()
+                latestSceneResult = result
+                val state = _uiState.value
+                val mask = result.toOverlayBitmap(state.overlayMode)
                 val events = result.events
                 _uiState.update {
                     it.copy(
                         segMask = mask,
+                        latestSceneDebugInfo = result.debugInfo,
                         lastEvents = events,
                         frameCount = frameCount,
                         eventCount = it.eventCount + events.size
@@ -260,11 +307,18 @@ class SceneAnalysisViewModel(
     private fun stopSceneAnalysis() {
         analysisJob?.cancel()
         analysisJob = null
+        latestSceneResult = null
         stopSceneAnalysisUseCase()
         speechManager.stop()
         hapticManager.cancel()
         _uiState.update {
-            it.copy(isRunning = false, isInitializing = false, isLoading = false, segMask = null)
+            it.copy(
+                isRunning = false,
+                isInitializing = false,
+                isLoading = false,
+                segMask = null,
+                latestSceneDebugInfo = null,
+            )
         }
     }
 
@@ -274,15 +328,36 @@ class SceneAnalysisViewModel(
         stopSceneAnalysisUseCase()
         speechManager.stop()
         hapticManager.cancel()
-        runBlocking {
-            runCatching {
-                stopSceneAnalysisUseCase.release()
-            }.onFailure { error ->
-                logger.error(TAG, "Error releasing scene analysis resources", error)
-            }
-        }
+        releaseSceneAnalysisResources()
         speechManager.release()
         super.onCleared()
+    }
+
+    private fun releaseSceneAnalysisResources() {
+        releaseJob?.cancel()
+        isReleasingResources = true
+        releaseJob = releaseScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    runCatching {
+                        stopSceneAnalysisUseCase.release()
+                    }.onFailure { error ->
+                        logger.error(TAG, "Error releasing scene analysis resources", error)
+                    }
+                }
+            } finally {
+                isReleasingResources = false
+                logger.info(TAG, "Scene analysis resources released")
+            }
+        }.also { job ->
+            job.invokeOnCompletion { cause ->
+                if (cause != null) {
+                    logger.error(TAG, "Release job failed", cause)
+                    isReleasingResources = false
+                }
+                releaseScope.cancel()
+            }
+        }
     }
 
     private fun applyLoadedTraceReport(
@@ -308,13 +383,14 @@ class SceneAnalysisViewModel(
         report: TraceReplayReport,
         warnings: List<String>,
     ): String {
-        val droppedRatePercent = if (report.totalFrames > 0) {
-            (report.droppedFrames.toDouble() / report.totalFrames * 100).toInt()
-        } else {
-            0
-        }
+        val droppedRatePercent = (report.droppedFrameRate * 100).toInt()
         val blockedRatePercent = (report.blockedFrameRate * 100).toInt()
         val dangerRatePercent = (report.dangerousFrameRate * 100).toInt()
+        val navigationPassablePercent = (report.avgNavigationPassableRatio * 100).toInt()
+        val blockageConfidencePercent = (report.avgBlockageConfidence * 100).toInt()
+        val verticalReachPercent = (report.avgVerticalReachRatio * 100).toInt()
+        val floodReachPercent = (report.avgFloodReachRatio * 100).toInt()
+        val widthRetentionPercent = (report.avgWidthRetentionP25 * 100).toInt()
         val warningSection = if (warnings.isEmpty()) {
             "budget=ok"
         } else {
@@ -325,12 +401,20 @@ class SceneAnalysisViewModel(
             appendLine("session=${report.sessionId}")
             appendLine("pipelineMode=${report.pipelineMode ?: "unknown"}")
             appendLine("targetHardware=${report.targetHardwareProfile ?: "unknown"}")
-            appendLine("frames=${report.totalFrames} dropped=${report.droppedFrames} (${droppedRatePercent}%)")
+            appendLine("frames=${report.totalFrames} observed=${report.totalObservedFrames} dropped=${report.droppedFrames} (${droppedRatePercent}%)")
             appendLine("events=${report.totalEvents} blocked=${blockedRatePercent}% danger=${dangerRatePercent}%")
             appendLine("avgPipelineMs=${report.avgTotalPipelineMs} p95PipelineMs=${report.p95TotalPipelineMs}")
             appendLine("avgInferenceMs=${report.avgInferenceMs} errors=${report.errorCount}")
+            appendLine("navPassable=${navigationPassablePercent}% blockageConfidence=${blockageConfidencePercent}% verticalReach=${verticalReachPercent}% floodReach=${floodReachPercent}% widthRetentionP25=${widthRetentionPercent}%")
             appendLine("messageKeys=${report.uniqueMessageKeys.joinToString()}")
             append(warningSection)
+        }
+    }
+
+    private fun SceneResult.toOverlayBitmap(overlayMode: SegmentationOverlayMode): Bitmap? {
+        return when (overlayMode) {
+            SegmentationOverlayMode.PASSABLE_MASK -> passableMask?.visualize()
+            SegmentationOverlayMode.SEMANTIC_CLASSES -> segmentationMask?.visualizeSemanticClasses()
         }
     }
 }

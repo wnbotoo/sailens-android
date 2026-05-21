@@ -117,6 +117,7 @@ fun TraceReplayReportScreen(
     onBackToLiveClick: () -> Unit,
     onLoadLatestTraceReportClick: () -> Unit,
     onCopyTraceReportClick: () -> Unit,
+    onShareTraceFileClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Surface(modifier = modifier.fillMaxSize()) {
@@ -155,12 +156,22 @@ fun TraceReplayReportScreen(
                 ) {
                     Text(stringResource(R.string.btn_load_latest_trace_report))
                 }
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
                     onClick = onCopyTraceReportClick,
                     enabled = state.traceReplayReport != null,
                     modifier = Modifier.weight(1f),
                 ) {
                     Text(stringResource(R.string.btn_copy_trace_report))
+                }
+                Button(
+                    onClick = onShareTraceFileClick,
+                    enabled = state.traceReplayReport != null,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(stringResource(R.string.btn_share_trace_file))
                 }
             }
 
@@ -237,13 +248,14 @@ private fun TraceReplayReportDetail(
     report: TraceReplayReport,
     warnings: List<String>,
 ) {
-    val droppedRatePercent = if (report.totalFrames > 0) {
-        (report.droppedFrames.toDouble() / report.totalFrames * 100).toInt()
-    } else {
-        0
-    }
+    val droppedRatePercent = (report.droppedFrameRate * 100).toInt()
     val blockedRatePercent = (report.blockedFrameRate * 100).toInt()
     val dangerRatePercent = (report.dangerousFrameRate * 100).toInt()
+    val navigationPassablePercent = (report.avgNavigationPassableRatio * 100).toInt()
+    val blockageConfidencePercent = (report.avgBlockageConfidence * 100).toInt()
+    val verticalReachPercent = (report.avgVerticalReachRatio * 100).toInt()
+    val floodReachPercent = (report.avgFloodReachRatio * 100).toInt()
+    val widthRetentionPercent = (report.avgWidthRetentionP25 * 100).toInt()
     val messageKeys = report.uniqueMessageKeys.ifEmpty {
         listOf(stringResource(R.string.value_unknown))
     }.joinToString()
@@ -273,6 +285,7 @@ private fun TraceReplayReportDetail(
                 )
             )
             TraceMetricLine(stringResource(R.string.trace_report_frames, report.totalFrames))
+            TraceMetricLine(stringResource(R.string.trace_report_observed_frames, report.totalObservedFrames))
             TraceMetricLine(stringResource(R.string.trace_report_dropped, report.droppedFrames, droppedRatePercent))
             TraceMetricLine(stringResource(R.string.trace_report_avg_pipeline, report.avgTotalPipelineMs))
             TraceMetricLine(stringResource(R.string.trace_report_p95_pipeline, report.p95TotalPipelineMs))
@@ -280,6 +293,11 @@ private fun TraceReplayReportDetail(
             TraceMetricLine(stringResource(R.string.trace_report_errors, report.errorCount))
             TraceMetricLine(stringResource(R.string.trace_report_blocked_rate, blockedRatePercent))
             TraceMetricLine(stringResource(R.string.trace_report_danger_rate, dangerRatePercent))
+            TraceMetricLine(stringResource(R.string.trace_report_avg_navigation_passable, navigationPassablePercent))
+            TraceMetricLine(stringResource(R.string.trace_report_avg_blockage_confidence, blockageConfidencePercent))
+            TraceMetricLine(stringResource(R.string.trace_report_avg_vertical_reach, verticalReachPercent))
+            TraceMetricLine(stringResource(R.string.trace_report_avg_flood_reach, floodReachPercent))
+            TraceMetricLine(stringResource(R.string.trace_report_avg_width_retention, widthRetentionPercent))
             TraceMetricLine(stringResource(R.string.trace_report_message_keys, messageKeys))
 
             Spacer(modifier = Modifier.height(4.dp))
@@ -319,4 +337,3 @@ private fun formatTimestamp(timestamp: Long): String {
         .atZone(ZoneId.systemDefault())
         .format(formatter)
 }
-

@@ -5,6 +5,7 @@ import com.friady.sailens.domain.model.analysis.GroundTypeChange
 import com.friady.sailens.domain.model.analysis.RoadSafetyState
 import com.friady.sailens.domain.model.analysis.WalkPathConnectivity
 import com.friady.sailens.domain.model.common.Severity
+import kotlin.math.min
 
 /**
  * 交叉验证器
@@ -41,6 +42,23 @@ class CrossValidator(
                 isNarrowing = false,
                 narrowingSeverity = Severity.NONE
             )
+        }
+
+        // 规则3：仅在道路语境下有强前向连通证据时，抑制边缘 blocked 误报。
+        if (roadSafety.isOnRoad && adjustedConnectivity.isBlocked && adjustedConnectivity.blockageSeverity != Severity.SEVERE) {
+            val hasForwardContinuity =
+                adjustedConnectivity.floodReachRatio >= config.minFloodReachRatio &&
+                    adjustedConnectivity.verticalReachRatio >= config.reachRatioThreshold
+            val hasUsableWidth = adjustedConnectivity.widthRetentionP25 >= config.narrowExitP25
+            val isBorderline = adjustedConnectivity.blockageConfidence < config.blockageThreshold * 1.15f
+
+            if (hasForwardContinuity && hasUsableWidth && isBorderline) {
+                adjustedConnectivity = adjustedConnectivity.copy(
+                    isBlocked = false,
+                    blockageConfidence = min(adjustedConnectivity.blockageConfidence, 0.29f),
+                    blockageSeverity = Severity.NONE,
+                )
+            }
         }
 
         return ValidatedResults(

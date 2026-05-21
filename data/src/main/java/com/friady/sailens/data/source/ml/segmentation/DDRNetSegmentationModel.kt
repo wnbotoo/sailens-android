@@ -20,6 +20,9 @@ private const val TAG = "DDRNetSegmentationModel"
 class DDRNetSegmentationModel(
     private val context: Context,
 ) : SegmentationModel {
+    companion object {
+        private const val MODEL_ASSET_PATH = "ddrnet23_slim_cityscapes_float_metadata.tflite"
+    }
 
     @OptIn(ExperimentalCoroutinesApi::class)
     private val singleThreadDispatcher = Dispatchers.IO.limitedParallelism(1)
@@ -33,31 +36,39 @@ class DDRNetSegmentationModel(
 
     override suspend fun initialize() {
         if (_isInitialized) return
-        try {
-            withContext(singleThreadDispatcher) {
-                val model = CompiledModel.create(
-                    context.assets,
-                    "ddrnet23_slim_cityscapes_float_metadata.tflite",
-                    CompiledModel.Options(Accelerator.GPU)
-                )
-
-                val config = SegmenterConfig(
-                    inputWidth = 2048,
-                    inputHeight = 1024,
-                    outputWidth = 256,
-                    outputHeight = 128,
-                    outputChannels = 19,
-                    mean = Triple(0f, 0f, 0f),
-                    std = Triple(1f, 1f, 1f),
-                    confidenceThreshold = 0.5f
-                )
-
-                segmenter = LiteRTSegmenter(model, config)
-                _isInitialized = true
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to initialize segmenter: ${e.message}")
+        withContext(singleThreadDispatcher) {
+            segmenter?.cleanup()
+            segmenter = null
             _isInitialized = false
+
+            val config = SegmenterConfig(
+                inputWidth = 2048,
+                inputHeight = 1024,
+                outputWidth = 256,
+                outputHeight = 128,
+                outputChannels = 19,
+                mean = Triple(0f, 0f, 0f),
+                std = Triple(1f, 1f, 1f),
+                confidenceThreshold = 0.5f
+            )
+
+            val initializationResult = runCatching {
+                Log.i(TAG, "Initializing DDRNet with GPU accelerator")
+                createSegmenter(config, Accelerator.GPU)
+            }.recoverCatching { gpuError ->
+                Log.w(TAG, "GPU initialization failed, retrying with CPU", gpuError)
+                createSegmenter(config, Accelerator.CPU)
+            }
+
+            initializationResult
+                .onSuccess { initializedSegmenter ->
+                    segmenter = initializedSegmenter
+                    _isInitialized = true
+                }
+                .onFailure { error ->
+                    Log.e(TAG, "Failed to initialize segmenter", error)
+                    throw IllegalStateException("Failed to initialize DDRNet segmenter", error)
+                }
         }
     }
 
@@ -72,7 +83,6 @@ class DDRNetSegmentationModel(
                     return@withContext Result.failure(CancellationException("Coroutine cancelled"))
                 }
                 val output = segmenter?.segment(frame)
-                println(output?.mask)
                 if (output != null) {
                     Result.success(output)
                 } else {
@@ -89,6 +99,30 @@ class DDRNetSegmentationModel(
             segmenter?.cleanup()
             segmenter = null
             _isInitialized = false
+        }
+    }
+
+    private fun createSegmenter(
+        config: SegmenterConfig,
+        accelerator: Accelerator,
+    ): LiteRTSegmenter {
+        ensureModelAssetAvailable()
+        val model = CompiledModel.create(
+            context.assets,
+            MODEL_ASSET_PATH,
+            CompiledModel.Options(accelerator)
+        )
+        return LiteRTSegmenter(model, config)
+    }
+
+    private fun ensureModelAssetAvailable() {
+        try {
+            context.assets.open(MODEL_ASSET_PATH).use { }
+        } catch (error: Exception) {
+            throw IllegalStateException(
+                "Model asset '$MODEL_ASSET_PATH' is not packaged in app assets. Make sure data/src/main/ml is included as an assets source set.",
+                error,
+            )
         }
     }
 }

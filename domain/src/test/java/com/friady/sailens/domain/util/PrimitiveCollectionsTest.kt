@@ -1,6 +1,7 @@
 package com.friady.sailens.domain.util
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class PrimitiveCollectionsTest {
@@ -34,5 +35,15 @@ class PrimitiveCollectionsTest {
             assertEquals(expected, queue.removeFirst())
         }
     }
-}
 
+    @Test
+    fun `int array list rejects index equal to size`() {
+        val list = IntArrayList(initialCapacity = 4)
+        list.add(42)
+
+        assertEquals(42, list[0])
+        assertThrows(IllegalArgumentException::class.java) {
+            list[1]
+        }
+    }
+}

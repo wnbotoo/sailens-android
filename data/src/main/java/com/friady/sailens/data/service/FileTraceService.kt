@@ -17,8 +17,14 @@ class FileTraceService(
 ) : TraceService {
     private val executor = Executors.newSingleThreadExecutor()
     private val queue = ConcurrentLinkedQueue<JSONObject>()
+
+    @Volatile
     private var isRunning = true
+
+    @Volatile
     private var activeSessionId: String? = null
+
+    @Volatile
     private var traceFile: File? = null
 
     companion object {
@@ -85,6 +91,7 @@ class FileTraceService(
         }
     }
 
+    @Synchronized
     private fun flushToDisk() {
         val file = traceFile ?: return
         if (queue.isEmpty()) return
@@ -113,4 +120,3 @@ class FileTraceService(
         }
     }
 }
-

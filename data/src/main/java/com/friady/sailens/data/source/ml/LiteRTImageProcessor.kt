@@ -8,7 +8,7 @@ import com.friady.sailens.domain.model.perception.ImageFrame
  *
  * 当前主链路统一走 `OpenCVImageProcessor`，这里保留相同 API，避免未来切换实现时影响调用方。
  */
-class LiteRTImageProcessor(config: SegmenterConfig) : AutoCloseable {
+class LiteRTImageProcessor(config: SegmenterConfig) : FramePreprocessor {
     private val delegate = OpenCVImageProcessor(config)
 
     /**
@@ -17,7 +17,7 @@ class LiteRTImageProcessor(config: SegmenterConfig) : AutoCloseable {
      * @param frame 输入帧
      * @return 模型输入的 FloatArray，大小为 inputHeight * inputWidth * 3
      */
-    fun preprocess(frame: ImageFrame, rotationDegrees: Int, outputArray: FloatArray) {
+    override fun preprocess(frame: ImageFrame, rotationDegrees: Int, outputArray: FloatArray) {
         delegate.preprocess(frame, rotationDegrees, outputArray)
     }
 
@@ -27,7 +27,7 @@ class LiteRTImageProcessor(config: SegmenterConfig) : AutoCloseable {
      * @param scores 模型输出的扁平化分数数组 (outputHeight * outputWidth * outputChannels)
      * @param resultMask 输出的分割掩码，大小为 outputHeight * outputWidth，每个像素对应类别索引或 -1 (低置信度)
      */
-    fun postprocess(scores: FloatArray, resultMask: IntArray) {
+    override fun postprocess(scores: FloatArray, resultMask: IntArray) {
         delegate.postprocess(scores, resultMask)
     }
 

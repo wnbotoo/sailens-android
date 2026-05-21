@@ -43,9 +43,6 @@ class CityscapesClassMapper : ClassMapper {
         // 障碍物
         private val OBSTACLE_IDS =
             setOf(
-                BUILDING,
-                WALL,
-                FENCE,
                 POLE,
                 PERSON,
                 RIDER,
@@ -116,16 +113,6 @@ class CityscapesClassMapper : ClassMapper {
     override fun isTrafficLight(classId: Int): Boolean {
         return classId == TRAFFIC_LIGHT
     }
-
-//    override fun toUnifiedSurfaceType(classId: Int): UnifiedSurfaceType {
-//        return when (classId) {
-//            SIDEWALK -> UnifiedSurfaceType.WALKABLE
-//            ROAD -> UnifiedSurfaceType.ROAD
-//            TERRAIN -> UnifiedSurfaceType.TERRAIN
-//            in OBSTACLE_IDS -> UnifiedSurfaceType.OBSTACLE
-//            else -> UnifiedSurfaceType.BACKGROUND
-//        }
-//    }
 
     override fun toGroundType(classId: Int): GroundType {
         return when (classId) {

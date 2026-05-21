@@ -2,6 +2,7 @@ package com.friady.sailens.domain.usecase.perception
 
 import com.friady.sailens.domain.config.PerceptionConfig
 import com.friady.sailens.domain.model.common.DistanceLevel
+import com.friady.sailens.domain.model.common.InferenceStrategy
 import com.friady.sailens.domain.model.common.NormalizedRect
 import com.friady.sailens.domain.model.common.PerceptionMode
 import com.friady.sailens.domain.model.perception.DetectedObstacle
@@ -93,14 +94,29 @@ class ProcessFrameUseCase(
             return obstacleTracker.update(rawObstacles, frame.timestamp)
         }
 
-        return if (frameCount % 2 == 1) {
-            // 奇数帧：运行实例分割，更新跟踪器
-            val instances = instanceProvider.detect(frame)
-            val rawObstacles = obstacleExtractor.extractFromInstances(instances, depthEstimator)
-            obstacleTracker.update(rawObstacles, frame.timestamp)
-        } else {
-            // 偶数帧：只用跟踪器预测，不运行实例分割
-            obstacleTracker.predict(frame.timestamp)
+        return when (perceptionConfig.inferenceStrategy) {
+
+            // 同时推理：sem（可行走区域）+ seg（障碍物识别）每帧都跑
+            // 优点：障碍物信息最及时；缺点：每帧双模型推理，功耗较高
+            InferenceStrategy.SIMULTANEOUS -> {
+                val instances = instanceProvider.detect(frame)
+                val rawObstacles = obstacleExtractor.extractFromInstances(instances, depthEstimator)
+                obstacleTracker.update(rawObstacles, frame.timestamp)
+            }
+
+            // 交替推理：sem 每帧运行，seg 奇偶帧交替运行
+            // 优点：seg 推理频率减半，功耗低；缺点：偶数帧用 tracker.predict() 补偿
+            InferenceStrategy.ALTERNATING -> {
+                if (frameCount % 2 == 1) {
+                    // 奇数帧：运行 seg（障碍物识别），更新跟踪器
+                    val instances = instanceProvider.detect(frame)
+                    val rawObstacles = obstacleExtractor.extractFromInstances(instances, depthEstimator)
+                    obstacleTracker.update(rawObstacles, frame.timestamp)
+                } else {
+                    // 偶数帧：跳过 seg，用跟踪器运动预测补偿
+                    obstacleTracker.predict(frame.timestamp)
+                }
+            }
         }
     }
 }

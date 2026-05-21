@@ -28,11 +28,13 @@ data class AnalysisConfig(
 
     // 路口检测
     val intersectionRoadRatioThreshold: Float = 0.15f,
+    val enableIntersectionFallback: Boolean = false,
 
     // 道路安全
     val roadHighRatioThreshold: Float = 0.70f,
     val roadMediumRatioThreshold: Float = 0.50f,
     val roadBottomCenterRatio: Float = 0.30f,
+    val roadAreaWarningConfidence: Float = 0.45f,
 
     // 地面类型检测
     val groundTypeDominantThreshold: Float = 0.30f,

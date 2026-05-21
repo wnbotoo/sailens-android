@@ -1,0 +1,27 @@
+package com.friady.sailens.domain.model.scene
+
+data class SceneDebugInfo(
+    val passableRatio: Float,
+    val navigationPassableRatio: Float,
+    val obstacleRatio: Float,
+    val roadRatio: Float,
+    val bottomCoverage: Float,
+    val bottomMaxRunWidthRatio: Float,
+    val blockageConfidence: Float,
+    val verticalReachRatio: Float,
+    val floodReachRatio: Float,
+    val widthRetentionP25: Float,
+    val validLayers: Int,
+    val totalLayers: Int,
+    val dominantClasses: List<String>,
+    val processFrameMs: Long,
+    val inferenceMs: Long,
+    val analyzeSceneMs: Long,
+    val decideEventsMs: Long,
+    val totalPipelineMs: Long,
+    val droppedFramesSinceLast: Int,
+    val recentAvgTotalPipelineMs: Double,
+    val recentP95TotalPipelineMs: Long,
+    val recentDroppedFrameRate: Double,
+    val isRuntimeOverBudget: Boolean,
+)

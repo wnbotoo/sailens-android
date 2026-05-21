@@ -1,5 +1,6 @@
 package com.friady.sailens.domain.processor.decision
 
+import com.friady.sailens.domain.model.common.DirectionZone
 import com.friady.sailens.domain.model.common.EventCategory
 import com.friady.sailens.domain.model.scene.SceneEvent
 import java.util.UUID
@@ -47,11 +48,25 @@ class EventMerger {
         val maxSeverity = events.maxOf { it.severity }
         val firstEvent = events.first()
 
-        val messageKey = when (allZones.size) {
-            1 -> "event_obstacle_${allZones[0].name.lowercase()}"
-            2 -> "event_obstacle_${allZones[0].name.lowercase()}_${allZones[1].name.lowercase()}"
+        val messageKey = when (allZones) {
+            listOf(DirectionZone.LEFT) -> "event_obstacle_left"
+            listOf(DirectionZone.CENTER) -> "event_obstacle_center"
+            listOf(DirectionZone.RIGHT) -> "event_obstacle_right"
+            listOf(DirectionZone.FRONT_LEFT) -> "event_obstacle_front_left"
+            listOf(DirectionZone.FRONT_RIGHT) -> "event_obstacle_front_right"
+            listOf(DirectionZone.LEFT, DirectionZone.CENTER) -> "event_obstacle_left_center"
+            listOf(DirectionZone.CENTER, DirectionZone.RIGHT) -> "event_obstacle_center_right"
+            listOf(DirectionZone.LEFT, DirectionZone.RIGHT) -> "event_obstacle_left_right"
             else -> "event_obstacle_multiple"
         }
+        val cooldownKeys = events
+            .flatMap { it.cooldownKeys.ifEmpty { setOf(it.dedupeKey) } }
+            .toMutableSet()
+            .apply {
+                allZones.forEach { add("obstacle_${it.name}") }
+                add(primaryObstacleCooldownKey(allZones))
+            }
+        val dedupeKey = primaryObstacleCooldownKey(allZones)
 
         return SceneEvent(
             id = UUID.randomUUID(),
@@ -64,10 +79,20 @@ class EventMerger {
                 "count" to events.size.toString()
             ),
             expiresAt = firstEvent.expiresAt,
-            dedupeKey = "obstacle_${allZones.joinToString("_") { it.name }}",
+            dedupeKey = dedupeKey,
+            cooldownKeys = cooldownKeys,
             confidence = maxConfidence,
             severity = maxSeverity,
             relatedZones = allZones
         )
+    }
+
+    private fun primaryObstacleCooldownKey(zones: List<DirectionZone>): String {
+        return when {
+            DirectionZone.CENTER in zones -> "obstacle_PRIMARY_CENTER"
+            DirectionZone.FRONT_LEFT in zones || DirectionZone.FRONT_RIGHT in zones -> "obstacle_PRIMARY_FRONT"
+            zones.size > 1 -> "obstacle_PRIMARY_SIDE"
+            else -> "obstacle_${zones.first().name}"
+        }
     }
 }

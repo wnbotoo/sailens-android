@@ -64,14 +64,6 @@ class CocoClassMapper : ClassMapper {
         return classId == TRAFFIC_LIGHT
     }
 
-//    override fun toUnifiedSurfaceType(classId: Int): UnifiedSurfaceType {
-//        return if (isObstacle(classId)) {
-//            UnifiedSurfaceType.OBSTACLE
-//        } else {
-//            UnifiedSurfaceType.BACKGROUND
-//        }
-//    }
-
     override fun toGroundType(classId: Int): GroundType {
         // COCO 不包含地面类别
         return GroundType.UNKNOWN

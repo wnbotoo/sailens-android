@@ -26,6 +26,11 @@ data class FrameTrace(
     val isBlocked: Boolean,
     val isNarrowing: Boolean,
     val isRoadDangerous: Boolean,
+    val navigationPassableRatio: Double,
+    val blockageConfidence: Double,
+    val verticalReachRatio: Double,
+    val floodReachRatio: Double,
+    val widthRetentionP25: Double,
     val messageKeys: List<String>,
 )
 

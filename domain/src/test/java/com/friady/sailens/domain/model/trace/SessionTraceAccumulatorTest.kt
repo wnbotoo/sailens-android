@@ -78,6 +78,11 @@ class SessionTraceAccumulatorTest {
         isBlocked = isBlocked,
         isNarrowing = false,
         isRoadDangerous = isRoadDangerous,
+        navigationPassableRatio = 0.5,
+        blockageConfidence = if (isBlocked) 0.6 else 0.2,
+        verticalReachRatio = if (isBlocked) 0.2 else 0.7,
+        floodReachRatio = if (isBlocked) 0.1 else 0.5,
+        widthRetentionP25 = if (isBlocked) 0.2 else 0.6,
         messageKeys = listOf("event_blocked"),
     )
 }

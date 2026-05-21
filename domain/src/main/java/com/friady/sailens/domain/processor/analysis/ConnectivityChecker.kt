@@ -84,12 +84,17 @@ class ConnectivityChecker(
         widthP25: Float,
     ): Float {
         var score = 0f
+        val continuityPenaltyScale = when {
+            widthP25 >= config.narrowEnterP25 -> 0.35f
+            widthP25 >= config.narrowEnterP25 * 0.8f -> 0.6f
+            else -> 1f
+        }
 
         if (verticalReachRatio < config.reachRatioThreshold) {
-            score += 0.35f * (1 - verticalReachRatio / config.reachRatioThreshold)
+            score += 0.35f * continuityPenaltyScale * (1 - verticalReachRatio / config.reachRatioThreshold)
         }
         if (floodReachRatio < config.minFloodReachRatio) {
-            score += 0.35f * (1 - floodReachRatio / config.minFloodReachRatio)
+            score += 0.35f * continuityPenaltyScale * (1 - floodReachRatio / config.minFloodReachRatio)
         }
         if (widthP25 < config.narrowEnterP25 * 0.6f) {
             score += 0.30f * (1 - widthP25 / (config.narrowEnterP25 * 0.6f))
@@ -116,7 +121,7 @@ class ConnectivityChecker(
         var validLayers = 0
 
         for (ratio in config.sampleLayerRatios) {
-            val row = ((1 - ratio) * mask.height).toInt().coerceIn(0, mask.height - 1)
+            val row = (ratio * mask.height).toInt().coerceIn(0, mask.height - 1)
             var maxRunWidth = 0
             var maxRunCenter = 0.5f
 
@@ -185,9 +190,10 @@ class ConnectivityChecker(
             return FloodResult(0f, 0f, 0f)
         }
 
-        val seedY = mask.height - 1
+        val seedY = bottomStats.maxRunRow.coerceIn(windowTop, windowBottom)
         val seedStartX = bottomStats.maxRunStart
         val seedEndX = bottomStats.maxRunEnd
+        val reachableWindowHeight = maxOf(1, seedY - windowTop)
         val seedCount = minOf(32, seedEndX - seedStartX + 1)
         val seedStep = maxOf(1, (seedEndX - seedStartX) / seedCount)
 
@@ -228,10 +234,25 @@ class ConnectivityChecker(
             rowWidths[cy]++
 
             for (i in 0..7) {
-                queue.addLast(packCoordinate(cx + dx[i], cy + dy[i]))
+                val nextX = cx + dx[i]
+                val nextY = cy + dy[i]
+                queue.addLast(packCoordinate(nextX, nextY))
+
+                if (i > 3) continue
+
+                val bridgeX = cx + dx[i] * 2
+                val bridgeY = cy + dy[i] * 2
+                if (bridgeX !in 0 until mask.width || bridgeY < windowTop || bridgeY > windowBottom) {
+                    continue
+                }
+                if (mask.get(nextX, nextY) || !mask.get(bridgeX, bridgeY)) {
+                    continue
+                }
+
+                queue.addLast(packCoordinate(bridgeX, bridgeY))
             }
 
-            val currentReach = (seedY - minYReached).toFloat() / windowHeight
+            val currentReach = (seedY - minYReached).toFloat() / reachableWindowHeight
             if (currentReach >= config.floodEarlyStopReachRatio) {
                 var totalRowWidth = 0
                 var activeRows = 0
@@ -250,7 +271,7 @@ class ConnectivityChecker(
             }
         }
 
-        val reachRatio = (seedY - minYReached).toFloat() / windowHeight
+        val reachRatio = (seedY - minYReached).toFloat() / reachableWindowHeight
         val windowArea = windowHeight * mask.width
         val visitedRatio = visitedCount.toFloat() / windowArea
 

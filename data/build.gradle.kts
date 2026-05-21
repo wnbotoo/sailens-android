@@ -4,9 +4,7 @@ plugins {
 
 android {
     namespace = "com.friady.sailens.data"
-    compileSdk {
-        version = release(36)
-    }
+    compileSdk = 37
 
     defaultConfig {
         minSdk = 34
@@ -24,6 +22,13 @@ android {
             )
         }
     }
+
+    sourceSets {
+        getByName("main") {
+            assets.directories.addAll(listOf("src/main/assets", "src/main/ml"))
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17

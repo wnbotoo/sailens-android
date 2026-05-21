@@ -55,7 +55,7 @@ class TraceReplayEntryPointsUseCaseTest {
                 {"type":"session_start","sessionId":"session-newest","startedAt":1000,"pipelineMode":"semantic_only","targetHardwareProfile":"snapdragon_8_gen_3_plus"}
                 """.trimIndent(),
                 """
-                {"type":"frame","sessionId":"session-newest","sequenceNumber":1,"frameTimestamp":1100,"frameWidth":640,"frameHeight":360,"droppedFramesSinceLast":0,"processFrameMs":20,"inferenceMs":12,"analyzeSceneMs":4,"decideEventsMs":3,"totalPipelineMs":29,"obstacleCount":1,"eventCount":1,"isBlocked":false,"isNarrowing":false,"isRoadDangerous":false,"messageKeys":["event_obstacle_center"]}
+                {"type":"frame","sessionId":"session-newest","sequenceNumber":1,"frameTimestamp":1100,"frameWidth":640,"frameHeight":360,"droppedFramesSinceLast":0,"processFrameMs":20,"inferenceMs":12,"analyzeSceneMs":4,"decideEventsMs":3,"totalPipelineMs":29,"obstacleCount":1,"eventCount":1,"isBlocked":false,"isNarrowing":false,"isRoadDangerous":false,"navigationPassableRatio":0.58,"blockageConfidence":0.15,"verticalReachRatio":0.66,"floodReachRatio":0.48,"widthRetentionP25":0.60,"messageKeys":["event_obstacle_center"]}
                 """.trimIndent(),
             )
         )
@@ -88,7 +88,7 @@ class TraceReplayEntryPointsUseCaseTest {
                 {"type":"session_start","sessionId":"session-budget","startedAt":1000,"pipelineMode":"combined","targetHardwareProfile":"snapdragon_8_gen_3_plus"}
                 """.trimIndent(),
                 """
-                {"type":"frame","sessionId":"session-budget","sequenceNumber":1,"frameTimestamp":1100,"frameWidth":640,"frameHeight":360,"droppedFramesSinceLast":2,"processFrameMs":30,"inferenceMs":20,"analyzeSceneMs":10,"decideEventsMs":8,"totalPipelineMs":95,"obstacleCount":2,"eventCount":1,"isBlocked":true,"isNarrowing":false,"isRoadDangerous":true,"messageKeys":["event_blocked"]}
+                {"type":"frame","sessionId":"session-budget","sequenceNumber":1,"frameTimestamp":1100,"frameWidth":640,"frameHeight":360,"droppedFramesSinceLast":2,"processFrameMs":30,"inferenceMs":20,"analyzeSceneMs":10,"decideEventsMs":8,"totalPipelineMs":95,"obstacleCount":2,"eventCount":1,"isBlocked":true,"isNarrowing":false,"isRoadDangerous":true,"navigationPassableRatio":0.30,"blockageConfidence":0.72,"verticalReachRatio":0.18,"floodReachRatio":0.09,"widthRetentionP25":0.16,"messageKeys":["event_blocked"]}
                 """.trimIndent(),
             )
         )

@@ -1,5 +1,16 @@
 package com.friady.sailens.domain.model.trace
 
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
+
 data class TraceReplaySession(
     val metadata: SessionTraceMetadata?,
     val frames: List<FrameTrace>,
@@ -20,6 +31,8 @@ data class TraceReplayReport(
     val targetHardwareProfile: String?,
     val totalFrames: Int,
     val droppedFrames: Int,
+    val totalObservedFrames: Int,
+    val droppedFrameRate: Double,
     val totalEvents: Int,
     val blockedFrames: Int,
     val dangerousFrames: Int,
@@ -30,12 +43,22 @@ data class TraceReplayReport(
     val avgTotalPipelineMs: Double,
     val p95TotalPipelineMs: Long,
     val maxTotalPipelineMs: Long,
+    val avgNavigationPassableRatio: Double,
+    val avgBlockageConfidence: Double,
+    val avgVerticalReachRatio: Double,
+    val avgFloodReachRatio: Double,
+    val avgWidthRetentionP25: Double,
     val maxDroppedFramesSinceLast: Int,
     val errorCount: Int,
     val uniqueMessageKeys: List<String>,
 )
 
 object TraceReplayParser {
+    private val json = Json {
+        ignoreUnknownKeys = true
+        isLenient = false
+    }
+
     fun parse(lines: List<String>): TraceReplaySession {
         var metadata: SessionTraceMetadata? = null
         var summary: SessionTraceSummary? = null
@@ -46,11 +69,12 @@ object TraceReplayParser {
             val line = rawLine.trim()
             if (line.isBlank()) return@forEachIndexed
 
-            when (val type = requireString(line, "type", index)) {
-                SESSION_START_TYPE -> metadata = parseMetadata(line, index)
-                FRAME_TYPE -> frames += parseFrame(line, index)
-                SESSION_SUMMARY_TYPE -> summary = parseSummary(line, index)
-                ERROR_TYPE -> errors += parseError(line, index)
+            val entry = parseObject(line, index)
+            when (val type = entry.requireString("type", index)) {
+                SESSION_START_TYPE -> metadata = parseMetadata(entry, index)
+                FRAME_TYPE -> frames += parseFrame(entry, index)
+                SESSION_SUMMARY_TYPE -> summary = parseSummary(entry, index)
+                ERROR_TYPE -> errors += parseError(entry, index)
                 else -> throw IllegalArgumentException("Unsupported trace entry type '$type' at line ${index + 1}")
             }
         }
@@ -63,139 +87,119 @@ object TraceReplayParser {
         )
     }
 
-    private fun parseMetadata(line: String, lineIndex: Int) = SessionTraceMetadata(
-        sessionId = requireString(line, "sessionId", lineIndex),
-        startedAt = requireLong(line, "startedAt", lineIndex),
-        pipelineMode = requireString(line, "pipelineMode", lineIndex),
-        targetHardwareProfile = requireString(line, "targetHardwareProfile", lineIndex),
-    )
-
-    private fun parseFrame(line: String, lineIndex: Int) = FrameTrace(
-        sessionId = requireString(line, "sessionId", lineIndex),
-        sequenceNumber = requireLong(line, "sequenceNumber", lineIndex),
-        frameTimestamp = requireLong(line, "frameTimestamp", lineIndex),
-        frameWidth = requireInt(line, "frameWidth", lineIndex),
-        frameHeight = requireInt(line, "frameHeight", lineIndex),
-        droppedFramesSinceLast = requireInt(line, "droppedFramesSinceLast", lineIndex),
-        processFrameMs = requireLong(line, "processFrameMs", lineIndex),
-        inferenceMs = requireLong(line, "inferenceMs", lineIndex),
-        analyzeSceneMs = requireLong(line, "analyzeSceneMs", lineIndex),
-        decideEventsMs = requireLong(line, "decideEventsMs", lineIndex),
-        totalPipelineMs = requireLong(line, "totalPipelineMs", lineIndex),
-        obstacleCount = requireInt(line, "obstacleCount", lineIndex),
-        eventCount = requireInt(line, "eventCount", lineIndex),
-        isBlocked = requireBoolean(line, "isBlocked", lineIndex),
-        isNarrowing = requireBoolean(line, "isNarrowing", lineIndex),
-        isRoadDangerous = requireBoolean(line, "isRoadDangerous", lineIndex),
-        messageKeys = requireStringArray(line, "messageKeys", lineIndex),
-    )
-
-    private fun parseSummary(line: String, lineIndex: Int) = SessionTraceSummary(
-        sessionId = requireString(line, "sessionId", lineIndex),
-        startedAt = requireLong(line, "startedAt", lineIndex),
-        completedAt = requireLong(line, "completedAt", lineIndex),
-        totalFrames = requireInt(line, "totalFrames", lineIndex),
-        droppedFrames = requireInt(line, "droppedFrames", lineIndex),
-        totalEvents = requireInt(line, "totalEvents", lineIndex),
-        blockedFrames = requireInt(line, "blockedFrames", lineIndex),
-        dangerousFrames = requireInt(line, "dangerousFrames", lineIndex),
-        avgProcessFrameMs = requireDouble(line, "avgProcessFrameMs", lineIndex),
-        avgTotalPipelineMs = requireDouble(line, "avgTotalPipelineMs", lineIndex),
-        avgInferenceMs = requireDouble(line, "avgInferenceMs", lineIndex),
-        p95TotalPipelineMs = requireLong(line, "p95TotalPipelineMs", lineIndex),
-        maxTotalPipelineMs = requireLong(line, "maxTotalPipelineMs", lineIndex),
-    )
-
-    private fun parseError(line: String, lineIndex: Int) = TraceReplayError(
-        sessionId = requireString(line, "sessionId", lineIndex),
-        stage = requireString(line, "stage", lineIndex),
-        exception = requireString(line, "exception", lineIndex),
-        message = optionalString(line, "message") ?: "",
-    )
-
-    private fun requireString(line: String, key: String, lineIndex: Int): String {
-        val match = stringFieldRegex(key).find(line)
-            ?: throw missingField(key, lineIndex)
-        return decodeJsonString(match.groupValues[1])
+    private fun parseObject(line: String, lineIndex: Int): JsonObject {
+        return try {
+            json.parseToJsonElement(line).jsonObject
+        } catch (error: Exception) {
+            throw IllegalArgumentException("Invalid JSON trace entry at line ${lineIndex + 1}", error)
+        }
     }
 
-    private fun optionalString(line: String, key: String): String? =
-        stringFieldRegex(key).find(line)?.groupValues?.get(1)?.let(::decodeJsonString)
+    private fun parseMetadata(entry: JsonObject, lineIndex: Int) = SessionTraceMetadata(
+        sessionId = entry.requireString("sessionId", lineIndex),
+        startedAt = entry.requireLong("startedAt", lineIndex),
+        pipelineMode = entry.requireString("pipelineMode", lineIndex),
+        targetHardwareProfile = entry.requireString("targetHardwareProfile", lineIndex),
+    )
 
-    private fun requireInt(line: String, key: String, lineIndex: Int): Int =
-        requireNumber(line, key, lineIndex).toInt()
+    private fun parseFrame(entry: JsonObject, lineIndex: Int) = FrameTrace(
+        sessionId = entry.requireString("sessionId", lineIndex),
+        sequenceNumber = entry.requireLong("sequenceNumber", lineIndex),
+        frameTimestamp = entry.requireLong("frameTimestamp", lineIndex),
+        frameWidth = entry.requireInt("frameWidth", lineIndex),
+        frameHeight = entry.requireInt("frameHeight", lineIndex),
+        droppedFramesSinceLast = entry.requireInt("droppedFramesSinceLast", lineIndex),
+        processFrameMs = entry.requireLong("processFrameMs", lineIndex),
+        inferenceMs = entry.requireLong("inferenceMs", lineIndex),
+        analyzeSceneMs = entry.requireLong("analyzeSceneMs", lineIndex),
+        decideEventsMs = entry.requireLong("decideEventsMs", lineIndex),
+        totalPipelineMs = entry.requireLong("totalPipelineMs", lineIndex),
+        obstacleCount = entry.requireInt("obstacleCount", lineIndex),
+        eventCount = entry.requireInt("eventCount", lineIndex),
+        isBlocked = entry.requireBoolean("isBlocked", lineIndex),
+        isNarrowing = entry.requireBoolean("isNarrowing", lineIndex),
+        isRoadDangerous = entry.requireBoolean("isRoadDangerous", lineIndex),
+        navigationPassableRatio = entry.optionalDouble("navigationPassableRatio") ?: 0.0,
+        blockageConfidence = entry.optionalDouble("blockageConfidence") ?: 0.0,
+        verticalReachRatio = entry.optionalDouble("verticalReachRatio") ?: 0.0,
+        floodReachRatio = entry.optionalDouble("floodReachRatio") ?: 0.0,
+        widthRetentionP25 = entry.optionalDouble("widthRetentionP25") ?: 0.0,
+        messageKeys = entry.requireStringArray("messageKeys", lineIndex),
+    )
 
-    private fun requireLong(line: String, key: String, lineIndex: Int): Long =
-        requireNumber(line, key, lineIndex).toLong()
+    private fun parseSummary(entry: JsonObject, lineIndex: Int) = SessionTraceSummary(
+        sessionId = entry.requireString("sessionId", lineIndex),
+        startedAt = entry.requireLong("startedAt", lineIndex),
+        completedAt = entry.requireLong("completedAt", lineIndex),
+        totalFrames = entry.requireInt("totalFrames", lineIndex),
+        droppedFrames = entry.requireInt("droppedFrames", lineIndex),
+        totalEvents = entry.requireInt("totalEvents", lineIndex),
+        blockedFrames = entry.requireInt("blockedFrames", lineIndex),
+        dangerousFrames = entry.requireInt("dangerousFrames", lineIndex),
+        avgProcessFrameMs = entry.requireDouble("avgProcessFrameMs", lineIndex),
+        avgTotalPipelineMs = entry.requireDouble("avgTotalPipelineMs", lineIndex),
+        avgInferenceMs = entry.requireDouble("avgInferenceMs", lineIndex),
+        p95TotalPipelineMs = entry.requireLong("p95TotalPipelineMs", lineIndex),
+        maxTotalPipelineMs = entry.requireLong("maxTotalPipelineMs", lineIndex),
+    )
 
-    private fun requireDouble(line: String, key: String, lineIndex: Int): Double {
-        val match = numberFieldRegex(key).find(line)
-            ?: throw missingField(key, lineIndex)
-        return match.groupValues[1].toDouble()
+    private fun parseError(entry: JsonObject, lineIndex: Int) = TraceReplayError(
+        sessionId = entry.requireString("sessionId", lineIndex),
+        stage = entry.requireString("stage", lineIndex),
+        exception = entry.requireString("exception", lineIndex),
+        message = entry.optionalString("message") ?: "",
+    )
+
+    private fun JsonObject.requireString(key: String, lineIndex: Int): String {
+        return element(key, lineIndex).jsonPrimitive.content
     }
 
-    private fun requireBoolean(line: String, key: String, lineIndex: Int): Boolean {
-        val match = booleanFieldRegex(key).find(line)
-            ?: throw missingField(key, lineIndex)
-        return match.groupValues[1].toBooleanStrict()
+    private fun JsonObject.optionalString(key: String): String? {
+        return get(key)?.jsonPrimitive?.content
     }
 
-    private fun requireStringArray(line: String, key: String, lineIndex: Int): List<String> {
-        val match = arrayFieldRegex(key).find(line)
-            ?: throw missingField(key, lineIndex)
-        val body = match.groupValues[1].trim()
-        if (body.isBlank()) return emptyList()
-
-        return stringValueRegex.findAll(body)
-            .map { decodeJsonString(it.groupValues[1]) }
-            .toList()
+    private fun JsonObject.requireInt(key: String, lineIndex: Int): Int {
+        val value = requireLong(key, lineIndex)
+        return value.toInt()
     }
 
-    private fun requireNumber(line: String, key: String, lineIndex: Int): String {
-        val match = numberFieldRegex(key).find(line)
-            ?: throw missingField(key, lineIndex)
-        return match.groupValues[1]
+    private fun JsonObject.requireLong(key: String, lineIndex: Int): Long {
+        return element(key, lineIndex).jsonPrimitive.longOrNull
+            ?: throw invalidField(key, lineIndex)
+    }
+
+    private fun JsonObject.requireDouble(key: String, lineIndex: Int): Double {
+        return element(key, lineIndex).jsonPrimitive.doubleOrNull
+            ?: throw invalidField(key, lineIndex)
+    }
+
+    private fun JsonObject.optionalDouble(key: String): Double? {
+        return get(key)?.jsonPrimitive?.doubleOrNull
+    }
+
+    private fun JsonObject.requireBoolean(key: String, lineIndex: Int): Boolean {
+        return element(key, lineIndex).jsonPrimitive.booleanOrNull
+            ?: throw invalidField(key, lineIndex)
+    }
+
+    private fun JsonObject.requireStringArray(key: String, lineIndex: Int): List<String> {
+        val value = element(key, lineIndex)
+        val array = value as? JsonArray ?: value.jsonArray
+        return array.map { item -> item.jsonPrimitive.content }
+    }
+
+    private fun JsonObject.element(key: String, lineIndex: Int): JsonElement {
+        return get(key) ?: throw missingField(key, lineIndex)
     }
 
     private fun missingField(key: String, lineIndex: Int) =
         IllegalArgumentException("Missing field '$key' at line ${lineIndex + 1}")
 
-    private fun stringFieldRegex(key: String) = Regex("\"${Regex.escape(key)}\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"")
-    private fun numberFieldRegex(key: String) = Regex("\"${Regex.escape(key)}\"\\s*:\\s*(-?\\d+(?:\\.\\d+)?)")
-    private fun booleanFieldRegex(key: String) = Regex("\"${Regex.escape(key)}\"\\s*:\\s*(true|false)")
-    private fun arrayFieldRegex(key: String) = Regex("\"${Regex.escape(key)}\"\\s*:\\s*\\[(.*?)]")
-
-    private val stringValueRegex = Regex("\"((?:\\\\.|[^\"\\\\])*)\"")
-
-    private fun decodeJsonString(value: String): String = buildString(value.length) {
-        var index = 0
-        while (index < value.length) {
-            val current = value[index]
-            if (current == '\\' && index + 1 < value.length) {
-                val escaped = value[index + 1]
-                append(
-                    when (escaped) {
-                        '\\' -> '\\'
-                        '"' -> '"'
-                        'n' -> '\n'
-                        'r' -> '\r'
-                        't' -> '\t'
-                        'b' -> '\b'
-                        'f' -> '\u000C'
-                        else -> escaped
-                    }
-                )
-                index += 2
-            } else {
-                append(current)
-                index++
-            }
-        }
-    }
+    private fun invalidField(key: String, lineIndex: Int) =
+        IllegalArgumentException("Invalid field '$key' at line ${lineIndex + 1}")
 
     private const val SESSION_START_TYPE = "session_start"
     private const val FRAME_TYPE = "frame"
     private const val SESSION_SUMMARY_TYPE = "session_summary"
     private const val ERROR_TYPE = "error"
 }
-

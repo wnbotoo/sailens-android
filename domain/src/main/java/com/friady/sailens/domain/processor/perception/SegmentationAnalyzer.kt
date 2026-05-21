@@ -9,7 +9,6 @@ import com.friady.sailens.domain.model.perception.SegmentationAnalysis
 import com.friady.sailens.domain.model.perception.SegmentationMask
 import com.friady.sailens.domain.util.BooleanStabilizer
 import com.friady.sailens.domain.util.FloatSmoother
-import kotlin.collections.iterator
 
 /**
  * 语义分割分析器
@@ -21,12 +20,17 @@ class SegmentationAnalyzer(
 ) {
     // 稳定器
     private val roadRatioSmoother = FloatSmoother(windowSize = config.roadRatioSmoothWindow)
+    private val bottomCenterRoadRatioSmoother =
+        FloatSmoother(windowSize = config.roadRatioSmoothWindow)
+    private val navigationPassableRatioSmoother =
+        FloatSmoother(windowSize = config.roadRatioSmoothWindow)
     private val trafficLightStabilizer =
         BooleanStabilizer(requiredFrames = config.trafficLightDebounceFrames)
 
     companion object {
         private const val BOTTOM_RATIO = 0.2f
         private const val CENTER_RATIO = 0.4f
+        private const val NAVIGATION_REGION_RATIO = 0.45f
     }
 
     /**
@@ -35,6 +39,7 @@ class SegmentationAnalyzer(
     fun analyze(segmentation: SegmentationMask): SegmentationAnalysis {
         val width = segmentation.width
         val height = segmentation.height
+        val totalPixels = width * height
 
         // 创建 Mask
         val passableMask = BinaryMask(width, height)
@@ -42,10 +47,14 @@ class SegmentationAnalyzer(
 
         // 统计变量
         var roadPixelCount = 0
+        var passablePixelCount = 0
+        var obstaclePixelCount = 0
         var rawHasTrafficLight = false
+        val classCounts = IntArray(classMapper.classCount)
 
         // 底部区域定义
         val bottomStartY = ((1 - BOTTOM_RATIO) * height).toInt()
+        val navigationStartY = ((1 - NAVIGATION_REGION_RATIO) * height).toInt()
         val centerStartX = ((1 - CENTER_RATIO) / 2 * width).toInt()
         val centerEndX = ((1 + CENTER_RATIO) / 2 * width).toInt()
 
@@ -53,6 +62,8 @@ class SegmentationAnalyzer(
         val groundTypeCounts = mutableMapOf<GroundType, Int>()
         var bottomCenterRoadPixels = 0
         var bottomCenterTotalPixels = 0
+        var navigationPassablePixelCount = 0
+        var navigationTotalPixels = 0
 
         // 底部 run 统计
         val bottomRowRuns = mutableMapOf<Int, MutableList<IntRange>>()
@@ -63,6 +74,9 @@ class SegmentationAnalyzer(
 
             for (x in 0 until width) {
                 val classId = segmentation.getClassId(x, y)
+                if (classId in 0 until classCounts.size) {
+                    classCounts[classId]++
+                }
 
                 // 判断类型
                 val isPassable = classMapper.isPassable(classId)
@@ -73,9 +87,11 @@ class SegmentationAnalyzer(
                 // 1. 设置 Mask
                 if (isPassable) {
                     passableMask.set(x, y, true)
+                    passablePixelCount++
                 }
                 if (isObstacle) {
                     obstacleMask.set(x, y, true)
+                    obstaclePixelCount++
                 }
 
                 // 2.  全图统计
@@ -84,6 +100,12 @@ class SegmentationAnalyzer(
                 }
                 if (isTrafficLight) {
                     rawHasTrafficLight = true
+                }
+                if (y >= navigationStartY) {
+                    navigationTotalPixels++
+                    if (isPassable) {
+                        navigationPassablePixelCount++
+                    }
                 }
 
                 // 3. 底部区域统计
@@ -120,8 +142,12 @@ class SegmentationAnalyzer(
         }
 
         // 计算统计结果
-        val totalPixels = width * height
         val rawRoadRatio = roadPixelCount.toFloat() / totalPixels
+        val navigationPassableRatio = if (navigationTotalPixels > 0) {
+            navigationPassablePixelCount.toFloat() / navigationTotalPixels
+        } else {
+            0f
+        }
 
         val bottomCenterGroundDistribution = if (bottomCenterTotalPixels > 0) {
             groundTypeCounts.mapValues { it.value.toFloat() / bottomCenterTotalPixels }
@@ -139,7 +165,17 @@ class SegmentationAnalyzer(
 
         // 稳定化
         val stableRoadRatio = roadRatioSmoother.update(rawRoadRatio)
+        val stableBottomCenterRoadRatio =
+            bottomCenterRoadRatioSmoother.update(bottomCenterRoadRatio)
+        val stableNavigationPassableRatio =
+            navigationPassableRatioSmoother.update(navigationPassableRatio)
         val stableHasTrafficLight = trafficLightStabilizer.update(rawHasTrafficLight)
+        val dominantClassNames = classCounts
+            .withIndex()
+            .filter { it.value > 0 }
+            .sortedByDescending { it.value }
+            .take(3)
+            .map { indexedValue -> classMapper.getClassName(indexedValue.index) }
 
         return SegmentationAnalysis(
             passableMask = passableMask,
@@ -147,9 +183,13 @@ class SegmentationAnalyzer(
             roadRatio = stableRoadRatio,
             hasTrafficLight = stableHasTrafficLight,
             bottomCenterGroundDistribution = bottomCenterGroundDistribution,
-            bottomCenterRoadRatio = bottomCenterRoadRatio,
+            bottomCenterRoadRatio = stableBottomCenterRoadRatio,
             bottomStats = bottomStats,
-            segmentation =segmentation,
+            passablePixelCount = passablePixelCount,
+            navigationPassableRatio = stableNavigationPassableRatio,
+            obstaclePixelCount = obstaclePixelCount,
+            dominantClassNames = dominantClassNames,
+            segmentation = segmentation,
             width = width,
             height = height
         )
@@ -194,6 +234,8 @@ class SegmentationAnalyzer(
 
     fun reset() {
         roadRatioSmoother.reset()
+        bottomCenterRoadRatioSmoother.reset()
+        navigationPassableRatioSmoother.reset()
         trafficLightStabilizer.reset()
     }
 }

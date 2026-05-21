@@ -37,7 +37,6 @@ val dataModule = module {
     single<SegmentationModel> { DDRNetSegmentationModel(context = androidContext()) }
     single { ImagePositionDepthEstimator() }
     single { DeviceRotationDataSource(context = androidContext()) }
-//    single { HardwareDepthSource(androidContext()) }
 
     // Repository
     single<PerceptionRepository> { MLPerceptionRepository(get()) }

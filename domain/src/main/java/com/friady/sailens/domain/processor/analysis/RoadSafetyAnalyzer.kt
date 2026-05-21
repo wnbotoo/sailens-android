@@ -80,18 +80,18 @@ class RoadSafetyAnalyzer(
     ): Pair<Boolean, Float> {
         if (!isOnRoad) return Pair(false, 0f)
 
-        var confidence = 0f
+        var confidence = config.roadAreaWarningConfidence
 
         if (hasVehicle) {
-            confidence += 0.6f
+            confidence += 0.45f
         }
 
         if (roadRatio > config.roadMediumRatioThreshold && hasTrafficLight) {
-            confidence += 0.3f
+            confidence += 0.15f
         }
 
         if (roadRatio > config.roadHighRatioThreshold) {
-            confidence += 0.4f
+            confidence += 0.15f
         }
 
         confidence = confidence.coerceIn(0f, 1f)

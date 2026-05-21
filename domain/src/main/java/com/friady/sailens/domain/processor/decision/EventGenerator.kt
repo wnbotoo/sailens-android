@@ -4,6 +4,7 @@ import com.friady.sailens.domain.model.analysis.GroundTypeChange
 import com.friady.sailens.domain.model.analysis.RoadSafetyState
 import com.friady.sailens.domain.model.analysis.SceneSnapshot
 import com.friady.sailens.domain.model.common.DirectionBias
+import com.friady.sailens.domain.model.common.DirectionZone
 import com.friady.sailens.domain.model.common.EventCategory
 import com.friady.sailens.domain.model.common.EventPriority
 import com.friady.sailens.domain.model.common.GroundType
@@ -137,6 +138,7 @@ class EventGenerator {
                 messageParams = mapOf("count" to zoneObstacles.size.toString()),
                 expiresAt = now + 3000,
                 dedupeKey = "obstacle_${zone.name}",
+                cooldownKeys = obstacleCooldownKeys(listOf(zone)),
                 relatedZones = listOf(zone)
             )
         }
@@ -166,7 +168,11 @@ class EventGenerator {
             priority = EventPriority.HIGH,
             messageKey = messageKey,
             expiresAt = now + 5000,
-            dedupeKey = "road_warning",
+            dedupeKey = if (roadSafety.hasVehicleOnRoad) {
+                "road_warning_vehicle"
+            } else {
+                "road_warning_area"
+            },
             confidence = roadSafety.dangerConfidence
         )
     }
@@ -207,5 +213,20 @@ class EventGenerator {
 
     fun reset() {
         wasOnRoad = false
+    }
+
+    private fun obstacleCooldownKeys(zones: List<DirectionZone>): Set<String> {
+        val keys = zones.mapTo(mutableSetOf()) { "obstacle_${it.name}" }
+        if (zones.any { it == DirectionZone.CENTER }) {
+            keys.add("obstacle_PRIMARY_CENTER")
+        }
+        if (zones.any {
+                it == DirectionZone.FRONT_LEFT ||
+                    it == DirectionZone.FRONT_RIGHT
+            }
+        ) {
+            keys.add("obstacle_PRIMARY_FRONT")
+        }
+        return keys
     }
 }

@@ -9,7 +9,6 @@ import com.friady.sailens.domain.model.common.UrgencyLevel
 import com.friady.sailens.domain.model.perception.DetectedObstacle
 import com.friady.sailens.domain.model.perception.RawObstacle
 import java.util.UUID
-import kotlin.collections.iterator
 
 /**
  * 障碍物跟踪器

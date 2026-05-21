@@ -15,6 +15,10 @@ data class SegmentationAnalysis(
     val bottomCenterGroundDistribution: Map<GroundType, Float>,
     val bottomCenterRoadRatio: Float,
     val bottomStats: BottomStats,
+    val passablePixelCount: Int,
+    val navigationPassableRatio: Float,
+    val obstaclePixelCount: Int,
+    val dominantClassNames: List<String>,
     val segmentation: SegmentationMask,  // 暴露给需要的处理器
     val width: Int,
     val height: Int,

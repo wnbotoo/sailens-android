@@ -1,263 +1,203 @@
-# Sailens 环境感知 App 代码审查报告（2026-05-20）
+# Sailens 环境感知 App 代码审查报告（2026-05-21）
 
-## 1. 项目定位与总体判断
+## 1. 总体判断
 
-`Sailens` 本质上是一个 **面向视障用户的端侧环境感知与主动提醒系统**。从工程形态上看，它与轻量级 ADAS/主动安全辅助链路高度相似：
+`Sailens` 是一个面向视障用户户外行走的端侧环境感知辅助系统。它的主链路与轻量 ADAS 很接近：
 
-`CameraX -> Frame Stream -> Semantic Perception -> Scene Analysis -> Event Decision -> UI/TTS/Haptics`
+`CameraX -> Frame Stream -> Semantic Segmentation -> Scene Analysis -> Event Decision -> UI / TTS / Haptics -> Trace Replay`
 
-当前项目已经具备较清晰的模块分层：
-- `:camera`：CameraX、帧采集、分析流入口
-- `:data`：ML 模型、OpenCV、深度与日志实现
-- `:domain`：感知/分析/决策核心逻辑
-- `:presentation`：Compose UI、状态机、语音/振动适配
-- `:app`：Koin 装配与入口壳层
-- `:ux`：通用 UI 资源
+当前架构方向是正确的：模块边界基本清晰，`domain` 里承载感知分析与决策，`data` 里承载 LiteRT / OpenCV / 文件服务，`camera` 负责帧入口，`presentation` 负责 Compose 状态、反馈与调试页面。
 
-本报告后续的性能判断，默认以 **`Snapdragon 8 Gen 3` 及以上 Android 旗舰 SoC** 作为主要目标设备预算，而 `S22` 只作为早期保守参考样本，不再作为上限假设。
+上一轮文档中提到的早期 P0/P1 问题大多已经完成收敛。本轮 review 的重点不再是推倒主链路，而是把项目从“研发验证版”继续推进到“可外场迭代版”：更可靠的实时决策、更完整的 trace 导出、更明确的性能预算，以及为后续 `YOLO + DDRNet` 融合建立可回放基线。
 
-**总体评价：架构方向正确，实时视觉辅助主链路已成型；2026-05-20 这轮审查中列出的 P0 / P1 / P2 问题已在当前代码中完成收敛。**
+## 2. 已确认的主链路
 
-当前项目依然更接近“研发验证版”而非“稳定可交付版”，但主要矛盾已经从**主链路正确性/热路径明显缺陷**，转移为：
-1. **观测、回放与评估已具备正式 session list / report 入口，但导出/分享与批量对比能力仍不完整**
-2. **性能预算已可在 replay 报告中判读，但仍缺主链路 runtime 告警与更正式的可视化入口**
-3. **后续 `YOLO + DDRNet` 融合前，还需要继续补齐 Phase 5 的数据基线与评估闭环**
+### 2.1 实时帧链路
 
-### 1.1 状态更新（2026-05-21）
-
-- 本报告第 4~6 节列出的 P0 / P1 / P2 问题，现已全部在代码层面落地修复。
-- 已验证到的落地点包括：
-  - `LiteRTSegmenter` 输出 mask 快照化
-  - `EventConflictResolver` 全量抑制冲突事件并补齐测试
-  - `SceneAnalysisView` preview / overlay 共用同一 `contentScale`
-  - `CameraViewModel` 预览与分析分辨率解耦（`1920x1080` vs `640x360`）
-  - `BinaryMask.visualize()` 改为批量 `setPixels()`
-  - `StopSceneAnalysisUseCase.release()` + `SceneAnalysisViewModel.onCleared()` 完整释放资源
-  - `ImageFrame` 改为平台无关 `IntArray` 像素缓冲
-  - `ObstacleExtractor` / `ConnectivityChecker` 热路径完成 primitive 化
-  - 域层 Koin 装配已移至 `app/.../DomainBindingsModule.kt`
-  - `SceneAnalysisView` 已具备正式 trace replay 页面入口（session list / report page / latest report / copy summary）
-
----
-
-## 2. 我确认过的关键运行链路
-
-### 2.1 视觉链路
-- `ImageFrameAnalyzer` 将 `ImageAnalysis` 帧转为 `ImageFrame` 并写入 `SharedFlow`
-- Flow 设置为 `extraBufferCapacity = 8` 且 `DROP_OLDEST`
-- `StartSceneAnalysisUseCase` 在启动时初始化分割模型，然后对每帧执行：
+- `ImageFrameAnalyzer` 从 CameraX `ImageAnalysis` 收帧，并通过 `MutableSharedFlow<ImageFrame>` 输出。
+- `SharedFlow` 使用 `DROP_OLDEST`，符合“当前帧比历史帧重要”的实时辅助原则。
+- `StartSceneAnalysisUseCase` 初始化感知仓库后，对每帧执行：
   - `ProcessFrameUseCase`
   - `AnalyzeSceneUseCase`
   - `DecideEventsUseCase`
-- `SceneAnalysisViewModel` 用 `collectLatest` 消费结果并更新 UI
-
-这条链路对于“高频视觉 + 允许丢旧帧”的场景是合理的，思路符合实时辅助系统而不是离线批处理系统。
+  - `TraceService.recordFrame`
+- `SceneAnalysisViewModel` 通过 `collectLatest` 消费结果，生成 overlay bitmap，并驱动语音 / 震动反馈。
 
 ### 2.2 决策链路
-`DecideEventsUseCase` 的处理顺序是：
+
+`DecideEventsUseCase` 顺序仍然合理：
+
 1. `EventGenerator`
 2. `EventConflictResolver`
 3. `EventMerger`
 4. `CooldownManager`
-5. 最终按优先级排序
+5. priority 排序
 
-这个顺序是合理的，**不建议随意重排**。冲突消解必须发生在合并和冷却之前，否则会让低价值事件穿透到最终播报层。
+这个顺序建议继续保持。冲突消解必须早于合并和冷却，否则低价值事件会污染反馈节奏。
 
----
+## 3. 当前优点
 
-## 3. 当前代码中的优点
+### 3.1 分层有继续演进空间
 
-### 3.1 分层与职责划分基本清晰
-- `:camera` 没有污染业务决策
-- `:data` 通过 `PerceptionRepository` / `DepthRepository` 等接口对接 `:domain`
-- `:presentation` 没有承载感知算法本体
+`camera / data / domain / presentation / app` 的边界总体健康，核心业务没有散落到 Activity 或 Compose 里。后续引入双模型、回放评估、设置项时，不需要大规模重构。
 
-### 3.2 采用 `collectLatest` 与 `DROP_OLDEST` 是正确的实时策略
-对于视障辅助这类“当前帧比旧帧更重要”的应用，保留最新状态优先于处理所有历史帧，这一点设计正确。
+### 3.2 实时策略方向正确
 
-### 3.3 分析与决策模块可继续演进
-`ConnectivityChecker`、`RoadSafetyAnalyzer`、`GroundTypeDetector`、`EventGenerator` 的拆分方式是对的，后续很适合做参数调优、测试补强和多策略 A/B 对比。
+`ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST`、`SharedFlow DROP_OLDEST` 和 `collectLatest` 的组合适合视障辅助场景。此类产品不应追求处理所有帧，而应保证最新风险判断尽快到达用户。
 
----
+### 3.3 Trace / Replay 已经有产品化雏形
 
-## 4. P0 级问题（应优先修复）
+项目已经有 session trace、frame trace、session summary、replay report、budget warning 和 Compose report page。这是后续做模型融合、参数调优和外场回归的关键地基。
 
-### P0-1 分割结果缓冲区存在共享可变引用风险【已修复】
-**位置**：`data/.../LiteRTSegmenter.kt`
+## 4. 本轮发现并已修复的问题
 
-**当前状态（2026-05-21）**：已修复。`LiteRTSegmenter` 在构造 `SegmentationMask` 前对 `cachedResultMask` 执行 `clone()`，保证下游读取的是稳定快照而不是复用写缓冲。
+### P0-1 `CooldownManager` 按事件类别冷却会误抑制新方向障碍【已修复】
 
-当前 `cachedResultMask` 是复用数组；若直接把它包装到 `SegmentationMask` 后下游继续读取，而下一帧推理又复写同一数组，就会出现：
-- UI 遮罩抖动/撕裂
-- 分析模块读取到被下一帧污染的数据
-- 事件判断出现随机误报/漏报
+**位置**：`domain/.../CooldownManager.kt`
 
-**结论**：这是典型的实时流水线数据别名问题，必须保证每帧输出对下游是“只读快照”。
+原实现用 `EventCategory` 作为冷却 key。结果是：如果刚播报“左侧障碍”，随后 2 秒内出现“前方障碍”，两者同属 `OBSTACLE`，后者会被冷却过滤。
 
-### P0-2 事件冲突消解逻辑只处理首个命中对象【已修复】
-**位置**：`domain/.../EventConflictResolver.kt`
+这对视障辅助是高风险问题，因为“方向变化”本身就是新的决策信息。自动驾驶里同理，目标类别相同不代表风险实体相同，仲裁 key 需要包含空间语义。
 
-**当前状态（2026-05-21）**：已修复。当前实现使用 `removeAll` 清理所有满足规则的 suppressed 事件；并已新增 `EventConflictResolverTest` 覆盖 `BLOCKED + 多个中心障碍` 场景。
+**本轮改动**
 
-当前实现使用 `find` 找 `suppressed` 事件，只会检查并移除第一个命中项。
-结果是：当 `BLOCKED` 存在时，多条中心区域障碍事件可能只被过滤一条，其余仍会泄漏到播报层。
+- 冷却 key 改为优先使用 `SceneEvent.dedupeKey`。
+- 保留 category 对应的 cooldown 时长。
+- 新增 `CooldownManagerTest` 覆盖：
+  - 同 dedupeKey 的重复障碍被抑制
+  - 同 category 但 dedupeKey 不同的障碍可以穿透
 
-**结论**：这会直接降低提示系统的可信度，并增加认知负荷。
+### P0-2 `IntArrayList.get()` 越界判断包含 `size`【已修复】
 
-### P0-3 摄像头预览与分割遮罩缩放策略不一致【已修复】
-**位置**：`presentation/.../SceneAnalysisView.kt`
+**位置**：`domain/.../PrimitiveCollections.kt`
 
-**当前状态（2026-05-21）**：已修复。`CaptureView` 同时把同一个 `contentScale` 传给 `CameraView` 与遮罩 `Image`，横竖屏下 overlay 与预览已在代码层面对齐。
+原实现使用 `index in 0..size`，会允许 `index == size`。这在热路径 primitive collection 里属于典型边界 bug，可能读到未定义的旧值。
 
-预览 `CameraView` 的 `contentScale` 在横竖屏可变化，但 `segMask` 叠加层写死为 `ContentScale.Fit`。
+**本轮改动**
 
-**结果**：横屏时遮罩与真实画面空间不对齐，视觉反馈失真。
+- 改为 `index in 0 until size`。
+- 新增单元测试覆盖 `index == size` 必须抛错。
 
-**结论**：对于环境辅助产品，这是安全级 UX 问题，不只是显示小瑕疵。
+### P1-1 Trace 写盘 flush 与会话切换存在并发窗口【已修复】
 
----
+**位置**：`data/.../FileTraceService.kt`
 
-## 5. P1 级问题（高收益、建议尽快推进）
+`FileTraceService` 有周期 flush 线程，同时 `startSession()` / `finishSession()` 也会 flush。原 `flushToDisk()` 没有串行化，理论上存在会话切换时旧队列内容被写入新文件或并发 writer 交错的风险。
 
-### P1-1 `ImageAnalysis` 与 `Preview` 共用 1080p 配置，浪费算力【已修复】
+**本轮改动**
+
+- `flushToDisk()` 加 `@Synchronized`。
+- `isRunning / activeSessionId / traceFile` 加 `@Volatile`。
+
+### P1-2 Trace report 缺少原始 JSONL 分享入口【已修复】
+
+**位置**：
+
+- `presentation/.../TraceReplayView.kt`
+- `presentation/.../SceneAnalysisView.kt`
+- `app/src/main/AndroidManifest.xml`
+- `app/src/main/res/xml/trace_file_paths.xml`
+
+之前只能复制 report 摘要，不能把原始 `trace_<sessionId>.jsonl` 分享给电脑、标注工具或评估脚本。
+
+**本轮改动**
+
+- 新增 `Share JSONL` 按钮。
+- 新增 `SceneAnalysisUiEffect.ShareTraceFile`。
+- 通过 AndroidX `FileProvider` 安全分享 app internal `files/traces/` 下的 JSONL。
+
+### P2-1 Camera 分析线程释放 API 更换为兼容写法【已修复】
+
 **位置**：`camera/.../CameraViewModel.kt`
 
-**当前状态（2026-05-21）**：已修复。`CameraViewModel` 已拆分 `PREVIEW_SIZE = 1920x1080` 与 `ANALYSIS_SIZE = 640x360`，并分别配置自己的 `ResolutionSelector`。
+将 `executor.close()` 改为 `executor.shutdown()`，避免依赖不必要的 Java API 语义，更符合 Android 工程常规写法。
 
-当前 `Preview` 和 `ImageAnalysis` 都走同一套 `1920x1080` 偏好分辨率。
-但下游模型最终输出只有 `256x128` mask，分析流没必要吃 1080p。
+## 5. 本轮追加修复的问题
 
-**影响**：
-- `ImageProxy -> Bitmap` 转换成本过高
-- OpenCV 预处理输入尺寸过大
-- 更容易掉帧、发热、拉高电耗
+### P1-3 `ImageFrameAnalyzer` 每帧 `ImageProxy.toBitmap()` 成本偏高【已修复】
 
-**建议**：预览保持高分辨率；分析流降到 `640x360` 或 `640x480`。
+**位置**：`camera/.../ImageFrameAnalyzer.kt`
 
-### P1-2 `BinaryMask.visualize()` 存在严重 JNI 热点【已修复】
-**位置**：`presentation/.../ext/Image.kt`
+原路径是：
 
-**当前状态（2026-05-21）**：已修复。实现已改为先填充 `IntArray`，再一次性调用 `bitmap.setPixels()`，不再逐像素 JNI 写入。
+`YUV_420_888 ImageProxy -> Bitmap -> IntArray -> ImageFrame -> Bitmap -> OpenCV Mat`
 
-当前逐像素调用 `bitmap[x, y] = color`，本质上是大量 `setPixel` JNI 往返。
+这条链路有两次像素搬运和至少一次 bitmap 对象参与。即使分析分辨率已降到 `640x360`，长期外场运行仍会增加 CPU、内存带宽、GC 与发热压力。
 
-**影响**：32,768 次像素写入/帧，容易让 UI 热路径出现卡顿。
+**本轮改动**
 
-**建议**：改为本地 `IntArray` 填充后一次性 `bitmap.setPixels()`。
+- `ImageFrameAnalyzer` 通过 `YuvToRgbaFrameConverter` 直接从 `ImageProxy.PlaneProxy` 转为 RGBA byte buffer。
+- `ImageFrame` 改为平台无关的 `pixelBytes + ImagePixelFormat`。
+- `OpenCVImageProcessor` 直接把 RGBA byte buffer 写入 `CV_8UC4 Mat`，不再回建 Bitmap。
+- 新增 `FramePreprocessor` 接口，后续可以接 CPU/OpenCV、RenderScript 替代、GPU/NNAPI 友好的预处理实现；本轮未启用 GPU/NNAPI。
+- 清理 `ImageFrameAnalyzer` 和 `OpenCVImageProcessor` 中的大段旧注释实现。
 
-### P1-3 启停生命周期不完全对称【已修复】
-**位置**：`StartSceneAnalysisUseCase.kt` / `StopSceneAnalysisUseCase.kt` / `SceneAnalysisViewModel.kt`
+### P1-4 ViewModel `onCleared()` 使用 `runBlocking` 释放模型资源【已修复】
 
-**当前状态（2026-05-21）**：已修复。`StopSceneAnalysisUseCase.invoke()` 负责 stop/reset，`release()` 负责释放 `PerceptionRepository` / `InstanceSegmentationProvider`；`SceneAnalysisViewModel.onCleared()` 已统一调用释放链路。
+**位置**：`presentation/.../SceneAnalysisViewModel.kt`
 
-当前启动阶段会初始化感知模型；停止阶段主要是 `reset()` 分析器和跟踪器，但 `PerceptionRepository.release()` 没有纳入主停机链路。
+`runBlocking` 在 ViewModel 清理阶段可能阻塞主线程。如果 LiteRT / GPU delegate 释放耗时，页面退出或配置变化会有卡顿风险。
 
-**风险**：
-- GPU / LiteRT 资源释放不完整
-- 多次启动停止后出现资源残留
-- 后续若引入更复杂 delegate，更容易出问题
+**本轮改动**
 
-**建议**：在 stop/release 语义上明确区分：
-- `stop()`：停止业务流并重置状态
-- `release()`：释放模型/委托/硬件资源
+- `onCleared()` 不再直接 `runBlocking`。
+- 模型 / OpenCV / LiteRT 释放进入独立 IO release scope。
+- release job 完成后自动取消 release scope，避免长期挂起。
 
----
+### P1-5 运行时性能预算还没有进入 live UI【已修复】
 
-## 6. P2 级问题（结构债务，建议分阶段治理）
+Replay report 已有 `p95TotalPipelineMs` 和 dropped frame warning，但 live 页面还看不到当前会话预算状态。
 
-### P2-1 `:domain` 仍然依赖 Android 类型【已修复】
-**位置**：`domain/.../model/perception/ImageFrame.kt`
+**本轮改动**
 
-**当前状态（2026-05-21）**：已修复。`ImageFrame` 已从 `Bitmap` 改为平台无关的 `IntArray` 像素缓冲，域层不再直接依赖 Android 图像类型。
+- 新增 `PipelineBudget`，统一 replay 与 live 阈值。
+- `StartSceneAnalysisUseCase` 增加最近 30 帧 runtime window。
+- `SceneDebugInfo` 增加当前耗时、近期 avg/p95、近期 dropped rate、runtime budget 状态。
+- Live debug 面板展示预算状态，不影响正式语音/震动反馈。
 
-`ImageFrame` 当前持有 `android.graphics.Bitmap`。这会导致：
-- `:domain` 失去纯 Kotlin 领域层属性
-- 单元测试与 KMM/纯 JVM 复用能力变差
-- 上层 Android 图像模型与业务模型强耦合
+### P2-2 Trace parser 使用手写正则解析 JSON【已修复】
 
-**建议方向**：
-- 把 Android 图像载体收敛到 `:camera` / `:data`
-- `:domain` 只接收平台无关像素缓冲、tensor 输入或抽象图像接口
+**位置**：`domain/.../TraceReplay.kt`
 
-### P2-2 DI 装配仍然混入 `:domain`【已修复】
-`domain/di/DomainModule.kt` 已移除，当前 Koin 装配集中在外层 `app/.../DomainBindingsModule.kt`。
+当前 parser 对现有 JSONL 足够工作，但正则 JSON 解析长期会变脆，字段嵌套、转义或格式变化都可能引入隐性 bug。
 
-### P2-3 Flood Fill / Connected Component 热路径对象分配偏多【已修复】
-**位置**：`ObstacleExtractor.kt`、`ConnectivityChecker.kt`
+**本轮改动**
 
-**当前状态（2026-05-21）**：已修复。热路径已切换为 packed coordinate + `IntArrayQueue` / `IntArrayList`，代码中已不再使用 `Pair<Int, Int>` 的 BFS/FloodFill 方案。
+- `domain` 显式依赖 `kotlinx.serialization-json`。
+- `TraceReplayParser` 改为 `Json.parseToJsonElement(...).jsonObject` 结构化解析。
+- 保留 `navigationPassableRatio` 等新增字段的默认回退。
 
-BFS/FloodFill 仍在大量使用 `Pair<Int, Int>` 和 `MutableList`。
-在连续帧场景下，这会放大 GC 压力。
+### P2-3 注释旧代码和未使用 import 需要清理【已修复】
 
-**建议方向**：
-- packed coordinate（`Int` 打包 x/y）
-- primitive queue / primitive list
-- 逐步改造成零额外对象分配热路径
+`ImageFrameAnalyzer.kt`、`OpenCVImageProcessor.kt` 里还保留较大段旧实现注释。研发期可以理解，但继续扩展前应清理，避免误导下一轮模型融合实现。
 
----
+**本轮改动**
 
-## 7. 产品能力层面的判断（从“自动驾驶辅助思路”看）
+- 删除旧 `ImageFrameAnalyzer` 注释实现。
+- 删除 `OpenCVImageProcessor` 中旧的注释替代实现。
+- 删除未编译的旧 `YOLO11InstanceProvider.kt` 注释文件，后续按 Phase 6 重新实现可测试版本。
+- 清理 mapper / presentation 中已废弃的注释代码。
 
-虽然这是面向行人的辅助 App，而不是车规 ADAS，但从系统工程视角，两者共享以下核心约束：
+## 6. 自动驾驶式演进建议
 
-### 7.1 必须优先保证“当前态正确”而不是“历史帧完整”
-你的 Flow 策略已经符合这一点，这是对的。
+`Sailens` 不是车规 ADAS，但它共享同一类系统约束：
 
-### 7.2 感知链路的目标不是像素级完美，而是“足够稳定的决策输入”
-因此：
-- 稳定器（debounce / smoother）是必要的
-- 决策链路必须抑制低价值噪音
-- UI/TTS/Haptics 必须以**高优先级事件优先**为原则
+- 感知链路必须稳定输出当前态。
+- 决策层要抑制低价值噪声，但不能压掉新的高风险空间信息。
+- 模型增强必须通过可回放 trace 验证，而不是主观感觉。
+- 端侧推理预算要优先服务“下一条可靠提醒”，而不是视觉效果。
 
-### 7.3 视觉辅助类产品的第一性能原则是：
-**把 CPU/GPU 用在“提高下一条决策的正确率”上，而不是浪费在无意义的像素搬运与对象分配上。**
+后续 `YOLO + DDRNet` 建议定位为融合增强：
 
-上一轮最值得立刻优化的点——分析流分辨率、mask 可视化方式、flood fill / connected component 数据结构——已经在当前代码中完成落地；下一轮重点应转向 replay / report / 预算告警。
+- `DDRNet` 每帧输出全局语义，负责可通行区域、道路、人行道、地面结构。
+- `YOLO` 低频或异步输出框级目标，负责人、车、骑行者、静态障碍。
+- `ObstacleTracker` 在 YOLO 空档帧维持目标连续性。
+- Replay A/B 对比必须先于正式默认启用。
 
----
+## 7. 当前结论
 
-## 8. 当前建议的实施优先级（已从“修旧问题”切到 Phase 5）
+项目不需要重写。它现在最需要的是继续补齐“可观测、可导出、可评估、可预算”的工程闭环。
 
-### 第一阶段：观测与回放入口补齐
-1. 增加 trace 导出/分享能力
-2. 增加多 session / A-B 对比入口
-3. 视需要补开发者菜单 / 更丰富的调试导航
+本轮已把会影响安全提醒的冷却 bug、primitive collection 边界 bug、trace 写盘并发风险、原始 trace 分享、帧转换热路径、非阻塞 release、live runtime budget、结构化 trace parser 和旧注释债务一起收口。
 
-### 第二阶段：性能预算显式化
-4. 为 `p95TotalPipelineMs`、`droppedFrames` 等指标增加正式阈值告警
-5. 增加最小 report 展示页或导出摘要
-
-### 第三阶段：为双模型融合做基线
-6. 建立真实场景 trace 基线
-7. 再引入 `YOLO + DDRNet` 并做 replay A/B 对比
-
----
-
-## 9. 当前验收结果（针对本报告列出的问题）
-
-### 正确性
-- [x] 连续处理多帧时，分割 mask 不再出现数据污染
-- [x] `BLOCKED` 存在时，相关低优先级障碍/收窄事件被稳定抑制
-- [x] 横屏/竖屏下 overlay 与预览严格对齐
-
-### 性能
-- [x] 分析流分辨率已独立降到 `640x360`
-- [x] `visualize()` 已不再使用逐像素 JNI 写入模式
-
-### 工程质量
-- [x] 已新增反映业务冲突消解逻辑的单元测试
-- [x] 文档中的问题清单、优先级和实施计划已更新到当前状态
-
----
-
-## 10. 结论
-
-这不是一个“推倒重来”的项目，恰恰相反：**它已经有了一个值得继续投资的骨架。**
-
-截至 2026-05-21，上一轮审查中点名的问题已经完成收敛；当前最需要做的，不再是反复修正主链路，而是把已有链路升级为**可观测、可回放、可评估**：
-- 把 replay/report 接到实际调试入口
-- 把性能预算做成可告警、可比较的输出
-- 在此基础上再推进 `YOLO + DDRNet` 双模型融合
-
-如果按这个顺序推进，`Sailens` 的下一阶段重点将从“修主链路”切换到“建立可验证的演进体系”。
+下一步建议进入外场验证：采集多组真实户外 trace，用新的 JSONL 分享入口导出样本，再基于 replay/live budget 判断是否具备引入 `YOLO + DDRNet` 融合的算力空间。

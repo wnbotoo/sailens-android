@@ -2,6 +2,7 @@ package com.friady.sailens.presentation.scene
 
 import android.graphics.Bitmap
 import com.friady.sailens.domain.model.scene.SceneEvent
+import com.friady.sailens.domain.model.scene.SceneDebugInfo
 import com.friady.sailens.domain.model.trace.TraceReplayReport
 import com.friady.sailens.domain.model.trace.TraceSessionDescriptor
 
@@ -14,7 +15,9 @@ data class SceneAnalysisUiState(
     val isSpeechEnabled: Boolean = true,
     val isHapticsEnabled: Boolean = true,
     val isSpeechReady: Boolean = false,
+    val overlayMode: SegmentationOverlayMode = SegmentationOverlayMode.PASSABLE_MASK,
     val segMask: Bitmap? = null,
+    val latestSceneDebugInfo: SceneDebugInfo? = null,
     val lastEvents: List<SceneEvent> = emptyList(),
     val eventCount: Int = 0,
     val frameCount: Long = 0,

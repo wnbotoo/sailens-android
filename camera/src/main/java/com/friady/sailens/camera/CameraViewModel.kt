@@ -69,6 +69,6 @@ class CameraViewModel(
 
     override fun onCleared() {
         super.onCleared()
-        executor.close()
+        executor.shutdown()
     }
 }

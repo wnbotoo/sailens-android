@@ -18,6 +18,7 @@ data class SceneEvent(
     val messageParams: Map<String, String> = emptyMap(),
     val expiresAt: Long,
     val dedupeKey: String,
+    val cooldownKeys: Set<String> = emptySet(),
     val confidence: Float = 1.0f,
     val severity: Severity = Severity.MODERATE,
     val relatedZones: List<DirectionZone> = emptyList(),

@@ -24,6 +24,13 @@ class BooleanStabilizer(
     private var pendingCount: Int = 0
 
     override fun update(value: Boolean): Boolean {
+        if (requiredFrames <= 1) {
+            currentState = value
+            pendingState = value
+            pendingCount = 0
+            return currentState
+        }
+
         if (value == currentState) {
             pendingState = value
             pendingCount = 0
@@ -61,6 +68,13 @@ class EnumStabilizer<E>(
     private var pendingCount: Int = 0
 
     override fun update(value: E): E {
+        if (requiredFrames <= 1) {
+            currentState = value
+            pendingState = value
+            pendingCount = 0
+            return currentState
+        }
+
         if (value == currentState) {
             pendingState = value
             pendingCount = 0
@@ -97,6 +111,13 @@ class NullableEnumStabilizer<E : Any>(
     private var pendingCount: Int = 0
 
     override fun update(value: E?): E? {
+        if (requiredFrames <= 1) {
+            currentState = value
+            pendingState = value
+            pendingCount = 0
+            return currentState
+        }
+
         if (value == currentState) {
             pendingState = value
             pendingCount = 0

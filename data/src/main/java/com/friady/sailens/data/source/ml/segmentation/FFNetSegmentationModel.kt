@@ -15,6 +15,9 @@ import kotlin.coroutines.cancellation.CancellationException
 class FFNetSegmentationModel(
     private val context: Context,
 ) : SegmentationModel {
+    companion object {
+        private const val MODEL_ASSET_PATH = "ffnet_78s_float.tflite"
+    }
 
     @OptIn(ExperimentalCoroutinesApi::class)
     private val singleThreadDispatcher = Dispatchers.IO.limitedParallelism(1)
@@ -30,9 +33,10 @@ class FFNetSegmentationModel(
         if (_isInitialized) return
         try {
             withContext(singleThreadDispatcher) {
+                ensureModelAssetAvailable()
                 val model = CompiledModel.create(
                     context.assets,
-                    "ffnet_78s_float.tflite",
+                    MODEL_ASSET_PATH,
                     CompiledModel.Options(Accelerator.GPU)
                 )
 
@@ -83,6 +87,17 @@ class FFNetSegmentationModel(
             segmenter?.cleanup()
             segmenter = null
             _isInitialized = false
+        }
+    }
+
+    private fun ensureModelAssetAvailable() {
+        try {
+            context.assets.open(MODEL_ASSET_PATH).use { }
+        } catch (error: Exception) {
+            throw IllegalStateException(
+                "Model asset '$MODEL_ASSET_PATH' is not packaged in app assets. Make sure data/src/main/ml is included as an assets source set.",
+                error,
+            )
         }
     }
 }

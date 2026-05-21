@@ -2,6 +2,7 @@ package com.friady.sailens.data.source.ml.segmentation
 
 import android.os.SystemClock
 import android.util.Log
+import com.friady.sailens.data.source.ml.FramePreprocessor
 import com.friady.sailens.data.source.ml.OpenCVImageProcessor
 import com.friady.sailens.domain.model.perception.ImageFrame
 import com.friady.sailens.domain.model.perception.SegmentationMask
@@ -24,12 +25,12 @@ class LiteRTSegmenter(
     private val cachedResultMask = IntArray(config.outputWidth * config.outputHeight)
 
     // 使用 LiteRT 处理器
-    private val processor = OpenCVImageProcessor(config)
+    private val processor: FramePreprocessor = OpenCVImageProcessor(config)
 
     fun segment(rawFrame: ImageFrame): SegmentationOutput {
         val startTime = SystemClock.uptimeMillis()
 
-        // 1. 预处理: Bitmap -> FloatArray (返回新数组，由 TensorBuffer 内部分配)
+        // 1. 预处理: RGBA frame buffer -> FloatArray
         processor.preprocess(rawFrame, rawFrame.rotationDegrees, cachedInputFloatArray)
         val afterPreprocessTime = SystemClock.uptimeMillis()
 

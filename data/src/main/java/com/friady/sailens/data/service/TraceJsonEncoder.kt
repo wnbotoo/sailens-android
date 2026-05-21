@@ -33,6 +33,11 @@ internal object TraceJsonEncoder {
         put("isBlocked", frameTrace.isBlocked)
         put("isNarrowing", frameTrace.isNarrowing)
         put("isRoadDangerous", frameTrace.isRoadDangerous)
+        put("navigationPassableRatio", frameTrace.navigationPassableRatio)
+        put("blockageConfidence", frameTrace.blockageConfidence)
+        put("verticalReachRatio", frameTrace.verticalReachRatio)
+        put("floodReachRatio", frameTrace.floodReachRatio)
+        put("widthRetentionP25", frameTrace.widthRetentionP25)
         put("messageKeys", JSONArray(frameTrace.messageKeys))
     }
 

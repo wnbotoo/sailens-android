@@ -9,12 +9,33 @@ enum class PerceptionMode {
 }
 
 /**
+ * 语义分割提供者类型
+ */
+enum class SemanticProviderType {
+    DDRNET_CITYSCAPES,
+    YOLO26_SEM,
+    CUSTOM
+}
+
+/**
+ * 双模型推理策略
+ *
+ * - SIMULTANEOUS: sem + seg 每帧同时推理，障碍物信息最新，功耗较高
+ * - ALTERNATING:  sem 每帧推理，seg 奇偶帧交替推理，跟踪器补偿偶数帧，功耗较低
+ */
+enum class InferenceStrategy {
+    SIMULTANEOUS,  // 每帧同时运行 sem（可行走区域）+ seg（障碍物识别）
+    ALTERNATING,   // sem 每帧运行；seg 交替运行，偶数帧用 tracker.predict() 补偿
+}
+
+/**
  * 实例分割提供者类型
  */
 enum class InstanceProviderType {
     NONE,       // 不使用（V1默认）
     YOLO11,     // YOLO11n-seg
     YOLO8,      // YOLOv8（未来）
+    YOLO26_SEG, // YOLO26-seg（预留）
     CUSTOM      // 自定义
 }
 

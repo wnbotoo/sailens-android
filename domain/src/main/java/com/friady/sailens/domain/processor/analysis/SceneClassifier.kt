@@ -14,7 +14,9 @@ class SceneClassifier(
     private val intersectionStabilizer = BooleanStabilizer(config.intersectionDebounceFrames)
 
     fun classify(analysis: SegmentationAnalysis): SceneElements {
-        val hasIntersectionRaw = analysis.roadRatio > config.intersectionRoadRatioThreshold
+        val hasIntersectionRaw = config.enableIntersectionFallback &&
+            analysis.hasTrafficLight &&
+            analysis.roadRatio > config.intersectionRoadRatioThreshold
         val hasIntersection = intersectionStabilizer.update(hasIntersectionRaw)
 
         return SceneElements(

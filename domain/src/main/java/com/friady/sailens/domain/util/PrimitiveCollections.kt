@@ -19,7 +19,7 @@ class IntArrayList(initialCapacity: Int = 16) {
     }
 
     operator fun get(index: Int): Int {
-        require(index in 0..size) { "Index $index out of bounds for size $size" }
+        require(index in 0 until size) { "Index $index out of bounds for size $size" }
         return values[index]
     }
 
@@ -69,5 +69,4 @@ class IntArrayQueue(initialCapacity: Int = 16) {
         tail = size
     }
 }
-
 

@@ -16,6 +16,8 @@ import com.friady.sailens.domain.util.IntArrayQueue
 import com.friady.sailens.domain.util.packCoordinate
 import com.friady.sailens.domain.util.unpackCoordinateX
 import com.friady.sailens.domain.util.unpackCoordinateY
+import kotlin.math.max
+import kotlin.math.min
 
 /**
  * 障碍物提取器
@@ -40,7 +42,7 @@ class ObstacleExtractor(
 
         return components
             .filter { it.pixelCount >= minPixels }
-            .map { component ->
+            .mapNotNull { component ->
                 val box = NormalizedRect.fromPixels(
                     component.minX, component.minY,
                     component.width, component.height,
@@ -48,6 +50,15 @@ class ObstacleExtractor(
                 )
 
                 val category = inferCategory(component, segmentation)
+                if (category == ObstacleCategory.UNKNOWN) {
+                    return@mapNotNull null
+                }
+
+                val areaRatio = component.pixelCount.toFloat() / totalPixels
+                if (!isSemanticObstacleRelevant(box, category, areaRatio)) {
+                    return@mapNotNull null
+                }
+
                 val zone = DirectionZone.fromNormalizedX(box.centerX, config.zoneMode)
                 val distance = depthEstimator(box)
 
@@ -57,7 +68,7 @@ class ObstacleExtractor(
                     zone = zone,
                     distance = distance,
                     confidence = 1.0f,
-                    areaRatio = component.pixelCount.toFloat() / totalPixels
+                    areaRatio = areaRatio
                 )
             }
             .sortedByDescending { it.areaRatio }
@@ -74,6 +85,7 @@ class ObstacleExtractor(
         return instances
             .filter { it.confidence >= config.minObstacleConfidence }
             .filter { it.category != ObstacleCategory.UNKNOWN }
+            .filter { isInstanceObstacleRelevant(it.boundingBox, it.category) }
             .map { instance ->
                 val zone =
                     DirectionZone.fromNormalizedX(instance.boundingBox.centerX, config.zoneMode)
@@ -85,7 +97,7 @@ class ObstacleExtractor(
                     zone = zone,
                     distance = distance,
                     confidence = instance.confidence,
-                    areaRatio = instance.boundingBox.area
+                    areaRatio = instance.maskAreaRatio() ?: instance.boundingBox.area
                 )
             }
             .sortedByDescending { it.areaRatio }
@@ -113,7 +125,56 @@ class ObstacleExtractor(
             }
         }
 
-        return categoryCounts.maxByOrNull { it.value }?.key ?: ObstacleCategory.STATIC_OBSTACLE
+        return categoryCounts.maxByOrNull { it.value }?.key ?: ObstacleCategory.UNKNOWN
+    }
+
+    private fun isSemanticObstacleRelevant(
+        box: NormalizedRect,
+        category: ObstacleCategory,
+        areaRatio: Float,
+    ): Boolean {
+        val corridorOverlap = corridorOverlapRatio(box)
+        val nearNavigationArea = box.maxY >= config.semanticObstacleMinBottomY
+
+        if (category == ObstacleCategory.STATIC_OBSTACLE) {
+            if (areaRatio > config.maxBackgroundObstacleAreaRatio) {
+                return false
+            }
+            return box.maxY >= config.staticObstacleMinBottomY &&
+                corridorOverlap >= config.staticObstacleMinCorridorOverlapRatio
+        }
+
+        return nearNavigationArea ||
+            corridorOverlap >= config.semanticObstacleMinCorridorOverlapRatio
+    }
+
+    private fun isInstanceObstacleRelevant(
+        box: NormalizedRect,
+        category: ObstacleCategory,
+    ): Boolean {
+        val corridorOverlap = corridorOverlapRatio(box)
+        if (category == ObstacleCategory.STATIC_OBSTACLE) {
+            return box.maxY >= config.staticObstacleMinBottomY ||
+                corridorOverlap >= config.staticObstacleMinCorridorOverlapRatio
+        }
+
+        return box.maxY >= config.semanticObstacleMinBottomY ||
+            corridorOverlap >= config.semanticObstacleMinCorridorOverlapRatio
+    }
+
+    private fun corridorOverlapRatio(box: NormalizedRect): Float {
+        val halfWidth = (config.navigationCorridorCenterWidth.coerceIn(0.1f, 1.0f)) / 2f
+        val corridorStart = 0.5f - halfWidth
+        val corridorEnd = 0.5f + halfWidth
+        val overlap = max(0f, min(box.maxX, corridorEnd) - max(box.x, corridorStart))
+        return overlap / box.width.coerceAtLeast(0.0001f)
+    }
+
+    private fun DetectedInstance.maskAreaRatio(): Float? {
+        val mask = mask ?: return null
+        val totalPixels = mask.width * mask.height
+        if (totalPixels <= 0) return null
+        return mask.countTrue().toFloat() / totalPixels
     }
 
     private fun findConnectedComponents(mask: BinaryMask): List<ConnectedComponent> {
