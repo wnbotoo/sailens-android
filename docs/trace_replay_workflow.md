@@ -35,6 +35,9 @@
 - 域层已补齐最小离线 replay 能力：
   - `TraceReplayParser`：解析 `trace_<sessionId>.jsonl`
   - `BuildTraceReplayReportUseCase`：生成 replay 聚合报告
+  - `ListTraceSessionsUseCase`：枚举已存储会话
+  - `LoadTraceReplayReportUseCase` / `LoadLatestTraceReplayReportUseCase`：加载指定或最新报告
+  - `EvaluateTraceReplayBudgetUseCase`：对 replay 报告给出预算 warning
   - 报告可输出：
     - `totalEvents`
     - `blockedFrameRate`
@@ -43,6 +46,13 @@
     - `p95TotalPipelineMs` / `maxTotalPipelineMs`
     - `errorCount`
     - `uniqueMessageKeys`
+- `SceneAnalysisView` 已接入正式入口：
+  - `Trace sessions` 页面：查看已存储 session 列表
+  - `Trace replay report` 页面：查看指定 session 的详细指标
+  - 可从页面中刷新 trace 会话列表
+  - 可加载 latest trace report
+  - 可按 session 载入 replay report
+  - 可复制当前报告摘要到剪贴板
 
 ## 文件位置
 
@@ -60,19 +70,20 @@
 ## 当前用途
 
 这批数据当前可以支持：
-1. 观察真实会话下的平均时延 / p95 时延
-2. 估算 `DROP_OLDEST` 下的帧丢失情况
-3. 对比纯 `DDRNet` 与未来 `YOLO + DDRNet` 双模型模式
-4. 给后续离线 replay 与评估脚本提供输入样本
+1. 在 App 内通过正式 session list / report 页面查看最近 trace 的关键性能指标
+2. 观察真实会话下的平均时延 / p95 时延
+3. 估算 `DROP_OLDEST` 下的帧丢失情况
+4. 对比纯 `DDRNet` 与未来 `YOLO + DDRNet` 双模型模式
+5. 给后续离线 replay 与评估脚本提供输入样本
 
 ## 下一步建议
 
-1. 增加 trace 导出入口（调试页 / 分享日志）
-2. 把离线 replay 解析 / 报告接到实际入口（调试页、开发者菜单或导出脚本）
-3. 为 replay 输出增加批量对比能力：
+1. 增加 trace 导出 / 分享入口（当前支持查看与复制摘要，但尚未导出原始 JSONL）
+2. 为 replay 输出增加批量对比能力：
    - 多 session 汇总
    - baseline vs experiment A/B 对比
    - 阈值告警（如 `p95TotalPipelineMs`、`droppedFrames`）
+3. 增加更正式的 report 页面或开发者菜单入口
 4. 再开始引入 `YOLO` 并做 A/B 对比
 
 

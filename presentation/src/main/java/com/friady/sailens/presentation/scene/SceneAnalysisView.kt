@@ -1,5 +1,7 @@
 package com.friady.sailens.presentation.scene
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.widget.Toast
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -56,6 +58,17 @@ fun SceneAnalysisView(
                 is SceneAnalysisUiEffect.ShowToast -> {
                     Toast.makeText(context, effect.message, Toast.LENGTH_SHORT).show()
                 }
+
+                is SceneAnalysisUiEffect.CopyToClipboard -> {
+                    val clipboardManager =
+                        context.getSystemService(ClipboardManager::class.java) as ClipboardManager
+                    clipboardManager.setPrimaryClip(ClipData.newPlainText(effect.label, effect.text))
+                    Toast.makeText(
+                        context,
+                        context.getString(R.string.trace_report_copied),
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                }
             }
         }
     }
@@ -63,25 +76,56 @@ fun SceneAnalysisView(
     val onToggleClick = {
         viewModel.toggleAnalysis()
     }
+    val onOpenTraceReplayClick = {
+        viewModel.openTraceReplaySessionsScreen()
+    }
     val onSpeechEnabledChange: (Boolean) -> Unit = viewModel::setSpeechEnabled
     val onHapticsEnabledChange: (Boolean) -> Unit = viewModel::setHapticsEnabled
 
-    if (isLandscape) {
-        ContentForLandscape(
-            state = state,
-            onToggleClick = onToggleClick,
-            onSpeechEnabledChange = onSpeechEnabledChange,
-            onHapticsEnabledChange = onHapticsEnabledChange,
-            modifier = modifier
-        )
-    } else {
-        ContentForPortrait(
-            state = state,
-            onToggleClick = onToggleClick,
-            onSpeechEnabledChange = onSpeechEnabledChange,
-            onHapticsEnabledChange = onHapticsEnabledChange,
-            modifier = modifier
-        )
+    when (state.currentScreen) {
+        SceneAnalysisScreen.LIVE_ANALYSIS -> {
+            if (isLandscape) {
+                ContentForLandscape(
+                    state = state,
+                    onToggleClick = onToggleClick,
+                    onOpenTraceReplayClick = onOpenTraceReplayClick,
+                    onSpeechEnabledChange = onSpeechEnabledChange,
+                    onHapticsEnabledChange = onHapticsEnabledChange,
+                    modifier = modifier,
+                )
+            } else {
+                ContentForPortrait(
+                    state = state,
+                    onToggleClick = onToggleClick,
+                    onOpenTraceReplayClick = onOpenTraceReplayClick,
+                    onSpeechEnabledChange = onSpeechEnabledChange,
+                    onHapticsEnabledChange = onHapticsEnabledChange,
+                    modifier = modifier,
+                )
+            }
+        }
+
+        SceneAnalysisScreen.TRACE_REPLAY_SESSIONS -> {
+            TraceReplaySessionsScreen(
+                state = state,
+                onBackToLiveClick = viewModel::showLiveAnalysisScreen,
+                onRefreshTraceSessionsClick = viewModel::refreshTraceSessions,
+                onLoadLatestTraceReportClick = viewModel::loadLatestTraceReplayReport,
+                onLoadTraceSessionClick = viewModel::loadTraceReplayReport,
+                modifier = modifier,
+            )
+        }
+
+        SceneAnalysisScreen.TRACE_REPLAY_REPORT -> {
+            TraceReplayReportScreen(
+                state = state,
+                onBackToSessionsClick = viewModel::showTraceReplaySessionsScreen,
+                onBackToLiveClick = viewModel::showLiveAnalysisScreen,
+                onLoadLatestTraceReportClick = viewModel::loadLatestTraceReplayReport,
+                onCopyTraceReportClick = viewModel::copyTraceReplaySummary,
+                modifier = modifier,
+            )
+        }
     }
 }
 
@@ -89,6 +133,7 @@ fun SceneAnalysisView(
 private fun ContentForLandscape(
     state: SceneAnalysisUiState,
     onToggleClick: () -> Unit,
+    onOpenTraceReplayClick: () -> Unit,
     onSpeechEnabledChange: (Boolean) -> Unit,
     onHapticsEnabledChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier
@@ -113,6 +158,7 @@ private fun ContentForLandscape(
                 isLoading = state.isLoading,
                 isSpeechEnabled = state.isSpeechEnabled,
                 isHapticsEnabled = state.isHapticsEnabled,
+                onOpenTraceReplayClick = onOpenTraceReplayClick,
                 onSpeechEnabledChange = onSpeechEnabledChange,
                 onHapticsEnabledChange = onHapticsEnabledChange,
                 onToggleClick = onToggleClick
@@ -127,6 +173,7 @@ private fun ContentForLandscape(
 private fun ContentForPortrait(
     state: SceneAnalysisUiState,
     onToggleClick: () -> Unit,
+    onOpenTraceReplayClick: () -> Unit,
     onSpeechEnabledChange: (Boolean) -> Unit,
     onHapticsEnabledChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier
@@ -151,6 +198,7 @@ private fun ContentForPortrait(
                 isLoading = state.isLoading,
                 isSpeechEnabled = state.isSpeechEnabled,
                 isHapticsEnabled = state.isHapticsEnabled,
+                onOpenTraceReplayClick = onOpenTraceReplayClick,
                 onSpeechEnabledChange = onSpeechEnabledChange,
                 onHapticsEnabledChange = onHapticsEnabledChange,
                 onToggleClick = onToggleClick
@@ -195,6 +243,7 @@ private fun ControlView(
     isLoading: Boolean,
     isSpeechEnabled: Boolean,
     isHapticsEnabled: Boolean,
+    onOpenTraceReplayClick: () -> Unit,
     onSpeechEnabledChange: (Boolean) -> Unit,
     onHapticsEnabledChange: (Boolean) -> Unit,
     onToggleClick: () -> Unit,
@@ -220,6 +269,13 @@ private fun ControlView(
         }
 
         Button(
+            onClick = onOpenTraceReplayClick,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(stringResource(R.string.btn_open_trace_replay))
+        }
+
+        Button(
             onClick = onToggleClick,
             enabled = !isLoading,
             modifier = Modifier.fillMaxWidth()
@@ -236,3 +292,4 @@ private fun ControlView(
         }
     }
 }
+

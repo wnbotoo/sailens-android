@@ -2,8 +2,11 @@ package com.friady.sailens.presentation.scene
 
 import android.graphics.Bitmap
 import com.friady.sailens.domain.model.scene.SceneEvent
+import com.friady.sailens.domain.model.trace.TraceReplayReport
+import com.friady.sailens.domain.model.trace.TraceSessionDescriptor
 
 data class SceneAnalysisUiState(
+    val currentScreen: SceneAnalysisScreen = SceneAnalysisScreen.LIVE_ANALYSIS,
     val isInitializing: Boolean = false,
     val isRunning: Boolean = false,
     val isLoading: Boolean = false,
@@ -15,5 +18,10 @@ data class SceneAnalysisUiState(
     val lastEvents: List<SceneEvent> = emptyList(),
     val eventCount: Int = 0,
     val frameCount: Long = 0,
+    val isTraceReplayLoading: Boolean = false,
+    val traceSessions: List<TraceSessionDescriptor> = emptyList(),
+    val selectedTraceSessionId: String? = null,
+    val traceReplayReport: TraceReplayReport? = null,
+    val traceReplayWarnings: List<String> = emptyList(),
     val errorMessage: String? = null,
 )

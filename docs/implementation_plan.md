@@ -197,7 +197,8 @@
 
 ## 9. 当前建议状态
 - **已完成**：Phase 1 + Phase 2 + Phase 3 + Phase 4
-- **下个迭代**：进入“观测/性能/双模型融合/产品闭环”的压缩路线图
+- **进行中**：Phase 5（已具备 trace 记录与域层 replay/report 基础）
+- **下个迭代**：补齐 Phase 5 的导出/分享、批量对比、runtime 预算告警与基线数据集
 
 ---
 
@@ -215,10 +216,12 @@
 - 但调度设计仍然要保留降级能力，避免未来换机型或热降频后主链路失稳
 
 **当前状态**
-- [~] 进行中：已开始补 `session trace / frame trace / dropped-frame` 观测能力
-- [ ] 待完成：离线 replay 评估入口
+- [x] 已完成：`session trace / frame trace / dropped-frame` 观测能力
+- [x] 已完成：域层离线 replay parser / report use case
+- [x] 已完成：离线 replay 正式入口（session list page / report page / latest report / copy summary）
+- [ ] 待完成：trace 导出 / 分享入口
 - [ ] 待完成：真实场景回放数据基线
-- [ ] 待完成：性能预算面板与阈值告警
+- [~] 进行中：性能预算提示（回放报告已显示 warning，运行时正式告警/面板未完成）
 
 **包含方向**
 - A：端侧性能专项（优先）
@@ -320,4 +323,11 @@
 - [x] `ImageFrame` 改为平台无关 `IntArray` 像素缓冲，移除 `Bitmap` 对域层的侵入
 - [x] `ObstacleExtractor` / `ConnectivityChecker` 改为 packed coordinate + primitive queue/list 热路径实现
 - [x] Koin 的 domain 装配迁移到 `app/.../DomainBindingsModule.kt`
+- [x] `StartSceneAnalysisUseCase` 已接入 `session trace / frame trace / session summary`
+- [x] 新增 `TraceReplayParser` 与 `BuildTraceReplayReportUseCase`
+- [x] `BuildTraceReplayReportUseCaseTest` 覆盖完整 trace 与缺失 summary 回退聚合
+- [x] `TraceReplayService` + `FileTraceReplayService` 支持枚举 trace 会话与按 session 读取 JSONL
+- [x] `SceneAnalysisViewModel` / `SceneAnalysisView` 已接入正式 replay 页面切换
+- [x] 当前界面可进入 session list page、report page、加载 latest report、切换 session report、复制摘要
+- [x] `EvaluateTraceReplayBudgetUseCase` 为 replay 报告补充预算 warning 判定
 - [x] 验证通过：`:domain:test` 与 `:app:assembleDebug`

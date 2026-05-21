@@ -20,6 +20,10 @@ import com.friady.sailens.domain.usecase.perception.ProcessFrameUseCase
 import com.friady.sailens.domain.usecase.scene.StartSceneAnalysisUseCase
 import com.friady.sailens.domain.usecase.scene.StopSceneAnalysisUseCase
 import com.friady.sailens.domain.usecase.trace.BuildTraceReplayReportUseCase
+import com.friady.sailens.domain.usecase.trace.EvaluateTraceReplayBudgetUseCase
+import com.friady.sailens.domain.usecase.trace.ListTraceSessionsUseCase
+import com.friady.sailens.domain.usecase.trace.LoadLatestTraceReplayReportUseCase
+import com.friady.sailens.domain.usecase.trace.LoadTraceReplayReportUseCase
 import org.koin.dsl.module
 
 val domainBindingsModule = module {
@@ -94,5 +98,9 @@ val domainBindingsModule = module {
         )
     }
     factory { BuildTraceReplayReportUseCase() }
+    factory { EvaluateTraceReplayBudgetUseCase() }
+    factory { ListTraceSessionsUseCase(get()) }
+    factory { LoadTraceReplayReportUseCase(get(), get()) }
+    factory { LoadLatestTraceReplayReportUseCase(get(), get()) }
 }
 

@@ -4,12 +4,19 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.friady.sailens.camera.ImageFrameProvider
 import com.friady.sailens.domain.model.scene.SceneEvent
+import com.friady.sailens.domain.model.trace.TraceReplayReport
+import com.friady.sailens.domain.model.trace.TraceSessionDescriptor
 import com.friady.sailens.domain.service.LogService
 import com.friady.sailens.domain.usecase.scene.StartSceneAnalysisUseCase
 import com.friady.sailens.domain.usecase.scene.StopSceneAnalysisUseCase
+import com.friady.sailens.domain.usecase.trace.EvaluateTraceReplayBudgetUseCase
+import com.friady.sailens.domain.usecase.trace.ListTraceSessionsUseCase
+import com.friady.sailens.domain.usecase.trace.LoadLatestTraceReplayReportUseCase
+import com.friady.sailens.domain.usecase.trace.LoadTraceReplayReportUseCase
 import com.friady.sailens.presentation.device.HapticManager
 import com.friady.sailens.presentation.device.SpeechManager
 import com.friady.sailens.presentation.ext.visualize
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -23,6 +30,7 @@ import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 
 private const val TAG = "SceneAnalysisViewModel"
 
@@ -33,6 +41,10 @@ class SceneAnalysisViewModel(
     private val hapticManager: HapticManager,
     private val speechManager: SpeechManager,
     private val logger: LogService,
+    private val listTraceSessionsUseCase: ListTraceSessionsUseCase,
+    private val loadTraceReplayReportUseCase: LoadTraceReplayReportUseCase,
+    private val loadLatestTraceReplayReportUseCase: LoadLatestTraceReplayReportUseCase,
+    private val evaluateTraceReplayBudgetUseCase: EvaluateTraceReplayBudgetUseCase,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SceneAnalysisUiState())
@@ -49,6 +61,7 @@ class SceneAnalysisViewModel(
             logger.debug(TAG, "SpeechManager initialized")
             _uiState.update { it.copy(isSpeechReady = true, errorMessage = null) }
         }
+        refreshTraceSessions()
     }
 
     fun toggleAnalysis() {
@@ -75,6 +88,119 @@ class SceneAnalysisViewModel(
         _uiState.update { it.copy(isHapticsEnabled = enabled) }
         if (!enabled) {
             hapticManager.cancel()
+        }
+    }
+
+    fun openTraceReplaySessionsScreen() {
+        _uiState.update { it.copy(currentScreen = SceneAnalysisScreen.TRACE_REPLAY_SESSIONS) }
+        refreshTraceSessions()
+    }
+
+    fun showLiveAnalysisScreen() {
+        _uiState.update { it.copy(currentScreen = SceneAnalysisScreen.LIVE_ANALYSIS) }
+    }
+
+    fun showTraceReplaySessionsScreen() {
+        _uiState.update { it.copy(currentScreen = SceneAnalysisScreen.TRACE_REPLAY_SESSIONS) }
+    }
+
+    fun refreshTraceSessions() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isTraceReplayLoading = true) }
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    listTraceSessionsUseCase()
+                }
+            }.onSuccess { sessions ->
+                _uiState.update {
+                    it.copy(
+                        isTraceReplayLoading = false,
+                        traceSessions = sessions,
+                    )
+                }
+            }.onFailure { error ->
+                logger.error(TAG, "Error refreshing trace sessions", error)
+                _uiState.update { it.copy(isTraceReplayLoading = false) }
+                _uiEffect.emit(SceneAnalysisUiEffect.ShowToast(error.message ?: "Failed to refresh traces"))
+            }
+        }
+    }
+
+    fun loadLatestTraceReplayReport() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isTraceReplayLoading = true) }
+            runCatching {
+                val sessions = withContext(Dispatchers.IO) { listTraceSessionsUseCase() }
+                val latestSessionId = sessions.firstOrNull()?.sessionId
+                val report = withContext(Dispatchers.IO) { loadLatestTraceReplayReportUseCase() }
+                Triple(sessions, latestSessionId, report)
+            }.onSuccess { (sessions, latestSessionId, report) ->
+                applyLoadedTraceReport(
+                    sessions = sessions,
+                    selectedSessionId = latestSessionId,
+                    report = report,
+                    currentScreen = if (report != null) {
+                        SceneAnalysisScreen.TRACE_REPLAY_REPORT
+                    } else {
+                        SceneAnalysisScreen.TRACE_REPLAY_SESSIONS
+                    },
+                )
+                if (report == null) {
+                    _uiEffect.emit(SceneAnalysisUiEffect.ShowToast("No trace sessions available yet"))
+                }
+            }.onFailure { error ->
+                logger.error(TAG, "Error loading latest trace replay report", error)
+                _uiState.update { it.copy(isTraceReplayLoading = false) }
+                _uiEffect.emit(SceneAnalysisUiEffect.ShowToast(error.message ?: "Failed to load latest trace report"))
+            }
+        }
+    }
+
+    fun loadTraceReplayReport(sessionId: String) {
+        viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    currentScreen = SceneAnalysisScreen.TRACE_REPLAY_REPORT,
+                    isTraceReplayLoading = true,
+                    selectedTraceSessionId = sessionId,
+                )
+            }
+            runCatching {
+                val sessions = withContext(Dispatchers.IO) { listTraceSessionsUseCase() }
+                val report = withContext(Dispatchers.IO) { loadTraceReplayReportUseCase(sessionId) }
+                sessions to report
+            }.onSuccess { (sessions, report) ->
+                applyLoadedTraceReport(
+                    sessions = sessions,
+                    selectedSessionId = sessionId,
+                    report = report,
+                    currentScreen = if (report != null) {
+                        SceneAnalysisScreen.TRACE_REPLAY_REPORT
+                    } else {
+                        SceneAnalysisScreen.TRACE_REPLAY_SESSIONS
+                    },
+                )
+                if (report == null) {
+                    _uiEffect.emit(SceneAnalysisUiEffect.ShowToast("Trace report unavailable for session $sessionId"))
+                }
+            }.onFailure { error ->
+                logger.error(TAG, "Error loading trace replay report", error)
+                _uiState.update { it.copy(isTraceReplayLoading = false) }
+                _uiEffect.emit(SceneAnalysisUiEffect.ShowToast(error.message ?: "Failed to load trace report"))
+            }
+        }
+    }
+
+    fun copyTraceReplaySummary() {
+        val state = _uiState.value
+        val report = state.traceReplayReport ?: return
+        viewModelScope.launch {
+            _uiEffect.emit(
+                SceneAnalysisUiEffect.CopyToClipboard(
+                    label = "trace_replay_report",
+                    text = buildTraceReplaySummary(report, state.traceReplayWarnings),
+                )
+            )
         }
     }
 
@@ -157,5 +283,54 @@ class SceneAnalysisViewModel(
         }
         speechManager.release()
         super.onCleared()
+    }
+
+    private fun applyLoadedTraceReport(
+        sessions: List<TraceSessionDescriptor>,
+        selectedSessionId: String?,
+        report: TraceReplayReport?,
+        currentScreen: SceneAnalysisScreen,
+    ) {
+        val warnings = report?.let { evaluateTraceReplayBudgetUseCase(it).warnings }.orEmpty()
+        _uiState.update {
+            it.copy(
+                currentScreen = currentScreen,
+                isTraceReplayLoading = false,
+                traceSessions = sessions,
+                selectedTraceSessionId = selectedSessionId,
+                traceReplayReport = report,
+                traceReplayWarnings = warnings,
+            )
+        }
+    }
+
+    private fun buildTraceReplaySummary(
+        report: TraceReplayReport,
+        warnings: List<String>,
+    ): String {
+        val droppedRatePercent = if (report.totalFrames > 0) {
+            (report.droppedFrames.toDouble() / report.totalFrames * 100).toInt()
+        } else {
+            0
+        }
+        val blockedRatePercent = (report.blockedFrameRate * 100).toInt()
+        val dangerRatePercent = (report.dangerousFrameRate * 100).toInt()
+        val warningSection = if (warnings.isEmpty()) {
+            "budget=ok"
+        } else {
+            "warnings=${warnings.joinToString(separator = "; ")}"
+        }
+
+        return buildString {
+            appendLine("session=${report.sessionId}")
+            appendLine("pipelineMode=${report.pipelineMode ?: "unknown"}")
+            appendLine("targetHardware=${report.targetHardwareProfile ?: "unknown"}")
+            appendLine("frames=${report.totalFrames} dropped=${report.droppedFrames} (${droppedRatePercent}%)")
+            appendLine("events=${report.totalEvents} blocked=${blockedRatePercent}% danger=${dangerRatePercent}%")
+            appendLine("avgPipelineMs=${report.avgTotalPipelineMs} p95PipelineMs=${report.p95TotalPipelineMs}")
+            appendLine("avgInferenceMs=${report.avgInferenceMs} errors=${report.errorCount}")
+            appendLine("messageKeys=${report.uniqueMessageKeys.joinToString()}")
+            append(warningSection)
+        }
     }
 }
