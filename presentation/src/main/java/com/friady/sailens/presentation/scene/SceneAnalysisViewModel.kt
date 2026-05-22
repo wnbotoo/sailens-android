@@ -465,6 +465,8 @@ class SceneAnalysisViewModel(
             appendLine("events=${report.totalEvents} blocked=${blockedRatePercent}% danger=${dangerRatePercent}%")
             appendLine("avgPipelineMs=${report.avgTotalPipelineMs} p95PipelineMs=${report.p95TotalPipelineMs}")
             appendLine("avgInferenceMs=${report.avgInferenceMs} errors=${report.errorCount}")
+            appendLine("semMs=pre:${report.avgSemanticPreprocessMs} infer:${report.avgSemanticInferenceMs} read:${report.avgSemanticOutputReadMs} post:${report.avgSemanticPostprocessMs}")
+            appendLine("segMs=pre:${report.avgInstancePreprocessMs} infer:${report.avgInstanceInferenceMs} read:${report.avgInstanceOutputReadMs} post:${report.avgInstancePostprocessMs}")
             appendLine("navPassable=${navigationPassablePercent}% blockageConfidence=${blockageConfidencePercent}% verticalReach=${verticalReachPercent}% floodReach=${floodReachPercent}% widthRetentionP25=${widthRetentionPercent}%")
             appendLine("messageKeys=${report.uniqueMessageKeys.joinToString()}")
             append(warningSection)

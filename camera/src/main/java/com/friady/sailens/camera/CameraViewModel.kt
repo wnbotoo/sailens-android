@@ -46,7 +46,7 @@ class CameraViewModel(
 
     private val imageAnalysis =
         ImageAnalysis.Builder().setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-            .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
+            .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
             .setResolutionSelector(getResolutionSelector(ANALYSIS_SIZE)).build().apply {
                 setAnalyzer(executor, imageFrameAnalyzer)
             }

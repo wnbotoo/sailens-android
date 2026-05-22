@@ -155,6 +155,14 @@ class StartSceneAnalysisUseCase(
                     floodReachRatio = sceneSnapshot.connectivity.floodReachRatio.toDouble(),
                     widthRetentionP25 = sceneSnapshot.connectivity.widthRetentionP25.toDouble(),
                     messageKeys = events.map { it.messageKey },
+                    semanticPreprocessMs = perceptionResult.semanticPreprocessTimeMs,
+                    semanticInferenceMs = perceptionResult.semanticInferenceTimeMs,
+                    semanticOutputReadMs = perceptionResult.semanticOutputReadTimeMs,
+                    semanticPostprocessMs = perceptionResult.semanticPostprocessTimeMs,
+                    instancePreprocessMs = perceptionResult.instancePreprocessTimeMs,
+                    instanceInferenceMs = perceptionResult.instanceInferenceTimeMs,
+                    instanceOutputReadMs = perceptionResult.instanceOutputReadTimeMs,
+                    instancePostprocessMs = perceptionResult.instancePostprocessTimeMs,
                 )
                 val runtimeStats = runtimeWindow.record(frameTrace)
 

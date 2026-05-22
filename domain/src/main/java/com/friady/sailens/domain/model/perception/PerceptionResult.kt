@@ -15,5 +15,12 @@ data class PerceptionResult(
     val bottomStats: BottomStats,
     val analysis: SegmentationAnalysis,
     val inferenceTimeMs: Long,
+    val semanticPreprocessTimeMs: Long = 0,
+    val semanticInferenceTimeMs: Long = 0,
+    val semanticOutputReadTimeMs: Long = 0,
+    val semanticPostprocessTimeMs: Long = 0,
+    val instancePreprocessTimeMs: Long = 0,
+    val instanceInferenceTimeMs: Long = 0,
+    val instanceOutputReadTimeMs: Long = 0,
+    val instancePostprocessTimeMs: Long = 0,
 )
-

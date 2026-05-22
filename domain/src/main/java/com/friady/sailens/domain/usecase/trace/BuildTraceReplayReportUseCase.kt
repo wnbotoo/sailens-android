@@ -41,6 +41,14 @@ class BuildTraceReplayReportUseCase {
             dangerousFrameRate = if (totalFrames > 0) summary.dangerousFrames.toDouble() / totalFrames else 0.0,
             avgProcessFrameMs = summary.avgProcessFrameMs,
             avgInferenceMs = summary.avgInferenceMs,
+            avgSemanticPreprocessMs = frames.averageOrZero { it.semanticPreprocessMs.toDouble() },
+            avgSemanticInferenceMs = frames.averageOrZero { it.semanticInferenceMs.toDouble() },
+            avgSemanticOutputReadMs = frames.averageOrZero { it.semanticOutputReadMs.toDouble() },
+            avgSemanticPostprocessMs = frames.averageOrZero { it.semanticPostprocessMs.toDouble() },
+            avgInstancePreprocessMs = frames.averageOrZero { it.instancePreprocessMs.toDouble() },
+            avgInstanceInferenceMs = frames.averageOrZero { it.instanceInferenceMs.toDouble() },
+            avgInstanceOutputReadMs = frames.averageOrZero { it.instanceOutputReadMs.toDouble() },
+            avgInstancePostprocessMs = frames.averageOrZero { it.instancePostprocessMs.toDouble() },
             avgTotalPipelineMs = summary.avgTotalPipelineMs,
             p95TotalPipelineMs = summary.p95TotalPipelineMs,
             maxTotalPipelineMs = summary.maxTotalPipelineMs,
@@ -76,5 +84,4 @@ class BuildTraceReplayReportUseCase {
         return sumOf(selector) / size
     }
 }
-
 

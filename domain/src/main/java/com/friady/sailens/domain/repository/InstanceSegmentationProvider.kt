@@ -1,7 +1,7 @@
 package com.friady.sailens.domain.repository
 
-import com.friady.sailens.domain.model.perception.DetectedInstance
 import com.friady.sailens.domain.model.perception.ImageFrame
+import com.friady.sailens.domain.model.perception.InstanceSegmentationOutput
 
 /**
  * 实例分割提供者接口（V2 可插拔）
@@ -21,7 +21,7 @@ interface InstanceSegmentationProvider {
     /**
      * 检测实例
      */
-    suspend fun detect(frame: ImageFrame): List<DetectedInstance>
+    suspend fun detect(frame: ImageFrame): InstanceSegmentationOutput
 
     /**
      * 释放资源

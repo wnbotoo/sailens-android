@@ -2,10 +2,12 @@ package com.friady.sailens.data.source.ml.semantic
 
 import android.content.Context
 import android.util.Log
+import com.friady.sailens.data.source.ml.resolveModelInputDataType
 import com.friady.sailens.domain.model.perception.ImageFrame
 import com.friady.sailens.domain.model.perception.SegmentationOutput
 import com.google.ai.edge.litert.Accelerator
 import com.google.ai.edge.litert.CompiledModel
+import com.google.ai.edge.litert.TensorType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.isActive
@@ -104,20 +106,31 @@ class YOLO26SemSegmentationModel(
             CompiledModel.Options(accelerator),
         )
         return try {
-            val config = model.createSegmenterConfig()
+            val inputTensorType = model.getInputTensorType(modelConfig.inputTensorName)
+            val inputDataType = resolveModelInputDataType(
+                configured = modelConfig.inputDataType,
+                tensorElementType = inputTensorType.elementType,
+            )
+            val config = model.createSegmenterConfig(inputTensorType)
             Log.i(
                 TAG,
-                "YOLO26 semantic tensor config: input=${config.inputWidth}x${config.inputHeight}, output=${config.outputWidth}x${config.outputHeight}x${config.outputChannels}"
+                "YOLO26 semantic tensor config: input=${config.inputWidth}x${config.inputHeight}, output=${config.outputWidth}x${config.outputHeight}x${config.outputChannels}, inputType=${inputDataType.dataType}, tensorElement=${inputDataType.elementTypeName}"
             )
-            LiteRTSegmenter(model, config)
+            LiteRTSegmenter(
+                model = model,
+                config = config,
+                inputDataType = inputDataType.dataType,
+                inputQuantization = modelConfig.inputQuantization,
+                preferNativeYuvPreprocessing = modelConfig.preferNativeYuvPreprocessing,
+            )
         } catch (error: Throwable) {
             model.close()
             throw error
         }
     }
 
-    private fun CompiledModel.createSegmenterConfig(): SegmenterConfig {
-        val inputDimensions = requireNotNull(getInputTensorType(modelConfig.inputTensorName).layout) {
+    private fun CompiledModel.createSegmenterConfig(inputTensorType: TensorType): SegmenterConfig {
+        val inputDimensions = requireNotNull(inputTensorType.layout) {
             "YOLO26 semantic input tensor '${modelConfig.inputTensorName}' has no layout"
         }.dimensions
         val outputDimensions = requireNotNull(getOutputTensorType(modelConfig.outputTensorName).layout) {

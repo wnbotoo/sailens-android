@@ -1,5 +1,8 @@
 package com.friady.sailens.data.source.ml.instance
 
+import com.friady.sailens.data.source.ml.ModelInputDataType
+import com.friady.sailens.data.source.ml.ModelInputQuantization
+
 /**
  * YOLO26-seg model contract. The input size is read from the TFLite tensor
  * metadata at runtime; the current bbox post-processing path expects a square
@@ -10,4 +13,7 @@ data class YOLO26SegModelConfig(
     val inputTensorName: String = "images",
     val classCount: Int = 80,
     val maskCoefficientCount: Int = 32,
+    val inputDataType: ModelInputDataType = ModelInputDataType.AUTO,
+    val inputQuantization: ModelInputQuantization = ModelInputQuantization(),
+    val preferNativeYuvPreprocessing: Boolean = true,
 )

@@ -40,6 +40,14 @@ data class TraceReplayReport(
     val dangerousFrameRate: Double,
     val avgProcessFrameMs: Double,
     val avgInferenceMs: Double,
+    val avgSemanticPreprocessMs: Double,
+    val avgSemanticInferenceMs: Double,
+    val avgSemanticOutputReadMs: Double,
+    val avgSemanticPostprocessMs: Double,
+    val avgInstancePreprocessMs: Double,
+    val avgInstanceInferenceMs: Double,
+    val avgInstanceOutputReadMs: Double,
+    val avgInstancePostprocessMs: Double,
     val avgTotalPipelineMs: Double,
     val p95TotalPipelineMs: Long,
     val maxTotalPipelineMs: Long,
@@ -125,6 +133,14 @@ object TraceReplayParser {
         floodReachRatio = entry.optionalDouble("floodReachRatio") ?: 0.0,
         widthRetentionP25 = entry.optionalDouble("widthRetentionP25") ?: 0.0,
         messageKeys = entry.requireStringArray("messageKeys", lineIndex),
+        semanticPreprocessMs = entry.optionalLong("semanticPreprocessMs") ?: 0,
+        semanticInferenceMs = entry.optionalLong("semanticInferenceMs") ?: 0,
+        semanticOutputReadMs = entry.optionalLong("semanticOutputReadMs") ?: 0,
+        semanticPostprocessMs = entry.optionalLong("semanticPostprocessMs") ?: 0,
+        instancePreprocessMs = entry.optionalLong("instancePreprocessMs") ?: 0,
+        instanceInferenceMs = entry.optionalLong("instanceInferenceMs") ?: 0,
+        instanceOutputReadMs = entry.optionalLong("instanceOutputReadMs") ?: 0,
+        instancePostprocessMs = entry.optionalLong("instancePostprocessMs") ?: 0,
     )
 
     private fun parseSummary(entry: JsonObject, lineIndex: Int) = SessionTraceSummary(
@@ -175,6 +191,10 @@ object TraceReplayParser {
 
     private fun JsonObject.optionalDouble(key: String): Double? {
         return get(key)?.jsonPrimitive?.doubleOrNull
+    }
+
+    private fun JsonObject.optionalLong(key: String): Long? {
+        return get(key)?.jsonPrimitive?.longOrNull
     }
 
     private fun JsonObject.requireBoolean(key: String, lineIndex: Int): Boolean {

@@ -39,6 +39,14 @@ internal object TraceJsonEncoder {
         put("floodReachRatio", frameTrace.floodReachRatio)
         put("widthRetentionP25", frameTrace.widthRetentionP25)
         put("messageKeys", JSONArray(frameTrace.messageKeys))
+        put("semanticPreprocessMs", frameTrace.semanticPreprocessMs)
+        put("semanticInferenceMs", frameTrace.semanticInferenceMs)
+        put("semanticOutputReadMs", frameTrace.semanticOutputReadMs)
+        put("semanticPostprocessMs", frameTrace.semanticPostprocessMs)
+        put("instancePreprocessMs", frameTrace.instancePreprocessMs)
+        put("instanceInferenceMs", frameTrace.instanceInferenceMs)
+        put("instanceOutputReadMs", frameTrace.instanceOutputReadMs)
+        put("instancePostprocessMs", frameTrace.instancePostprocessMs)
     }
 
     fun encodeSessionSummary(summary: SessionTraceSummary): JSONObject = JSONObject().apply {
@@ -67,4 +75,3 @@ internal object TraceJsonEncoder {
         put("stackTrace", throwable.stackTraceToString().take(1000))
     }
 }
-

@@ -1,16 +1,19 @@
 package com.friady.sailens.data.source.ml.instance
 
 import android.content.Context
+import android.os.SystemClock
 import android.util.Log
-import com.friady.sailens.data.source.ml.FramePreprocessor
-import com.friady.sailens.data.source.ml.OpenCVImageProcessor
+import com.friady.sailens.data.source.ml.ModelInputDataType
+import com.friady.sailens.data.source.ml.YoloInputPreprocessor
+import com.friady.sailens.data.source.ml.resolveModelInputDataType
 import com.friady.sailens.data.source.ml.semantic.SegmenterConfig
 import com.friady.sailens.domain.config.PerceptionConfig
-import com.friady.sailens.domain.model.perception.DetectedInstance
 import com.friady.sailens.domain.model.perception.ImageFrame
+import com.friady.sailens.domain.model.perception.InstanceSegmentationOutput
 import com.friady.sailens.domain.repository.InstanceSegmentationProvider
 import com.google.ai.edge.litert.Accelerator
 import com.google.ai.edge.litert.CompiledModel
+import com.google.ai.edge.litert.TensorBuffer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.isActive
@@ -37,10 +40,12 @@ class YOLO26SegInstanceProvider(
     private val singleThreadDispatcher = Dispatchers.IO.limitedParallelism(1)
 
     private var model: CompiledModel? = null
-    private var inputBuffers: List<com.google.ai.edge.litert.TensorBuffer>? = null
-    private var outputBuffers: List<com.google.ai.edge.litert.TensorBuffer>? = null
-    private var processor: FramePreprocessor? = null
-    private var cachedInput: FloatArray = FloatArray(0)
+    private var inputBuffers: List<TensorBuffer>? = null
+    private var outputBuffers: List<TensorBuffer>? = null
+    private var processor: YoloInputPreprocessor? = null
+    private var inputDataType: ModelInputDataType = ModelInputDataType.FLOAT32
+    private var cachedFloatInput: FloatArray = FloatArray(0)
+    private var cachedInt8Input: ByteArray = ByteArray(0)
     private var postProcessor: YOLO26SegPostProcessor? = null
     private var hasLoggedTensorInfo: Boolean = false
 
@@ -80,34 +85,50 @@ class YOLO26SegInstanceProvider(
         }
     }
 
-    override suspend fun detect(frame: ImageFrame): List<DetectedInstance> {
-        if (!_isInitialized) return emptyList()
+    override suspend fun detect(frame: ImageFrame): InstanceSegmentationOutput {
+        if (!_isInitialized) return InstanceSegmentationOutput(emptyList())
 
         return withContext(singleThreadDispatcher) {
             if (!isActive) throw CancellationException("Coroutine cancelled")
 
-            val activeInputBuffers = inputBuffers ?: return@withContext emptyList()
-            val activeOutputBuffers = outputBuffers ?: return@withContext emptyList()
-            val activeModel = model ?: return@withContext emptyList()
-            val activeProcessor = processor ?: return@withContext emptyList()
-            val activePostProcessor = postProcessor ?: return@withContext emptyList()
+            val activeInputBuffers = inputBuffers ?: return@withContext InstanceSegmentationOutput(emptyList())
+            val activeOutputBuffers = outputBuffers ?: return@withContext InstanceSegmentationOutput(emptyList())
+            val activeModel = model ?: return@withContext InstanceSegmentationOutput(emptyList())
+            val activeProcessor = processor ?: return@withContext InstanceSegmentationOutput(emptyList())
+            val activePostProcessor = postProcessor ?: return@withContext InstanceSegmentationOutput(emptyList())
+            val activeInputDataType = inputDataType
 
-            activeProcessor.preprocess(frame, frame.rotationDegrees, cachedInput)
-            activeInputBuffers[0].writeFloat(cachedInput)
+            val startTime = SystemClock.uptimeMillis()
+            preprocessInput(activeProcessor, frame, activeInputDataType)
+            val afterPreprocessTime = SystemClock.uptimeMillis()
+
+            writeInput(activeInputBuffers[0], activeInputDataType)
             activeModel.run(activeInputBuffers, activeOutputBuffers)
+            val afterModelTime = SystemClock.uptimeMillis()
 
-            val detectionTensor = activeOutputBuffers.firstOrNull()?.readFloat() ?: return@withContext emptyList()
+            val detectionTensor = activeOutputBuffers.firstOrNull()?.readFloat()
+                ?: return@withContext InstanceSegmentationOutput(emptyList())
             val prototypeTensor = activeOutputBuffers.getOrNull(1)?.readFloat()
+            val afterOutputReadTime = SystemClock.uptimeMillis()
 
             if (!hasLoggedTensorInfo) {
                 Log.i(
                     TAG,
-                    "YOLO26-seg runtime tensors: outputs=${activeOutputBuffers.size}, detectionValues=${detectionTensor.size}, prototypeValues=${prototypeTensor?.size ?: 0}, frame=${frame.width}x${frame.height}, rotation=${frame.rotationDegrees}"
+                    "YOLO26-seg runtime tensors: outputs=${activeOutputBuffers.size}, detectionValues=${detectionTensor.size}, prototypeValues=${prototypeTensor?.size ?: 0}, frame=${frame.width}x${frame.height}, rotation=${frame.rotationDegrees}, inputType=$activeInputDataType"
                 )
                 hasLoggedTensorInfo = true
             }
 
-            activePostProcessor.postProcess(frame, detectionTensor, prototypeTensor)
+            val instances = activePostProcessor.postProcess(frame, detectionTensor, prototypeTensor)
+            val afterPostprocessTime = SystemClock.uptimeMillis()
+
+            InstanceSegmentationOutput(
+                instances = instances,
+                preprocessTimeMs = afterPreprocessTime - startTime,
+                inferenceTimeMs = afterModelTime - afterPreprocessTime,
+                outputReadTimeMs = afterOutputReadTime - afterModelTime,
+                postprocessTimeMs = afterPostprocessTime - afterOutputReadTime,
+            )
         }
     }
 
@@ -127,7 +148,12 @@ class YOLO26SegInstanceProvider(
     }
 
     private fun configurePreAndPostProcessing(model: CompiledModel) {
-        val inputDimensions = requireNotNull(model.getInputTensorType(modelConfig.inputTensorName).layout) {
+        val inputTensorType = model.getInputTensorType(modelConfig.inputTensorName)
+        val resolvedInputDataType = resolveModelInputDataType(
+            configured = modelConfig.inputDataType,
+            tensorElementType = inputTensorType.elementType,
+        )
+        val inputDimensions = requireNotNull(inputTensorType.layout) {
             "YOLO26 instance input tensor '${modelConfig.inputTensorName}' has no layout"
         }.dimensions
         val inputSpec = NhwcInputTensorSpec.from(inputDimensions)
@@ -146,8 +172,15 @@ class YOLO26SegInstanceProvider(
             confidenceThreshold = perceptionConfig.minObstacleConfidence,
         )
 
-        processor = OpenCVImageProcessor(inputConfig)
-        cachedInput = FloatArray(inputSpec.width * inputSpec.height * inputSpec.channels)
+        inputDataType = resolvedInputDataType.dataType
+        val inputElementCount = inputSpec.width * inputSpec.height * inputSpec.channels
+        cachedFloatInput = FloatArray(if (inputDataType == ModelInputDataType.FLOAT32) inputElementCount else 0)
+        cachedInt8Input = ByteArray(if (inputDataType == ModelInputDataType.INT8) inputElementCount else 0)
+        processor = YoloInputPreprocessor(
+            config = inputConfig,
+            inputQuantization = modelConfig.inputQuantization,
+            preferNativeYuvPreprocessing = modelConfig.preferNativeYuvPreprocessing,
+        )
         postProcessor = YOLO26SegPostProcessor(
             inputSize = inputSpec.width,
             classCount = modelConfig.classCount,
@@ -159,8 +192,41 @@ class YOLO26SegInstanceProvider(
 
         Log.i(
             TAG,
-            "YOLO26 instance tensor config: input=${inputSpec.width}x${inputSpec.height}x${inputSpec.channels}"
+            "YOLO26 instance tensor config: input=${inputSpec.width}x${inputSpec.height}x${inputSpec.channels}, inputType=${resolvedInputDataType.dataType}, tensorElement=${resolvedInputDataType.elementTypeName}"
         )
+    }
+
+    private fun preprocessInput(
+        processor: YoloInputPreprocessor,
+        frame: ImageFrame,
+        activeInputDataType: ModelInputDataType,
+    ) {
+        when (activeInputDataType) {
+            ModelInputDataType.FLOAT32 -> processor.preprocessFloat(
+                frame = frame,
+                rotationDegrees = frame.rotationDegrees,
+                outputArray = cachedFloatInput,
+            )
+
+            ModelInputDataType.INT8 -> processor.preprocessInt8(
+                frame = frame,
+                rotationDegrees = frame.rotationDegrees,
+                outputArray = cachedInt8Input,
+            )
+
+            ModelInputDataType.AUTO -> error("AUTO input type must be resolved before detection")
+        }
+    }
+
+    private fun writeInput(
+        inputBuffer: TensorBuffer,
+        activeInputDataType: ModelInputDataType,
+    ) {
+        when (activeInputDataType) {
+            ModelInputDataType.FLOAT32 -> inputBuffer.writeFloat(cachedFloatInput)
+            ModelInputDataType.INT8 -> inputBuffer.writeInt8(cachedInt8Input)
+            ModelInputDataType.AUTO -> error("AUTO input type must be resolved before detection")
+        }
     }
 
     private fun ensureModelAssetAvailable() {
@@ -174,7 +240,9 @@ class YOLO26SegInstanceProvider(
     private fun cleanupInternal() {
         processor?.close()
         processor = null
-        cachedInput = FloatArray(0)
+        cachedFloatInput = FloatArray(0)
+        cachedInt8Input = ByteArray(0)
+        inputDataType = ModelInputDataType.FLOAT32
         postProcessor = null
         inputBuffers?.forEach { it.close() }
         outputBuffers?.forEach { it.close() }

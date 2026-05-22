@@ -6,14 +6,15 @@ import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import com.friady.sailens.domain.model.perception.ImageFrame
 import com.friady.sailens.domain.model.perception.ImagePixelFormat
+import com.friady.sailens.domain.model.perception.Yuv420FrameData
+import com.friady.sailens.domain.model.perception.YuvPlaneData
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
-import java.nio.ByteBuffer
 
 class ImageFrameAnalyzer(
-    private val frameConverter: ImageFrameConverter = ImageProxyToRgbaFrameConverter(),
+    private val frameConverter: ImageFrameConverter = ImageProxyToFrameConverter(),
 ) : ImageAnalysis.Analyzer, ImageFrameProvider {
     private var nextSequenceNumber = 0L
 
@@ -41,22 +42,47 @@ interface ImageFrameConverter {
     ): ImageFrame
 }
 
-class ImageProxyToRgbaFrameConverter : ImageFrameConverter {
+class ImageProxyToFrameConverter : ImageFrameConverter {
     override fun convert(
         image: ImageProxy,
         sequenceNumber: Long,
     ): ImageFrame {
-        val rgba = when (image.format) {
-            PixelFormat.RGBA_8888 -> copyRgba(image)
-            ImageFormat.FLEX_RGBA_8888 -> copyRgba(image)
-            ImageFormat.YUV_420_888 -> convertYuvToRgba(image)
-            else -> error("Unsupported image format ${image.format}; expected RGBA_8888 or YUV_420_888")
+        return when (image.format) {
+            ImageFormat.YUV_420_888 -> createYuvFrame(image, sequenceNumber)
+            PixelFormat.RGBA_8888 -> createRgbaFrame(image, sequenceNumber)
+            ImageFormat.FLEX_RGBA_8888 -> createRgbaFrame(image, sequenceNumber)
+            else -> error("Unsupported image format ${image.format}; expected YUV_420_888 or RGBA_8888")
         }
+    }
 
+    private fun createYuvFrame(
+        image: ImageProxy,
+        sequenceNumber: Long,
+    ): ImageFrame {
         return ImageFrame(
             width = image.width,
             height = image.height,
-            pixelBytes = rgba,
+            pixelBytes = ByteArray(0),
+            pixelFormat = ImagePixelFormat.YUV_420_888,
+            rotationDegrees = image.imageInfo.rotationDegrees,
+            timestamp = image.imageInfo.timestamp,
+            sequenceNumber = sequenceNumber,
+            yuvData = Yuv420FrameData(
+                y = copyPlane(image.planes[0]),
+                u = copyPlane(image.planes[1]),
+                v = copyPlane(image.planes[2]),
+            ),
+        )
+    }
+
+    private fun createRgbaFrame(
+        image: ImageProxy,
+        sequenceNumber: Long,
+    ): ImageFrame {
+        return ImageFrame(
+            width = image.width,
+            height = image.height,
+            pixelBytes = copyRgba(image),
             pixelFormat = ImagePixelFormat.RGBA_8888,
             rotationDegrees = image.imageInfo.rotationDegrees,
             timestamp = image.imageInfo.timestamp,
@@ -97,68 +123,15 @@ class ImageProxyToRgbaFrameConverter : ImageFrameConverter {
         return rgba
     }
 
-    private fun convertYuvToRgba(image: ImageProxy): ByteArray {
-        val width = image.width
-        val height = image.height
-        val rgba = ByteArray(width * height * ImagePixelFormat.RGBA_8888.bytesPerPixel)
-        yuv420ToRgba(image.planes, width, height, rgba)
-        return rgba
-    }
-
-    private fun yuv420ToRgba(
-        planes: Array<ImageProxy.PlaneProxy>,
-        width: Int,
-        height: Int,
-        output: ByteArray,
-    ) {
-        val yPlane = planes[0]
-        val uPlane = planes[1]
-        val vPlane = planes[2]
-        val yBuffer = yPlane.buffer
-        val uBuffer = uPlane.buffer
-        val vBuffer = vPlane.buffer
-
-        var outIndex = 0
-        for (y in 0 until height) {
-            val yRowOffset = y * yPlane.rowStride
-            val uRowOffset = (y / 2) * uPlane.rowStride
-            val vRowOffset = (y / 2) * vPlane.rowStride
-
-            for (x in 0 until width) {
-                val yValue = yBuffer.unsigned(yRowOffset + x * yPlane.pixelStride)
-                val uvColumnOffset = (x / 2) * uPlane.pixelStride
-                val uValue = uBuffer.unsigned(uRowOffset + uvColumnOffset)
-                val vValue = vBuffer.unsigned(
-                    vRowOffset + (x / 2) * vPlane.pixelStride
-                )
-
-                val c = (yValue - 16).coerceAtLeast(0)
-                val d = uValue - 128
-                val e = vValue - 128
-
-                output[outIndex++] = clampToByte((298 * c + 409 * e + 128) shr 8)
-                output[outIndex++] = clampToByte((298 * c - 100 * d - 208 * e + 128) shr 8)
-                output[outIndex++] = clampToByte((298 * c + 516 * d + 128) shr 8)
-                output[outIndex++] = FULL_ALPHA
-            }
-        }
-    }
-
-    private fun ByteBuffer.unsigned(index: Int): Int {
-        val limit = limit()
-        if (index < 0 || index >= limit) {
-            throw IllegalArgumentException(
-                "Plane buffer index $index out of bounds [0, $limit)"
-            )
-        }
-        return get(index).toInt() and 0xFF
-    }
-
-    private fun clampToByte(value: Int): Byte {
-        return value.coerceIn(0, 255).toByte()
-    }
-
-    private companion object {
-        private val FULL_ALPHA: Byte = 0xFF.toByte()
+    private fun copyPlane(plane: ImageProxy.PlaneProxy): YuvPlaneData {
+        val buffer = plane.buffer.duplicate()
+        buffer.position(0)
+        val bytes = ByteArray(buffer.remaining())
+        buffer.get(bytes)
+        return YuvPlaneData(
+            bytes = bytes,
+            rowStride = plane.rowStride,
+            pixelStride = plane.pixelStride,
+        )
     }
 }

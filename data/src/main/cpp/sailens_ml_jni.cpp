@@ -28,6 +28,22 @@ struct Candidate {
     Rect rect;
 };
 
+struct YuvPlane {
+    const jbyte* data;
+    int size;
+    int rowStride;
+    int pixelStride;
+    int width;
+    int height;
+    int defaultValue;
+};
+
+struct RgbPixel {
+    float r;
+    float g;
+    float b;
+};
+
 static bool isAllowedClass(int classId, const std::vector<int>& allowedClassIds) {
     return std::find(allowedClassIds.begin(), allowedClassIds.end(), classId) != allowedClassIds.end();
 }
@@ -392,7 +408,364 @@ static std::vector<int> readAllowedClassIds(JNIEnv* env, jintArray allowedClassI
     return values;
 }
 
+static int unsignedByteAt(const YuvPlane& plane, int x, int y) {
+    if (plane.data == nullptr || x < 0 || y < 0 || x >= plane.width || y >= plane.height) {
+        return plane.defaultValue;
+    }
+    const int index = y * plane.rowStride + x * plane.pixelStride;
+    if (index < 0 || index >= plane.size) {
+        return plane.defaultValue;
+    }
+    return static_cast<int>(static_cast<unsigned char>(plane.data[index]));
+}
+
+static float samplePlaneBilinear(const YuvPlane& plane, float x, float y) {
+    if (plane.width <= 0 || plane.height <= 0) {
+        return static_cast<float>(plane.defaultValue);
+    }
+
+    const float clampedX = std::clamp(x, 0.0f, static_cast<float>(plane.width - 1));
+    const float clampedY = std::clamp(y, 0.0f, static_cast<float>(plane.height - 1));
+    const int x0 = static_cast<int>(std::floor(clampedX));
+    const int y0 = static_cast<int>(std::floor(clampedY));
+    const int x1 = std::min(x0 + 1, plane.width - 1);
+    const int y1 = std::min(y0 + 1, plane.height - 1);
+    const float dx = clampedX - x0;
+    const float dy = clampedY - y0;
+
+    const float v00 = static_cast<float>(unsignedByteAt(plane, x0, y0));
+    const float v10 = static_cast<float>(unsignedByteAt(plane, x1, y0));
+    const float v01 = static_cast<float>(unsignedByteAt(plane, x0, y1));
+    const float v11 = static_cast<float>(unsignedByteAt(plane, x1, y1));
+    const float top = v00 + (v10 - v00) * dx;
+    const float bottom = v01 + (v11 - v01) * dx;
+    return top + (bottom - top) * dy;
+}
+
+static void rotatedToSource(
+        float rotatedX,
+        float rotatedY,
+        int sourceWidth,
+        int sourceHeight,
+        int rotationDegrees,
+        float& sourceX,
+        float& sourceY) {
+    const int normalizedRotation = ((rotationDegrees % 360) + 360) % 360;
+    switch (normalizedRotation) {
+        case 90:
+            sourceX = rotatedY;
+            sourceY = static_cast<float>(sourceHeight - 1) - rotatedX;
+            break;
+        case 180:
+            sourceX = static_cast<float>(sourceWidth - 1) - rotatedX;
+            sourceY = static_cast<float>(sourceHeight - 1) - rotatedY;
+            break;
+        case 270:
+            sourceX = static_cast<float>(sourceWidth - 1) - rotatedY;
+            sourceY = rotatedX;
+            break;
+        default:
+            sourceX = rotatedX;
+            sourceY = rotatedY;
+            break;
+    }
+}
+
+static RgbPixel yuvToRgb(float yValue, float uValue, float vValue) {
+    const float c = std::max(yValue - 16.0f, 0.0f);
+    const float d = uValue - 128.0f;
+    const float e = vValue - 128.0f;
+    return {
+            std::clamp(1.164f * c + 1.596f * e, 0.0f, 255.0f),
+            std::clamp(1.164f * c - 0.392f * d - 0.813f * e, 0.0f, 255.0f),
+            std::clamp(1.164f * c + 2.017f * d, 0.0f, 255.0f),
+    };
+}
+
+static RgbPixel sampleYuvAsRgb(
+        const YuvPlane& yPlane,
+        const YuvPlane& uPlane,
+        const YuvPlane& vPlane,
+        float sourceX,
+        float sourceY) {
+    const float yValue = samplePlaneBilinear(yPlane, sourceX, sourceY);
+    const float uValue = samplePlaneBilinear(uPlane, sourceX * 0.5f, sourceY * 0.5f);
+    const float vValue = samplePlaneBilinear(vPlane, sourceX * 0.5f, sourceY * 0.5f);
+    return yuvToRgb(yValue, uValue, vValue);
+}
+
+template <typename Writer>
+static bool preprocessYuv(
+        const YuvPlane& yPlane,
+        const YuvPlane& uPlane,
+        const YuvPlane& vPlane,
+        int sourceWidth,
+        int sourceHeight,
+        int rotationDegrees,
+        int targetWidth,
+        int targetHeight,
+        float meanR,
+        float meanG,
+        float meanB,
+        float stdR,
+        float stdG,
+        float stdB,
+        Writer writer) {
+    if (sourceWidth <= 0 || sourceHeight <= 0 || targetWidth <= 0 || targetHeight <= 0 ||
+        stdR == 0.0f || stdG == 0.0f || stdB == 0.0f) {
+        return false;
+    }
+
+    const int normalizedRotation = ((rotationDegrees % 360) + 360) % 360;
+    const bool rotated = normalizedRotation == 90 || normalizedRotation == 270;
+    const int rotatedWidth = rotated ? sourceHeight : sourceWidth;
+    const int rotatedHeight = rotated ? sourceWidth : sourceHeight;
+    const float scale = std::min(
+            targetWidth / static_cast<float>(rotatedWidth),
+            targetHeight / static_cast<float>(rotatedHeight));
+    const float resizedWidth = rotatedWidth * scale;
+    const float resizedHeight = rotatedHeight * scale;
+    const float padX = (targetWidth - resizedWidth) * 0.5f;
+    const float padY = (targetHeight - resizedHeight) * 0.5f;
+
+    int outIndex = 0;
+    for (int y = 0; y < targetHeight; ++y) {
+        for (int x = 0; x < targetWidth; ++x) {
+            RgbPixel pixel = {0.0f, 0.0f, 0.0f};
+            if (x >= padX && y >= padY && x < padX + resizedWidth && y < padY + resizedHeight) {
+                const float rotatedX = (static_cast<float>(x) - padX + 0.5f) / scale - 0.5f;
+                const float rotatedY = (static_cast<float>(y) - padY + 0.5f) / scale - 0.5f;
+                float sourceX = 0.0f;
+                float sourceY = 0.0f;
+                rotatedToSource(
+                        rotatedX,
+                        rotatedY,
+                        sourceWidth,
+                        sourceHeight,
+                        normalizedRotation,
+                        sourceX,
+                        sourceY);
+                pixel = sampleYuvAsRgb(yPlane, uPlane, vPlane, sourceX, sourceY);
+            }
+
+            writer(outIndex++, (pixel.r / 255.0f - meanR) / stdR);
+            writer(outIndex++, (pixel.g / 255.0f - meanG) / stdG);
+            writer(outIndex++, (pixel.b / 255.0f - meanB) / stdB);
+        }
+    }
+
+    return true;
+}
+
 }  // namespace
+
+extern "C"
+JNIEXPORT jboolean JNICALL
+Java_com_friady_sailens_data_source_ml_NativeYuvInputPreprocessor_nativePreprocessYuvToFloat(
+        JNIEnv* env,
+        jobject,
+        jbyteArray y,
+        jbyteArray u,
+        jbyteArray v,
+        jint yRowStride,
+        jint yPixelStride,
+        jint uRowStride,
+        jint uPixelStride,
+        jint vRowStride,
+        jint vPixelStride,
+        jint sourceWidth,
+        jint sourceHeight,
+        jint rotationDegrees,
+        jint targetWidth,
+        jint targetHeight,
+        jfloat meanR,
+        jfloat meanG,
+        jfloat meanB,
+        jfloat stdR,
+        jfloat stdG,
+        jfloat stdB,
+        jfloatArray output) {
+    if (y == nullptr || u == nullptr || v == nullptr || output == nullptr ||
+        yRowStride <= 0 || yPixelStride <= 0 ||
+        uRowStride <= 0 || uPixelStride <= 0 ||
+        vRowStride <= 0 || vPixelStride <= 0 ||
+        sourceWidth <= 0 || sourceHeight <= 0 ||
+        targetWidth <= 0 || targetHeight <= 0 ||
+        env->GetArrayLength(output) != targetWidth * targetHeight * 3) {
+        return JNI_FALSE;
+    }
+
+    jbyte* yData = env->GetByteArrayElements(y, nullptr);
+    jbyte* uData = env->GetByteArrayElements(u, nullptr);
+    jbyte* vData = env->GetByteArrayElements(v, nullptr);
+    jfloat* outputData = env->GetFloatArrayElements(output, nullptr);
+    if (yData == nullptr || uData == nullptr || vData == nullptr || outputData == nullptr) {
+        if (yData != nullptr) env->ReleaseByteArrayElements(y, yData, JNI_ABORT);
+        if (uData != nullptr) env->ReleaseByteArrayElements(u, uData, JNI_ABORT);
+        if (vData != nullptr) env->ReleaseByteArrayElements(v, vData, JNI_ABORT);
+        if (outputData != nullptr) env->ReleaseFloatArrayElements(output, outputData, JNI_ABORT);
+        return JNI_FALSE;
+    }
+
+    const YuvPlane yPlane = {
+            yData,
+            env->GetArrayLength(y),
+            yRowStride,
+            yPixelStride,
+            sourceWidth,
+            sourceHeight,
+            16,
+    };
+    const YuvPlane uPlane = {
+            uData,
+            env->GetArrayLength(u),
+            uRowStride,
+            uPixelStride,
+            (sourceWidth + 1) / 2,
+            (sourceHeight + 1) / 2,
+            128,
+    };
+    const YuvPlane vPlane = {
+            vData,
+            env->GetArrayLength(v),
+            vRowStride,
+            vPixelStride,
+            (sourceWidth + 1) / 2,
+            (sourceHeight + 1) / 2,
+            128,
+    };
+
+    const bool success = preprocessYuv(
+            yPlane,
+            uPlane,
+            vPlane,
+            sourceWidth,
+            sourceHeight,
+            rotationDegrees,
+            targetWidth,
+            targetHeight,
+            meanR,
+            meanG,
+            meanB,
+            stdR,
+            stdG,
+            stdB,
+            [outputData](int index, float value) {
+                outputData[index] = value;
+            });
+
+    env->ReleaseFloatArrayElements(output, outputData, success ? 0 : JNI_ABORT);
+    env->ReleaseByteArrayElements(v, vData, JNI_ABORT);
+    env->ReleaseByteArrayElements(u, uData, JNI_ABORT);
+    env->ReleaseByteArrayElements(y, yData, JNI_ABORT);
+    return success ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C"
+JNIEXPORT jboolean JNICALL
+Java_com_friady_sailens_data_source_ml_NativeYuvInputPreprocessor_nativePreprocessYuvToInt8(
+        JNIEnv* env,
+        jobject,
+        jbyteArray y,
+        jbyteArray u,
+        jbyteArray v,
+        jint yRowStride,
+        jint yPixelStride,
+        jint uRowStride,
+        jint uPixelStride,
+        jint vRowStride,
+        jint vPixelStride,
+        jint sourceWidth,
+        jint sourceHeight,
+        jint rotationDegrees,
+        jint targetWidth,
+        jint targetHeight,
+        jfloat meanR,
+        jfloat meanG,
+        jfloat meanB,
+        jfloat stdR,
+        jfloat stdG,
+        jfloat stdB,
+        jfloat quantScale,
+        jint quantZeroPoint,
+        jbyteArray output) {
+    if (y == nullptr || u == nullptr || v == nullptr || output == nullptr ||
+        yRowStride <= 0 || yPixelStride <= 0 ||
+        uRowStride <= 0 || uPixelStride <= 0 ||
+        vRowStride <= 0 || vPixelStride <= 0 ||
+        sourceWidth <= 0 || sourceHeight <= 0 ||
+        targetWidth <= 0 || targetHeight <= 0 ||
+        quantScale <= 0.0f ||
+        env->GetArrayLength(output) != targetWidth * targetHeight * 3) {
+        return JNI_FALSE;
+    }
+
+    jbyte* yData = env->GetByteArrayElements(y, nullptr);
+    jbyte* uData = env->GetByteArrayElements(u, nullptr);
+    jbyte* vData = env->GetByteArrayElements(v, nullptr);
+    jbyte* outputData = env->GetByteArrayElements(output, nullptr);
+    if (yData == nullptr || uData == nullptr || vData == nullptr || outputData == nullptr) {
+        if (yData != nullptr) env->ReleaseByteArrayElements(y, yData, JNI_ABORT);
+        if (uData != nullptr) env->ReleaseByteArrayElements(u, uData, JNI_ABORT);
+        if (vData != nullptr) env->ReleaseByteArrayElements(v, vData, JNI_ABORT);
+        if (outputData != nullptr) env->ReleaseByteArrayElements(output, outputData, JNI_ABORT);
+        return JNI_FALSE;
+    }
+
+    const YuvPlane yPlane = {
+            yData,
+            env->GetArrayLength(y),
+            yRowStride,
+            yPixelStride,
+            sourceWidth,
+            sourceHeight,
+            16,
+    };
+    const YuvPlane uPlane = {
+            uData,
+            env->GetArrayLength(u),
+            uRowStride,
+            uPixelStride,
+            (sourceWidth + 1) / 2,
+            (sourceHeight + 1) / 2,
+            128,
+    };
+    const YuvPlane vPlane = {
+            vData,
+            env->GetArrayLength(v),
+            vRowStride,
+            vPixelStride,
+            (sourceWidth + 1) / 2,
+            (sourceHeight + 1) / 2,
+            128,
+    };
+
+    const bool success = preprocessYuv(
+            yPlane,
+            uPlane,
+            vPlane,
+            sourceWidth,
+            sourceHeight,
+            rotationDegrees,
+            targetWidth,
+            targetHeight,
+            meanR,
+            meanG,
+            meanB,
+            stdR,
+            stdG,
+            stdB,
+            [outputData, quantScale, quantZeroPoint](int index, float value) {
+                const int quantized = static_cast<int>(std::lround(value / quantScale + quantZeroPoint));
+                outputData[index] = static_cast<jbyte>(std::clamp(quantized, -128, 127));
+            });
+
+    env->ReleaseByteArrayElements(output, outputData, success ? 0 : JNI_ABORT);
+    env->ReleaseByteArrayElements(v, vData, JNI_ABORT);
+    env->ReleaseByteArrayElements(u, uData, JNI_ABORT);
+    env->ReleaseByteArrayElements(y, yData, JNI_ABORT);
+    return success ? JNI_TRUE : JNI_FALSE;
+}
 
 extern "C"
 JNIEXPORT jfloatArray JNICALL

@@ -37,6 +37,18 @@ class ProcessFrameUseCase(
     private data class ObstacleTrackingOutput(
         val trackedObstacles: List<DetectedObstacle>,
         val instanceDetections: List<DetectedInstance> = emptyList(),
+        val instancePreprocessTimeMs: Long = 0,
+        val instanceInferenceTimeMs: Long = 0,
+        val instanceOutputReadTimeMs: Long = 0,
+        val instancePostprocessTimeMs: Long = 0,
+    )
+
+    private data class SemanticAnalysisOutput(
+        val analysis: SegmentationAnalysis,
+        val preprocessTimeMs: Long = 0,
+        val inferenceTimeMs: Long = 0,
+        val outputReadTimeMs: Long = 0,
+        val postprocessTimeMs: Long = 0,
     )
 
     private data class CachedSemanticAnalysis(
@@ -57,9 +69,10 @@ class ProcessFrameUseCase(
         frameCount++
 
         // 1. 语义分割推理。高分辨率 semantic 输出较重，可配置为隔帧刷新并复用上一次 mask。
-        val analysis = getSemanticAnalysis(frame).getOrElse {
+        val semanticOutput = getSemanticAnalysis(frame).getOrElse {
             return Result.failure(it)
         }
+        val analysis = semanticOutput.analysis
 
         // 3. 障碍物检测与跟踪
         val trackingOutput = detectAndTrackObstacles(frame, analysis)
@@ -74,13 +87,21 @@ class ProcessFrameUseCase(
             instanceDetections = trackingOutput.instanceDetections,
             bottomStats = analysis.bottomStats,
             analysis = analysis,
-            inferenceTimeMs = inferenceTime
+            inferenceTimeMs = inferenceTime,
+            semanticPreprocessTimeMs = semanticOutput.preprocessTimeMs,
+            semanticInferenceTimeMs = semanticOutput.inferenceTimeMs,
+            semanticOutputReadTimeMs = semanticOutput.outputReadTimeMs,
+            semanticPostprocessTimeMs = semanticOutput.postprocessTimeMs,
+            instancePreprocessTimeMs = trackingOutput.instancePreprocessTimeMs,
+            instanceInferenceTimeMs = trackingOutput.instanceInferenceTimeMs,
+            instanceOutputReadTimeMs = trackingOutput.instanceOutputReadTimeMs,
+            instancePostprocessTimeMs = trackingOutput.instancePostprocessTimeMs,
         )
 
         return Result.success(perception)
     }
 
-    private suspend fun getSemanticAnalysis(frame: ImageFrame): Result<SegmentationAnalysis> {
+    private suspend fun getSemanticAnalysis(frame: ImageFrame): Result<SemanticAnalysisOutput> {
         val reusableCached = cachedSemanticAnalysis?.takeIf { cached ->
             cached.frameWidth == frame.width &&
                 cached.frameHeight == frame.height &&
@@ -94,7 +115,11 @@ class ProcessFrameUseCase(
 
         if (!shouldRunSemantic) {
             framesSinceSemanticUpdate++
-            return Result.success(requireNotNull(reusableCached).analysis)
+            return Result.success(
+                SemanticAnalysisOutput(
+                    analysis = requireNotNull(reusableCached).analysis,
+                )
+            )
         }
 
         val segmentationOutput = perceptionRepository.segment(frame).getOrElse {
@@ -108,7 +133,15 @@ class ProcessFrameUseCase(
             analysis = analysis,
         )
         framesSinceSemanticUpdate = 0
-        return Result.success(analysis)
+        return Result.success(
+            SemanticAnalysisOutput(
+                analysis = analysis,
+                preprocessTimeMs = segmentationOutput.preprocessTimeMs,
+                inferenceTimeMs = segmentationOutput.modelTimeMs,
+                outputReadTimeMs = segmentationOutput.outputReadTimeMs,
+                postprocessTimeMs = segmentationOutput.postprocessTimeMs,
+            )
+        )
     }
 
     private suspend fun detectAndTrackObstacles(
@@ -153,11 +186,15 @@ class ProcessFrameUseCase(
             // 同时推理：sem（可行走区域）+ seg（障碍物识别）每帧都跑
             // 优点：障碍物信息最及时；缺点：每帧双模型推理，功耗较高
             InferenceStrategy.SIMULTANEOUS -> {
-                val instances = instanceProvider.detect(frame)
-                val rawObstacles = obstacleExtractor.extractFromInstances(instances, depthEstimator)
+                val instanceOutput = instanceProvider.detect(frame)
+                val rawObstacles = obstacleExtractor.extractFromInstances(instanceOutput.instances, depthEstimator)
                 ObstacleTrackingOutput(
                     trackedObstacles = obstacleTracker.update(rawObstacles, frame.timestamp),
-                    instanceDetections = instances,
+                    instanceDetections = instanceOutput.instances,
+                    instancePreprocessTimeMs = instanceOutput.preprocessTimeMs,
+                    instanceInferenceTimeMs = instanceOutput.inferenceTimeMs,
+                    instanceOutputReadTimeMs = instanceOutput.outputReadTimeMs,
+                    instancePostprocessTimeMs = instanceOutput.postprocessTimeMs,
                 )
             }
 
@@ -166,11 +203,15 @@ class ProcessFrameUseCase(
             InferenceStrategy.ALTERNATING -> {
                 if (frameCount % 2 == 1) {
                     // 奇数帧：运行 seg（障碍物识别），更新跟踪器
-                    val instances = instanceProvider.detect(frame)
-                    val rawObstacles = obstacleExtractor.extractFromInstances(instances, depthEstimator)
+                    val instanceOutput = instanceProvider.detect(frame)
+                    val rawObstacles = obstacleExtractor.extractFromInstances(instanceOutput.instances, depthEstimator)
                     ObstacleTrackingOutput(
                         trackedObstacles = obstacleTracker.update(rawObstacles, frame.timestamp),
-                        instanceDetections = instances,
+                        instanceDetections = instanceOutput.instances,
+                        instancePreprocessTimeMs = instanceOutput.preprocessTimeMs,
+                        instanceInferenceTimeMs = instanceOutput.inferenceTimeMs,
+                        instanceOutputReadTimeMs = instanceOutput.outputReadTimeMs,
+                        instancePostprocessTimeMs = instanceOutput.postprocessTimeMs,
                     )
                 } else {
                     // 偶数帧：跳过 seg，用跟踪器运动预测补偿

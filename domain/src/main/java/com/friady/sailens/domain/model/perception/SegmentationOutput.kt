@@ -8,6 +8,8 @@ data class SegmentationOutput(
     val preprocessTimeMs: Long,
     val inferenceTimeMs: Long,
     val postprocessTimeMs: Long,
+    val modelTimeMs: Long = inferenceTimeMs,
+    val outputReadTimeMs: Long = 0,
 )
 
 /**

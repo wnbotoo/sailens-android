@@ -14,6 +14,7 @@ import com.friady.sailens.domain.model.perception.ClassMapper
 import com.friady.sailens.domain.model.perception.DetectedInstance
 import com.friady.sailens.domain.model.perception.ImageFrame
 import com.friady.sailens.domain.model.perception.ImagePixelFormat
+import com.friady.sailens.domain.model.perception.InstanceSegmentationOutput
 import com.friady.sailens.domain.model.perception.SegmentationMask
 import com.friady.sailens.domain.model.perception.SegmentationOutput
 import com.friady.sailens.domain.processor.perception.ObstacleExtractor
@@ -173,16 +174,18 @@ class ProcessFrameUseCaseTest {
 
         override suspend fun initialize() = Unit
 
-        override suspend fun detect(frame: ImageFrame): List<DetectedInstance> {
+        override suspend fun detect(frame: ImageFrame): InstanceSegmentationOutput {
             detectCalls++
-            return listOf(
-                DetectedInstance(
-                    classId = 0,
-                    className = "person",
-                    confidence = 0.9f,
-                    boundingBox = NormalizedRect(0.4f, 0.4f, 0.2f, 0.2f),
-                    mask = null,
-                    category = ObstacleCategory.PERSON,
+            return InstanceSegmentationOutput(
+                instances = listOf(
+                    DetectedInstance(
+                        classId = 0,
+                        className = "person",
+                        confidence = 0.9f,
+                        boundingBox = NormalizedRect(0.4f, 0.4f, 0.2f, 0.2f),
+                        mask = null,
+                        category = ObstacleCategory.PERSON,
+                    )
                 )
             )
         }

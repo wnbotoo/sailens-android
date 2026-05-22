@@ -17,7 +17,7 @@ import com.friady.sailens.domain.model.common.ZoneMode
  *
  *   - YOLOv26n-seg (instanceProviderType = YOLO26_SEG)
  *       识别障碍物：有什么（类别）、在哪里（BBox + Mask）
- *       → 驱动 InstanceSegmentationProvider.detect() → List<DetectedInstance>
+ *       → 驱动 InstanceSegmentationProvider.detect() → InstanceSegmentationOutput
  *
  * 推理策略 (inferenceStrategy)：
  *   - SIMULTANEOUS: 两个模型每帧同时推理，信息最新，适合高性能设备

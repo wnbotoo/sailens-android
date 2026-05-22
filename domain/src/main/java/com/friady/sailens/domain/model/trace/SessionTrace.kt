@@ -32,6 +32,14 @@ data class FrameTrace(
     val floodReachRatio: Double,
     val widthRetentionP25: Double,
     val messageKeys: List<String>,
+    val semanticPreprocessMs: Long = 0,
+    val semanticInferenceMs: Long = 0,
+    val semanticOutputReadMs: Long = 0,
+    val semanticPostprocessMs: Long = 0,
+    val instancePreprocessMs: Long = 0,
+    val instanceInferenceMs: Long = 0,
+    val instanceOutputReadMs: Long = 0,
+    val instancePostprocessMs: Long = 0,
 )
 
 data class SessionTraceSummary(
@@ -104,4 +112,3 @@ class SessionTraceAccumulator(
         )
     }
 }
-

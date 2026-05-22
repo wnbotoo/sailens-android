@@ -3,6 +3,7 @@ package com.friady.sailens.data.source.ml
 import com.friady.sailens.data.source.ml.semantic.SegmenterConfig
 import com.friady.sailens.domain.model.perception.ImageFrame
 import com.friady.sailens.domain.model.perception.ImagePixelFormat
+import com.friady.sailens.domain.model.perception.Yuv420FrameData
 import org.opencv.core.Core
 import org.opencv.core.CvType
 import org.opencv.core.Mat
@@ -26,21 +27,17 @@ class OpenCVImageProcessor(
     private val scaledImage = Mat()
     private val paddedImage = Mat()
     private val normalizedImage = Mat()
+    private var rgbaScratch = ByteArray(0)
 
     /**
-     * 预处理：ImageFrame RGBA bytes -> Mat -> Rotate -> Letterbox Resize -> Normalize -> FloatArray
+     * 预处理：ImageFrame -> RGB Mat -> Rotate -> Letterbox Resize -> Normalize -> FloatArray
      */
     override fun preprocess(frame: ImageFrame, rotationDegrees: Int, outputArray: FloatArray) {
-        require(frame.pixelFormat == ImagePixelFormat.RGBA_8888) {
-            "Unsupported frame pixel format ${frame.pixelFormat}"
-        }
-        require(frame.pixelBytes.size >= frame.width * frame.height * frame.pixelFormat.bytesPerPixel) {
-            "Frame pixel buffer is smaller than ${frame.width}x${frame.height} ${frame.pixelFormat}"
-        }
+        val rgbaBytes = frame.toRgbaBytes()
 
         // 1. RGBA bytes -> Mat
         inputMatRgba.create(frame.height, frame.width, CvType.CV_8UC4)
-        inputMatRgba.put(0, 0, frame.pixelBytes)
+        inputMatRgba.put(0, 0, rgbaBytes)
 
         // 2. 转为 RGB
         Imgproc.cvtColor(inputMatRgba, inputMatRgb, Imgproc.COLOR_RGBA2RGB)
@@ -118,6 +115,70 @@ class OpenCVImageProcessor(
         }
     }
 
+    private fun ImageFrame.toRgbaBytes(): ByteArray {
+        return when (pixelFormat) {
+            ImagePixelFormat.RGBA_8888 -> {
+                require(pixelBytes.size >= width * height * pixelFormat.bytesPerPixel) {
+                    "Frame pixel buffer is smaller than ${width}x$height $pixelFormat"
+                }
+                pixelBytes
+            }
+
+            ImagePixelFormat.YUV_420_888 -> {
+                val yuv = requireNotNull(yuvData) {
+                    "YUV_420_888 frame must include yuvData"
+                }
+                val requiredSize = width * height * ImagePixelFormat.RGBA_8888.bytesPerPixel
+                if (rgbaScratch.size != requiredSize) {
+                    rgbaScratch = ByteArray(requiredSize)
+                }
+                yuv420ToRgba(yuv, width, height, rgbaScratch)
+                rgbaScratch
+            }
+        }
+    }
+
+    private fun yuv420ToRgba(
+        yuv: Yuv420FrameData,
+        width: Int,
+        height: Int,
+        output: ByteArray,
+    ) {
+        var outIndex = 0
+        for (y in 0 until height) {
+            val yRowOffset = y * yuv.y.rowStride
+            val uRowOffset = (y / 2) * yuv.u.rowStride
+            val vRowOffset = (y / 2) * yuv.v.rowStride
+
+            for (x in 0 until width) {
+                val yValue = yuv.y.bytes.unsigned(yRowOffset + x * yuv.y.pixelStride)
+                val uvColumnOffset = (x / 2) * yuv.u.pixelStride
+                val uValue = yuv.u.bytes.unsigned(uRowOffset + uvColumnOffset)
+                val vValue = yuv.v.bytes.unsigned(vRowOffset + (x / 2) * yuv.v.pixelStride)
+
+                val c = (yValue - 16).coerceAtLeast(0)
+                val d = uValue - 128
+                val e = vValue - 128
+
+                output[outIndex++] = clampToByte((298 * c + 409 * e + 128) shr 8)
+                output[outIndex++] = clampToByte((298 * c - 100 * d - 208 * e + 128) shr 8)
+                output[outIndex++] = clampToByte((298 * c + 516 * d + 128) shr 8)
+                output[outIndex++] = FULL_ALPHA
+            }
+        }
+    }
+
+    private fun ByteArray.unsigned(index: Int): Int {
+        require(index in indices) {
+            "Plane buffer index $index out of bounds [0, $size)"
+        }
+        return this[index].toInt() and 0xFF
+    }
+
+    private fun clampToByte(value: Int): Byte {
+        return value.coerceIn(0, 255).toByte()
+    }
+
     override fun close() {
         inputMatRgba.release()
         inputMatRgb.release()
@@ -125,5 +186,9 @@ class OpenCVImageProcessor(
         scaledImage.release()
         paddedImage.release()
         normalizedImage.release()
+    }
+
+    private companion object {
+        private val FULL_ALPHA: Byte = 0xFF.toByte()
     }
 }
