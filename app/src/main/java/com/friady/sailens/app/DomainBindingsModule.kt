@@ -2,6 +2,9 @@ package com.friady.sailens.app
 
 import com.friady.sailens.domain.config.AnalysisConfig
 import com.friady.sailens.domain.config.PerceptionConfig
+import com.friady.sailens.domain.model.common.InferenceStrategy
+import com.friady.sailens.domain.model.common.PerceptionMode
+import com.friady.sailens.domain.model.common.SemanticProviderType
 import com.friady.sailens.domain.processor.analysis.ConnectivityChecker
 import com.friady.sailens.domain.processor.analysis.CrossValidator
 import com.friady.sailens.domain.processor.analysis.GroundTypeDetector
@@ -27,7 +30,15 @@ import com.friady.sailens.domain.usecase.trace.LoadTraceReplayReportUseCase
 import org.koin.dsl.module
 
 val domainBindingsModule = module {
-    single { PerceptionConfig() }
+    single {
+        PerceptionConfig(
+            mode = PerceptionMode.COMBINED,
+            semanticProviderType = SemanticProviderType.YOLO26_SEM,
+            inferenceStrategy = InferenceStrategy.ALTERNATING,
+            enableSemanticFrameSkipping = false,
+            semanticFrameInterval = 2,
+        )
+    }
     single { AnalysisConfig() }
 
     single { SegmentationAnalyzer(config = get(), classMapper = get()) }
@@ -38,7 +49,7 @@ val domainBindingsModule = module {
     single { GroundTypeDetector(config = get()) }
     single { SceneClassifier(config = get()) }
     single { CrossValidator(config = get()) }
-    single { EventGenerator() }
+    single { EventGenerator(config = get()) }
     single { EventConflictResolver() }
     single { EventMerger() }
     single { CooldownManager() }
@@ -47,7 +58,7 @@ val domainBindingsModule = module {
         ProcessFrameUseCase(
             get(),
             get(),
-            null,
+            get(),
             get(),
             get(),
             get(),
@@ -74,7 +85,8 @@ val domainBindingsModule = module {
     factory {
         StartSceneAnalysisUseCase(
             get(),
-            null,
+            get(),
+            get(),
             get(),
             get(),
             get(),
@@ -85,7 +97,7 @@ val domainBindingsModule = module {
     factory {
         StopSceneAnalysisUseCase(
             get(),
-            null,
+            get(),
             get(),
             get(),
             get(),
@@ -103,4 +115,3 @@ val domainBindingsModule = module {
     factory { LoadTraceReplayReportUseCase(get(), get()) }
     factory { LoadLatestTraceReplayReportUseCase(get(), get()) }
 }
-

@@ -1,15 +1,12 @@
-package com.friady.sailens.data.source.ml.segmentation
+package com.friady.sailens.data.source.ml.semantic
 
 import android.os.SystemClock
-import android.util.Log
 import com.friady.sailens.data.source.ml.FramePreprocessor
 import com.friady.sailens.data.source.ml.OpenCVImageProcessor
 import com.friady.sailens.domain.model.perception.ImageFrame
 import com.friady.sailens.domain.model.perception.SegmentationMask
 import com.friady.sailens.domain.model.perception.SegmentationOutput
 import com.google.ai.edge.litert.CompiledModel
-
-private const val TAG = "LiteRTSegmenter"
 
 class LiteRTSegmenter(
     private val model: CompiledModel,
@@ -26,6 +23,7 @@ class LiteRTSegmenter(
 
     // 使用 LiteRT 处理器
     private val processor: FramePreprocessor = OpenCVImageProcessor(config)
+    private val nativePostProcessor = YOLO26SemNativePostProcessor(config)
 
     fun segment(rawFrame: ImageFrame): SegmentationOutput {
         val startTime = SystemClock.uptimeMillis()
@@ -39,7 +37,9 @@ class LiteRTSegmenter(
         val afterInferenceTime = SystemClock.uptimeMillis()
 
         // 4. 后处理: FloatArray -> IntArray (ArgMax)
-        processor.postprocess(outputFloatArray, cachedResultMask)
+        if (!nativePostProcessor.postProcess(outputFloatArray, cachedResultMask)) {
+            processor.postprocess(outputFloatArray, cachedResultMask)
+        }
         val afterPostprocessTime = SystemClock.uptimeMillis()
 
         // 3. 包装结果
@@ -54,11 +54,6 @@ class LiteRTSegmenter(
         val preprocessTimeMs = afterPreprocessTime - startTime
         val inferenceTimeMs = afterInferenceTime - afterPreprocessTime
         val postprocessTimeMs = afterPostprocessTime - afterInferenceTime
-
-        Log.d(
-            TAG,
-            "preprocessTimeMs ${preprocessTimeMs}, inferenceTimeMs ${inferenceTimeMs}, postprocessTimeMs ${postprocessTimeMs}"
-        )
 
         return SegmentationOutput(
             mask,
@@ -75,7 +70,7 @@ class LiteRTSegmenter(
         // 运行模型
         model.run(inputBuffers, outputBuffers)
 
-        // 读取输出 (假设输出是 NHWC [1, 128, 256, 19] 扁平化后的数据)
+        // 读取输出，形状由 SegmenterConfig 对应的 TFLite tensor metadata 决定。
         return outputBuffers[0].readFloat()
     }
 

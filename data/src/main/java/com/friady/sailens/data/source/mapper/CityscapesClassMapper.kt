@@ -6,7 +6,7 @@ import com.friady.sailens.domain.model.perception.ClassMapper
 
 /**
  * Cityscapes 数据集类别映射器
- * 用于 DDRNet 等基于 Cityscapes 训练的模型
+ * 用于 YOLO26-sem 等基于 Cityscapes 19 类语义定义训练的模型
  */
 class CityscapesClassMapper : ClassMapper {
 

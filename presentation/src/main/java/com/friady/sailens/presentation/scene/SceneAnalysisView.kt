@@ -4,7 +4,9 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.graphics.Paint
 import android.widget.Toast
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -33,7 +35,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -42,6 +49,8 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.friady.sailens.camera.CameraView
+import com.friady.sailens.domain.model.common.ObstacleCategory
+import com.friady.sailens.domain.model.perception.DetectedObstacle
 import com.friady.sailens.presentation.R
 import org.koin.androidx.compose.koinViewModel
 import java.io.File
@@ -160,6 +169,10 @@ private fun ContentForLandscape(
     Row(modifier = modifier.fillMaxSize()) {
         CaptureView(
             segMask = state.segMask,
+            overlayMode = state.overlayMode,
+            trackedObstacles = state.trackedObstacles,
+            frameDisplayWidth = state.frameDisplayWidth,
+            frameDisplayHeight = state.frameDisplayHeight,
             contentScale = ContentScale.FillHeight,
             modifier = Modifier
                 .weight(1f)
@@ -204,6 +217,10 @@ private fun ContentForPortrait(
     Column(modifier = modifier) {
         CaptureView(
             segMask = state.segMask,
+            overlayMode = state.overlayMode,
+            trackedObstacles = state.trackedObstacles,
+            frameDisplayWidth = state.frameDisplayWidth,
+            frameDisplayHeight = state.frameDisplayHeight,
             contentScale = ContentScale.Fit,
             modifier = Modifier
                 .fillMaxWidth()
@@ -238,6 +255,10 @@ private fun ContentForPortrait(
 @Composable
 private fun CaptureView(
     segMask: android.graphics.Bitmap?,
+    overlayMode: SegmentationOverlayMode,
+    trackedObstacles: List<DetectedObstacle>,
+    frameDisplayWidth: Int?,
+    frameDisplayHeight: Int?,
     contentScale: ContentScale,
     modifier: Modifier = Modifier
 ) {
@@ -259,6 +280,56 @@ private fun CaptureView(
                 contentScale = contentScale,
                 alpha = 0.6f
             )
+        }
+        if (overlayMode == SegmentationOverlayMode.INSTANCE_DEBUG && trackedObstacles.isNotEmpty()) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val transform = ViewContentTransform.from(
+                    containerSize = size,
+                    sourceWidth = frameDisplayWidth,
+                    sourceHeight = frameDisplayHeight,
+                    contentScale = contentScale,
+                )
+                val labelPaint = Paint().apply {
+                    color = android.graphics.Color.WHITE
+                    textSize = 32f
+                    isAntiAlias = true
+                    style = Paint.Style.FILL
+                }
+                val backgroundPaint = Paint().apply {
+                    color = android.graphics.Color.argb(180, 0, 0, 0)
+                    style = Paint.Style.FILL
+                }
+
+                trackedObstacles.forEach { obstacle ->
+                    val color = obstacle.category.overlayColor()
+                    val left = transform.offsetX + obstacle.boundingBox.x * transform.sourceWidth * transform.scale
+                    val top = transform.offsetY + obstacle.boundingBox.y * transform.sourceHeight * transform.scale
+                    val width = obstacle.boundingBox.width * transform.sourceWidth * transform.scale
+                    val height = obstacle.boundingBox.height * transform.sourceHeight * transform.scale
+
+                    drawRect(
+                        color = color,
+                        topLeft = Offset(left, top),
+                        size = Size(width, height),
+                        style = Stroke(width = 4.dp.toPx(), cap = StrokeCap.Round),
+                    )
+
+                    val label = "${obstacle.category.name} ${(obstacle.confidence * 100).toInt()}%"
+                    drawContext.canvas.nativeCanvas.apply {
+                        val textWidth = labelPaint.measureText(label)
+                        drawRoundRect(
+                            left,
+                            (top - 38f).coerceAtLeast(0f),
+                            (left + textWidth + 18f).coerceAtMost(size.width),
+                            (top - 4f).coerceAtLeast(30f),
+                            10f,
+                            10f,
+                            backgroundPaint,
+                        )
+                        drawText(label, left + 8f, (top - 12f).coerceAtLeast(24f), labelPaint)
+                    }
+                }
+            }
         }
     }
 }
@@ -323,15 +394,22 @@ private fun ControlView(
             ) {
                 Text(stringResource(R.string.btn_overlay_semantic))
             }
+
+            Button(
+                onClick = { onOverlayModeChange(SegmentationOverlayMode.INSTANCE_DEBUG) },
+                modifier = Modifier.weight(1f),
+            ) {
+                Text(stringResource(R.string.btn_overlay_instance_debug))
+            }
         }
 
         Text(
             text = stringResource(
                 R.string.label_current_overlay_mode,
-                if (overlayMode == SegmentationOverlayMode.PASSABLE_MASK) {
-                    stringResource(R.string.btn_overlay_passable)
-                } else {
-                    stringResource(R.string.btn_overlay_semantic)
+                when (overlayMode) {
+                    SegmentationOverlayMode.PASSABLE_MASK -> stringResource(R.string.btn_overlay_passable)
+                    SegmentationOverlayMode.SEMANTIC_CLASSES -> stringResource(R.string.btn_overlay_semantic)
+                    SegmentationOverlayMode.INSTANCE_DEBUG -> stringResource(R.string.btn_overlay_instance_debug)
                 }
             ),
             style = MaterialTheme.typography.bodySmall,
@@ -383,6 +461,9 @@ private fun SceneDebugInfoView(
             text = stringResource(R.string.title_live_pipeline_debug),
             style = MaterialTheme.typography.titleSmall,
         )
+        Text(stringResource(R.string.debug_semantic_provider, debugInfo.semanticProvider))
+        Text(stringResource(R.string.debug_instance_provider, debugInfo.instanceProvider))
+        Text(stringResource(R.string.debug_inference_strategy, debugInfo.inferenceStrategy))
         Text(stringResource(R.string.debug_passable_ratio, passablePercent))
         Text(stringResource(R.string.debug_navigation_passable_ratio, navigationPassablePercent))
         Text(stringResource(R.string.debug_obstacle_ratio, obstaclePercent))
@@ -400,6 +481,8 @@ private fun SceneDebugInfoView(
         Text(stringResource(R.string.debug_recent_avg_pipeline_ms, debugInfo.recentAvgTotalPipelineMs))
         Text(stringResource(R.string.debug_recent_p95_pipeline_ms, debugInfo.recentP95TotalPipelineMs))
         Text(stringResource(R.string.debug_recent_dropped_rate, recentDroppedPercent, debugInfo.droppedFramesSinceLast))
+        Text(stringResource(R.string.debug_tracked_obstacle_count, debugInfo.trackedObstacleCount))
+        Text(stringResource(R.string.debug_raw_instance_count, debugInfo.rawInstanceCount, debugInfo.rawInstanceMaskCount))
         Text(
             text = stringResource(
                 if (debugInfo.isRuntimeOverBudget) {
@@ -414,6 +497,55 @@ private fun SceneDebugInfoView(
                 MaterialTheme.colorScheme.primary
             },
         )
+    }
+}
+
+private fun ObstacleCategory.overlayColor(): Color {
+    return when (this) {
+        ObstacleCategory.PERSON -> Color(0xFFFF5252)
+        ObstacleCategory.VEHICLE -> Color(0xFF42A5F5)
+        ObstacleCategory.BICYCLE -> Color(0xFFFFCA28)
+        ObstacleCategory.STATIC_OBSTACLE -> Color(0xFFAB47BC)
+        ObstacleCategory.UNKNOWN -> Color.White
+    }
+}
+
+private data class ViewContentTransform(
+    val sourceWidth: Float,
+    val sourceHeight: Float,
+    val scale: Float,
+    val offsetX: Float,
+    val offsetY: Float,
+) {
+    companion object {
+        fun from(
+            containerSize: Size,
+            sourceWidth: Int?,
+            sourceHeight: Int?,
+            contentScale: ContentScale,
+        ): ViewContentTransform {
+            val safeSourceWidth = sourceWidth?.takeIf { it > 0 }?.toFloat() ?: containerSize.width
+            val safeSourceHeight = sourceHeight?.takeIf { it > 0 }?.toFloat() ?: containerSize.height
+            val scaleX = containerSize.width / safeSourceWidth
+            val scaleY = containerSize.height / safeSourceHeight
+            val scale = when (contentScale) {
+                ContentScale.Fit -> minOf(scaleX, scaleY)
+                ContentScale.FillHeight -> scaleY
+                ContentScale.FillWidth -> scaleX
+                ContentScale.Crop -> maxOf(scaleX, scaleY)
+                else -> minOf(scaleX, scaleY)
+            }
+            val drawnWidth = safeSourceWidth * scale
+            val drawnHeight = safeSourceHeight * scale
+
+            return ViewContentTransform(
+                sourceWidth = safeSourceWidth,
+                sourceHeight = safeSourceHeight,
+                scale = scale,
+                offsetX = (containerSize.width - drawnWidth) / 2f,
+                offsetY = (containerSize.height - drawnHeight) / 2f,
+            )
+        }
     }
 }
 

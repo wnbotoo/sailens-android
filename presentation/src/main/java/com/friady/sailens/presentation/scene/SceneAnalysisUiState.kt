@@ -1,6 +1,8 @@
 package com.friady.sailens.presentation.scene
 
 import android.graphics.Bitmap
+import com.friady.sailens.domain.model.perception.DetectedInstance
+import com.friady.sailens.domain.model.perception.DetectedObstacle
 import com.friady.sailens.domain.model.scene.SceneEvent
 import com.friady.sailens.domain.model.scene.SceneDebugInfo
 import com.friady.sailens.domain.model.trace.TraceReplayReport
@@ -17,6 +19,10 @@ data class SceneAnalysisUiState(
     val isSpeechReady: Boolean = false,
     val overlayMode: SegmentationOverlayMode = SegmentationOverlayMode.PASSABLE_MASK,
     val segMask: Bitmap? = null,
+    val frameDisplayWidth: Int? = null,
+    val frameDisplayHeight: Int? = null,
+    val trackedObstacles: List<DetectedObstacle> = emptyList(),
+    val instanceDetections: List<DetectedInstance> = emptyList(),
     val latestSceneDebugInfo: SceneDebugInfo? = null,
     val lastEvents: List<SceneEvent> = emptyList(),
     val eventCount: Int = 0,

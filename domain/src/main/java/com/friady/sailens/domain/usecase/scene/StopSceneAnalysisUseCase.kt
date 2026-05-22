@@ -17,7 +17,7 @@ import com.friady.sailens.domain.service.LogService
  */
 class StopSceneAnalysisUseCase(
     private val perceptionRepository: PerceptionRepository,
-    private val instanceProvider: InstanceSegmentationProvider?,
+    private val instanceProvider: InstanceSegmentationProvider,
     private val segmentationAnalyzer: SegmentationAnalyzer,
     private val obstacleTracker: ObstacleTracker,
     private val connectivityChecker: ConnectivityChecker,
@@ -46,7 +46,7 @@ class StopSceneAnalysisUseCase(
 
     suspend fun release() {
         perceptionRepository.release()
-        instanceProvider?.release()
+        instanceProvider.release()
         logService.info("Navigation", "Resources released")
     }
 }

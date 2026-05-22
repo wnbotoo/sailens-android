@@ -18,13 +18,17 @@ class CooldownManager() {
         EventCategory.GROUND_CHANGE to 8000
     )
 
+    private val keyCooldowns: Map<String, Long> = mapOf(
+        "road_warning_vehicle" to 5000,
+    )
+
     private val lastEventTimes = mutableMapOf<String, Long>()
 
     fun filter(events: List<SceneEvent>, now: Long): List<SceneEvent> {
         return events.filter { event ->
-            val cooldown = cooldowns[event.category] ?: 3000
             event.cooldownKeys().all { key ->
                 val lastTime = lastEventTimes[key]
+                val cooldown = cooldownFor(event, key)
                 lastTime == null || now - lastTime >= cooldown
             }
         }
@@ -42,5 +46,9 @@ class CooldownManager() {
 
     private fun SceneEvent.cooldownKeys(): Set<String> = cooldownKeys.ifEmpty {
         setOf(dedupeKey.ifBlank { category.name })
+    }
+
+    private fun cooldownFor(event: SceneEvent, key: String): Long {
+        return keyCooldowns[key] ?: cooldowns[event.category] ?: 3000
     }
 }

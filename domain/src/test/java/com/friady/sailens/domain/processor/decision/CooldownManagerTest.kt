@@ -73,6 +73,40 @@ class CooldownManagerTest {
         assertTrue(filtered.isEmpty())
     }
 
+    @Test
+    fun `vehicle road warning uses shorter cooldown`() {
+        val first = roadWarningEvent(
+            messageKey = "event_road_warning_vehicle",
+            dedupeKey = "road_warning_vehicle",
+        )
+        val repeated = roadWarningEvent(
+            messageKey = "event_road_warning_vehicle",
+            dedupeKey = "road_warning_vehicle",
+        )
+
+        cooldownManager.recordEvent(first, now = 10_000)
+
+        assertTrue(cooldownManager.filter(listOf(repeated), now = 14_999).isEmpty())
+        assertEquals(listOf(repeated), cooldownManager.filter(listOf(repeated), now = 15_000))
+    }
+
+    @Test
+    fun `non vehicle road warning keeps category cooldown`() {
+        val first = roadWarningEvent(
+            messageKey = "event_road_warning",
+            dedupeKey = "road_warning_area",
+        )
+        val repeated = roadWarningEvent(
+            messageKey = "event_road_warning",
+            dedupeKey = "road_warning_area",
+        )
+
+        cooldownManager.recordEvent(first, now = 10_000)
+
+        assertTrue(cooldownManager.filter(listOf(repeated), now = 15_000).isEmpty())
+        assertEquals(listOf(repeated), cooldownManager.filter(listOf(repeated), now = 22_000))
+    }
+
     private fun obstacleEvent(
         messageKey: String,
         dedupeKey: String,
@@ -87,5 +121,17 @@ class CooldownManagerTest {
         dedupeKey = dedupeKey,
         cooldownKeys = cooldownKeys,
         relatedZones = listOf(zone),
+    )
+
+    private fun roadWarningEvent(
+        messageKey: String,
+        dedupeKey: String,
+    ): SceneEvent = SceneEvent(
+        timestamp = 10_000,
+        category = EventCategory.ROAD_WARNING,
+        priority = EventPriority.HIGH,
+        messageKey = messageKey,
+        expiresAt = 15_000,
+        dedupeKey = dedupeKey,
     )
 }

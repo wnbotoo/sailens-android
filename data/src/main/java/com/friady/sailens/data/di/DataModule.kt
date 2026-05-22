@@ -9,12 +9,14 @@ import com.friady.sailens.data.service.FileTraceService
 import com.friady.sailens.data.source.depth.ImagePositionDepthEstimator
 import com.friady.sailens.data.source.device.DeviceRotationDataSource
 import com.friady.sailens.data.source.mapper.ClassMapperProviderImpl
-import com.friady.sailens.data.source.ml.segmentation.DDRNetSegmentationModel
-import com.friady.sailens.data.source.ml.segmentation.SegmentationModel
+import com.friady.sailens.data.source.ml.instance.YOLO26SegInstanceProvider
+import com.friady.sailens.data.source.ml.semantic.SegmentationModel
+import com.friady.sailens.data.source.ml.semantic.YOLO26SemSegmentationModel
 import com.friady.sailens.domain.model.perception.ClassMapper
 import com.friady.sailens.domain.model.perception.ClassMapperProvider
 import com.friady.sailens.domain.repository.DepthRepository
 import com.friady.sailens.domain.repository.DeviceSensorRepository
+import com.friady.sailens.domain.repository.InstanceSegmentationProvider
 import com.friady.sailens.domain.repository.PerceptionRepository
 import com.friady.sailens.domain.service.LogService
 import com.friady.sailens.domain.service.TraceReplayService
@@ -24,9 +26,7 @@ import org.koin.dsl.module
 
 val dataModule = module {
     single<ClassMapperProvider> {
-        ClassMapperProviderImpl(
-            config = get()
-        )
+        ClassMapperProviderImpl()
     }
 
     single<ClassMapper> {
@@ -34,7 +34,15 @@ val dataModule = module {
     }
 
     // Data source
-    single<SegmentationModel> { DDRNetSegmentationModel(context = androidContext()) }
+    single<SegmentationModel> {
+        YOLO26SemSegmentationModel(context = androidContext())
+    }
+    single<InstanceSegmentationProvider> {
+        YOLO26SegInstanceProvider(
+            context = androidContext(),
+            perceptionConfig = get(),
+        )
+    }
     single { ImagePositionDepthEstimator() }
     single { DeviceRotationDataSource(context = androidContext()) }
 

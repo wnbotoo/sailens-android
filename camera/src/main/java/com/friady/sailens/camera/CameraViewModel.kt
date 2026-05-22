@@ -2,7 +2,6 @@ package com.friady.sailens.camera
 
 import android.content.Context
 import android.util.Size
-import android.view.Surface
 import androidx.camera.core.AspectRatio
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
@@ -22,8 +21,8 @@ class CameraViewModel(
     private val imageFrameAnalyzer: ImageAnalysis.Analyzer,
 ) : ViewModel() {
     private companion object {
-        val PREVIEW_SIZE = Size(1920, 1080)
-        val ANALYSIS_SIZE = Size(640, 360)
+        val PREVIEW_SIZE = Size(1280, 720)
+        val ANALYSIS_SIZE = Size(1280, 720)
     }
 
     private val executor = Executors.newSingleThreadExecutor()
@@ -47,7 +46,7 @@ class CameraViewModel(
 
     private val imageAnalysis =
         ImageAnalysis.Builder().setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-            .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
+            .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
             .setResolutionSelector(getResolutionSelector(ANALYSIS_SIZE)).build().apply {
                 setAnalyzer(executor, imageFrameAnalyzer)
             }

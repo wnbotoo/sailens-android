@@ -23,7 +23,11 @@ class AnalyzeSceneUseCase(
 
         // 1.  独立分析
         val connectivity = connectivityChecker.analyze(analysis.passableMask)
-        val roadSafety = roadSafetyAnalyzer.analyze(analysis, perceptionResult.obstacles)
+        val roadSafety = roadSafetyAnalyzer.analyze(
+            analysis = analysis,
+            obstacles = perceptionResult.obstacles,
+            instanceDetections = perceptionResult.instanceDetections,
+        )
         val groundChange = groundTypeDetector.detect(analysis.bottomCenterGroundDistribution)
         val sceneElements = sceneClassifier.classify(analysis)
 

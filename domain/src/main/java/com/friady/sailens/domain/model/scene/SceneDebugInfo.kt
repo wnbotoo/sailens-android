@@ -1,6 +1,9 @@
 package com.friady.sailens.domain.model.scene
 
 data class SceneDebugInfo(
+    val semanticProvider: String,
+    val instanceProvider: String,
+    val inferenceStrategy: String,
     val passableRatio: Float,
     val navigationPassableRatio: Float,
     val obstacleRatio: Float,
@@ -24,4 +27,7 @@ data class SceneDebugInfo(
     val recentP95TotalPipelineMs: Long,
     val recentDroppedFrameRate: Double,
     val isRuntimeOverBudget: Boolean,
+    val trackedObstacleCount: Int,
+    val rawInstanceCount: Int,
+    val rawInstanceMaskCount: Int,
 )

@@ -13,6 +13,12 @@ android {
         consumerProguardFiles("consumer-rules.pro")
     }
 
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
@@ -20,12 +26,6 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-        }
-    }
-
-    sourceSets {
-        getByName("main") {
-            assets.directories.addAll(listOf("src/main/assets", "src/main/ml"))
         }
     }
 

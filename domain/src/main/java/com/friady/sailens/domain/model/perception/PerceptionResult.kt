@@ -11,6 +11,7 @@ data class PerceptionResult(
     val passableMask: BinaryMask,
     val obstacleMask: BinaryMask,
     val obstacles: List<DetectedObstacle>,
+    val instanceDetections: List<DetectedInstance>,
     val bottomStats: BottomStats,
     val analysis: SegmentationAnalysis,
     val inferenceTimeMs: Long,

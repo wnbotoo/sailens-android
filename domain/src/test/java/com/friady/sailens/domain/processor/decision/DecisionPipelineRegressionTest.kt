@@ -4,6 +4,7 @@ import com.friady.sailens.domain.model.analysis.RoadSafetyState
 import com.friady.sailens.domain.model.analysis.SceneElements
 import com.friady.sailens.domain.model.analysis.SceneSnapshot
 import com.friady.sailens.domain.model.analysis.WalkPathConnectivity
+import com.friady.sailens.domain.model.common.DirectionBias
 import com.friady.sailens.domain.model.common.EventCategory
 import com.friady.sailens.domain.model.common.Severity
 import org.junit.Assert.assertEquals
@@ -62,6 +63,36 @@ class DecisionPipelineRegressionTest {
 
         assertEquals(1, merged.size)
         assertEquals(EventCategory.BLOCKED, merged.single().category)
+    }
+
+    @Test
+    fun `narrowing and direction advice are suppressed by default`() {
+        val events = runPipeline(
+            snapshot = SceneSnapshot(
+                timestamp = 1L,
+                obstacles = emptyList(),
+                bottomCoverage = 1f,
+                connectivity = connectivity().copy(
+                    isNarrowing = true,
+                    suggestedBias = DirectionBias.LEFT,
+                    narrowingConfidence = 0.9f,
+                    narrowingSeverity = Severity.MODERATE,
+                ),
+                sceneElements = SceneElements(),
+                roadSafety = RoadSafetyState(
+                    isOnRoad = false,
+                    isDangerous = false,
+                    roadRatio = 0f,
+                    hasVehicleOnRoad = false,
+                    hasTrafficLight = false,
+                    dangerConfidence = 0f,
+                ),
+                groundTypeChange = null,
+            ),
+            now = 20_000L,
+        )
+
+        assertEquals(emptyList<String>(), events.map { it.messageKey })
     }
 
     private fun runPipeline(

@@ -2,7 +2,7 @@
 
 ## 目标
 
-为 `Sailens` 建立一条最小可用的“可观测 -> 可回放 -> 可评估”链路，避免后续引入 `YOLO + DDRNet` 后只能凭主观体验判断效果。
+为 `Sailens` 建立一条最小可用的“可观测 -> 可回放 -> 可评估”链路，避免 YOLO26 双模型调参只能凭主观体验判断效果。
 
 ## 当前已落地能力
 
@@ -80,7 +80,7 @@
 1. 在 App 内通过正式 session list / report 页面查看最近 trace 的关键性能指标
 2. 观察真实会话下的平均时延 / p95 时延
 3. 估算 `DROP_OLDEST` 下的帧丢失情况
-4. 对比纯 `DDRNet` 与未来 `YOLO + DDRNet` 双模型模式
+4. 对比不同 YOLO26 模型尺寸、delegate、阈值和 pipeline 策略
 5. 给后续离线 replay 与评估脚本提供输入样本
 6. 将原始 JSONL 分享到电脑、标注工具或批量评估脚本
 7. 在实时运行时提前观察预算是否被击穿
@@ -92,4 +92,4 @@
    - baseline vs experiment A/B 对比
    - 阈值告警（如 `p95TotalPipelineMs`、`droppedFrames`）
 2. 采集真实场景 trace 基线
-3. 再开始引入 `YOLO` 并做 A/B 对比
+3. 持续用 YOLO26 双模型配置做 A/B 对比

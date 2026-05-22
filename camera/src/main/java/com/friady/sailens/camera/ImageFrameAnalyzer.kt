@@ -1,6 +1,7 @@
 package com.friady.sailens.camera
 
 import android.graphics.ImageFormat
+import android.graphics.PixelFormat
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import com.friady.sailens.domain.model.perception.ImageFrame
@@ -10,10 +11,9 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import java.nio.ByteBuffer
-import kotlin.math.min
 
 class ImageFrameAnalyzer(
-    private val frameConverter: ImageFrameConverter = YuvToRgbaFrameConverter(),
+    private val frameConverter: ImageFrameConverter = ImageProxyToRgbaFrameConverter(),
 ) : ImageAnalysis.Analyzer, ImageFrameProvider {
     private var nextSequenceNumber = 0L
 
@@ -41,29 +41,68 @@ interface ImageFrameConverter {
     ): ImageFrame
 }
 
-class YuvToRgbaFrameConverter : ImageFrameConverter {
+class ImageProxyToRgbaFrameConverter : ImageFrameConverter {
     override fun convert(
         image: ImageProxy,
         sequenceNumber: Long,
     ): ImageFrame {
-        require(image.format == ImageFormat.YUV_420_888) {
-            "Unsupported image format ${image.format}; expected YUV_420_888"
+        val rgba = when (image.format) {
+            PixelFormat.RGBA_8888 -> copyRgba(image)
+            ImageFormat.FLEX_RGBA_8888 -> copyRgba(image)
+            ImageFormat.YUV_420_888 -> convertYuvToRgba(image)
+            else -> error("Unsupported image format ${image.format}; expected RGBA_8888 or YUV_420_888")
         }
 
-        val width = image.width
-        val height = image.height
-        val rgba = ByteArray(width * height * ImagePixelFormat.RGBA_8888.bytesPerPixel)
-        yuv420ToRgba(image.planes, width, height, rgba)
-
         return ImageFrame(
-            width = width,
-            height = height,
+            width = image.width,
+            height = image.height,
             pixelBytes = rgba,
             pixelFormat = ImagePixelFormat.RGBA_8888,
             rotationDegrees = image.imageInfo.rotationDegrees,
             timestamp = image.imageInfo.timestamp,
             sequenceNumber = sequenceNumber,
         )
+    }
+
+    private fun copyRgba(image: ImageProxy): ByteArray {
+        val width = image.width
+        val height = image.height
+        val rgba = ByteArray(width * height * ImagePixelFormat.RGBA_8888.bytesPerPixel)
+        val plane = image.planes.firstOrNull()
+            ?: error("RGBA image has no planes")
+        val buffer = plane.buffer.duplicate()
+        val rowStride = plane.rowStride
+        val pixelStride = plane.pixelStride
+        val outputRowBytes = width * ImagePixelFormat.RGBA_8888.bytesPerPixel
+
+        if (pixelStride == ImagePixelFormat.RGBA_8888.bytesPerPixel) {
+            for (row in 0 until height) {
+                buffer.position(row * rowStride)
+                buffer.get(rgba, row * outputRowBytes, outputRowBytes)
+            }
+            return rgba
+        }
+
+        var outputIndex = 0
+        for (y in 0 until height) {
+            val rowOffset = y * rowStride
+            for (x in 0 until width) {
+                val pixelOffset = rowOffset + x * pixelStride
+                rgba[outputIndex++] = buffer.get(pixelOffset)
+                rgba[outputIndex++] = buffer.get(pixelOffset + 1)
+                rgba[outputIndex++] = buffer.get(pixelOffset + 2)
+                rgba[outputIndex++] = buffer.get(pixelOffset + 3)
+            }
+        }
+        return rgba
+    }
+
+    private fun convertYuvToRgba(image: ImageProxy): ByteArray {
+        val width = image.width
+        val height = image.height
+        val rgba = ByteArray(width * height * ImagePixelFormat.RGBA_8888.bytesPerPixel)
+        yuv420ToRgba(image.planes, width, height, rgba)
+        return rgba
     }
 
     private fun yuv420ToRgba(

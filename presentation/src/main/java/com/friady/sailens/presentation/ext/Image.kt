@@ -3,8 +3,13 @@ package com.friady.sailens.presentation.ext
 import android.graphics.Bitmap
 import android.graphics.Color
 import com.friady.sailens.domain.model.common.BinaryMask
+import com.friady.sailens.domain.model.common.ObstacleCategory
+import com.friady.sailens.domain.model.perception.DetectedInstance
 import com.friady.sailens.domain.model.perception.SegmentationMask
 import androidx.core.graphics.createBitmap
+import kotlin.math.roundToInt
+
+private const val DEFAULT_OVERLAY_LONG_SIDE = 720
 
 fun BinaryMask.visualize(
     color: Int = Color.argb((0.7f * 255).toInt(), 0, 255, 0), // 绿色 + 70% 不透明度
@@ -23,6 +28,33 @@ fun BinaryMask.visualize(
     return bitmap
 }
 
+fun BinaryMask.visualizeForAspect(
+    sourceAspectRatio: Float?,
+    color: Int = Color.argb((0.7f * 255).toInt(), 0, 255, 0),
+    maxLongSide: Int = DEFAULT_OVERLAY_LONG_SIDE,
+): Bitmap {
+    val crop = AspectCrop.from(width, height, sourceAspectRatio)
+    val outputSize = crop.outputSize(maxLongSide)
+    val bitmap = createBitmap(outputSize.width, outputSize.height)
+    val pixels = IntArray(outputSize.width * outputSize.height)
+
+    for (y in 0 until outputSize.height) {
+        val sourceY = crop.top + ((y + 0.5f) * crop.height / outputSize.height)
+            .toInt()
+            .coerceIn(0, height - 1)
+        val rowOffset = y * outputSize.width
+        for (x in 0 until outputSize.width) {
+            val sourceX = crop.left + ((x + 0.5f) * crop.width / outputSize.width)
+                .toInt()
+                .coerceIn(0, width - 1)
+            pixels[rowOffset + x] = if (get(sourceX, sourceY)) color else Color.TRANSPARENT
+        }
+    }
+
+    bitmap.setPixels(pixels, 0, outputSize.width, 0, 0, outputSize.width, outputSize.height)
+    return bitmap
+}
+
 fun SegmentationMask.visualizeSemanticClasses(): Bitmap {
     val bitmap = createBitmap(width, height)
     val pixels = IntArray(width * height)
@@ -33,6 +65,62 @@ fun SegmentationMask.visualizeSemanticClasses(): Bitmap {
     }
 
     bitmap.setPixels(pixels, 0, width, 0, 0, width, height)
+    return bitmap
+}
+
+fun SegmentationMask.visualizeSemanticClassesForAspect(
+    sourceAspectRatio: Float?,
+    maxLongSide: Int = DEFAULT_OVERLAY_LONG_SIDE,
+): Bitmap {
+    val crop = AspectCrop.from(width, height, sourceAspectRatio)
+    val outputSize = crop.outputSize(maxLongSide)
+    val bitmap = createBitmap(outputSize.width, outputSize.height)
+    val pixels = IntArray(outputSize.width * outputSize.height)
+
+    for (y in 0 until outputSize.height) {
+        val sourceY = crop.top + ((y + 0.5f) * crop.height / outputSize.height)
+            .toInt()
+            .coerceIn(0, height - 1)
+        val rowOffset = y * outputSize.width
+        for (x in 0 until outputSize.width) {
+            val sourceX = crop.left + ((x + 0.5f) * crop.width / outputSize.width)
+                .toInt()
+                .coerceIn(0, width - 1)
+            val classId = getClassId(sourceX, sourceY)
+            pixels[rowOffset + x] = SEMANTIC_CLASS_COLORS.getOrElse(classId) { UNKNOWN_CLASS_COLOR }
+        }
+    }
+
+    bitmap.setPixels(pixels, 0, outputSize.width, 0, 0, outputSize.width, outputSize.height)
+    return bitmap
+}
+
+fun List<DetectedInstance>.visualizeInstanceMasks(): Bitmap? {
+    val firstMask = firstNotNullOfOrNull { it.mask } ?: return null
+    val bitmap = createBitmap(firstMask.width, firstMask.height)
+    val pixels = IntArray(firstMask.width * firstMask.height) { Color.TRANSPARENT }
+
+    forEach { instance ->
+        val mask = instance.mask ?: return@forEach
+        val color = when (instance.category) {
+            ObstacleCategory.PERSON -> Color.argb(150, 255, 82, 82)
+            ObstacleCategory.VEHICLE -> Color.argb(150, 66, 165, 245)
+            ObstacleCategory.BICYCLE -> Color.argb(150, 255, 202, 40)
+            ObstacleCategory.STATIC_OBSTACLE -> Color.argb(150, 171, 71, 188)
+            ObstacleCategory.UNKNOWN -> Color.argb(150, 255, 255, 255)
+        }
+
+        for (y in 0 until mask.height) {
+            val rowOffset = y * mask.width
+            for (x in 0 until mask.width) {
+                if (mask.get(x, y)) {
+                    pixels[rowOffset + x] = color
+                }
+            }
+        }
+    }
+
+    bitmap.setPixels(pixels, 0, firstMask.width, 0, 0, firstMask.width, firstMask.height)
     return bitmap
 }
 
@@ -59,3 +147,60 @@ private val SEMANTIC_CLASS_COLORS = intArrayOf(
 )
 
 private val UNKNOWN_CLASS_COLOR = Color.argb(170, 255, 255, 255)
+
+private data class AspectCrop(
+    val left: Int,
+    val top: Int,
+    val width: Int,
+    val height: Int,
+) {
+    fun outputSize(maxLongSide: Int): OutputSize {
+        if (width <= 0 || height <= 0) return OutputSize(1, 1)
+        val scale = if (width >= height) {
+            maxLongSide.toFloat() / width
+        } else {
+            maxLongSide.toFloat() / height
+        }.coerceAtMost(1f)
+
+        return OutputSize(
+            width = (width * scale).roundToInt().coerceAtLeast(1),
+            height = (height * scale).roundToInt().coerceAtLeast(1),
+        )
+    }
+
+    companion object {
+        fun from(
+            width: Int,
+            height: Int,
+            sourceAspectRatio: Float?,
+        ): AspectCrop {
+            val targetAspectRatio = sourceAspectRatio
+                ?.takeIf { it > 0f }
+                ?: return AspectCrop(left = 0, top = 0, width = width, height = height)
+            val maskAspectRatio = width.toFloat() / height
+
+            return if (maskAspectRatio > targetAspectRatio) {
+                val cropWidth = (height * targetAspectRatio).roundToInt().coerceIn(1, width)
+                AspectCrop(
+                    left = (width - cropWidth) / 2,
+                    top = 0,
+                    width = cropWidth,
+                    height = height,
+                )
+            } else {
+                val cropHeight = (width / targetAspectRatio).roundToInt().coerceIn(1, height)
+                AspectCrop(
+                    left = 0,
+                    top = (height - cropHeight) / 2,
+                    width = width,
+                    height = cropHeight,
+                )
+            }
+        }
+    }
+}
+
+private data class OutputSize(
+    val width: Int,
+    val height: Int,
+)

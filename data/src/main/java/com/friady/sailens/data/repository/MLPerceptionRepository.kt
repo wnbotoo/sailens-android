@@ -1,6 +1,6 @@
 package com.friady.sailens.data.repository
 
-import com.friady.sailens.data.source.ml.segmentation.SegmentationModel
+import com.friady.sailens.data.source.ml.semantic.SegmentationModel
 import com.friady.sailens.domain.model.perception.ImageFrame
 import com.friady.sailens.domain.model.perception.SegmentationOutput
 import com.friady.sailens.domain.repository.PerceptionRepository

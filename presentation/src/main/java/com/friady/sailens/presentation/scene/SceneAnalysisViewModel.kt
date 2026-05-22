@@ -3,6 +3,7 @@ package com.friady.sailens.presentation.scene
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import android.graphics.Bitmap
+import android.os.SystemClock
 import com.friady.sailens.camera.ImageFrameProvider
 import com.friady.sailens.domain.model.scene.SceneEvent
 import com.friady.sailens.domain.model.scene.SceneResult
@@ -17,8 +18,9 @@ import com.friady.sailens.domain.usecase.trace.LoadLatestTraceReplayReportUseCas
 import com.friady.sailens.domain.usecase.trace.LoadTraceReplayReportUseCase
 import com.friady.sailens.presentation.device.HapticManager
 import com.friady.sailens.presentation.device.SpeechManager
-import com.friady.sailens.presentation.ext.visualizeSemanticClasses
-import com.friady.sailens.presentation.ext.visualize
+import com.friady.sailens.presentation.ext.visualizeSemanticClassesForAspect
+import com.friady.sailens.presentation.ext.visualizeInstanceMasks
+import com.friady.sailens.presentation.ext.visualizeForAspect
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.CoroutineScope
@@ -39,6 +41,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 private const val TAG = "SceneAnalysisViewModel"
+private const val OVERLAY_RENDER_INTERVAL_MS = 250L
 
 class SceneAnalysisViewModel(
     private val imageFrameProvider: ImageFrameProvider,
@@ -61,9 +64,11 @@ class SceneAnalysisViewModel(
 
     private var analysisJob: Job? = null
     private var releaseJob: Job? = null
+    private var overlayRenderJob: Job? = null
     private val releaseScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var frameCount: Long = 0
     private var latestSceneResult: SceneResult? = null
+    private var lastOverlayRenderTimeMs: Long = 0L
 
     // State machine to prevent concurrent release/analysis initialization
     @Volatile
@@ -105,12 +110,14 @@ class SceneAnalysisViewModel(
     }
 
     fun setOverlayMode(overlayMode: SegmentationOverlayMode) {
+        lastOverlayRenderTimeMs = 0L
         _uiState.update {
             it.copy(
                 overlayMode = overlayMode,
-                segMask = latestSceneResult?.toOverlayBitmap(overlayMode),
+                segMask = null,
             )
         }
+        scheduleOverlayRender(latestSceneResult, overlayMode, force = true)
     }
 
     fun openTraceReplaySessionsScreen() {
@@ -264,7 +271,12 @@ class SceneAnalysisViewModel(
                 latestSceneResult = null
                 _uiState.update {
                     it.copy(
-                        isRunning = false, isLoading = false, errorMessage = e.message ?: "Unknown error"
+                        isRunning = false,
+                        isLoading = false,
+                        segMask = null,
+                        trackedObstacles = emptyList(),
+                        instanceDetections = emptyList(),
+                        errorMessage = e.message ?: "Unknown error"
                     )
                 }
                 _uiEffect.emit(SceneAnalysisUiEffect.ShowToast(e.message ?: "Unknown error"))
@@ -272,15 +284,32 @@ class SceneAnalysisViewModel(
                 frameCount++
                 latestSceneResult = result
                 val state = _uiState.value
-                val mask = result.toOverlayBitmap(state.overlayMode)
                 val events = result.events
                 _uiState.update {
                     it.copy(
-                        segMask = mask,
+                        frameDisplayWidth = result.frameDisplayWidth,
+                        frameDisplayHeight = result.frameDisplayHeight,
+                        trackedObstacles = result.obstacles,
+                        instanceDetections = result.instanceDetections,
                         latestSceneDebugInfo = result.debugInfo,
                         lastEvents = events,
                         frameCount = frameCount,
                         eventCount = it.eventCount + events.size
+                    )
+                }
+                scheduleOverlayRender(result, state.overlayMode)
+                if (frameCount == 1L) {
+                    logger.info(
+                        TAG,
+                        "First frame diagnostics",
+                        mapOf(
+                            "semanticProvider" to (result.debugInfo?.semanticProvider ?: "unknown"),
+                            "instanceProvider" to (result.debugInfo?.instanceProvider ?: "unknown"),
+                            "inferenceStrategy" to (result.debugInfo?.inferenceStrategy ?: "unknown"),
+                            "trackedObstacles" to result.obstacles.size,
+                            "rawInstances" to result.instanceDetections.size,
+                            "rawInstanceMasks" to result.instanceDetections.count { it.mask != null },
+                        )
                     )
                 }
                 onSceneEvents(events)
@@ -307,6 +336,8 @@ class SceneAnalysisViewModel(
     private fun stopSceneAnalysis() {
         analysisJob?.cancel()
         analysisJob = null
+        overlayRenderJob?.cancel()
+        overlayRenderJob = null
         latestSceneResult = null
         stopSceneAnalysisUseCase()
         speechManager.stop()
@@ -317,6 +348,10 @@ class SceneAnalysisViewModel(
                 isInitializing = false,
                 isLoading = false,
                 segMask = null,
+                frameDisplayWidth = null,
+                frameDisplayHeight = null,
+                trackedObstacles = emptyList(),
+                instanceDetections = emptyList(),
                 latestSceneDebugInfo = null,
             )
         }
@@ -325,12 +360,37 @@ class SceneAnalysisViewModel(
     override fun onCleared() {
         analysisJob?.cancel()
         analysisJob = null
+        overlayRenderJob?.cancel()
+        overlayRenderJob = null
         stopSceneAnalysisUseCase()
         speechManager.stop()
         hapticManager.cancel()
         releaseSceneAnalysisResources()
         speechManager.release()
         super.onCleared()
+    }
+
+    private fun scheduleOverlayRender(
+        result: SceneResult?,
+        overlayMode: SegmentationOverlayMode,
+        force: Boolean = false,
+    ) {
+        if (result == null) return
+        val now = SystemClock.elapsedRealtime()
+        if (!force && now - lastOverlayRenderTimeMs < OVERLAY_RENDER_INTERVAL_MS) {
+            return
+        }
+        lastOverlayRenderTimeMs = now
+
+        overlayRenderJob?.cancel()
+        overlayRenderJob = viewModelScope.launch {
+            val bitmap = withContext(Dispatchers.Default) {
+                result.toOverlayBitmap(overlayMode)
+            }
+            if (_uiState.value.overlayMode == overlayMode) {
+                _uiState.update { it.copy(segMask = bitmap) }
+            }
+        }
     }
 
     private fun releaseSceneAnalysisResources() {
@@ -412,9 +472,15 @@ class SceneAnalysisViewModel(
     }
 
     private fun SceneResult.toOverlayBitmap(overlayMode: SegmentationOverlayMode): Bitmap? {
+        val sourceAspectRatio = frameDisplayWidth?.let { width ->
+            frameDisplayHeight?.takeIf { it > 0 }?.let { height ->
+                width.toFloat() / height
+            }
+        }
         return when (overlayMode) {
-            SegmentationOverlayMode.PASSABLE_MASK -> passableMask?.visualize()
-            SegmentationOverlayMode.SEMANTIC_CLASSES -> segmentationMask?.visualizeSemanticClasses()
+            SegmentationOverlayMode.PASSABLE_MASK -> passableMask?.visualizeForAspect(sourceAspectRatio)
+            SegmentationOverlayMode.SEMANTIC_CLASSES -> segmentationMask?.visualizeSemanticClassesForAspect(sourceAspectRatio)
+            SegmentationOverlayMode.INSTANCE_DEBUG -> instanceDetections.visualizeInstanceMasks()
         }
     }
 }

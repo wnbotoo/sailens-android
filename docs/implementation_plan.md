@@ -7,7 +7,7 @@
 1. 实时提醒不能漏掉新的高风险空间信息。
 2. Trace 必须能从设备导出，支持离线评估与 A/B 对比。
 3. 端侧性能预算要能在 replay 和 live 两条路径上被观测。
-4. 后续 `YOLO + DDRNet` 必须建立在可回放基线之上。
+4. 后续 YOLO26 模型尺寸、delegate 与 pipeline 策略必须建立在可回放基线之上。
 
 ## 1. 本轮已完成（2026-05-21）
 
@@ -138,7 +138,7 @@
 **结果**
 
 - 删除 `ImageFrameAnalyzer`、`OpenCVImageProcessor` 中的大段旧实现注释。
-- 删除旧的注释版 `YOLO11InstanceProvider.kt`，后续 Phase 6 重新按可测试实现接入。
+- 删除旧的注释版实例 provider，后续模型接入必须按可测试实现落地。
 
 ## 2. Phase 5A：本轮验证
 
@@ -232,7 +232,7 @@
 - 不再使用正则解析 JSON。
 - 旧 JSONL 测试样本继续通过。
 
-## 4. Phase 6：YOLO + DDRNet 融合
+## 4. Phase 6：YOLO26 双模型发布链路
 
 **前置条件**
 
@@ -243,11 +243,11 @@
 
 **推荐架构**
 
-1. `DDRNet` 每帧低分辨率跑全局语义。
-2. `YOLO` 每 2 到 3 帧或独立异步低频跑检测。
+1. `YOLO26-sem` 负责全局语义、道路、人行道和可通行区域。
+2. `YOLO26-seg` 每 2 到 3 帧或独立异步低频跑实例检测。
 3. `ObstacleTracker` 在检测空档帧补预测。
 4. `EventGenerator` 融合语义通行性、目标类别、空间区域和稳定性。
-5. 只在高风险/高不确定 ROI 做二次精化，不要让 YOLO ROI 取代 DDRNet 全局语义。
+5. 只在高风险/高不确定 ROI 做二次精化，不要让局部目标检测取代全局语义。
 
 **验收**
 
@@ -284,6 +284,6 @@
 2. 手工验证 trace JSONL 分享。
 3. 真机验证新的 `YUV -> RGBA -> OpenCV Mat` 路径画面方向与 overlay 对齐。
 4. 采集至少 10 组户外 trace。
-5. 基于 replay/live budget 决定是否进入 YOLO + DDRNet。
+5. 基于 replay/live budget 决定是否启用更高频 YOLO26-seg 或更大 YOLO26-sem。
 
 一句话原则：先让系统可测，再让模型变强，最后让体验变得安静可靠。

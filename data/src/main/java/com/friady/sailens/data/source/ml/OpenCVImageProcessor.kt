@@ -1,6 +1,6 @@
 package com.friady.sailens.data.source.ml
 
-import com.friady.sailens.data.source.ml.segmentation.SegmenterConfig
+import com.friady.sailens.data.source.ml.semantic.SegmenterConfig
 import com.friady.sailens.domain.model.perception.ImageFrame
 import com.friady.sailens.domain.model.perception.ImagePixelFormat
 import org.opencv.core.Core
@@ -84,7 +84,7 @@ class OpenCVImageProcessor(
      * 后处理：FloatArray -> ArgMax -> IntArray
      * 手动实现 argmax，因为 OpenCV 的 reduceArgMax 对 3D Mat 支持有问题
      */
-    override fun postprocess(outputFloatArray: FloatArray, outputMask: IntArray) {
+    override fun postprocess(scores: FloatArray, resultMask: IntArray) {
         val h = config.outputHeight
         val w = config.outputWidth
         val c = config.outputChannels
@@ -94,17 +94,17 @@ class OpenCVImageProcessor(
             for (col in 0 until w) {
                 val baseIdx = (row * w + col) * c
                 var maxIdx = 0
-                var maxVal = outputFloatArray[baseIdx]
+                var maxVal = scores[baseIdx]
 
                 for (ch in 1 until c) {
-                    val value = outputFloatArray[baseIdx + ch]
+                    val value = scores[baseIdx + ch]
                     if (value > maxVal) {
                         maxVal = value
                         maxIdx = ch
                     }
                 }
 
-                outputMask[row * w + col] = maxIdx
+                resultMask[row * w + col] = maxIdx
             }
         }
     }

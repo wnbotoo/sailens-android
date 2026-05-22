@@ -19,7 +19,11 @@
     <string name="label_current_overlay_mode">Current overlay: %1$s</string>
     <string name="btn_overlay_passable">Passable mask</string>
     <string name="btn_overlay_semantic">Semantic classes</string>
+    <string name="btn_overlay_instance_debug">Instance debug</string>
     <string name="title_live_pipeline_debug">Live pipeline debug</string>
+    <string name="debug_semantic_provider">Semantic provider: %1$s</string>
+    <string name="debug_instance_provider">Instance provider: %1$s</string>
+    <string name="debug_inference_strategy">Inference strategy: %1$s</string>
     <string name="debug_passable_ratio">Global passable ratio: %1$d%%</string>
     <string name="debug_navigation_passable_ratio">Navigation-region passable ratio: %1$d%%</string>
     <string name="debug_obstacle_ratio">Obstacle ratio: %1$d%%</string>
@@ -37,6 +41,8 @@
     <string name="debug_recent_avg_pipeline_ms">Recent avg pipeline: %1$.1fms</string>
     <string name="debug_recent_p95_pipeline_ms">Recent P95 pipeline: %1$dms</string>
     <string name="debug_recent_dropped_rate">Recent dropped: %1$d%% (last +%2$d)</string>
+    <string name="debug_tracked_obstacle_count">Tracked obstacles: %1$d</string>
+    <string name="debug_raw_instance_count">Raw instances / masks: %1$d / %2$d</string>
     <string name="debug_runtime_budget_ok">Runtime budget: OK</string>
     <string name="debug_runtime_budget_warning">Runtime budget: over target</string>
     <string name="title_trace_replay_debug">Trace replay debug</string>

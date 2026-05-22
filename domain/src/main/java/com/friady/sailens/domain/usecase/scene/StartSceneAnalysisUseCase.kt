@@ -1,6 +1,8 @@
 package com.friady.sailens.domain.usecase.scene
 
+import com.friady.sailens.domain.config.PerceptionConfig
 import com.friady.sailens.domain.config.PipelineBudget
+import com.friady.sailens.domain.model.common.PerceptionMode
 import com.friady.sailens.domain.model.trace.FrameTrace
 import com.friady.sailens.domain.model.trace.SessionTraceAccumulator
 import com.friady.sailens.domain.model.trace.SessionTraceMetadata
@@ -35,8 +37,9 @@ private data class PipelineFrameResult(
  * 开始导航用例
  */
 class StartSceneAnalysisUseCase(
+    private val perceptionConfig: PerceptionConfig,
     private val perceptionRepository: PerceptionRepository,
-    private val instanceProvider: InstanceSegmentationProvider?,
+    private val instanceProvider: InstanceSegmentationProvider,
     private val processFrameUseCase: ProcessFrameUseCase,
     private val analyzeSceneUseCase: AnalyzeSceneUseCase,
     private val decideEventsUseCase: DecideEventsUseCase,
@@ -49,6 +52,7 @@ class StartSceneAnalysisUseCase(
         val accumulator = SessionTraceAccumulator(sessionId, sessionStartedAt)
         val runtimeWindow = PipelineRuntimeWindow()
         var lastSequenceNumber: Long? = null
+        processFrameUseCase.reset()
 
         if (!perceptionRepository.isInitialized) {
             perceptionRepository.initialize()
@@ -62,18 +66,28 @@ class StartSceneAnalysisUseCase(
             SessionTraceMetadata(
                 sessionId = sessionId,
                 startedAt = sessionStartedAt,
-                pipelineMode = if (instanceProvider != null) "combined" else "semantic_only",
+                pipelineMode = perceptionConfig.mode.traceName(),
                 targetHardwareProfile = TARGET_HARDWARE_PROFILE,
             )
         )
 
         logService.info("Navigation", "Navigation started")
+        logService.info(
+            "Navigation",
+            "Perception config",
+            mapOf(
+                "mode" to perceptionConfig.mode.name,
+                "semanticProvider" to perceptionConfig.semanticProviderType.name,
+                "instanceProvider" to perceptionConfig.instanceProviderType.name,
+                "inferenceStrategy" to perceptionConfig.inferenceStrategy.name,
+            ),
+        )
 
-        // 2. 初始化实例分割提供者（可选）
-        instanceProvider?.let {
-            if (!it.isInitialized) {
-                it.initialize()
-                check(it.isInitialized) {
+        // 2. 初始化实例分割提供者
+        if (perceptionConfig.mode == PerceptionMode.COMBINED) {
+            if (!instanceProvider.isInitialized) {
+                instanceProvider.initialize()
+                check(instanceProvider.isInitialized) {
                     "Instance provider initialization completed but provider is still not initialized"
                 }
                 logService.info("Navigation", "Instance provider initialized")
@@ -146,9 +160,16 @@ class StartSceneAnalysisUseCase(
 
                 return@mapNotNull PipelineFrameResult(
                     sceneResult = SceneResult(
+                        frameDisplayWidth = frame.displayWidth(),
+                        frameDisplayHeight = frame.displayHeight(),
                         passableMask = perceptionResult.passableMask,
                         segmentationMask = perceptionResult.analysis.segmentation,
+                        obstacles = perceptionResult.obstacles,
+                        instanceDetections = perceptionResult.instanceDetections,
                         debugInfo = SceneDebugInfo(
+                            semanticProvider = perceptionConfig.semanticProviderType.name,
+                            instanceProvider = perceptionConfig.instanceProviderType.name,
+                            inferenceStrategy = perceptionConfig.inferenceStrategy.name,
                             passableRatio = perceptionResult.analysis.passablePixelCount.toFloat() /
                                 (perceptionResult.analysis.width * perceptionResult.analysis.height),
                             navigationPassableRatio = perceptionResult.analysis.navigationPassableRatio,
@@ -174,6 +195,9 @@ class StartSceneAnalysisUseCase(
                             recentP95TotalPipelineMs = runtimeStats.p95TotalPipelineMs,
                             recentDroppedFrameRate = runtimeStats.droppedFrameRate,
                             isRuntimeOverBudget = runtimeStats.isOverBudget,
+                            trackedObstacleCount = perceptionResult.obstacles.size,
+                            rawInstanceCount = perceptionResult.instanceDetections.size,
+                            rawInstanceMaskCount = perceptionResult.instanceDetections.count { it.mask != null },
                         ),
                         events = events
                     ),
@@ -205,6 +229,21 @@ class StartSceneAnalysisUseCase(
                 )
             }
             .map { it.sceneResult }
+    }
+}
+
+private fun ImageFrame.displayWidth(): Int {
+    return if (rotationDegrees == 90 || rotationDegrees == 270) height else width
+}
+
+private fun ImageFrame.displayHeight(): Int {
+    return if (rotationDegrees == 90 || rotationDegrees == 270) width else height
+}
+
+private fun PerceptionMode.traceName(): String {
+    return when (this) {
+        PerceptionMode.COMBINED -> "combined"
+        PerceptionMode.SEMANTIC_ONLY -> "semantic_only"
     }
 }
 

@@ -1,10 +1,12 @@
 package com.friady.sailens.domain.processor.decision
 
+import com.friady.sailens.domain.config.AnalysisConfig
 import com.friady.sailens.domain.model.analysis.GroundTypeChange
 import com.friady.sailens.domain.model.analysis.RoadSafetyState
 import com.friady.sailens.domain.model.analysis.SceneSnapshot
 import com.friady.sailens.domain.model.common.DirectionBias
 import com.friady.sailens.domain.model.common.DirectionZone
+import com.friady.sailens.domain.model.common.DistanceLevel
 import com.friady.sailens.domain.model.common.EventCategory
 import com.friady.sailens.domain.model.common.EventPriority
 import com.friady.sailens.domain.model.common.GroundType
@@ -16,8 +18,16 @@ import com.friady.sailens.domain.model.perception.DetectedObstacle
 /**
  * 事件生成器
  */
-class EventGenerator {
+class EventGenerator(
+    private val config: AnalysisConfig = AnalysisConfig(),
+) {
     private var wasOnRoad = false
+
+    private companion object {
+        private const val MIN_OBSTACLE_CONFIDENCE_TO_ANNOUNCE = 0.55f
+        private const val MIN_CENTER_OBSTACLE_AREA_RATIO = 0.012f
+        private const val MIN_SIDE_OBSTACLE_AREA_RATIO = 0.025f
+    }
 
     fun generate(snapshot: SceneSnapshot, now: Long): List<SceneEvent> {
         val events = mutableListOf<SceneEvent>()
@@ -28,19 +38,19 @@ class EventGenerator {
         }
 
         // 2. 收窄事件
-        if (snapshot.connectivity.isNarrowing && !snapshot.connectivity.isBlocked) {
+        if (config.enableNarrowingEvents && snapshot.connectivity.isNarrowing && !snapshot.connectivity.isBlocked) {
             events.add(createNarrowingEvent(snapshot, now))
         }
 
         // 3. 方向建议
-        snapshot.connectivity.suggestedBias?.let {
-            events.add(createDirectionAdviceEvent(it, now))
+        if (config.enableDirectionAdviceEvents) {
+            snapshot.connectivity.suggestedBias?.let {
+                events.add(createDirectionAdviceEvent(it, now))
+            }
         }
 
         // 4.  障碍物事件
-        val significantObstacles = snapshot.obstacles.filter {
-            it.urgency >= UrgencyLevel.MEDIUM && it.isStable()
-        }
+        val significantObstacles = snapshot.obstacles.filter(::shouldAnnounceObstacle)
         if (significantObstacles.isNotEmpty()) {
             events.addAll(createObstacleEvents(significantObstacles, now))
         }
@@ -85,6 +95,32 @@ class EventGenerator {
             confidence = snapshot.connectivity.blockageConfidence,
             severity = snapshot.connectivity.blockageSeverity
         )
+    }
+
+    private fun shouldAnnounceObstacle(obstacle: DetectedObstacle): Boolean {
+        if (!obstacle.isStable(minFrames = 3)) return false
+        if (obstacle.confidence < MIN_OBSTACLE_CONFIDENCE_TO_ANNOUNCE) return false
+        if (obstacle.distance == DistanceLevel.FAR && obstacle.urgency < UrgencyLevel.CRITICAL) return false
+
+        return when (obstacle.zone) {
+            DirectionZone.CENTER -> {
+                obstacle.urgency >= UrgencyLevel.CRITICAL ||
+                    obstacle.distance == DistanceLevel.NEAR ||
+                    obstacle.areaRatio >= MIN_CENTER_OBSTACLE_AREA_RATIO
+            }
+
+            DirectionZone.FRONT_LEFT,
+            DirectionZone.FRONT_RIGHT -> {
+                obstacle.urgency >= UrgencyLevel.HIGH &&
+                    obstacle.areaRatio >= MIN_CENTER_OBSTACLE_AREA_RATIO
+            }
+
+            DirectionZone.LEFT,
+            DirectionZone.RIGHT -> {
+                obstacle.urgency >= UrgencyLevel.HIGH &&
+                    obstacle.areaRatio >= MIN_SIDE_OBSTACLE_AREA_RATIO
+            }
+        }
     }
 
     private fun createNarrowingEvent(snapshot: SceneSnapshot, now: Long): SceneEvent {

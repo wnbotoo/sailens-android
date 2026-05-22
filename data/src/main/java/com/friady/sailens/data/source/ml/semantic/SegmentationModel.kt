@@ -1,4 +1,4 @@
-package com.friady.sailens.data.source.ml.segmentation
+package com.friady.sailens.data.source.ml.semantic
 
 import com.friady.sailens.domain.model.perception.ImageFrame
 import com.friady.sailens.domain.model.perception.SegmentationOutput
@@ -14,10 +14,10 @@ interface SegmentationModel {
 }
 
 data class SegmenterConfig(
-    val inputWidth: Int,  // 2048
-    val inputHeight: Int,  // 1024
-    val outputWidth: Int,  // 256
-    val outputHeight: Int,  // 128
+    val inputWidth: Int,
+    val inputHeight: Int,
+    val outputWidth: Int,
+    val outputHeight: Int,
     val outputChannels: Int,
     val mean: Triple<Float, Float, Float>,
     val std: Triple<Float, Float, Float>,

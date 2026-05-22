@@ -21,15 +21,25 @@ import com.friady.sailens.domain.model.common.ZoneMode
  *
  * 推理策略 (inferenceStrategy)：
  *   - SIMULTANEOUS: 两个模型每帧同时推理，信息最新，适合高性能设备
- *   - ALTERNATING:  sem 每帧运行，seg 奇偶帧交替，tracker 补偿偶数帧，适合低功耗场景
+ *   - ALTERNATING:  seg 奇偶帧交替，tracker 补偿偶数帧，适合低功耗场景
+ *
+ * semanticFrameSkipping:
+ *   - enableSemanticFrameSkipping = true 时，语义分割可按 semanticFrameInterval 降频运行
+ *   - 跳过帧会复用最近一次 semantic mask，适合当前 YOLO26-sem 高分辨率输出较重的场景
  */
 data class PerceptionConfig(
-    val mode: PerceptionMode = PerceptionMode.SEMANTIC_ONLY,
-    val semanticProviderType: SemanticProviderType = SemanticProviderType.DDRNET_CITYSCAPES,
-    val instanceProviderType: InstanceProviderType = InstanceProviderType.NONE,
+    val mode: PerceptionMode = PerceptionMode.COMBINED,
+    val semanticProviderType: SemanticProviderType = SemanticProviderType.YOLO26_SEM,
+    val instanceProviderType: InstanceProviderType = InstanceProviderType.YOLO26_SEG,
 
     /** 双模型推理策略，仅 mode = COMBINED 时生效 */
     val inferenceStrategy: InferenceStrategy = InferenceStrategy.ALTERNATING,
+
+    /** 是否允许语义分割降频运行；关闭后 semantic 每帧推理 */
+    val enableSemanticFrameSkipping: Boolean = false,
+
+    /** semantic 每隔多少帧刷新一次，2 表示一帧推理、一帧复用 */
+    val semanticFrameInterval: Int = 2,
 
     val enableHardwareDepth: Boolean = false,
     val enableMonocularDepth: Boolean = false,

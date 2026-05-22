@@ -12,9 +12,7 @@ enum class PerceptionMode {
  * 语义分割提供者类型
  */
 enum class SemanticProviderType {
-    DDRNET_CITYSCAPES,
-    YOLO26_SEM,
-    CUSTOM
+    YOLO26_SEM
 }
 
 /**
@@ -32,11 +30,7 @@ enum class InferenceStrategy {
  * 实例分割提供者类型
  */
 enum class InstanceProviderType {
-    NONE,       // 不使用（V1默认）
-    YOLO11,     // YOLO11n-seg
-    YOLO8,      // YOLOv8（未来）
-    YOLO26_SEG, // YOLO26-seg（预留）
-    CUSTOM      // 自定义
+    YOLO26_SEG
 }
 
 /**
