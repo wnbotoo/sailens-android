@@ -21,6 +21,7 @@ val presentationModule = module {
             get(),
             get(),
             get(),
+            get(),
             get()
         )
     }

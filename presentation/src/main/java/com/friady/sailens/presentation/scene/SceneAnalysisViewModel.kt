@@ -10,6 +10,7 @@ import com.friady.sailens.domain.model.scene.SceneResult
 import com.friady.sailens.domain.model.trace.TraceReplayReport
 import com.friady.sailens.domain.model.trace.TraceSessionDescriptor
 import com.friady.sailens.domain.service.LogService
+import com.friady.sailens.domain.service.TraceService
 import com.friady.sailens.domain.usecase.scene.StartSceneAnalysisUseCase
 import com.friady.sailens.domain.usecase.scene.StopSceneAnalysisUseCase
 import com.friady.sailens.domain.usecase.trace.EvaluateTraceReplayBudgetUseCase
@@ -50,6 +51,7 @@ class SceneAnalysisViewModel(
     private val hapticManager: HapticManager,
     private val speechManager: SpeechManager,
     private val logger: LogService,
+    private val traceService: TraceService,
     private val listTraceSessionsUseCase: ListTraceSessionsUseCase,
     private val loadTraceReplayReportUseCase: LoadTraceReplayReportUseCase,
     private val loadLatestTraceReplayReportUseCase: LoadLatestTraceReplayReportUseCase,
@@ -384,9 +386,17 @@ class SceneAnalysisViewModel(
 
         overlayRenderJob?.cancel()
         overlayRenderJob = viewModelScope.launch {
+            val renderStartAt = SystemClock.elapsedRealtime()
             val bitmap = withContext(Dispatchers.Default) {
                 result.toOverlayBitmap(overlayMode)
             }
+            val renderCompletedAt = SystemClock.elapsedRealtime()
+            traceService.recordOverlayRender(
+                renderedAt = renderCompletedAt,
+                renderMs = renderCompletedAt - renderStartAt,
+                overlayMode = overlayMode.name,
+                bitmapRendered = bitmap != null,
+            )
             if (_uiState.value.overlayMode == overlayMode) {
                 _uiState.update { it.copy(segMask = bitmap) }
             }
@@ -463,8 +473,11 @@ class SceneAnalysisViewModel(
             appendLine("targetHardware=${report.targetHardwareProfile ?: "unknown"}")
             appendLine("frames=${report.totalFrames} observed=${report.totalObservedFrames} dropped=${report.droppedFrames} (${droppedRatePercent}%)")
             appendLine("events=${report.totalEvents} blocked=${blockedRatePercent}% danger=${dangerRatePercent}%")
+            appendLine("fps=camera:${report.cameraInputFps} pipeline:${report.pipelineOutputFps} throughput:${report.pipelineThroughputFps}")
             appendLine("avgPipelineMs=${report.avgTotalPipelineMs} p95PipelineMs=${report.p95TotalPipelineMs}")
             appendLine("avgInferenceMs=${report.avgInferenceMs} errors=${report.errorCount}")
+            appendLine("modelFps=sem:${report.semanticModelFps} seg:${report.instanceModelFps} runFps=sem:${report.semanticRunFps} seg:${report.instanceRunFps}")
+            appendLine("maskRender=count:${report.maskRenderCount}/${report.overlayRenderCount} fps:${report.maskRenderFps} avgMs:${report.avgMaskRenderMs}")
             appendLine("semMs=pre:${report.avgSemanticPreprocessMs} infer:${report.avgSemanticInferenceMs} read:${report.avgSemanticOutputReadMs} post:${report.avgSemanticPostprocessMs}")
             appendLine("segMs=pre:${report.avgInstancePreprocessMs} infer:${report.avgInstanceInferenceMs} read:${report.avgInstanceOutputReadMs} post:${report.avgInstancePostprocessMs}")
             appendLine("navPassable=${navigationPassablePercent}% blockageConfidence=${blockageConfidencePercent}% verticalReach=${verticalReachPercent}% floodReach=${floodReachPercent}% widthRetentionP25=${widthRetentionPercent}%")

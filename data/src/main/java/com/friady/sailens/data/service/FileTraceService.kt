@@ -52,6 +52,25 @@ class FileTraceService(
         trimQueueIfNeeded()
     }
 
+    override fun recordOverlayRender(
+        renderedAt: Long,
+        renderMs: Long,
+        overlayMode: String,
+        bitmapRendered: Boolean,
+    ) {
+        val sessionId = activeSessionId ?: return
+        queue.offer(
+            TraceJsonEncoder.encodeOverlayRender(
+                sessionId = sessionId,
+                renderedAt = renderedAt,
+                renderMs = renderMs,
+                overlayMode = overlayMode,
+                bitmapRendered = bitmapRendered,
+            )
+        )
+        trimQueueIfNeeded()
+    }
+
     override fun recordError(sessionId: String, stage: String, throwable: Throwable) {
         if (sessionId != activeSessionId) return
         queue.offer(TraceJsonEncoder.encodeError(sessionId, stage, throwable))

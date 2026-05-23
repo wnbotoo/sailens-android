@@ -28,6 +28,10 @@ internal object TraceJsonEncoder {
         put("analyzeSceneMs", frameTrace.analyzeSceneMs)
         put("decideEventsMs", frameTrace.decideEventsMs)
         put("totalPipelineMs", frameTrace.totalPipelineMs)
+        put("pipelineStartedAt", frameTrace.pipelineStartedAt)
+        put("pipelineCompletedAt", frameTrace.pipelineCompletedAt)
+        put("cameraFrameIntervalMs", frameTrace.cameraFrameIntervalMs)
+        put("pipelineOutputIntervalMs", frameTrace.pipelineOutputIntervalMs)
         put("obstacleCount", frameTrace.obstacleCount)
         put("eventCount", frameTrace.eventCount)
         put("isBlocked", frameTrace.isBlocked)
@@ -47,6 +51,21 @@ internal object TraceJsonEncoder {
         put("instanceInferenceMs", frameTrace.instanceInferenceMs)
         put("instanceOutputReadMs", frameTrace.instanceOutputReadMs)
         put("instancePostprocessMs", frameTrace.instancePostprocessMs)
+    }
+
+    fun encodeOverlayRender(
+        sessionId: String,
+        renderedAt: Long,
+        renderMs: Long,
+        overlayMode: String,
+        bitmapRendered: Boolean,
+    ): JSONObject = JSONObject().apply {
+        put("type", "overlay_render")
+        put("sessionId", sessionId)
+        put("renderedAt", renderedAt)
+        put("renderMs", renderMs)
+        put("overlayMode", overlayMode)
+        put("bitmapRendered", bitmapRendered)
     }
 
     fun encodeSessionSummary(summary: SessionTraceSummary): JSONObject = JSONObject().apply {

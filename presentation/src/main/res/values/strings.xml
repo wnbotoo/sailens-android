@@ -74,9 +74,16 @@
     <string name="trace_report_frames">Frames: %1$d</string>
     <string name="trace_report_observed_frames">Observed frames: %1$d</string>
     <string name="trace_report_dropped">Dropped: %1$d (%2$d%%)</string>
+    <string name="trace_report_duration">Duration: %1$dms</string>
+    <string name="trace_report_camera_fps">Camera input FPS: %1$.1f</string>
+    <string name="trace_report_pipeline_fps">Pipeline output FPS: %1$.1f</string>
+    <string name="trace_report_throughput_fps">Pipeline throughput FPS: %1$.1f</string>
     <string name="trace_report_avg_pipeline">Avg pipeline: %1$.1fms</string>
     <string name="trace_report_p95_pipeline">P95 pipeline: %1$dms</string>
     <string name="trace_report_avg_inference">Avg inference: %1$.1fms</string>
+    <string name="trace_report_semantic_runs">Sem runs: %1$d, run FPS: %2$.1f, model FPS: %3$.1f</string>
+    <string name="trace_report_instance_runs">Seg runs: %1$d, run FPS: %2$.1f, model FPS: %3$.1f</string>
+    <string name="trace_report_mask_render">Mask renders: %1$d/%2$d, FPS: %3$.1f, avg: %4$.1fms</string>
     <string name="trace_report_errors">Errors: %1$d</string>
     <string name="trace_report_message_keys">Message keys: %1$s</string>
     <string name="trace_report_blocked_rate">Blocked frames: %1$d%%</string>

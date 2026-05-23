@@ -7,7 +7,7 @@ import com.friady.sailens.domain.model.trace.SessionTraceSummary
 interface TraceService {
     fun startSession(metadata: SessionTraceMetadata)
     fun recordFrame(frameTrace: FrameTrace)
+    fun recordOverlayRender(renderedAt: Long, renderMs: Long, overlayMode: String, bitmapRendered: Boolean)
     fun recordError(sessionId: String, stage: String, throwable: Throwable)
     fun finishSession(summary: SessionTraceSummary)
 }
-

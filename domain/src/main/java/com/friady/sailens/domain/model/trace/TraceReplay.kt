@@ -14,6 +14,7 @@ import kotlinx.serialization.json.longOrNull
 data class TraceReplaySession(
     val metadata: SessionTraceMetadata?,
     val frames: List<FrameTrace>,
+    val overlayRenders: List<OverlayRenderTrace>,
     val errors: List<TraceReplayError>,
     val summary: SessionTraceSummary?,
 )
@@ -34,6 +35,20 @@ data class TraceReplayReport(
     val totalObservedFrames: Int,
     val droppedFrameRate: Double,
     val totalEvents: Int,
+    val durationMs: Long,
+    val cameraInputFps: Double,
+    val pipelineOutputFps: Double,
+    val pipelineThroughputFps: Double,
+    val semanticRunCount: Int,
+    val semanticRunFps: Double,
+    val semanticModelFps: Double,
+    val instanceRunCount: Int,
+    val instanceRunFps: Double,
+    val instanceModelFps: Double,
+    val overlayRenderCount: Int,
+    val maskRenderCount: Int,
+    val avgMaskRenderMs: Double,
+    val maskRenderFps: Double,
     val blockedFrames: Int,
     val dangerousFrames: Int,
     val blockedFrameRate: Double,
@@ -71,6 +86,7 @@ object TraceReplayParser {
         var metadata: SessionTraceMetadata? = null
         var summary: SessionTraceSummary? = null
         val frames = mutableListOf<FrameTrace>()
+        val overlayRenders = mutableListOf<OverlayRenderTrace>()
         val errors = mutableListOf<TraceReplayError>()
 
         lines.forEachIndexed { index, rawLine ->
@@ -81,6 +97,7 @@ object TraceReplayParser {
             when (val type = entry.requireString("type", index)) {
                 SESSION_START_TYPE -> metadata = parseMetadata(entry, index)
                 FRAME_TYPE -> frames += parseFrame(entry, index)
+                OVERLAY_RENDER_TYPE -> overlayRenders += parseOverlayRender(entry, index)
                 SESSION_SUMMARY_TYPE -> summary = parseSummary(entry, index)
                 ERROR_TYPE -> errors += parseError(entry, index)
                 else -> throw IllegalArgumentException("Unsupported trace entry type '$type' at line ${index + 1}")
@@ -90,6 +107,7 @@ object TraceReplayParser {
         return TraceReplaySession(
             metadata = metadata,
             frames = frames,
+            overlayRenders = overlayRenders,
             errors = errors,
             summary = summary,
         )
@@ -122,6 +140,10 @@ object TraceReplayParser {
         analyzeSceneMs = entry.requireLong("analyzeSceneMs", lineIndex),
         decideEventsMs = entry.requireLong("decideEventsMs", lineIndex),
         totalPipelineMs = entry.requireLong("totalPipelineMs", lineIndex),
+        pipelineStartedAt = entry.optionalLong("pipelineStartedAt") ?: 0,
+        pipelineCompletedAt = entry.optionalLong("pipelineCompletedAt") ?: 0,
+        cameraFrameIntervalMs = entry.optionalLong("cameraFrameIntervalMs") ?: 0,
+        pipelineOutputIntervalMs = entry.optionalLong("pipelineOutputIntervalMs") ?: 0,
         obstacleCount = entry.requireInt("obstacleCount", lineIndex),
         eventCount = entry.requireInt("eventCount", lineIndex),
         isBlocked = entry.requireBoolean("isBlocked", lineIndex),
@@ -141,6 +163,14 @@ object TraceReplayParser {
         instanceInferenceMs = entry.optionalLong("instanceInferenceMs") ?: 0,
         instanceOutputReadMs = entry.optionalLong("instanceOutputReadMs") ?: 0,
         instancePostprocessMs = entry.optionalLong("instancePostprocessMs") ?: 0,
+    )
+
+    private fun parseOverlayRender(entry: JsonObject, lineIndex: Int) = OverlayRenderTrace(
+        sessionId = entry.requireString("sessionId", lineIndex),
+        renderedAt = entry.requireLong("renderedAt", lineIndex),
+        renderMs = entry.requireLong("renderMs", lineIndex),
+        overlayMode = entry.optionalString("overlayMode") ?: "unknown",
+        bitmapRendered = entry.requireBoolean("bitmapRendered", lineIndex),
     )
 
     private fun parseSummary(entry: JsonObject, lineIndex: Int) = SessionTraceSummary(
@@ -220,6 +250,7 @@ object TraceReplayParser {
 
     private const val SESSION_START_TYPE = "session_start"
     private const val FRAME_TYPE = "frame"
+    private const val OVERLAY_RENDER_TYPE = "overlay_render"
     private const val SESSION_SUMMARY_TYPE = "session_summary"
     private const val ERROR_TYPE = "error"
 }

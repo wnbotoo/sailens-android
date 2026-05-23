@@ -21,6 +21,10 @@ data class FrameTrace(
     val analyzeSceneMs: Long,
     val decideEventsMs: Long,
     val totalPipelineMs: Long,
+    val pipelineStartedAt: Long = 0,
+    val pipelineCompletedAt: Long = 0,
+    val cameraFrameIntervalMs: Long = 0,
+    val pipelineOutputIntervalMs: Long = 0,
     val obstacleCount: Int,
     val eventCount: Int,
     val isBlocked: Boolean,
@@ -40,6 +44,14 @@ data class FrameTrace(
     val instanceInferenceMs: Long = 0,
     val instanceOutputReadMs: Long = 0,
     val instancePostprocessMs: Long = 0,
+)
+
+data class OverlayRenderTrace(
+    val sessionId: String,
+    val renderedAt: Long,
+    val renderMs: Long,
+    val overlayMode: String,
+    val bitmapRendered: Boolean,
 )
 
 data class SessionTraceSummary(

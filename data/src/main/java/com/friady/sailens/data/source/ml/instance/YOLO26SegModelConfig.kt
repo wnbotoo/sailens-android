@@ -9,7 +9,7 @@ import com.friady.sailens.data.source.ml.ModelInputQuantization
  * letterboxed model input.
  */
 data class YOLO26SegModelConfig(
-    val assetPath: String = "yolo26n-seg_int8.tflite",
+    val assetPath: String = "yolo26n-seg-640_int8.tflite",
     val inputTensorName: String = "images",
     val classCount: Int = 80,
     val maskCoefficientCount: Int = 32,

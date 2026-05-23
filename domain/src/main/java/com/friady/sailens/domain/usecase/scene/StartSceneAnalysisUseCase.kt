@@ -52,6 +52,8 @@ class StartSceneAnalysisUseCase(
         val accumulator = SessionTraceAccumulator(sessionId, sessionStartedAt)
         val runtimeWindow = PipelineRuntimeWindow()
         var lastSequenceNumber: Long? = null
+        var lastFrameTimestamp: Long? = null
+        var lastPipelineCompletedAt: Long? = null
         processFrameUseCase.reset()
 
         if (!perceptionRepository.isInitialized) {
@@ -131,6 +133,14 @@ class StartSceneAnalysisUseCase(
                     (frame.sequenceNumber - previousSequence - 1).coerceAtLeast(0).toInt()
                 } ?: 0
                 lastSequenceNumber = frame.sequenceNumber
+                val cameraFrameIntervalMs = lastFrameTimestamp?.let { previousTimestamp ->
+                    frameTimestampDeltaMs(previousTimestamp, frame.timestamp)
+                } ?: 0
+                lastFrameTimestamp = frame.timestamp
+                val pipelineOutputIntervalMs = lastPipelineCompletedAt?.let { previousCompletedAt ->
+                    (decideCompletedAt - previousCompletedAt).coerceAtLeast(0)
+                } ?: 0
+                lastPipelineCompletedAt = decideCompletedAt
 
                 val frameTrace = FrameTrace(
                     sessionId = sessionId,
@@ -144,6 +154,10 @@ class StartSceneAnalysisUseCase(
                     analyzeSceneMs = analyzeCompletedAt - analyzeStartedAt,
                     decideEventsMs = decideCompletedAt - analyzeCompletedAt,
                     totalPipelineMs = decideCompletedAt - pipelineStart,
+                    pipelineStartedAt = pipelineStart,
+                    pipelineCompletedAt = decideCompletedAt,
+                    cameraFrameIntervalMs = cameraFrameIntervalMs,
+                    pipelineOutputIntervalMs = pipelineOutputIntervalMs,
                     obstacleCount = perceptionResult.obstacles.size,
                     eventCount = events.size,
                     isBlocked = sceneSnapshot.connectivity.isBlocked,
@@ -253,6 +267,12 @@ private fun PerceptionMode.traceName(): String {
         PerceptionMode.COMBINED -> "combined"
         PerceptionMode.SEMANTIC_ONLY -> "semantic_only"
     }
+}
+
+private fun frameTimestampDeltaMs(previousTimestamp: Long, currentTimestamp: Long): Long {
+    val delta = currentTimestamp - previousTimestamp
+    if (delta <= 0) return 0
+    return if (delta > 1_000_000L) delta / 1_000_000L else delta
 }
 
 private data class PipelineRuntimeStats(

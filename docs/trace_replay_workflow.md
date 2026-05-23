@@ -6,6 +6,8 @@
 
 ## 当前已落地能力
 
+详细指标含义、计算方式和调优判断见 [`trace_metrics_guide.md`](trace_metrics_guide.md)。
+
 - `StartSceneAnalysisUseCase` 会在每次分析会话开始时创建一个新的 `sessionId`
 - 每帧都会记录 `frame trace`：
   - `sequenceNumber`
@@ -71,6 +73,7 @@
 - 每行一条 JSON 记录，按顺序包含：
   - `session_start`
   - 多条 `frame`
+  - 可选 `overlay_render`
   - 可选 `error`
   - `session_summary`
 

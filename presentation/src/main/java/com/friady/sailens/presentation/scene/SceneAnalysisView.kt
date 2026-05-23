@@ -21,7 +21,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -415,10 +417,6 @@ private fun ControlView(
             style = MaterialTheme.typography.bodySmall,
         )
 
-        latestSceneDebugInfo?.let { debugInfo ->
-            SceneDebugInfoView(debugInfo = debugInfo)
-        }
-
         Button(
             onClick = onToggleClick,
             enabled = !isLoading,
@@ -433,6 +431,10 @@ private fun ControlView(
                 Spacer(modifier = Modifier.width(8.dp))
             }
             Text(if (isRunning) "Stop Image Analyzer" else "Start Image Analyzer")
+        }
+
+        latestSceneDebugInfo?.let { debugInfo ->
+            SceneDebugInfoView(debugInfo = debugInfo)
         }
     }
 }
@@ -456,7 +458,12 @@ private fun SceneDebugInfoView(
         listOf(stringResource(R.string.value_unknown))
     }.joinToString()
 
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    val scrollState = rememberScrollState()
+
+    Column(
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+        modifier = Modifier.verticalScroll(scrollState)
+    ) {
         Text(
             text = stringResource(R.string.title_live_pipeline_debug),
             style = MaterialTheme.typography.titleSmall,

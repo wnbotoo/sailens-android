@@ -9,7 +9,7 @@ import com.friady.sailens.data.source.ml.ModelInputQuantization
  * resolution model does not require changing width/height constants.
  */
 data class YOLO26SemModelConfig(
-    val assetPath: String = "yolo26n-sem_int8.tflite",
+    val assetPath: String = "yolo26n-sem-640_int8.tflite",
     val inputTensorName: String = "images",
     val outputTensorName: String = "Identity",
     val outputChannels: Int = 19,
