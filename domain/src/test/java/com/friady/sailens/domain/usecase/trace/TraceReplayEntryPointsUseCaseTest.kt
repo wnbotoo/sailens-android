@@ -1,5 +1,6 @@
 package com.friady.sailens.domain.usecase.trace
 
+import com.friady.sailens.domain.config.PipelinePerformanceBudget
 import com.friady.sailens.domain.model.trace.TraceSessionDescriptor
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -98,5 +99,29 @@ class TraceReplayEntryPointsUseCaseTest {
         assertTrue(evaluation.warnings.any { it.contains("p95 total pipeline") })
         assertTrue(evaluation.warnings.any { it.contains("dropped frame rate") })
     }
-}
 
+    @Test
+    fun `evaluate trace replay budget uses injected budget`() {
+        val report = BuildTraceReplayReportUseCase()(
+            listOf(
+                """
+                {"type":"session_start","sessionId":"session-budget","startedAt":1000,"pipelineMode":"combined","targetHardwareProfile":"snapdragon_8_gen_3_plus"}
+                """.trimIndent(),
+                """
+                {"type":"frame","sessionId":"session-budget","sequenceNumber":1,"frameTimestamp":1100,"frameWidth":640,"frameHeight":360,"droppedFramesSinceLast":0,"processFrameMs":30,"inferenceMs":20,"analyzeSceneMs":10,"decideEventsMs":8,"totalPipelineMs":95,"obstacleCount":2,"eventCount":1,"isBlocked":true,"isNarrowing":false,"isRoadDangerous":true,"navigationPassableRatio":0.30,"blockageConfidence":0.72,"verticalReachRatio":0.18,"floodReachRatio":0.09,"widthRetentionP25":0.16,"messageKeys":["event_blocked"]}
+                """.trimIndent(),
+            )
+        )
+        val useCase = EvaluateTraceReplayBudgetUseCase(
+            PipelinePerformanceBudget(
+                targetP95TotalPipelineMs = 120L,
+                maxDroppedFrameRate = 0.10,
+            )
+        )
+
+        val evaluation = useCase(report)
+
+        assertTrue(evaluation.isWithinBudget)
+        assertEquals(emptyList<String>(), evaluation.warnings)
+    }
+}

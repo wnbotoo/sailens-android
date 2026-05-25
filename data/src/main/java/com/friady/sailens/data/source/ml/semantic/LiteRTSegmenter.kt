@@ -3,6 +3,7 @@ package com.friady.sailens.data.source.ml.semantic
 import android.os.SystemClock
 import com.friady.sailens.data.source.ml.ModelInputDataType
 import com.friady.sailens.data.source.ml.ModelInputQuantization
+import com.friady.sailens.data.source.ml.YoloTensorConfig
 import com.friady.sailens.data.source.ml.YoloInputPreprocessor
 import com.friady.sailens.domain.model.perception.ImageFrame
 import com.friady.sailens.domain.model.perception.SegmentationMask
@@ -12,7 +13,7 @@ import com.google.ai.edge.litert.CompiledModel
 
 class LiteRTSegmenter(
     private val model: CompiledModel,
-    private val config: SegmenterConfig,
+    private val config: YoloTensorConfig,
     private val inputDataType: ModelInputDataType,
     inputQuantization: ModelInputQuantization,
     preferNativeYuvPreprocessing: Boolean,
@@ -34,7 +35,7 @@ class LiteRTSegmenter(
         inputQuantization = inputQuantization,
         preferNativeYuvPreprocessing = preferNativeYuvPreprocessing,
     )
-    private val nativePostProcessor = YOLO26SemNativePostProcessor(config)
+    private val nativeArgmaxPostprocessor = NativeSemanticArgmaxPostprocessor(config)
 
     fun segment(rawFrame: ImageFrame): SegmentationOutput {
         val startTime = SystemClock.uptimeMillis()
@@ -60,7 +61,7 @@ class LiteRTSegmenter(
             height = config.outputHeight,
             channels = config.outputChannels,
         )
-        if (nativePostprocessResult == null && !nativePostProcessor.postProcess(outputFloatArray, cachedResultMask)) {
+        if (nativePostprocessResult == null && !nativeArgmaxPostprocessor.argmaxScores(outputFloatArray, cachedResultMask)) {
             inputPreprocessor.postprocess(outputFloatArray, cachedResultMask)
         }
         val afterPostprocessTime = SystemClock.uptimeMillis()

@@ -12,14 +12,3 @@ interface SegmentationModel {
     suspend fun segment(frame: ImageFrame): Result<SegmentationOutput>
     suspend fun release()
 }
-
-data class SegmenterConfig(
-    val inputWidth: Int,
-    val inputHeight: Int,
-    val outputWidth: Int,
-    val outputHeight: Int,
-    val outputChannels: Int,
-    val mean: Triple<Float, Float, Float>,
-    val std: Triple<Float, Float, Float>,
-    val confidenceThreshold: Float = 0f,
-)

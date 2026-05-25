@@ -3,6 +3,7 @@ package com.friady.sailens.domain.usecase.perception
 import com.friady.sailens.domain.config.PerceptionConfig
 import com.friady.sailens.domain.model.common.DistanceLevel
 import com.friady.sailens.domain.model.common.InferenceStrategy
+import com.friady.sailens.domain.model.common.InstanceProviderType
 import com.friady.sailens.domain.model.common.NormalizedRect
 import com.friady.sailens.domain.model.common.PerceptionMode
 import com.friady.sailens.domain.model.perception.DetectedInstance
@@ -177,7 +178,10 @@ class ProcessFrameUseCase(
         depthEstimator: (NormalizedRect) -> DistanceLevel,
     ): ObstacleTrackingOutput {
         // 如果实例模型尚未初始化，回退到语义分割，避免启动阶段阻塞导航结果。
-        if (!instanceProvider.isInitialized) {
+        if (
+            perceptionConfig.instanceProviderType == InstanceProviderType.NONE ||
+            !instanceProvider.isInitialized
+        ) {
             val rawObstacles = obstacleExtractor.extractFromSemantic(analysis, depthEstimator)
             return ObstacleTrackingOutput(
                 trackedObstacles = obstacleTracker.update(rawObstacles, frame.timestamp),

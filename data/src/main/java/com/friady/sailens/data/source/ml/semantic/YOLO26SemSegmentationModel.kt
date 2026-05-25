@@ -2,6 +2,7 @@ package com.friady.sailens.data.source.ml.semantic
 
 import android.content.Context
 import android.util.Log
+import com.friady.sailens.data.source.ml.YoloTensorConfig
 import com.friady.sailens.data.source.ml.resolveModelInputDataType
 import com.friady.sailens.domain.model.perception.ImageFrame
 import com.friady.sailens.domain.model.perception.SegmentationOutput
@@ -115,7 +116,7 @@ class YOLO26SemSegmentationModel(
                 configured = modelConfig.inputDataType,
                 tensorElementType = inputTensorType.elementType,
             )
-            val config = model.createSegmenterConfig(inputTensorType)
+            val config = model.createYoloTensorConfig(inputTensorType)
             Log.i(
                 TAG,
                 "YOLO26 semantic tensor config: input=${config.inputWidth}x${config.inputHeight}, output=${config.outputWidth}x${config.outputHeight}x${config.outputChannels}, inputType=${inputDataType.dataType}, tensorElement=${inputDataType.elementTypeName}"
@@ -135,7 +136,7 @@ class YOLO26SemSegmentationModel(
         }
     }
 
-    private fun CompiledModel.createSegmenterConfig(inputTensorType: TensorType): SegmenterConfig {
+    private fun CompiledModel.createYoloTensorConfig(inputTensorType: TensorType): YoloTensorConfig {
         val inputDimensions = requireNotNull(inputTensorType.layout) {
             "YOLO26 semantic input tensor '${modelConfig.inputTensorName}' has no layout"
         }.dimensions
@@ -145,7 +146,7 @@ class YOLO26SemSegmentationModel(
         val inputSpec = NhwcImageTensorSpec.fromInput(inputDimensions)
         val outputSpec = NhwcImageTensorSpec.fromOutput(outputDimensions, modelConfig.outputChannels)
 
-        return SegmenterConfig(
+        return YoloTensorConfig(
             inputWidth = inputSpec.width,
             inputHeight = inputSpec.height,
             outputWidth = outputSpec.width,

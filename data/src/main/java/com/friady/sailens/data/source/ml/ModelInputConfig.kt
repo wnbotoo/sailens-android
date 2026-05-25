@@ -13,6 +13,17 @@ data class ModelInputQuantization(
     val zeroPoint: Int = -128,
 )
 
+data class YoloTensorConfig(
+    val inputWidth: Int,
+    val inputHeight: Int,
+    val outputWidth: Int,
+    val outputHeight: Int,
+    val outputChannels: Int,
+    val mean: Triple<Float, Float, Float>,
+    val std: Triple<Float, Float, Float>,
+    val confidenceThreshold: Float = 0f,
+)
+
 data class ResolvedModelInputDataType(
     val dataType: ModelInputDataType,
     val elementTypeName: String,

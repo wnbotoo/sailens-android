@@ -98,17 +98,34 @@ class ProcessFrameUseCaseTest {
         assertEquals(3, repository.segmentCalls)
     }
 
+    @Test
+    fun `combined mode with disabled instance provider uses semantic fallback`() {
+        val instanceProvider = FakeInstanceProvider()
+        val useCase = createUseCase(
+            inferenceStrategy = InferenceStrategy.SIMULTANEOUS,
+            instanceProvider = instanceProvider,
+            instanceProviderType = InstanceProviderType.NONE,
+        )
+
+        val result = runBlocking { useCase(createFrame(sequenceNumber = 1, timestamp = 100L)) }
+
+        assertTrue(result.isSuccess)
+        assertEquals(0, instanceProvider.detectCalls)
+        assertEquals(0, result.getOrThrow().instanceDetections.size)
+    }
+
     private fun createUseCase(
         inferenceStrategy: InferenceStrategy,
         instanceProvider: InstanceSegmentationProvider,
         perceptionRepository: FakePerceptionRepository = FakePerceptionRepository(),
         enableSemanticFrameSkipping: Boolean = true,
         semanticFrameInterval: Int = 2,
+        instanceProviderType: InstanceProviderType = InstanceProviderType.YOLO26_SEG,
     ): ProcessFrameUseCase {
         val config = PerceptionConfig(
             mode = PerceptionMode.COMBINED,
             semanticProviderType = SemanticProviderType.YOLO26_SEM,
-            instanceProviderType = InstanceProviderType.YOLO26_SEG,
+            instanceProviderType = instanceProviderType,
             inferenceStrategy = inferenceStrategy,
             enableSemanticFrameSkipping = enableSemanticFrameSkipping,
             semanticFrameInterval = semanticFrameInterval,

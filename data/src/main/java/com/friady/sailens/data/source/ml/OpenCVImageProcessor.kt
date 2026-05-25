@@ -1,6 +1,5 @@
 package com.friady.sailens.data.source.ml
 
-import com.friady.sailens.data.source.ml.semantic.SegmenterConfig
 import com.friady.sailens.domain.model.perception.ImageFrame
 import com.friady.sailens.domain.model.perception.ImagePixelFormat
 import com.friady.sailens.domain.model.perception.Yuv420FrameData
@@ -14,7 +13,7 @@ import org.opencv.osgi.OpenCVNativeLoader
 import kotlin.math.min
 
 class OpenCVImageProcessor(
-    private val config: SegmenterConfig,
+    private val config: YoloTensorConfig,
 ) : FramePreprocessor {
     init {
         OpenCVNativeLoader().init()

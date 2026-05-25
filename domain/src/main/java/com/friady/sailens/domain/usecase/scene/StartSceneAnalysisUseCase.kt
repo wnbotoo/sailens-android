@@ -1,7 +1,8 @@
 package com.friady.sailens.domain.usecase.scene
 
 import com.friady.sailens.domain.config.PerceptionConfig
-import com.friady.sailens.domain.config.PipelineBudget
+import com.friady.sailens.domain.config.PipelinePerformanceBudget
+import com.friady.sailens.domain.model.common.InstanceProviderType
 import com.friady.sailens.domain.model.common.PerceptionMode
 import com.friady.sailens.domain.model.trace.FrameTrace
 import com.friady.sailens.domain.model.trace.SessionTraceAccumulator
@@ -25,8 +26,6 @@ import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.onEach
 import java.util.UUID
 
-private const val TARGET_HARDWARE_PROFILE = "snapdragon_8_gen_3_plus"
-
 private data class PipelineFrameResult(
     val sceneResult: SceneResult,
     val frameTrace: FrameTrace,
@@ -45,6 +44,7 @@ class StartSceneAnalysisUseCase(
     private val decideEventsUseCase: DecideEventsUseCase,
     private val logService: LogService,
     private val traceService: TraceService,
+    private val pipelineBudget: PipelinePerformanceBudget,
 ) {
     suspend operator fun invoke(frameFlow: Flow<ImageFrame>): Flow<SceneResult> {
         val sessionId = UUID.randomUUID().toString()
@@ -69,7 +69,7 @@ class StartSceneAnalysisUseCase(
                 sessionId = sessionId,
                 startedAt = sessionStartedAt,
                 pipelineMode = perceptionConfig.mode.traceName(),
-                targetHardwareProfile = TARGET_HARDWARE_PROFILE,
+                targetHardwareProfile = perceptionConfig.targetHardwareProfile,
             )
         )
 
@@ -82,11 +82,16 @@ class StartSceneAnalysisUseCase(
                 "semanticProvider" to perceptionConfig.semanticProviderType.name,
                 "instanceProvider" to perceptionConfig.instanceProviderType.name,
                 "inferenceStrategy" to perceptionConfig.inferenceStrategy.name,
+                "runtimeProfile" to perceptionConfig.runtimeProfileName,
+                "targetHardwareProfile" to perceptionConfig.targetHardwareProfile,
             ),
         )
 
         // 2. 初始化实例分割提供者
-        if (perceptionConfig.mode == PerceptionMode.COMBINED) {
+        if (
+            perceptionConfig.mode == PerceptionMode.COMBINED &&
+            perceptionConfig.instanceProviderType != InstanceProviderType.NONE
+        ) {
             if (!instanceProvider.isInitialized) {
                 instanceProvider.initialize()
                 check(instanceProvider.isInitialized) {
@@ -178,7 +183,7 @@ class StartSceneAnalysisUseCase(
                     instanceOutputReadMs = perceptionResult.instanceOutputReadTimeMs,
                     instancePostprocessMs = perceptionResult.instancePostprocessTimeMs,
                 )
-                val runtimeStats = runtimeWindow.record(frameTrace)
+                val runtimeStats = runtimeWindow.record(frameTrace, pipelineBudget)
 
                 return@mapNotNull PipelineFrameResult(
                     sceneResult = SceneResult(
@@ -290,7 +295,10 @@ private class PipelineRuntimeWindow(
     private var nextIndex = 0
     private var size = 0
 
-    fun record(frameTrace: FrameTrace): PipelineRuntimeStats {
+    fun record(
+        frameTrace: FrameTrace,
+        budget: PipelinePerformanceBudget,
+    ): PipelineRuntimeStats {
         totalPipelineTimes[nextIndex] = frameTrace.totalPipelineMs
         droppedFrames[nextIndex] = frameTrace.droppedFramesSinceLast
         nextIndex = (nextIndex + 1) % capacity
@@ -324,8 +332,8 @@ private class PipelineRuntimeWindow(
             avgTotalPipelineMs = if (size > 0) totalPipelineMs.toDouble() / size else 0.0,
             p95TotalPipelineMs = p95,
             droppedFrameRate = droppedFrameRate,
-            isOverBudget = p95 > PipelineBudget.TARGET_P95_TOTAL_PIPELINE_MS ||
-                droppedFrameRate > PipelineBudget.MAX_DROPPED_FRAME_RATE,
+            isOverBudget = p95 > budget.targetP95TotalPipelineMs ||
+                droppedFrameRate > budget.maxDroppedFrameRate,
         )
     }
 }

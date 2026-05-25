@@ -1,11 +1,12 @@
 package com.friady.sailens.data.source.ml.semantic
 
 import com.friady.sailens.data.source.ml.NativeMlLibrary
+import com.friady.sailens.data.source.ml.YoloTensorConfig
 
-internal class YOLO26SemNativePostProcessor(
-    private val config: SegmenterConfig,
+internal class NativeSemanticArgmaxPostprocessor(
+    private val config: YoloTensorConfig,
 ) {
-    fun postProcess(
+    fun argmaxScores(
         scores: FloatArray,
         resultMask: IntArray,
     ): Boolean {
@@ -14,7 +15,7 @@ internal class YOLO26SemNativePostProcessor(
         if (resultMask.size != config.outputWidth * config.outputHeight) return false
 
         return runCatching {
-            nativeArgMax(
+            nativeArgmaxScores(
                 scores = scores,
                 resultMask = resultMask,
                 width = config.outputWidth,
@@ -24,7 +25,7 @@ internal class YOLO26SemNativePostProcessor(
         }.getOrDefault(false)
     }
 
-    private external fun nativeArgMax(
+    private external fun nativeArgmaxScores(
         scores: FloatArray,
         resultMask: IntArray,
         width: Int,

@@ -1,11 +1,10 @@
 package com.friady.sailens.data.source.ml
 
-import com.friady.sailens.data.source.ml.semantic.SegmenterConfig
 import com.friady.sailens.domain.model.perception.ImageFrame
 import kotlin.math.roundToInt
 
 internal class YoloInputPreprocessor(
-    private val config: SegmenterConfig,
+    private val config: YoloTensorConfig,
     private val inputQuantization: ModelInputQuantization,
     private val preferNativeYuvPreprocessing: Boolean,
 ) : AutoCloseable {

@@ -857,7 +857,7 @@ Java_com_friady_sailens_data_source_ml_instance_YOLO26SegNativePostProcessor_nat
 
 extern "C"
 JNIEXPORT jboolean JNICALL
-Java_com_friady_sailens_data_source_ml_semantic_YOLO26SemNativePostProcessor_nativeArgMax(
+Java_com_friady_sailens_data_source_ml_semantic_NativeSemanticArgmaxPostprocessor_nativeArgmaxScores(
         JNIEnv* env,
         jobject,
         jfloatArray scores,

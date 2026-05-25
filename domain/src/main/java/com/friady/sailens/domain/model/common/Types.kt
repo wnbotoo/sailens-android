@@ -30,6 +30,7 @@ enum class InferenceStrategy {
  * 实例分割提供者类型
  */
 enum class InstanceProviderType {
+    NONE,
     YOLO26_SEG
 }
 

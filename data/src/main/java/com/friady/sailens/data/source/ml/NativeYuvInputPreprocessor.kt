@@ -1,11 +1,10 @@
 package com.friady.sailens.data.source.ml
 
-import com.friady.sailens.data.source.ml.semantic.SegmenterConfig
 import com.friady.sailens.domain.model.perception.ImageFrame
 import com.friady.sailens.domain.model.perception.ImagePixelFormat
 
 internal class NativeYuvInputPreprocessor(
-    private val config: SegmenterConfig,
+    private val config: YoloTensorConfig,
     private val inputQuantization: ModelInputQuantization,
 ) {
     fun preprocessFloat(

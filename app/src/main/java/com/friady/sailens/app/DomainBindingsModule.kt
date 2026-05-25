@@ -5,9 +5,7 @@ import com.friady.sailens.data.source.ml.instance.YOLO26SegModelConfig
 import com.friady.sailens.data.source.ml.semantic.YOLO26SemModelConfig
 import com.friady.sailens.domain.config.AnalysisConfig
 import com.friady.sailens.domain.config.PerceptionConfig
-import com.friady.sailens.domain.model.common.InferenceStrategy
-import com.friady.sailens.domain.model.common.PerceptionMode
-import com.friady.sailens.domain.model.common.SemanticProviderType
+import com.friady.sailens.domain.config.PipelinePerformanceBudget
 import com.friady.sailens.domain.processor.analysis.ConnectivityAnalysisProcessor
 import com.friady.sailens.domain.processor.analysis.ConnectivityChecker
 import com.friady.sailens.domain.processor.analysis.CrossValidator
@@ -35,37 +33,13 @@ import com.friady.sailens.domain.usecase.trace.LoadTraceReplayReportUseCase
 import org.koin.dsl.module
 
 val domainBindingsModule = module {
-    // 640x360 minimizes camera bandwidth; 960x540 is a balanced default for the 640 square models.
-    // The selected TFLite asset still owns the actual model tensor shape.
-    single {
-        CameraRuntimeConfig(
-            previewWidth = 1280,
-            previewHeight = 720,
-            analysisWidth = 960,
-            analysisHeight = 540,
-        )
-    }
-    single {
-        YOLO26SemModelConfig(
-            assetPath = "yolo26n-sem-640_int8.tflite",
-        )
-    }
-    single {
-        YOLO26SegModelConfig(
-            assetPath = "yolo26n-seg-640_int8.tflite",
-            enableMaskReconstruction = false,
-        )
-    }
-    single {
-        PerceptionConfig(
-            mode = PerceptionMode.COMBINED,
-            semanticProviderType = SemanticProviderType.YOLO26_SEM,
-            inferenceStrategy = InferenceStrategy.ALTERNATING,
-            enableSemanticFrameSkipping = false,
-            semanticFrameInterval = 2,
-        )
-    }
-    single { AnalysisConfig() }
+    single { SailensRuntimeProfile.balanced() }
+    single<CameraRuntimeConfig> { get<SailensRuntimeProfile>().camera }
+    single<YOLO26SemModelConfig> { get<SailensRuntimeProfile>().semanticModel }
+    single<YOLO26SegModelConfig> { get<SailensRuntimeProfile>().instanceModel }
+    single<PerceptionConfig> { get<SailensRuntimeProfile>().perception }
+    single<AnalysisConfig> { get<SailensRuntimeProfile>().analysis }
+    single<PipelinePerformanceBudget> { get<SailensRuntimeProfile>().pipelineBudget }
 
     single<SegmentationAnalysisProcessor> { SegmentationAnalyzer(config = get(), classMapper = get()) }
     single<ConnectivityAnalysisProcessor> { ConnectivityChecker(config = get(), statsExtractor = get()) }
@@ -82,61 +56,62 @@ val domainBindingsModule = module {
 
     factory {
         ProcessFrameUseCase(
-            get(),
-            get(),
-            get(),
-            get(),
-            get(),
-            get(),
-            get()
+            perceptionConfig = get(),
+            perceptionRepository = get(),
+            instanceProvider = get(),
+            depthRepository = get(),
+            segmentationAnalyzer = get(),
+            obstacleExtractor = get(),
+            obstacleTracker = get(),
         )
     }
     factory {
         AnalyzeSceneUseCase(
-            get(),
-            get(),
-            get(),
-            get(),
-            get()
+            connectivityChecker = get(),
+            roadSafetyAnalyzer = get(),
+            groundTypeDetector = get(),
+            sceneClassifier = get(),
+            crossValidator = get(),
         )
     }
     factory {
         DecideEventsUseCase(
-            get(),
-            get(),
-            get(),
-            get()
+            eventGenerator = get(),
+            conflictResolver = get(),
+            eventMerger = get(),
+            cooldownManager = get(),
         )
     }
     factory {
         StartSceneAnalysisUseCase(
-            get(),
-            get(),
-            get(),
-            get(),
-            get(),
-            get(),
-            get(),
-            get()
+            perceptionConfig = get(),
+            perceptionRepository = get(),
+            instanceProvider = get(),
+            processFrameUseCase = get(),
+            analyzeSceneUseCase = get(),
+            decideEventsUseCase = get(),
+            logService = get(),
+            traceService = get(),
+            pipelineBudget = get(),
         )
     }
     factory {
         StopSceneAnalysisUseCase(
-            get(),
-            get(),
-            get(),
-            get(),
-            get(),
-            get(),
-            get(),
-            get(),
-            get(),
-            get(),
-            get()
+            perceptionRepository = get(),
+            instanceProvider = get(),
+            segmentationAnalyzer = get(),
+            obstacleTracker = get(),
+            connectivityChecker = get(),
+            roadSafetyAnalyzer = get(),
+            groundTypeDetector = get(),
+            sceneClassifier = get(),
+            eventGenerator = get(),
+            cooldownManager = get(),
+            logService = get(),
         )
     }
     factory { BuildTraceReplayReportUseCase() }
-    factory { EvaluateTraceReplayBudgetUseCase() }
+    factory { EvaluateTraceReplayBudgetUseCase(get()) }
     factory { ListTraceSessionsUseCase(get()) }
     factory { LoadTraceReplayReportUseCase(get(), get()) }
     factory { LoadLatestTraceReplayReportUseCase(get(), get()) }

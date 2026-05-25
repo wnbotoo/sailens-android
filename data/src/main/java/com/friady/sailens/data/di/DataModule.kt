@@ -10,10 +10,14 @@ import com.friady.sailens.data.source.depth.ImagePositionDepthEstimator
 import com.friady.sailens.data.source.device.DeviceRotationDataSource
 import com.friady.sailens.data.source.mapper.ClassMapperProviderImpl
 import com.friady.sailens.data.source.ml.analysis.NativeConnectivityStatsExtractor
+import com.friady.sailens.data.source.ml.instance.DisabledInstanceSegmentationProvider
 import com.friady.sailens.data.source.ml.instance.YOLO26SegInstanceProvider
 import com.friady.sailens.data.source.ml.semantic.NativeSemanticScorePostprocessor
 import com.friady.sailens.data.source.ml.semantic.SegmentationModel
 import com.friady.sailens.data.source.ml.semantic.YOLO26SemSegmentationModel
+import com.friady.sailens.domain.config.PerceptionConfig
+import com.friady.sailens.domain.model.common.InstanceProviderType
+import com.friady.sailens.domain.model.common.SemanticProviderType
 import com.friady.sailens.domain.model.perception.ClassMapper
 import com.friady.sailens.domain.model.perception.ClassMapperProvider
 import com.friady.sailens.domain.processor.analysis.ConnectivityStatsExtractor
@@ -49,18 +53,23 @@ val dataModule = module {
 
     // Data source
     single<SegmentationModel> {
-        YOLO26SemSegmentationModel(
-            context = androidContext(),
-            modelConfig = get(),
-            nativeScorePostprocessor = get<NativeSemanticScorePostprocessor>(),
-        )
+        when (get<PerceptionConfig>().semanticProviderType) {
+            SemanticProviderType.YOLO26_SEM -> YOLO26SemSegmentationModel(
+                context = androidContext(),
+                modelConfig = get(),
+                nativeScorePostprocessor = get<NativeSemanticScorePostprocessor>(),
+            )
+        }
     }
     single<InstanceSegmentationProvider> {
-        YOLO26SegInstanceProvider(
-            context = androidContext(),
-            perceptionConfig = get(),
-            modelConfig = get(),
-        )
+        when (get<PerceptionConfig>().instanceProviderType) {
+            InstanceProviderType.NONE -> DisabledInstanceSegmentationProvider()
+            InstanceProviderType.YOLO26_SEG -> YOLO26SegInstanceProvider(
+                context = androidContext(),
+                perceptionConfig = get(),
+                modelConfig = get(),
+            )
+        }
     }
     single { ImagePositionDepthEstimator() }
     single { DeviceRotationDataSource(context = androidContext()) }

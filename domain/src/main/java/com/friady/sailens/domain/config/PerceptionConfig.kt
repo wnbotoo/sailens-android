@@ -13,7 +13,7 @@ import com.friady.sailens.domain.model.common.ZoneMode
  * 双模型职责：
  *   - YOLOv26n-sem (semanticProviderType = YOLO26_SEM)
  *       理解可行走区域：哪里能走、地面类型、道路边界
- *       → 驱动 PerceptionRepository.segment() → SegmentationAnalysis
+ *       → 驱动 PerceptionRepository.segment() → SegmentationOutput
  *
  *   - YOLOv26n-seg (instanceProviderType = YOLO26_SEG)
  *       识别障碍物：有什么（类别）、在哪里（BBox + Mask）
@@ -28,9 +28,11 @@ import com.friady.sailens.domain.model.common.ZoneMode
  *   - 跳过帧会复用最近一次 semantic mask，适合当前 YOLO26-sem 高分辨率输出较重的场景
  */
 data class PerceptionConfig(
-    val mode: PerceptionMode = PerceptionMode.COMBINED,
+    val runtimeProfileName: String = "balanced",
+    val targetHardwareProfile: String = "snapdragon_8_gen_3_plus",
+    val mode: PerceptionMode = PerceptionMode.SEMANTIC_ONLY,
     val semanticProviderType: SemanticProviderType = SemanticProviderType.YOLO26_SEM,
-    val instanceProviderType: InstanceProviderType = InstanceProviderType.YOLO26_SEG,
+    val instanceProviderType: InstanceProviderType = InstanceProviderType.NONE,
 
     /** 双模型推理策略，仅 mode = COMBINED 时生效 */
     val inferenceStrategy: InferenceStrategy = InferenceStrategy.ALTERNATING,

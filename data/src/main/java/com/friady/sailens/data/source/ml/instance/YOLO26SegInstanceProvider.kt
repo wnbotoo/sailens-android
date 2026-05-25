@@ -5,8 +5,8 @@ import android.os.SystemClock
 import android.util.Log
 import com.friady.sailens.data.source.ml.ModelInputDataType
 import com.friady.sailens.data.source.ml.YoloInputPreprocessor
+import com.friady.sailens.data.source.ml.YoloTensorConfig
 import com.friady.sailens.data.source.ml.resolveModelInputDataType
-import com.friady.sailens.data.source.ml.semantic.SegmenterConfig
 import com.friady.sailens.domain.config.PerceptionConfig
 import com.friady.sailens.domain.model.perception.ImageFrame
 import com.friady.sailens.domain.model.perception.InstanceSegmentationOutput
@@ -177,7 +177,7 @@ class YOLO26SegInstanceProvider(
             "YOLO26 instance post-processor expects square input, got ${inputSpec.width}x${inputSpec.height}"
         }
 
-        val inputConfig = SegmenterConfig(
+        val inputConfig = YoloTensorConfig(
             inputWidth = inputSpec.width,
             inputHeight = inputSpec.height,
             outputWidth = inputSpec.width,
