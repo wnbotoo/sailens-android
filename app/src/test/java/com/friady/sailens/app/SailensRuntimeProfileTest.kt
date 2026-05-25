@@ -1,5 +1,6 @@
 package com.friady.sailens.app
 
+import com.friady.sailens.presentation.scene.SceneOverlayMode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -16,6 +17,11 @@ class SailensRuntimeProfileTest {
         assertEquals("balanced", profile.perception.runtimeProfileName)
         assertEquals(profile.targetHardwareProfile, profile.perception.targetHardwareProfile)
         assertFalse(profile.perception.enableSemanticFrameSkipping)
+        assertTrue(profile.sceneOverlay.enablePassableAreaMaskOverlay)
+        assertTrue(profile.sceneOverlay.enableSemanticClassMaskOverlay)
+        assertTrue(profile.sceneOverlay.enableDetectionOverlay)
+        assertTrue(profile.sceneOverlay.enableDebugPanel)
+        assertEquals(SceneOverlayMode.PASSABLE_AREA_MASK, profile.sceneOverlay.initialMode)
     }
 
     @Test

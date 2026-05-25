@@ -17,8 +17,11 @@
     <string name="label_feedback_haptics">震动反馈</string>
     <string name="label_overlay_mode">叠加层模式</string>
     <string name="label_current_overlay_mode">当前叠加层：%1$s</string>
-    <string name="btn_overlay_passable">可通行 Mask</string>
-    <string name="btn_overlay_semantic">语义类别</string>
+    <string name="btn_overlay_off">关闭</string>
+    <string name="btn_overlay_passable_area_mask">可行走区域 Mask</string>
+    <string name="btn_overlay_semantic_class_mask">语义类别 Mask</string>
+    <string name="btn_overlay_detection_boxes">物体框</string>
+    <string name="btn_overlay_instance_debug">实例调试</string>
     <string name="title_live_pipeline_debug">实时 Pipeline 调试</string>
     <string name="debug_passable_ratio">全局可通行占比：%1$d%%</string>
     <string name="debug_navigation_passable_ratio">导航区域可通行占比：%1$d%%</string>

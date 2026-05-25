@@ -30,6 +30,7 @@ import com.friady.sailens.domain.usecase.trace.EvaluateTraceReplayBudgetUseCase
 import com.friady.sailens.domain.usecase.trace.ListTraceSessionsUseCase
 import com.friady.sailens.domain.usecase.trace.LoadLatestTraceReplayReportUseCase
 import com.friady.sailens.domain.usecase.trace.LoadTraceReplayReportUseCase
+import com.friady.sailens.presentation.scene.SceneOverlayConfig
 import org.koin.dsl.module
 
 val domainBindingsModule = module {
@@ -40,6 +41,7 @@ val domainBindingsModule = module {
     single<PerceptionConfig> { get<SailensRuntimeProfile>().perception }
     single<AnalysisConfig> { get<SailensRuntimeProfile>().analysis }
     single<PipelinePerformanceBudget> { get<SailensRuntimeProfile>().pipelineBudget }
+    single<SceneOverlayConfig> { get<SailensRuntimeProfile>().sceneOverlay }
 
     single<SegmentationAnalysisProcessor> { SegmentationAnalyzer(config = get(), classMapper = get()) }
     single<ConnectivityAnalysisProcessor> { ConnectivityChecker(config = get(), statsExtractor = get()) }

@@ -42,7 +42,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 private const val TAG = "SceneAnalysisViewModel"
-private const val OVERLAY_RENDER_INTERVAL_MS = 250L
 
 class SceneAnalysisViewModel(
     private val imageFrameProvider: ImageFrameProvider,
@@ -56,9 +55,15 @@ class SceneAnalysisViewModel(
     private val loadTraceReplayReportUseCase: LoadTraceReplayReportUseCase,
     private val loadLatestTraceReplayReportUseCase: LoadLatestTraceReplayReportUseCase,
     private val evaluateTraceReplayBudgetUseCase: EvaluateTraceReplayBudgetUseCase,
+    private val sceneOverlayConfig: SceneOverlayConfig,
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(SceneAnalysisUiState())
+    private val _uiState = MutableStateFlow(
+        SceneAnalysisUiState(
+            enabledOverlayModes = sceneOverlayConfig.enabledOverlayModes,
+            overlayMode = sceneOverlayConfig.effectiveInitialMode,
+        )
+    )
     val uiState: StateFlow<SceneAnalysisUiState> = _uiState.asStateFlow()
 
     private val _uiEffect = MutableSharedFlow<SceneAnalysisUiEffect>()
@@ -111,15 +116,33 @@ class SceneAnalysisViewModel(
         }
     }
 
-    fun setOverlayMode(overlayMode: SegmentationOverlayMode) {
+    fun setOverlayMode(overlayMode: SceneOverlayMode) {
         lastOverlayRenderTimeMs = 0L
+        val effectiveOverlayMode = sceneOverlayConfig.coerceEnabledMode(overlayMode)
+        if (effectiveOverlayMode == SceneOverlayMode.OFF) {
+            overlayRenderJob?.cancel()
+            overlayRenderJob = null
+            _uiState.update {
+                it.copy(
+                    overlayMode = SceneOverlayMode.OFF,
+                    segMask = null,
+                    trackedObstacles = emptyList(),
+                    instanceDetections = emptyList(),
+                )
+            }
+            return
+        }
+
+        val result = latestSceneResult
         _uiState.update {
             it.copy(
-                overlayMode = overlayMode,
+                overlayMode = effectiveOverlayMode,
                 segMask = null,
+                trackedObstacles = result?.trackedObstaclesForOverlay(effectiveOverlayMode).orEmpty(),
+                instanceDetections = result?.instanceDetectionsForOverlay(effectiveOverlayMode).orEmpty(),
             )
         }
-        scheduleOverlayRender(latestSceneResult, overlayMode, force = true)
+        scheduleOverlayRender(result, effectiveOverlayMode, force = true)
     }
 
     fun openTraceReplaySessionsScreen() {
@@ -285,21 +308,21 @@ class SceneAnalysisViewModel(
             }.collectLatest { result ->
                 frameCount++
                 latestSceneResult = result
-                val state = _uiState.value
+                val overlayMode = _uiState.value.overlayMode
                 val events = result.events
                 _uiState.update {
                     it.copy(
                         frameDisplayWidth = result.frameDisplayWidth,
                         frameDisplayHeight = result.frameDisplayHeight,
-                        trackedObstacles = result.obstacles,
-                        instanceDetections = result.instanceDetections,
-                        latestSceneDebugInfo = result.debugInfo,
+                        trackedObstacles = result.trackedObstaclesForOverlay(overlayMode),
+                        instanceDetections = result.instanceDetectionsForOverlay(overlayMode),
+                        latestSceneDebugInfo = result.debugInfo.takeIf { sceneOverlayConfig.enableDebugPanel },
                         lastEvents = events,
                         frameCount = frameCount,
                         eventCount = it.eventCount + events.size
                     )
                 }
-                scheduleOverlayRender(result, state.overlayMode)
+                scheduleOverlayRender(result, overlayMode)
                 if (frameCount == 1L) {
                     logger.info(
                         TAG,
@@ -374,12 +397,19 @@ class SceneAnalysisViewModel(
 
     private fun scheduleOverlayRender(
         result: SceneResult?,
-        overlayMode: SegmentationOverlayMode,
+        overlayMode: SceneOverlayMode,
         force: Boolean = false,
     ) {
-        if (result == null) return
+        if (result == null || !sceneOverlayConfig.isModeEnabled(overlayMode) || !overlayMode.rendersBitmap()) {
+            overlayRenderJob?.cancel()
+            overlayRenderJob = null
+            if (_uiState.value.segMask != null) {
+                _uiState.update { it.copy(segMask = null) }
+            }
+            return
+        }
         val now = SystemClock.elapsedRealtime()
-        if (!force && now - lastOverlayRenderTimeMs < OVERLAY_RENDER_INTERVAL_MS) {
+        if (!force && now - lastOverlayRenderTimeMs < sceneOverlayConfig.bitmapRenderIntervalMs) {
             return
         }
         lastOverlayRenderTimeMs = now
@@ -486,16 +516,48 @@ class SceneAnalysisViewModel(
         }
     }
 
-    private fun SceneResult.toOverlayBitmap(overlayMode: SegmentationOverlayMode): Bitmap? {
+    private fun SceneResult.trackedObstaclesForOverlay(overlayMode: SceneOverlayMode) =
+        if (sceneOverlayConfig.isModeEnabled(overlayMode) && overlayMode == SceneOverlayMode.INSTANCE_DEBUG) {
+            obstacles
+        } else {
+            emptyList()
+        }
+
+    private fun SceneResult.instanceDetectionsForOverlay(overlayMode: SceneOverlayMode) =
+        if (!sceneOverlayConfig.isModeEnabled(overlayMode)) {
+            emptyList()
+        } else {
+            when (overlayMode) {
+                SceneOverlayMode.DETECTION_BOXES,
+                SceneOverlayMode.INSTANCE_DEBUG -> instanceDetections
+                SceneOverlayMode.OFF,
+                SceneOverlayMode.PASSABLE_AREA_MASK,
+                SceneOverlayMode.SEMANTIC_CLASS_MASK -> emptyList()
+            }
+        }
+
+    private fun SceneResult.toOverlayBitmap(overlayMode: SceneOverlayMode): Bitmap? {
         val sourceAspectRatio = frameDisplayWidth?.let { width ->
             frameDisplayHeight?.takeIf { it > 0 }?.let { height ->
                 width.toFloat() / height
             }
         }
         return when (overlayMode) {
-            SegmentationOverlayMode.PASSABLE_MASK -> passableMask?.visualizeForAspect(sourceAspectRatio)
-            SegmentationOverlayMode.SEMANTIC_CLASSES -> segmentationMask?.visualizeSemanticClassesForAspect(sourceAspectRatio)
-            SegmentationOverlayMode.INSTANCE_DEBUG -> instanceDetections.visualizeInstanceMasks()
+            SceneOverlayMode.PASSABLE_AREA_MASK -> passableMask?.visualizeForAspect(sourceAspectRatio)
+            SceneOverlayMode.SEMANTIC_CLASS_MASK -> segmentationMask?.visualizeSemanticClassesForAspect(sourceAspectRatio)
+            SceneOverlayMode.INSTANCE_DEBUG -> instanceDetections.visualizeInstanceMasks()
+            SceneOverlayMode.OFF,
+            SceneOverlayMode.DETECTION_BOXES -> null
+        }
+    }
+
+    private fun SceneOverlayMode.rendersBitmap(): Boolean {
+        return when (this) {
+            SceneOverlayMode.PASSABLE_AREA_MASK,
+            SceneOverlayMode.SEMANTIC_CLASS_MASK,
+            SceneOverlayMode.INSTANCE_DEBUG -> true
+            SceneOverlayMode.OFF,
+            SceneOverlayMode.DETECTION_BOXES -> false
         }
     }
 }

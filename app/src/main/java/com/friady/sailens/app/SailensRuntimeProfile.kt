@@ -10,6 +10,7 @@ import com.friady.sailens.domain.model.common.InferenceStrategy
 import com.friady.sailens.domain.model.common.InstanceProviderType
 import com.friady.sailens.domain.model.common.PerceptionMode
 import com.friady.sailens.domain.model.common.SemanticProviderType
+import com.friady.sailens.presentation.scene.SceneOverlayConfig
 
 /**
  * Single app-level profile for runtime tuning.
@@ -26,6 +27,7 @@ data class SailensRuntimeProfile(
     val perception: PerceptionConfig,
     val analysis: AnalysisConfig,
     val pipelineBudget: PipelinePerformanceBudget,
+    val sceneOverlay: SceneOverlayConfig,
 ) {
     companion object {
         fun balanced(): SailensRuntimeProfile {
@@ -59,6 +61,7 @@ data class SailensRuntimeProfile(
                 ),
                 analysis = AnalysisConfig(),
                 pipelineBudget = PipelinePerformanceBudget(),
+                sceneOverlay = SceneOverlayConfig(),
             )
         }
 

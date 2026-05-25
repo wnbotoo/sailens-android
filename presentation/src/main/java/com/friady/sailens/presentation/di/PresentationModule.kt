@@ -12,17 +12,18 @@ val presentationModule = module {
     single { SpeechManager(androidContext()) }
     viewModel {
         SceneAnalysisViewModel(
-            get(),
-            get(),
-            get(),
-            get(),
-            get(),
-            get(),
-            get(),
-            get(),
-            get(),
-            get(),
-            get()
+            imageFrameProvider = get(),
+            startSceneAnalysisUseCase = get(),
+            stopSceneAnalysisUseCase = get(),
+            hapticManager = get(),
+            speechManager = get(),
+            logger = get(),
+            traceService = get(),
+            listTraceSessionsUseCase = get(),
+            loadTraceReplayReportUseCase = get(),
+            loadLatestTraceReplayReportUseCase = get(),
+            evaluateTraceReplayBudgetUseCase = get(),
+            sceneOverlayConfig = get(),
         )
     }
 }

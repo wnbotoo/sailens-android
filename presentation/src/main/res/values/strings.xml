@@ -17,8 +17,10 @@
     <string name="label_feedback_haptics">Haptic feedback</string>
     <string name="label_overlay_mode">Overlay mode</string>
     <string name="label_current_overlay_mode">Current overlay: %1$s</string>
-    <string name="btn_overlay_passable">Passable mask</string>
-    <string name="btn_overlay_semantic">Semantic classes</string>
+    <string name="btn_overlay_off">Off</string>
+    <string name="btn_overlay_passable_area_mask">Passable area mask</string>
+    <string name="btn_overlay_semantic_class_mask">Semantic class mask</string>
+    <string name="btn_overlay_detection_boxes">Detection boxes</string>
     <string name="btn_overlay_instance_debug">Instance debug</string>
     <string name="title_live_pipeline_debug">Live pipeline debug</string>
     <string name="debug_semantic_provider">Semantic provider: %1$s</string>
