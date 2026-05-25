@@ -25,7 +25,7 @@ private const val TAG = "YOLO26SemModel"
 class YOLO26SemSegmentationModel(
     private val context: Context,
     private val modelConfig: YOLO26SemModelConfig = YOLO26SemModelConfig(),
-    private val nativeSegmentationAnalyzer: NativeSegmentationAnalyzer? = null,
+    private val nativeScorePostprocessor: NativeSemanticScorePostprocessor? = null,
 ) : SegmentationModel {
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -127,7 +127,7 @@ class YOLO26SemSegmentationModel(
                 inputQuantization = modelConfig.inputQuantization,
                 preferNativeYuvPreprocessing = modelConfig.preferNativeYuvPreprocessing,
                 accelerator = accelerator,
-                nativeSegmentationAnalyzer = nativeSegmentationAnalyzer,
+                nativeScorePostprocessor = nativeScorePostprocessor,
             )
         } catch (error: Throwable) {
             model.close()

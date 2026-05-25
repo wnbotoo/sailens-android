@@ -12,6 +12,7 @@ data class AnalysisConfig(
     val sampleLayerRatios: List<Float> = listOf(0.85f, 0.70f, 0.55f),
     val minRunWidthRatio: Float = 0.05f,
     val reachRatioThreshold: Float = 0.40f,
+    val connectivityBottomRatio: Float = 0.15f,
 
     // 连通性 - 洪泛
     val floodWindowTopRatio: Float = 0.30f,
@@ -42,6 +43,11 @@ data class AnalysisConfig(
 
     // 地面类型检测
     val groundTypeDominantThreshold: Float = 0.30f,
+
+    // 语义统计区域
+    val segmentationBottomRatio: Float = 0.20f,
+    val segmentationCenterRatio: Float = 0.40f,
+    val segmentationNavigationRegionRatio: Float = 0.45f,
 
     // 稳定器参数
     val blockDebounceFrames: Int = 4,

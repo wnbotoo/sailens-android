@@ -67,6 +67,53 @@ class SegmentationAnalyzerTest {
         assertEquals(0, currentFrame.passablePixelCount)
     }
 
+    @Test
+    fun `precomputed stats path matches direct analysis path`() {
+        val config = AnalysisConfig(
+            roadRatioSmoothWindow = 1,
+            trafficLightDebounceFrames = 1,
+        )
+        val mask = SegmentationMask(
+            width = 4,
+            height = 4,
+            classMap = intArrayOf(
+                ROAD, ROAD, BACKGROUND, BACKGROUND,
+                ROAD, OBSTACLE, BACKGROUND, BACKGROUND,
+                ROAD, ROAD, ROAD, OBSTACLE,
+                ROAD, ROAD, ROAD, ROAD,
+            ),
+        )
+
+        val direct = SegmentationAnalyzer(config, classMapper).analyze(mask)
+        val stats = KotlinSegmentationStatsExtractor(config, classMapper).extract(mask)
+        val fromStats = SegmentationAnalyzer(config, classMapper).analyze(mask, stats)
+
+        assertEquals(direct, fromStats)
+    }
+
+    @Test
+    fun `precomputed stats path does not re-extract class map`() {
+        val config = AnalysisConfig(
+            roadRatioSmoothWindow = 1,
+            trafficLightDebounceFrames = 1,
+        )
+        val mask = SegmentationMask(
+            width = 2,
+            height = 2,
+            classMap = intArrayOf(ROAD, ROAD, BACKGROUND, OBSTACLE),
+        )
+        val stats = KotlinSegmentationStatsExtractor(config, classMapper).extract(mask)
+        val rejectingExtractor = object : SegmentationStatsExtractor {
+            override fun extract(segmentation: SegmentationMask) =
+                error("stats extractor should not run when precomputed stats are supplied")
+        }
+
+        val result = SegmentationAnalyzer(config, classMapper, rejectingExtractor).analyze(mask, stats)
+
+        assertEquals(stats.passablePixelCount, result.passablePixelCount)
+        assertEquals(stats.obstaclePixelCount, result.obstaclePixelCount)
+    }
+
     private companion object {
         private const val ROAD = 0
         private const val OBSTACLE = 1

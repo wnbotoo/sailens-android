@@ -22,12 +22,4 @@ data class SegmentationAnalysis(
     val segmentation: SegmentationMask,  // 暴露给需要的处理器
     val width: Int,
     val height: Int,
-) {
-    override fun equals(other: Any?): Boolean {
-        if (this === other) return true
-        if (other !is SegmentationAnalysis) return false
-        return width == other.width && height == other.height
-    }
-
-    override fun hashCode(): Int = 31 * width + height
-}
+)

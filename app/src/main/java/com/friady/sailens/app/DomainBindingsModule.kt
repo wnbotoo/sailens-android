@@ -8,6 +8,8 @@ import com.friady.sailens.domain.config.PerceptionConfig
 import com.friady.sailens.domain.model.common.InferenceStrategy
 import com.friady.sailens.domain.model.common.PerceptionMode
 import com.friady.sailens.domain.model.common.SemanticProviderType
+import com.friady.sailens.domain.processor.analysis.ConnectivityAnalysisProcessor
+import com.friady.sailens.domain.processor.analysis.ConnectivityChecker
 import com.friady.sailens.domain.processor.analysis.CrossValidator
 import com.friady.sailens.domain.processor.analysis.GroundTypeDetector
 import com.friady.sailens.domain.processor.analysis.RoadSafetyAnalyzer
@@ -18,6 +20,8 @@ import com.friady.sailens.domain.processor.decision.EventGenerator
 import com.friady.sailens.domain.processor.decision.EventMerger
 import com.friady.sailens.domain.processor.perception.ObstacleExtractor
 import com.friady.sailens.domain.processor.perception.ObstacleTracker
+import com.friady.sailens.domain.processor.perception.SegmentationAnalysisProcessor
+import com.friady.sailens.domain.processor.perception.SegmentationAnalyzer
 import com.friady.sailens.domain.usecase.decision.DecideEventsUseCase
 import com.friady.sailens.domain.usecase.perception.AnalyzeSceneUseCase
 import com.friady.sailens.domain.usecase.perception.ProcessFrameUseCase
@@ -63,6 +67,8 @@ val domainBindingsModule = module {
     }
     single { AnalysisConfig() }
 
+    single<SegmentationAnalysisProcessor> { SegmentationAnalyzer(config = get(), classMapper = get()) }
+    single<ConnectivityAnalysisProcessor> { ConnectivityChecker(config = get(), statsExtractor = get()) }
     single { ObstacleExtractor(config = get(), classMapper = get()) }
     single { ObstacleTracker(config = get()) }
     single { RoadSafetyAnalyzer(config = get(), classMapper = get()) }

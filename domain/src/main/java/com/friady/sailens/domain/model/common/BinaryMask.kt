@@ -30,7 +30,7 @@ class BinaryMask private constructor(
 
     fun coverage(): Float = countTrue().toFloat() / (width * height)
 
-    fun toPackedBits(): LongArray = bits.toLongArray()
+    fun copyPackedBits(): LongArray = bits.toLongArray()
 
     /**
      * 获取某行的连续 true 区间（runs）
@@ -130,6 +130,22 @@ class BinaryMask private constructor(
         ): BinaryMask {
             return BinaryMask(width, height, BitSet.valueOf(packedBits))
         }
+    }
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is BinaryMask) return false
+
+        return width == other.width &&
+            height == other.height &&
+            bits == other.bits
+    }
+
+    override fun hashCode(): Int {
+        var result = width
+        result = 31 * result + height
+        result = 31 * result + bits.hashCode()
+        return result
     }
 }
 

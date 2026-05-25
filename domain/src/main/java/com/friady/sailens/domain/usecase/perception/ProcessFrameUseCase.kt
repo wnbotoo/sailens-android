@@ -74,7 +74,7 @@ class ProcessFrameUseCase(
         }
         val analysis = semanticOutput.analysis
 
-        // 3. 障碍物检测与跟踪
+        // 2. 障碍物检测与跟踪
         val trackingOutput = detectAndTrackObstacles(frame, analysis)
 
         val inferenceTime = Timestamp.now() - startTime
@@ -125,7 +125,10 @@ class ProcessFrameUseCase(
         val segmentationOutput = perceptionRepository.segment(frame).getOrElse {
             return Result.failure(it)
         }
-        val analysis = segmentationOutput.analysis ?: segmentationAnalyzer.analyze(segmentationOutput.mask)
+        val analysis = segmentationAnalyzer.analyze(
+            segmentation = segmentationOutput.mask,
+            stats = segmentationOutput.analysisStats,
+        )
         cachedSemanticAnalysis = CachedSemanticAnalysis(
             frameWidth = frame.width,
             frameHeight = frame.height,

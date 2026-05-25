@@ -914,7 +914,7 @@ Java_com_friady_sailens_data_source_ml_semantic_YOLO26SemNativePostProcessor_nat
 
 extern "C"
 JNIEXPORT jboolean JNICALL
-Java_com_friady_sailens_data_source_ml_semantic_NativeSegmentationAnalyzer_nativeAnalyzeScores(
+Java_com_friady_sailens_data_source_ml_semantic_NativeSemanticScorePostprocessor_nativePostprocessScores(
         JNIEnv* env,
         jobject,
         jfloatArray scores,
@@ -1167,7 +1167,7 @@ Java_com_friady_sailens_data_source_ml_semantic_NativeSegmentationAnalyzer_nativ
 
 extern "C"
 JNIEXPORT jboolean JNICALL
-Java_com_friady_sailens_data_source_ml_analysis_NativeConnectivityChecker_nativeAnalyzeConnectivity(
+Java_com_friady_sailens_data_source_ml_analysis_NativeConnectivityStatsExtractor_nativeExtractConnectivityStats(
         JNIEnv* env,
         jobject,
         jlongArray passableWords,
@@ -1175,6 +1175,7 @@ Java_com_friady_sailens_data_source_ml_analysis_NativeConnectivityChecker_native
         jint height,
         jfloatArray sampleLayerRatios,
         jfloat minRunWidthRatio,
+        jfloat bottomRatio,
         jfloat floodWindowTopRatio,
         jint maxFloodNodes,
         jfloat floodEarlyStopReachRatio,
@@ -1202,6 +1203,8 @@ Java_com_friady_sailens_data_source_ml_analysis_NativeConnectivityChecker_native
         width <= 0 ||
         height <= 0 ||
         minRunWidthRatio < 0.0f ||
+        bottomRatio < 0.0f ||
+        bottomRatio > 1.0f ||
         floodWindowTopRatio < 0.0f ||
         floodWindowTopRatio > 1.0f ||
         maxFloodNodes <= 0) {
@@ -1281,7 +1284,7 @@ Java_com_friady_sailens_data_source_ml_analysis_NativeConnectivityChecker_native
         int maxRunEnd;
     };
 
-    const int bottomStartRow = std::clamp(static_cast<int>((1.0f - 0.15f) * height), 0, height);
+    const int bottomStartRow = std::clamp(static_cast<int>((1.0f - bottomRatio) * height), 0, height);
     BottomStatsNative bottomStats{0, bottomStartRow, 0, 0};
     for (int row = bottomStartRow; row < height; ++row) {
         int runStart = 0;
@@ -1526,234 +1529,5 @@ Java_com_friady_sailens_data_source_ml_analysis_NativeConnectivityChecker_native
     env->ReleaseFloatArrayElements(sampleLayerRatios, ratioData, JNI_ABORT);
     env->ReleaseIntArrayElements(intOutputs, intData, 0);
     env->ReleaseFloatArrayElements(floatOutputs, floatData, 0);
-    return JNI_TRUE;
-}
-
-extern "C"
-JNIEXPORT jboolean JNICALL
-Java_com_friady_sailens_data_source_ml_semantic_NativeSegmentationAnalyzer_nativeAnalyze(
-        JNIEnv* env,
-        jobject,
-        jintArray classMap,
-        jint width,
-        jint height,
-        jbooleanArray passableLookup,
-        jbooleanArray obstacleLookup,
-        jbooleanArray roadLookup,
-        jbooleanArray trafficLightLookup,
-        jintArray groundTypeLookup,
-        jfloat bottomRatio,
-        jfloat centerRatio,
-        jfloat navigationRegionRatio,
-        jlongArray passableWords,
-        jlongArray obstacleWords,
-        jintArray classCounts,
-        jintArray groundTypeCounts,
-        jintArray intOutputs) {
-    constexpr int outputCount = 13;
-    constexpr int outPassablePixelCount = 0;
-    constexpr int outObstaclePixelCount = 1;
-    constexpr int outRoadPixelCount = 2;
-    constexpr int outHasTrafficLight = 3;
-    constexpr int outBottomCenterRoadPixels = 4;
-    constexpr int outBottomCenterTotalPixels = 5;
-    constexpr int outNavigationPassablePixels = 6;
-    constexpr int outNavigationTotalPixels = 7;
-    constexpr int outBottomTruePixels = 8;
-    constexpr int outMaxRunWidth = 9;
-    constexpr int outMaxRunRow = 10;
-    constexpr int outMaxRunStart = 11;
-    constexpr int outMaxRunEnd = 12;
-
-    if (classMap == nullptr ||
-        passableLookup == nullptr ||
-        obstacleLookup == nullptr ||
-        roadLookup == nullptr ||
-        trafficLightLookup == nullptr ||
-        groundTypeLookup == nullptr ||
-        passableWords == nullptr ||
-        obstacleWords == nullptr ||
-        classCounts == nullptr ||
-        groundTypeCounts == nullptr ||
-        intOutputs == nullptr ||
-        width <= 0 ||
-        height <= 0 ||
-        bottomRatio < 0.0f ||
-        bottomRatio > 1.0f ||
-        centerRatio < 0.0f ||
-        centerRatio > 1.0f ||
-        navigationRegionRatio < 0.0f ||
-        navigationRegionRatio > 1.0f) {
-        return JNI_FALSE;
-    }
-
-    const int pixelCount = width * height;
-    const int wordCount = (pixelCount + 63) / 64;
-    const int classCount = env->GetArrayLength(classCounts);
-    const int groundTypeCount = env->GetArrayLength(groundTypeCounts);
-
-    if (env->GetArrayLength(classMap) != pixelCount ||
-        env->GetArrayLength(passableWords) < wordCount ||
-        env->GetArrayLength(obstacleWords) < wordCount ||
-        env->GetArrayLength(passableLookup) < classCount ||
-        env->GetArrayLength(obstacleLookup) < classCount ||
-        env->GetArrayLength(roadLookup) < classCount ||
-        env->GetArrayLength(trafficLightLookup) < classCount ||
-        env->GetArrayLength(groundTypeLookup) < classCount ||
-        env->GetArrayLength(intOutputs) < outputCount ||
-        classCount <= 0 ||
-        groundTypeCount <= 0) {
-        return JNI_FALSE;
-    }
-
-    jint* classData = env->GetIntArrayElements(classMap, nullptr);
-    jboolean* passableData = env->GetBooleanArrayElements(passableLookup, nullptr);
-    jboolean* obstacleData = env->GetBooleanArrayElements(obstacleLookup, nullptr);
-    jboolean* roadData = env->GetBooleanArrayElements(roadLookup, nullptr);
-    jboolean* trafficLightData = env->GetBooleanArrayElements(trafficLightLookup, nullptr);
-    jint* groundTypeData = env->GetIntArrayElements(groundTypeLookup, nullptr);
-    jlong* passableWordData = env->GetLongArrayElements(passableWords, nullptr);
-    jlong* obstacleWordData = env->GetLongArrayElements(obstacleWords, nullptr);
-    jint* classCountData = env->GetIntArrayElements(classCounts, nullptr);
-    jint* groundTypeCountData = env->GetIntArrayElements(groundTypeCounts, nullptr);
-    jint* outputData = env->GetIntArrayElements(intOutputs, nullptr);
-
-    if (classData == nullptr ||
-        passableData == nullptr ||
-        obstacleData == nullptr ||
-        roadData == nullptr ||
-        trafficLightData == nullptr ||
-        groundTypeData == nullptr ||
-        passableWordData == nullptr ||
-        obstacleWordData == nullptr ||
-        classCountData == nullptr ||
-        groundTypeCountData == nullptr ||
-        outputData == nullptr) {
-        if (classData != nullptr) env->ReleaseIntArrayElements(classMap, classData, JNI_ABORT);
-        if (passableData != nullptr) env->ReleaseBooleanArrayElements(passableLookup, passableData, JNI_ABORT);
-        if (obstacleData != nullptr) env->ReleaseBooleanArrayElements(obstacleLookup, obstacleData, JNI_ABORT);
-        if (roadData != nullptr) env->ReleaseBooleanArrayElements(roadLookup, roadData, JNI_ABORT);
-        if (trafficLightData != nullptr) env->ReleaseBooleanArrayElements(trafficLightLookup, trafficLightData, JNI_ABORT);
-        if (groundTypeData != nullptr) env->ReleaseIntArrayElements(groundTypeLookup, groundTypeData, JNI_ABORT);
-        if (passableWordData != nullptr) env->ReleaseLongArrayElements(passableWords, passableWordData, JNI_ABORT);
-        if (obstacleWordData != nullptr) env->ReleaseLongArrayElements(obstacleWords, obstacleWordData, JNI_ABORT);
-        if (classCountData != nullptr) env->ReleaseIntArrayElements(classCounts, classCountData, JNI_ABORT);
-        if (groundTypeCountData != nullptr) env->ReleaseIntArrayElements(groundTypeCounts, groundTypeCountData, JNI_ABORT);
-        if (outputData != nullptr) env->ReleaseIntArrayElements(intOutputs, outputData, JNI_ABORT);
-        return JNI_FALSE;
-    }
-
-    std::fill(passableWordData, passableWordData + wordCount, 0);
-    std::fill(obstacleWordData, obstacleWordData + wordCount, 0);
-    std::fill(classCountData, classCountData + classCount, 0);
-    std::fill(groundTypeCountData, groundTypeCountData + groundTypeCount, 0);
-    std::fill(outputData, outputData + outputCount, 0);
-
-    const int bottomStartY = std::clamp(
-            static_cast<int>((1.0f - bottomRatio) * height),
-            0,
-            height);
-    const int navigationStartY = std::clamp(
-            static_cast<int>((1.0f - navigationRegionRatio) * height),
-            0,
-            height);
-    const int centerStartX = std::clamp(
-            static_cast<int>(((1.0f - centerRatio) * 0.5f) * width),
-            0,
-            width);
-    const int centerEndX = std::clamp(
-            static_cast<int>(((1.0f + centerRatio) * 0.5f) * width),
-            centerStartX,
-            width);
-
-    outputData[outMaxRunRow] = bottomStartY;
-
-    for (int y = 0; y < height; ++y) {
-        int currentRunStart = -1;
-
-        for (int x = 0; x < width; ++x) {
-            const int pixelIndex = y * width + x;
-            const int classId = classData[pixelIndex];
-            const bool validClass = classId >= 0 && classId < classCount;
-            const bool isPassable = validClass && passableData[classId] == JNI_TRUE;
-            const bool isObstacle = validClass && obstacleData[classId] == JNI_TRUE;
-            const bool isRoad = validClass && roadData[classId] == JNI_TRUE;
-            const bool isTrafficLight = validClass && trafficLightData[classId] == JNI_TRUE;
-            const int groundType = validClass ? groundTypeData[classId] : -1;
-
-            if (validClass) {
-                classCountData[classId]++;
-            }
-            if (isPassable) {
-                setPackedBit(passableWordData, pixelIndex);
-                outputData[outPassablePixelCount]++;
-            }
-            if (isObstacle) {
-                setPackedBit(obstacleWordData, pixelIndex);
-                outputData[outObstaclePixelCount]++;
-            }
-            if (isRoad) {
-                outputData[outRoadPixelCount]++;
-            }
-            if (isTrafficLight) {
-                outputData[outHasTrafficLight] = 1;
-            }
-            if (y >= navigationStartY) {
-                outputData[outNavigationTotalPixels]++;
-                if (isPassable) {
-                    outputData[outNavigationPassablePixels]++;
-                }
-            }
-
-            if (y >= bottomStartY) {
-                if (isPassable) {
-                    outputData[outBottomTruePixels]++;
-                }
-                if (x >= centerStartX && x < centerEndX) {
-                    outputData[outBottomCenterTotalPixels]++;
-                    if (groundType >= 0 && groundType < groundTypeCount) {
-                        groundTypeCountData[groundType]++;
-                    }
-                    if (isRoad) {
-                        outputData[outBottomCenterRoadPixels]++;
-                    }
-                }
-                if (isPassable && currentRunStart == -1) {
-                    currentRunStart = x;
-                } else if (!isPassable && currentRunStart != -1) {
-                    const int runWidth = x - currentRunStart;
-                    if (runWidth > outputData[outMaxRunWidth]) {
-                        outputData[outMaxRunWidth] = runWidth;
-                        outputData[outMaxRunRow] = y;
-                        outputData[outMaxRunStart] = currentRunStart;
-                        outputData[outMaxRunEnd] = x - 1;
-                    }
-                    currentRunStart = -1;
-                }
-            }
-        }
-
-        if (y >= bottomStartY && currentRunStart != -1) {
-            const int runWidth = width - currentRunStart;
-            if (runWidth > outputData[outMaxRunWidth]) {
-                outputData[outMaxRunWidth] = runWidth;
-                outputData[outMaxRunRow] = y;
-                outputData[outMaxRunStart] = currentRunStart;
-                outputData[outMaxRunEnd] = width - 1;
-            }
-        }
-    }
-
-    env->ReleaseIntArrayElements(classMap, classData, JNI_ABORT);
-    env->ReleaseBooleanArrayElements(passableLookup, passableData, JNI_ABORT);
-    env->ReleaseBooleanArrayElements(obstacleLookup, obstacleData, JNI_ABORT);
-    env->ReleaseBooleanArrayElements(roadLookup, roadData, JNI_ABORT);
-    env->ReleaseBooleanArrayElements(trafficLightLookup, trafficLightData, JNI_ABORT);
-    env->ReleaseIntArrayElements(groundTypeLookup, groundTypeData, JNI_ABORT);
-    env->ReleaseLongArrayElements(passableWords, passableWordData, 0);
-    env->ReleaseLongArrayElements(obstacleWords, obstacleWordData, 0);
-    env->ReleaseIntArrayElements(classCounts, classCountData, 0);
-    env->ReleaseIntArrayElements(groundTypeCounts, groundTypeCountData, 0);
-    env->ReleaseIntArrayElements(intOutputs, outputData, 0);
     return JNI_TRUE;
 }

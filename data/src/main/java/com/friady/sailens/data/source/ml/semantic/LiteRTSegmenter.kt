@@ -17,7 +17,7 @@ class LiteRTSegmenter(
     inputQuantization: ModelInputQuantization,
     preferNativeYuvPreprocessing: Boolean,
     val accelerator: Accelerator,
-    private val nativeSegmentationAnalyzer: NativeSegmentationAnalyzer? = null,
+    private val nativeScorePostprocessor: NativeSemanticScorePostprocessor? = null,
 ) {
     private val inputBuffers = model.createInputBuffers()
     private val outputBuffers = model.createOutputBuffers()
@@ -51,23 +51,23 @@ class LiteRTSegmenter(
         val outputFloatArray = outputBuffers[0].readFloat()
         val afterOutputReadTime = SystemClock.uptimeMillis()
 
-        // 3. 后处理: FloatArray -> IntArray + semantic analysis. Native fused path keeps
-        // the argmax and analyzer in one scan; fallback still produces the same mask.
-        val nativeAnalysis = nativeSegmentationAnalyzer?.analyzeScores(
+        // 3. 后处理: FloatArray -> IntArray + raw semantic stats. Native fused path keeps
+        // argmax and stat extraction in one score scan; fallback still produces the same mask.
+        val nativePostprocessResult = nativeScorePostprocessor?.postprocessScores(
             scores = outputFloatArray,
             reusableResultMask = cachedResultMask,
             width = config.outputWidth,
             height = config.outputHeight,
             channels = config.outputChannels,
         )
-        if (nativeAnalysis == null && !nativePostProcessor.postProcess(outputFloatArray, cachedResultMask)) {
+        if (nativePostprocessResult == null && !nativePostProcessor.postProcess(outputFloatArray, cachedResultMask)) {
             inputPreprocessor.postprocess(outputFloatArray, cachedResultMask)
         }
         val afterPostprocessTime = SystemClock.uptimeMillis()
 
         // 4. 包装结果
         // cachedResultMask 会在下一帧继续复用，这里必须做快照，避免下游读取时被后续推理覆盖
-        val mask = nativeAnalysis?.segmentation ?: SegmentationMask(
+        val mask = nativePostprocessResult?.mask ?: SegmentationMask(
             config.outputWidth,
             config.outputHeight,
             cachedResultMask.clone(),
@@ -85,7 +85,7 @@ class LiteRTSegmenter(
             postprocessTimeMs,
             modelTimeMs,
             outputReadTimeMs,
-            nativeAnalysis,
+            nativePostprocessResult?.stats,
         )
     }
 

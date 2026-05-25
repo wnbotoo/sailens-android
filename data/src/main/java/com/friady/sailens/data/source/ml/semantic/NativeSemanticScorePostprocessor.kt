@@ -7,38 +7,30 @@ import com.friady.sailens.domain.model.common.BinaryMask
 import com.friady.sailens.domain.model.common.BottomStats
 import com.friady.sailens.domain.model.common.GroundType
 import com.friady.sailens.domain.model.perception.ClassMapper
-import com.friady.sailens.domain.model.perception.SegmentationAnalysis
+import com.friady.sailens.domain.model.perception.SegmentationAnalysisStats
 import com.friady.sailens.domain.model.perception.SegmentationMask
-import com.friady.sailens.domain.processor.perception.SegmentationAnalysisProcessor
-import com.friady.sailens.domain.processor.perception.SegmentationAnalyzer
-import com.friady.sailens.domain.util.BooleanStabilizer
-import com.friady.sailens.domain.util.FloatSmoother
 
-private const val TAG = "NativeSegAnalyzer"
+private const val TAG = "NativeSemanticPost"
 
-class NativeSegmentationAnalyzer(
+internal data class SemanticPostprocessResult(
+    val mask: SegmentationMask,
+    val stats: SegmentationAnalysisStats,
+)
+
+class NativeSemanticScorePostprocessor(
     private val config: AnalysisConfig,
-    private val classMapper: ClassMapper,
-) : SegmentationAnalysisProcessor {
-    private val fallbackAnalyzer = SegmentationAnalyzer(config, classMapper)
+    classMapper: ClassMapper,
+) {
     private val lookup = SemanticClassLookup.from(classMapper)
-
-    private val roadRatioSmoother = FloatSmoother(windowSize = config.roadRatioSmoothWindow)
-    private val bottomCenterRoadRatioSmoother =
-        FloatSmoother(windowSize = config.roadRatioSmoothWindow)
-    private val navigationPassableRatioSmoother =
-        FloatSmoother(windowSize = config.roadRatioSmoothWindow)
-    private val trafficLightStabilizer =
-        BooleanStabilizer(requiredFrames = config.trafficLightDebounceFrames)
     private var hasLoggedBackend = false
 
-    fun analyzeScores(
+    internal fun postprocessScores(
         scores: FloatArray,
         reusableResultMask: IntArray,
         width: Int,
         height: Int,
         channels: Int,
-    ): SegmentationAnalysis? {
+    ): SemanticPostprocessResult? {
         if (!NativeMlLibrary.isAvailable) return null
 
         val pixelCount = width * height
@@ -54,12 +46,12 @@ class NativeSegmentationAnalyzer(
         val wordCount = (pixelCount + Long.SIZE_BITS - 1) / Long.SIZE_BITS
         val passableWords = LongArray(wordCount)
         val obstacleWords = LongArray(wordCount)
-        val classCounts = IntArray(classMapper.classCount)
+        val classCounts = IntArray(lookup.classCount)
         val groundTypeCounts = IntArray(GroundType.entries.size)
         val intOutputs = IntArray(INT_OUTPUT_COUNT)
 
         val nativeSuccess = runCatching {
-            nativeAnalyzeScores(
+            nativePostprocessScores(
                 scores = scores,
                 resultMask = reusableResultMask,
                 width = width,
@@ -70,9 +62,9 @@ class NativeSegmentationAnalyzer(
                 roadLookup = lookup.road,
                 trafficLightLookup = lookup.trafficLight,
                 groundTypeLookup = lookup.groundType,
-                bottomRatio = BOTTOM_RATIO,
-                centerRatio = CENTER_RATIO,
-                navigationRegionRatio = NAVIGATION_REGION_RATIO,
+                bottomRatio = config.segmentationBottomRatio,
+                centerRatio = config.segmentationCenterRatio,
+                navigationRegionRatio = config.segmentationNavigationRegionRatio,
                 passableWords = passableWords,
                 obstacleWords = obstacleWords,
                 classCounts = classCounts,
@@ -83,114 +75,56 @@ class NativeSegmentationAnalyzer(
 
         if (!nativeSuccess) return null
 
-        logBackend("native fused score analysis")
-        return buildAnalysis(
-            segmentation = SegmentationMask(width, height, reusableResultMask.clone()),
-            passableWords = passableWords,
-            obstacleWords = obstacleWords,
-            classCounts = classCounts,
-            groundTypeCounts = groundTypeCounts,
-            intOutputs = intOutputs,
-        )
-    }
-
-    override fun analyze(segmentation: SegmentationMask): SegmentationAnalysis {
-        if (!NativeMlLibrary.isAvailable) {
-            logBackend("Kotlin fallback; native library unavailable")
-            return fallbackAnalyzer.analyze(segmentation)
+        if (!hasLoggedBackend) {
+            Log.i(TAG, "Semantic score postprocess backend: native")
+            hasLoggedBackend = true
         }
 
-        val width = segmentation.width
-        val height = segmentation.height
-        val pixelCount = width * height
-        if (pixelCount <= 0 || segmentation.classMap.size != pixelCount) {
-            logBackend("Kotlin fallback; invalid mask ${width}x$height size=${segmentation.classMap.size}")
-            return fallbackAnalyzer.analyze(segmentation)
-        }
-
-        val wordCount = (pixelCount + Long.SIZE_BITS - 1) / Long.SIZE_BITS
-        val passableWords = LongArray(wordCount)
-        val obstacleWords = LongArray(wordCount)
-        val classCounts = IntArray(classMapper.classCount)
-        val groundTypeCounts = IntArray(GroundType.entries.size)
-        val intOutputs = IntArray(INT_OUTPUT_COUNT)
-
-        val nativeSuccess = runCatching {
-            nativeAnalyze(
-                classMap = segmentation.classMap,
+        val mask = SegmentationMask(width, height, reusableResultMask.clone())
+        return SemanticPostprocessResult(
+            mask = mask,
+            stats = buildStats(
                 width = width,
                 height = height,
-                passableLookup = lookup.passable,
-                obstacleLookup = lookup.obstacle,
-                roadLookup = lookup.road,
-                trafficLightLookup = lookup.trafficLight,
-                groundTypeLookup = lookup.groundType,
-                bottomRatio = BOTTOM_RATIO,
-                centerRatio = CENTER_RATIO,
-                navigationRegionRatio = NAVIGATION_REGION_RATIO,
                 passableWords = passableWords,
                 obstacleWords = obstacleWords,
                 classCounts = classCounts,
                 groundTypeCounts = groundTypeCounts,
                 intOutputs = intOutputs,
-            )
-        }.getOrDefault(false)
-
-        if (!nativeSuccess) {
-            logBackend("Kotlin fallback; native analysis failed")
-            return fallbackAnalyzer.analyze(segmentation)
-        }
-        logBackend("native")
-
-        return buildAnalysis(
-            segmentation = segmentation,
-            passableWords = passableWords,
-            obstacleWords = obstacleWords,
-            classCounts = classCounts,
-            groundTypeCounts = groundTypeCounts,
-            intOutputs = intOutputs,
+            ),
         )
     }
 
-    private fun buildAnalysis(
-        segmentation: SegmentationMask,
+    private fun buildStats(
+        width: Int,
+        height: Int,
         passableWords: LongArray,
         obstacleWords: LongArray,
         classCounts: IntArray,
         groundTypeCounts: IntArray,
         intOutputs: IntArray,
-    ): SegmentationAnalysis {
-        val width = segmentation.width
-        val height = segmentation.height
+    ): SegmentationAnalysisStats {
         val pixelCount = width * height
         val bottomCenterTotalPixels = intOutputs[OUT_BOTTOM_CENTER_TOTAL_PIXELS]
-        val bottomCenterGroundDistribution = buildBottomCenterGroundDistribution(
-            groundTypeCounts = groundTypeCounts,
-            bottomCenterTotalPixels = bottomCenterTotalPixels,
-        )
-
         val totalPixels = pixelCount.toFloat()
-        val rawRoadRatio = if (totalPixels > 0f) intOutputs[OUT_ROAD_PIXEL_COUNT] / totalPixels else 0f
-        val rawNavigationPassableRatio = intOutputs[OUT_NAVIGATION_TOTAL_PIXELS]
-            .takeIf { it > 0 }
-            ?.let { intOutputs[OUT_NAVIGATION_PASSABLE_PIXELS].toFloat() / it }
-            ?: 0f
-        val rawBottomCenterRoadRatio = bottomCenterTotalPixels
-            .takeIf { it > 0 }
-            ?.let { intOutputs[OUT_BOTTOM_CENTER_ROAD_PIXELS].toFloat() / it }
-            ?: 0f
 
-        return SegmentationAnalysis(
+        return SegmentationAnalysisStats(
             passableMask = BinaryMask.fromPackedBits(width, height, passableWords),
             obstacleMask = BinaryMask.fromPackedBits(width, height, obstacleWords),
-            roadRatio = roadRatioSmoother.update(rawRoadRatio),
-            hasTrafficLight = trafficLightStabilizer.update(intOutputs[OUT_HAS_TRAFFIC_LIGHT] != 0),
-            bottomCenterGroundDistribution = bottomCenterGroundDistribution,
-            bottomCenterRoadRatio = bottomCenterRoadRatioSmoother.update(rawBottomCenterRoadRatio),
+            roadRatio = if (totalPixels > 0f) intOutputs[OUT_ROAD_PIXEL_COUNT] / totalPixels else 0f,
+            hasTrafficLight = intOutputs[OUT_HAS_TRAFFIC_LIGHT] != 0,
+            bottomCenterGroundDistribution = buildBottomCenterGroundDistribution(
+                groundTypeCounts = groundTypeCounts,
+                bottomCenterTotalPixels = bottomCenterTotalPixels,
+            ),
+            bottomCenterRoadRatio = bottomCenterTotalPixels
+                .takeIf { it > 0 }
+                ?.let { intOutputs[OUT_BOTTOM_CENTER_ROAD_PIXELS].toFloat() / it }
+                ?: 0f,
             bottomStats = buildBottomStats(
                 width = width,
                 height = height,
-                bottomStartY = ((1 - BOTTOM_RATIO) * height).toInt(),
+                bottomStartY = ((1 - config.segmentationBottomRatio) * height).toInt(),
                 bottomTruePixels = intOutputs[OUT_BOTTOM_TRUE_PIXELS],
                 maxRunWidth = intOutputs[OUT_MAX_RUN_WIDTH],
                 maxRunRow = intOutputs[OUT_MAX_RUN_ROW],
@@ -198,21 +132,13 @@ class NativeSegmentationAnalyzer(
                 maxRunEnd = intOutputs[OUT_MAX_RUN_END],
             ),
             passablePixelCount = intOutputs[OUT_PASSABLE_PIXEL_COUNT],
-            navigationPassableRatio = navigationPassableRatioSmoother.update(rawNavigationPassableRatio),
+            navigationPassableRatio = intOutputs[OUT_NAVIGATION_TOTAL_PIXELS]
+                .takeIf { it > 0 }
+                ?.let { intOutputs[OUT_NAVIGATION_PASSABLE_PIXELS].toFloat() / it }
+                ?: 0f,
             obstaclePixelCount = intOutputs[OUT_OBSTACLE_PIXEL_COUNT],
-            dominantClassNames = dominantClassNames(classCounts),
-            segmentation = segmentation,
-            width = width,
-            height = height,
+            classCounts = classCounts,
         )
-    }
-
-    override fun reset() {
-        fallbackAnalyzer.reset()
-        roadRatioSmoother.reset()
-        bottomCenterRoadRatioSmoother.reset()
-        navigationPassableRatioSmoother.reset()
-        trafficLightStabilizer.reset()
     }
 
     private fun buildBottomStats(
@@ -261,41 +187,7 @@ class NativeSegmentationAnalyzer(
         return distribution
     }
 
-    private fun dominantClassNames(classCounts: IntArray): List<String> {
-        return classCounts
-            .withIndex()
-            .filter { it.value > 0 }
-            .sortedByDescending { it.value }
-            .take(3)
-            .map { classMapper.getClassName(it.index) }
-    }
-
-    private fun logBackend(message: String) {
-        if (hasLoggedBackend) return
-        Log.i(TAG, "Segmentation analyzer backend: $message")
-        hasLoggedBackend = true
-    }
-
-    private external fun nativeAnalyze(
-        classMap: IntArray,
-        width: Int,
-        height: Int,
-        passableLookup: BooleanArray,
-        obstacleLookup: BooleanArray,
-        roadLookup: BooleanArray,
-        trafficLightLookup: BooleanArray,
-        groundTypeLookup: IntArray,
-        bottomRatio: Float,
-        centerRatio: Float,
-        navigationRegionRatio: Float,
-        passableWords: LongArray,
-        obstacleWords: LongArray,
-        classCounts: IntArray,
-        groundTypeCounts: IntArray,
-        intOutputs: IntArray,
-    ): Boolean
-
-    private external fun nativeAnalyzeScores(
+    private external fun nativePostprocessScores(
         scores: FloatArray,
         resultMask: IntArray,
         width: Int,
@@ -317,6 +209,7 @@ class NativeSegmentationAnalyzer(
     ): Boolean
 
     private data class SemanticClassLookup(
+        val classCount: Int,
         val passable: BooleanArray,
         val obstacle: BooleanArray,
         val road: BooleanArray,
@@ -327,6 +220,7 @@ class NativeSegmentationAnalyzer(
             fun from(classMapper: ClassMapper): SemanticClassLookup {
                 val classCount = classMapper.classCount
                 return SemanticClassLookup(
+                    classCount = classCount,
                     passable = BooleanArray(classCount) { classMapper.isPassable(it) },
                     obstacle = BooleanArray(classCount) { classMapper.isObstacle(it) },
                     road = BooleanArray(classCount) { classMapper.isRoad(it) },
@@ -340,9 +234,6 @@ class NativeSegmentationAnalyzer(
     }
 
     private companion object {
-        private const val BOTTOM_RATIO = 0.2f
-        private const val CENTER_RATIO = 0.4f
-        private const val NAVIGATION_REGION_RATIO = 0.45f
         private const val UNKNOWN_GROUND = -1
 
         private const val OUT_PASSABLE_PIXEL_COUNT = 0
