@@ -9,11 +9,15 @@ import com.friady.sailens.data.service.FileTraceService
 import com.friady.sailens.data.source.depth.ImagePositionDepthEstimator
 import com.friady.sailens.data.source.device.DeviceRotationDataSource
 import com.friady.sailens.data.source.mapper.ClassMapperProviderImpl
+import com.friady.sailens.data.source.ml.analysis.NativeConnectivityChecker
 import com.friady.sailens.data.source.ml.instance.YOLO26SegInstanceProvider
+import com.friady.sailens.data.source.ml.semantic.NativeSegmentationAnalyzer
 import com.friady.sailens.data.source.ml.semantic.SegmentationModel
 import com.friady.sailens.data.source.ml.semantic.YOLO26SemSegmentationModel
 import com.friady.sailens.domain.model.perception.ClassMapper
 import com.friady.sailens.domain.model.perception.ClassMapperProvider
+import com.friady.sailens.domain.processor.analysis.ConnectivityAnalysisProcessor
+import com.friady.sailens.domain.processor.perception.SegmentationAnalysisProcessor
 import com.friady.sailens.domain.repository.DepthRepository
 import com.friady.sailens.domain.repository.DeviceSensorRepository
 import com.friady.sailens.domain.repository.InstanceSegmentationProvider
@@ -33,14 +37,32 @@ val dataModule = module {
         get<ClassMapperProvider>().getSemanticClassMapper()
     }
 
+    single {
+        NativeSegmentationAnalyzer(
+            config = get(),
+            classMapper = get(),
+        )
+    }
+
+    single<SegmentationAnalysisProcessor> { get<NativeSegmentationAnalyzer>() }
+
+    single<ConnectivityAnalysisProcessor> {
+        NativeConnectivityChecker(config = get())
+    }
+
     // Data source
     single<SegmentationModel> {
-        YOLO26SemSegmentationModel(context = androidContext())
+        YOLO26SemSegmentationModel(
+            context = androidContext(),
+            modelConfig = get(),
+            nativeSegmentationAnalyzer = get<NativeSegmentationAnalyzer>(),
+        )
     }
     single<InstanceSegmentationProvider> {
         YOLO26SegInstanceProvider(
             context = androidContext(),
             perceptionConfig = get(),
+            modelConfig = get(),
         )
     }
     single { ImagePositionDepthEstimator() }

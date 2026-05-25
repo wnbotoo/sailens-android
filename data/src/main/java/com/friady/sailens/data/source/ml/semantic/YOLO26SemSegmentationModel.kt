@@ -25,6 +25,7 @@ private const val TAG = "YOLO26SemModel"
 class YOLO26SemSegmentationModel(
     private val context: Context,
     private val modelConfig: YOLO26SemModelConfig = YOLO26SemModelConfig(),
+    private val nativeSegmentationAnalyzer: NativeSegmentationAnalyzer? = null,
 ) : SegmentationModel {
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -58,7 +59,10 @@ class YOLO26SemSegmentationModel(
                 .onSuccess { initializedSegmenter ->
                     segmenter = initializedSegmenter
                     _isInitialized = true
-                    Log.i(TAG, "YOLO26 semantic model initialized")
+                    Log.i(
+                        TAG,
+                        "YOLO26 semantic model initialized with ${initializedSegmenter.accelerator}"
+                    )
                 }
                 .onFailure { error ->
                     Log.e(TAG, "Failed to initialize YOLO26 semantic model", error)
@@ -122,6 +126,8 @@ class YOLO26SemSegmentationModel(
                 inputDataType = inputDataType.dataType,
                 inputQuantization = modelConfig.inputQuantization,
                 preferNativeYuvPreprocessing = modelConfig.preferNativeYuvPreprocessing,
+                accelerator = accelerator,
+                nativeSegmentationAnalyzer = nativeSegmentationAnalyzer,
             )
         } catch (error: Throwable) {
             model.close()

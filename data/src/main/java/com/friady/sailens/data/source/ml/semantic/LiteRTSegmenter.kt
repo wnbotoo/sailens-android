@@ -7,6 +7,7 @@ import com.friady.sailens.data.source.ml.YoloInputPreprocessor
 import com.friady.sailens.domain.model.perception.ImageFrame
 import com.friady.sailens.domain.model.perception.SegmentationMask
 import com.friady.sailens.domain.model.perception.SegmentationOutput
+import com.google.ai.edge.litert.Accelerator
 import com.google.ai.edge.litert.CompiledModel
 
 class LiteRTSegmenter(
@@ -15,6 +16,8 @@ class LiteRTSegmenter(
     private val inputDataType: ModelInputDataType,
     inputQuantization: ModelInputQuantization,
     preferNativeYuvPreprocessing: Boolean,
+    val accelerator: Accelerator,
+    private val nativeSegmentationAnalyzer: NativeSegmentationAnalyzer? = null,
 ) {
     private val inputBuffers = model.createInputBuffers()
     private val outputBuffers = model.createOutputBuffers()
@@ -48,19 +51,26 @@ class LiteRTSegmenter(
         val outputFloatArray = outputBuffers[0].readFloat()
         val afterOutputReadTime = SystemClock.uptimeMillis()
 
-        // 3. 后处理: FloatArray -> IntArray (ArgMax)
-        if (!nativePostProcessor.postProcess(outputFloatArray, cachedResultMask)) {
+        // 3. 后处理: FloatArray -> IntArray + semantic analysis. Native fused path keeps
+        // the argmax and analyzer in one scan; fallback still produces the same mask.
+        val nativeAnalysis = nativeSegmentationAnalyzer?.analyzeScores(
+            scores = outputFloatArray,
+            reusableResultMask = cachedResultMask,
+            width = config.outputWidth,
+            height = config.outputHeight,
+            channels = config.outputChannels,
+        )
+        if (nativeAnalysis == null && !nativePostProcessor.postProcess(outputFloatArray, cachedResultMask)) {
             inputPreprocessor.postprocess(outputFloatArray, cachedResultMask)
         }
         val afterPostprocessTime = SystemClock.uptimeMillis()
 
         // 4. 包装结果
         // cachedResultMask 会在下一帧继续复用，这里必须做快照，避免下游读取时被后续推理覆盖
-        val stableResultMask = cachedResultMask.clone()
-        val mask = SegmentationMask(
+        val mask = nativeAnalysis?.segmentation ?: SegmentationMask(
             config.outputWidth,
             config.outputHeight,
-            stableResultMask,
+            cachedResultMask.clone(),
         )
 
         val preprocessTimeMs = afterPreprocessTime - startTime
@@ -75,6 +85,7 @@ class LiteRTSegmenter(
             postprocessTimeMs,
             modelTimeMs,
             outputReadTimeMs,
+            nativeAnalysis,
         )
     }
 

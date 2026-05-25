@@ -16,4 +16,5 @@ data class YOLO26SegModelConfig(
     val inputDataType: ModelInputDataType = ModelInputDataType.AUTO,
     val inputQuantization: ModelInputQuantization = ModelInputQuantization(),
     val preferNativeYuvPreprocessing: Boolean = true,
+    val enableMaskReconstruction: Boolean = false,
 )

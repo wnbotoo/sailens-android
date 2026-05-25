@@ -5,11 +5,12 @@ import java.util.BitSet
 /**
  * 二值掩码
  */
-class BinaryMask(
+class BinaryMask private constructor(
     val width: Int,
     val height: Int,
+    private val bits: BitSet,
 ) {
-    private val bits = BitSet(width * height)
+    constructor(width: Int, height: Int) : this(width, height, BitSet(width * height))
 
     fun get(x: Int, y: Int): Boolean {
         if (x !in 0..<width || y < 0 || y >= height) return false
@@ -28,6 +29,8 @@ class BinaryMask(
     fun countTrue(): Int = bits.cardinality()
 
     fun coverage(): Float = countTrue().toFloat() / (width * height)
+
+    fun toPackedBits(): LongArray = bits.toLongArray()
 
     /**
      * 获取某行的连续 true 区间（runs）
@@ -117,6 +120,16 @@ class BinaryMask(
         }
 
         return result
+    }
+
+    companion object {
+        fun fromPackedBits(
+            width: Int,
+            height: Int,
+            packedBits: LongArray,
+        ): BinaryMask {
+            return BinaryMask(width, height, BitSet.valueOf(packedBits))
+        }
     }
 }
 

@@ -19,12 +19,8 @@ import java.util.concurrent.Executors
 class CameraViewModel(
     private val camera: Camera,
     private val imageFrameAnalyzer: ImageAnalysis.Analyzer,
+    private val runtimeConfig: CameraRuntimeConfig = CameraRuntimeConfig(),
 ) : ViewModel() {
-    private companion object {
-        val PREVIEW_SIZE = Size(1280, 720)
-        val ANALYSIS_SIZE = Size(1280, 720)
-    }
-
     private val executor = Executors.newSingleThreadExecutor()
 
     private val _surfaceRequest = MutableStateFlow<SurfaceRequest?>(null)
@@ -38,7 +34,9 @@ class CameraViewModel(
     }
 
     private val previewUseCase = Preview.Builder()
-        .setResolutionSelector(getResolutionSelector(PREVIEW_SIZE)).build().apply {
+        .setResolutionSelector(
+            getResolutionSelector(Size(runtimeConfig.previewWidth, runtimeConfig.previewHeight))
+        ).build().apply {
             setSurfaceProvider { newSurfaceRequest ->
                 _surfaceRequest.update { newSurfaceRequest }
             }
@@ -47,7 +45,9 @@ class CameraViewModel(
     private val imageAnalysis =
         ImageAnalysis.Builder().setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
             .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
-            .setResolutionSelector(getResolutionSelector(ANALYSIS_SIZE)).build().apply {
+            .setResolutionSelector(
+                getResolutionSelector(Size(runtimeConfig.analysisWidth, runtimeConfig.analysisHeight))
+            ).build().apply {
                 setAnalyzer(executor, imageFrameAnalyzer)
             }
 

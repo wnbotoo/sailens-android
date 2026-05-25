@@ -17,7 +17,7 @@ import com.friady.sailens.domain.util.FloatSmoother
 class SegmentationAnalyzer(
     private val config: AnalysisConfig,
     private val classMapper: ClassMapper,
-) {
+) : SegmentationAnalysisProcessor {
     // 稳定器
     private val roadRatioSmoother = FloatSmoother(windowSize = config.roadRatioSmoothWindow)
     private val bottomCenterRoadRatioSmoother =
@@ -36,7 +36,7 @@ class SegmentationAnalyzer(
     /**
      * 单次遍历分析
      */
-    fun analyze(segmentation: SegmentationMask): SegmentationAnalysis {
+    override fun analyze(segmentation: SegmentationMask): SegmentationAnalysis {
         val width = segmentation.width
         val height = segmentation.height
         val totalPixels = width * height
@@ -65,8 +65,12 @@ class SegmentationAnalyzer(
         var navigationPassablePixelCount = 0
         var navigationTotalPixels = 0
 
-        // 底部 run 统计
-        val bottomRowRuns = mutableMapOf<Int, MutableList<IntRange>>()
+        // 底部 run 统计。热路径中直接单次扫描累计，避免每帧创建 row -> ranges 集合。
+        var bottomTruePixels = 0
+        var maxRunWidth = 0
+        var maxRunRow = bottomStartY
+        var maxRunStart = 0
+        var maxRunEnd = 0
 
         // ===== 单次遍历 =====
         for (y in 0 until height) {
@@ -110,6 +114,10 @@ class SegmentationAnalyzer(
 
                 // 3. 底部区域统计
                 if (y >= bottomStartY) {
+                    if (isPassable) {
+                        bottomTruePixels++
+                    }
+
                     // 底部中央区域
                     if (x in centerStartX until centerEndX) {
                         bottomCenterTotalPixels++
@@ -127,8 +135,13 @@ class SegmentationAnalyzer(
                     if (isPassable && currentRunStart == -1) {
                         currentRunStart = x
                     } else if (!isPassable && currentRunStart != -1) {
-                        bottomRowRuns.getOrPut(y) { mutableListOf() }
-                            .add(currentRunStart until x)
+                        val runWidth = x - currentRunStart
+                        if (runWidth > maxRunWidth) {
+                            maxRunWidth = runWidth
+                            maxRunRow = y
+                            maxRunStart = currentRunStart
+                            maxRunEnd = x - 1
+                        }
                         currentRunStart = -1
                     }
                 }
@@ -136,8 +149,13 @@ class SegmentationAnalyzer(
 
             // 行末处理
             if (y >= bottomStartY && currentRunStart != -1) {
-                bottomRowRuns.getOrPut(y) { mutableListOf() }
-                    .add(currentRunStart until width)
+                val runWidth = width - currentRunStart
+                if (runWidth > maxRunWidth) {
+                    maxRunWidth = runWidth
+                    maxRunRow = y
+                    maxRunStart = currentRunStart
+                    maxRunEnd = width - 1
+                }
             }
         }
 
@@ -161,7 +179,16 @@ class SegmentationAnalyzer(
             0f
         }
 
-        val bottomStats = computeBottomStats(bottomRowRuns, width, height, bottomStartY)
+        val bottomStats = computeBottomStats(
+            width = width,
+            height = height,
+            bottomStartY = bottomStartY,
+            bottomTruePixels = bottomTruePixels,
+            maxRunWidth = maxRunWidth,
+            maxRunRow = maxRunRow,
+            maxRunStart = maxRunStart,
+            maxRunEnd = maxRunEnd,
+        )
 
         // 稳定化
         val stableRoadRatio = roadRatioSmoother.update(rawRoadRatio)
@@ -196,33 +223,19 @@ class SegmentationAnalyzer(
     }
 
     private fun computeBottomStats(
-        rowRuns: Map<Int, List<IntRange>>,
         width: Int,
         height: Int,
         bottomStartY: Int,
+        bottomTruePixels: Int,
+        maxRunWidth: Int,
+        maxRunRow: Int,
+        maxRunStart: Int,
+        maxRunEnd: Int,
     ): BottomStats {
-        var maxRunWidth = 0
-        var maxRunRow = bottomStartY
-        var maxRunStart = 0
-        var maxRunEnd = 0
-        var totalTruePixels = 0
         val totalBottomPixels = (height - bottomStartY) * width
 
-        for ((row, runs) in rowRuns) {
-            for (run in runs) {
-                val runWidth = run.last - run.first + 1
-                totalTruePixels += runWidth
-                if (runWidth > maxRunWidth) {
-                    maxRunWidth = runWidth
-                    maxRunRow = row
-                    maxRunStart = run.first
-                    maxRunEnd = run.last
-                }
-            }
-        }
-
         return BottomStats(
-            coverage = if (totalBottomPixels > 0) totalTruePixels.toFloat() / totalBottomPixels else 0f,
+            coverage = if (totalBottomPixels > 0) bottomTruePixels.toFloat() / totalBottomPixels else 0f,
             maxRunWidth = maxRunWidth,
             maxRunWidthRatio = maxRunWidth.toFloat() / width,
             maxRunRow = maxRunRow,
@@ -232,7 +245,7 @@ class SegmentationAnalyzer(
         )
     }
 
-    fun reset() {
+    override fun reset() {
         roadRatioSmoother.reset()
         bottomCenterRoadRatioSmoother.reset()
         navigationPassableRatioSmoother.reset()

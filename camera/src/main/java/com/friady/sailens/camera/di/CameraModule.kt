@@ -14,5 +14,5 @@ val cameraModule = module {
     single { Camera() }
     single { ImageFrameAnalyzer() }
         .binds(arrayOf(ImageAnalysis.Analyzer::class, ImageFrameProvider::class))
-    viewModel { CameraViewModel(get(), get()) }
+    viewModel { CameraViewModel(get(), get(), get()) }
 }

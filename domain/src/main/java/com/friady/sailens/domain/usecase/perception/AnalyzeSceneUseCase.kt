@@ -2,7 +2,7 @@ package com.friady.sailens.domain.usecase.perception
 
 import com.friady.sailens.domain.model.analysis.SceneSnapshot
 import com.friady.sailens.domain.model.perception.PerceptionResult
-import com.friady.sailens.domain.processor.analysis.ConnectivityChecker
+import com.friady.sailens.domain.processor.analysis.ConnectivityAnalysisProcessor
 import com.friady.sailens.domain.processor.analysis.CrossValidator
 import com.friady.sailens.domain.processor.analysis.GroundTypeDetector
 import com.friady.sailens.domain.processor.analysis.RoadSafetyAnalyzer
@@ -12,7 +12,7 @@ import com.friady.sailens.domain.processor.analysis.SceneClassifier
  * 分析场景用例
  */
 class AnalyzeSceneUseCase(
-    private val connectivityChecker: ConnectivityChecker,
+    private val connectivityChecker: ConnectivityAnalysisProcessor,
     private val roadSafetyAnalyzer: RoadSafetyAnalyzer,
     private val groundTypeDetector: GroundTypeDetector,
     private val sceneClassifier: SceneClassifier,
@@ -22,7 +22,7 @@ class AnalyzeSceneUseCase(
         val analysis = perceptionResult.analysis
 
         // 1.  独立分析
-        val connectivity = connectivityChecker.analyze(analysis.passableMask)
+        val connectivity = connectivityChecker.analyze(analysis)
         val roadSafety = roadSafetyAnalyzer.analyze(
             analysis = analysis,
             obstacles = perceptionResult.obstacles,

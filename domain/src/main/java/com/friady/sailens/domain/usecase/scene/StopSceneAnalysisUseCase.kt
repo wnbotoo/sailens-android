@@ -1,13 +1,13 @@
 package com.friady.sailens.domain.usecase.scene
 
-import com.friady.sailens.domain.processor.analysis.ConnectivityChecker
+import com.friady.sailens.domain.processor.analysis.ConnectivityAnalysisProcessor
 import com.friady.sailens.domain.processor.analysis.GroundTypeDetector
 import com.friady.sailens.domain.processor.analysis.RoadSafetyAnalyzer
 import com.friady.sailens.domain.processor.analysis.SceneClassifier
 import com.friady.sailens.domain.processor.decision.CooldownManager
 import com.friady.sailens.domain.processor.decision.EventGenerator
 import com.friady.sailens.domain.processor.perception.ObstacleTracker
-import com.friady.sailens.domain.processor.perception.SegmentationAnalyzer
+import com.friady.sailens.domain.processor.perception.SegmentationAnalysisProcessor
 import com.friady.sailens.domain.repository.InstanceSegmentationProvider
 import com.friady.sailens.domain.repository.PerceptionRepository
 import com.friady.sailens.domain.service.LogService
@@ -18,9 +18,9 @@ import com.friady.sailens.domain.service.LogService
 class StopSceneAnalysisUseCase(
     private val perceptionRepository: PerceptionRepository,
     private val instanceProvider: InstanceSegmentationProvider,
-    private val segmentationAnalyzer: SegmentationAnalyzer,
+    private val segmentationAnalyzer: SegmentationAnalysisProcessor,
     private val obstacleTracker: ObstacleTracker,
-    private val connectivityChecker: ConnectivityChecker,
+    private val connectivityChecker: ConnectivityAnalysisProcessor,
     private val roadSafetyAnalyzer: RoadSafetyAnalyzer,
     private val groundTypeDetector: GroundTypeDetector,
     private val sceneClassifier: SceneClassifier,

@@ -12,7 +12,7 @@ import com.friady.sailens.domain.model.perception.PerceptionResult
 import com.friady.sailens.domain.model.perception.SegmentationAnalysis
 import com.friady.sailens.domain.processor.perception.ObstacleExtractor
 import com.friady.sailens.domain.processor.perception.ObstacleTracker
-import com.friady.sailens.domain.processor.perception.SegmentationAnalyzer
+import com.friady.sailens.domain.processor.perception.SegmentationAnalysisProcessor
 import com.friady.sailens.domain.repository.DepthRepository
 import com.friady.sailens.domain.repository.InstanceSegmentationProvider
 import com.friady.sailens.domain.repository.PerceptionRepository
@@ -26,7 +26,7 @@ class ProcessFrameUseCase(
     private val perceptionRepository: PerceptionRepository,
     private val instanceProvider: InstanceSegmentationProvider,
     private val depthRepository: DepthRepository,
-    private val segmentationAnalyzer: SegmentationAnalyzer,
+    private val segmentationAnalyzer: SegmentationAnalysisProcessor,
     private val obstacleExtractor: ObstacleExtractor,
     private val obstacleTracker: ObstacleTracker,
 ) {
@@ -117,7 +117,7 @@ class ProcessFrameUseCase(
             framesSinceSemanticUpdate++
             return Result.success(
                 SemanticAnalysisOutput(
-                    analysis = requireNotNull(reusableCached).analysis,
+                    analysis = reusableCached.analysis,
                 )
             )
         }
@@ -125,7 +125,7 @@ class ProcessFrameUseCase(
         val segmentationOutput = perceptionRepository.segment(frame).getOrElse {
             return Result.failure(it)
         }
-        val analysis = segmentationAnalyzer.analyze(segmentationOutput.mask)
+        val analysis = segmentationOutput.analysis ?: segmentationAnalyzer.analyze(segmentationOutput.mask)
         cachedSemanticAnalysis = CachedSemanticAnalysis(
             frameWidth = frame.width,
             frameHeight = frame.height,

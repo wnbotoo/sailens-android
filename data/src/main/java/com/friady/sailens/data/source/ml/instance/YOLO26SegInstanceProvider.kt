@@ -47,6 +47,7 @@ class YOLO26SegInstanceProvider(
     private var cachedFloatInput: FloatArray = FloatArray(0)
     private var cachedInt8Input: ByteArray = ByteArray(0)
     private var postProcessor: YOLO26SegPostProcessor? = null
+    private var activeAccelerator: Accelerator? = null
     private var hasLoggedTensorInfo: Boolean = false
 
     @Volatile
@@ -61,27 +62,38 @@ class YOLO26SegInstanceProvider(
         withContext(singleThreadDispatcher) {
             cleanupInternal()
 
-            val initializedModel = runCatching {
+            val initializationResult = runCatching {
                 Log.i(TAG, "Initializing YOLO26 instance model with GPU accelerator")
-                createCompiledModel(Accelerator.GPU)
+                initializeWithAccelerator(Accelerator.GPU)
             }.recoverCatching { gpuError ->
                 Log.w(TAG, "GPU initialization failed, retrying with CPU", gpuError)
-                createCompiledModel(Accelerator.CPU)
-            }.getOrElse { error ->
-                throw IllegalStateException("Failed to initialize YOLO26 instance model", error)
+                cleanupInternal()
+                initializeWithAccelerator(Accelerator.CPU)
             }
 
-            try {
-                model = initializedModel
-                inputBuffers = initializedModel.createInputBuffers()
-                outputBuffers = initializedModel.createOutputBuffers()
-                configurePreAndPostProcessing(initializedModel)
-                _isInitialized = true
-                Log.i(TAG, "YOLO26 instance model initialized")
-            } catch (error: Throwable) {
-                cleanupInternal()
-                throw error
-            }
+            initializationResult
+                .onSuccess {
+                    _isInitialized = true
+                    Log.i(TAG, "YOLO26 instance model initialized with $activeAccelerator")
+                }
+                .onFailure { error ->
+                    cleanupInternal()
+                    throw IllegalStateException("Failed to initialize YOLO26 instance model", error)
+                }
+        }
+    }
+
+    private fun initializeWithAccelerator(accelerator: Accelerator) {
+        val initializedModel = createCompiledModel(accelerator)
+        try {
+            model = initializedModel
+            activeAccelerator = accelerator
+            inputBuffers = initializedModel.createInputBuffers()
+            outputBuffers = initializedModel.createOutputBuffers()
+            configurePreAndPostProcessing(initializedModel)
+        } catch (error: Throwable) {
+            cleanupInternal()
+            throw error
         }
     }
 
@@ -108,13 +120,17 @@ class YOLO26SegInstanceProvider(
 
             val detectionTensor = activeOutputBuffers.firstOrNull()?.readFloat()
                 ?: return@withContext InstanceSegmentationOutput(emptyList())
-            val prototypeTensor = activeOutputBuffers.getOrNull(1)?.readFloat()
+            val prototypeTensor = if (modelConfig.enableMaskReconstruction) {
+                activeOutputBuffers.getOrNull(1)?.readFloat()
+            } else {
+                null
+            }
             val afterOutputReadTime = SystemClock.uptimeMillis()
 
             if (!hasLoggedTensorInfo) {
                 Log.i(
                     TAG,
-                    "YOLO26-seg runtime tensors: outputs=${activeOutputBuffers.size}, detectionValues=${detectionTensor.size}, prototypeValues=${prototypeTensor?.size ?: 0}, frame=${frame.width}x${frame.height}, rotation=${frame.rotationDegrees}, inputType=$activeInputDataType"
+                    "YOLO26-seg runtime tensors: outputs=${activeOutputBuffers.size}, detectionValues=${detectionTensor.size}, prototypeValues=${prototypeTensor?.size ?: 0}, prototypeRead=${modelConfig.enableMaskReconstruction}, frame=${frame.width}x${frame.height}, rotation=${frame.rotationDegrees}, inputType=$activeInputDataType, accelerator=$activeAccelerator"
                 )
                 hasLoggedTensorInfo = true
             }
@@ -187,7 +203,7 @@ class YOLO26SegInstanceProvider(
             maskCoefficientCount = modelConfig.maskCoefficientCount,
             confidenceThreshold = perceptionConfig.minObstacleConfidence,
             maxDetections = perceptionConfig.maxObstacles,
-            enableMaskReconstruction = false,
+            enableMaskReconstruction = modelConfig.enableMaskReconstruction,
         )
 
         Log.i(
@@ -244,6 +260,7 @@ class YOLO26SegInstanceProvider(
         cachedInt8Input = ByteArray(0)
         inputDataType = ModelInputDataType.FLOAT32
         postProcessor = null
+        activeAccelerator = null
         inputBuffers?.forEach { it.close() }
         outputBuffers?.forEach { it.close() }
         inputBuffers = null

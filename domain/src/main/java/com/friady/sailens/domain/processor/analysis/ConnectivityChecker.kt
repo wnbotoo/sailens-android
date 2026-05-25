@@ -6,6 +6,7 @@ import com.friady.sailens.domain.model.common.BinaryMask
 import com.friady.sailens.domain.model.common.BottomStats
 import com.friady.sailens.domain.model.common.DirectionBias
 import com.friady.sailens.domain.model.common.Severity
+import com.friady.sailens.domain.model.perception.SegmentationAnalysis
 import com.friady.sailens.domain.util.BooleanStabilizer
 import com.friady.sailens.domain.util.IntArrayQueue
 import com.friady.sailens.domain.util.NullableEnumStabilizer
@@ -20,10 +21,14 @@ import kotlin.math.abs
  */
 class ConnectivityChecker(
     private val config: AnalysisConfig,
-) {
+) : ConnectivityAnalysisProcessor {
     private val blockedStabilizer = BooleanStabilizer(config.blockDebounceFrames)
     private val narrowingStabilizer = BooleanStabilizer(config.narrowDebounceFrames)
     private val biasStabilizer = NullableEnumStabilizer<DirectionBias>(config.biasDebounceFrames)
+
+    override fun analyze(analysis: SegmentationAnalysis): WalkPathConnectivity {
+        return analyze(analysis.passableMask)
+    }
 
     fun analyze(passableMask: BinaryMask): WalkPathConnectivity {
         val bottomStats = passableMask.getBottomStats(0.15f)
@@ -317,7 +322,7 @@ class ConnectivityChecker(
         }
     }
 
-    fun reset() {
+    override fun reset() {
         blockedStabilizer.reset()
         narrowingStabilizer.reset()
         biasStabilizer.reset()
