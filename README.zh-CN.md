@@ -90,6 +90,8 @@ metadata 自动读取**，所以**换模型通常不需要改代码**。
 | [`docs/trace_metrics_guide.zh-CN.md`](docs/trace_metrics_guide.zh-CN.md) | [English](docs/trace_metrics_guide.md) | Trace / replay 指标定义 |
 | [`docs/trace_replay_workflow.zh-CN.md`](docs/trace_replay_workflow.zh-CN.md) | [English](docs/trace_replay_workflow.md) | 可观测 → 可回放 → 可评估 |
 | [`docs/vlm-asr-assistant-plan.zh-CN.md`](docs/vlm-asr-assistant-plan.zh-CN.md) | [English](docs/vlm-asr-assistant-plan.md) | 规划中的 VLM / ASR 助手路径 |
+| [`docs/background-guidance-plan.zh-CN.md`](docs/background-guidance-plan.zh-CN.md) | [English](docs/background-guidance-plan.md) | 规划中的相机前台服务（息屏继续导航） |
+| [`docs/guidance-validation-roadmap.zh-CN.md`](docs/guidance-validation-roadmap.zh-CN.md) | [English](docs/guidance-validation-roadmap.md) | 延期的真机提示验证与空间化 earcon 门槛 |
 
 `AGENTS.md` 是给编码 agent 的仓库指南（仅英文——它是给工具读的，不是给人读的）。
 

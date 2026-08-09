@@ -1,10 +1,10 @@
 package com.sailens.domain.processor.decision
 
 import com.sailens.domain.config.AnalysisConfig
+import com.sailens.domain.model.analysis.FrameQuality
 import com.sailens.domain.model.analysis.GroundTypeChange
 import com.sailens.domain.model.analysis.RoadSafetyState
 import com.sailens.domain.model.analysis.SceneSnapshot
-import com.sailens.domain.model.common.DirectionBias
 import com.sailens.domain.model.common.DirectionZone
 import com.sailens.domain.model.common.DistanceLevel
 import com.sailens.domain.model.common.EventCategory
@@ -22,8 +22,6 @@ import com.sailens.domain.model.perception.DetectedObstacle
 class EventGenerator(
     private val config: AnalysisConfig = AnalysisConfig(),
 ) {
-    private var wasOnRoad = false
-
     private companion object {
         private const val MIN_HARD_BLOCKED_CONFIDENCE = 0.75f
         private const val MAX_HARD_BLOCKED_VERTICAL_REACH = 0.55f
@@ -55,6 +53,12 @@ class EventGenerator(
     fun generate(snapshot: SceneSnapshot, now: Long): List<SceneEvent> {
         val events = mutableListOf<SceneEvent>()
 
+        // 0. 输入质量。镜头被挡/环境过暗时，下面所有基于画面的判断都不可信，
+        //    但这条事件仍然照常生成——由 EventConflictResolver 负责让它压掉其余全部事件。
+        if (config.enableSensorQualityEvents && snapshot.frameQuality != FrameQuality.OK) {
+            events.add(createSensorQualityEvent(snapshot.frameQuality, now))
+        }
+
         // 1. 阻塞 / 复杂路况事件
         if (snapshot.connectivity.isBlocked) {
             if (isHardBlocked(snapshot)) {
@@ -69,20 +73,13 @@ class EventGenerator(
             events.add(createNarrowingEvent(snapshot, now))
         }
 
-        // 3. 方向建议
-        if (config.enableDirectionAdviceEvents) {
-            snapshot.connectivity.suggestedBias?.let {
-                events.add(createDirectionAdviceEvent(it, now))
-            }
-        }
-
-        // 4.  障碍物事件
+        // 3.  障碍物事件
         val significantObstacles = snapshot.obstacles.filter(::shouldAnnounceObstacle)
         if (significantObstacles.isNotEmpty()) {
             events.addAll(createObstacleEvents(significantObstacles, now))
         }
 
-        // 5. 路口事件
+        // 4. 路口事件
         val emitsIntersection = config.enableIntersectionEvents && snapshot.sceneElements.hasIntersection
         if (emitsIntersection) {
             events.add(createIntersectionEvent(now))
@@ -90,24 +87,46 @@ class EventGenerator(
             events.add(createTrafficLightEvent(now))
         }
 
-        // 6. 道路安全事件默认不播，避免把不稳定的车道/机动车道识别当作确定提示。
+        // 5. 道路安全事件默认不播，避免把不稳定的车道/机动车道识别当作确定提示。
         if (config.enableRoadWarningEvents && snapshot.roadSafety.isDangerous) {
             events.add(createRoadWarningEvent(snapshot.roadSafety, now))
         }
 
-        if (config.enableRoadExitEvents && wasOnRoad && !snapshot.roadSafety.isOnRoad) {
-            events.add(createRoadExitEvent(now))
-        }
-        wasOnRoad = snapshot.roadSafety.isOnRoad
-
-        // 7. 地面变化事件默认不播，当前只作为分析/debug 信号保留。
+        // 6. 地面变化事件默认不播，当前只作为分析/debug 信号保留。
         if (config.enableGroundChangeEvents) {
             snapshot.groundTypeChange?.let {
                 events.add(createGroundChangeEvent(it, now))
             }
         }
 
+        // suggestedBias 目前只是各扫描层最宽通行片段的质心偏移，不证明该侧片段与用户脚下
+        // 属于同一个前向连通分量。因此它只能保留为诊断信号，不能生成"靠左/靠右"这类
+        // 可执行指令。恢复方向后缀前，分析层必须提供左右候选路线各自的连通性与安全性证据。
         return events
+    }
+
+    private fun createSensorQualityEvent(quality: FrameQuality, now: Long): SceneEvent {
+        val messageKey = when (quality) {
+            FrameQuality.OBSTRUCTED -> "event_camera_blocked"
+            FrameQuality.TOO_DARK -> "event_low_light"
+            FrameQuality.OK -> error("createSensorQualityEvent called with FrameQuality.OK")
+        }
+
+        return SceneEvent(
+            timestamp = now,
+            category = EventCategory.SENSOR_QUALITY,
+            // 遮挡是 CRITICAL：用户正举着一个瞎掉的手机在走路，这比任何前方障碍都紧急，
+            // 且需要打断当前播报队列。过暗只是可靠性下降，HIGH 足够。
+            priority = if (quality == FrameQuality.OBSTRUCTED) {
+                EventPriority.CRITICAL
+            } else {
+                EventPriority.HIGH
+            },
+            messageKey = messageKey,
+            expiresAt = now + 6000,
+            dedupeKey = "sensor_quality_${quality.name.lowercase()}",
+            severity = Severity.SEVERE,
+        )
     }
 
     private fun createBlockedEvent(snapshot: SceneSnapshot, now: Long): SceneEvent {
@@ -264,22 +283,6 @@ class EventGenerator(
         )
     }
 
-    private fun createDirectionAdviceEvent(bias: DirectionBias, now: Long): SceneEvent {
-        val messageKey = when (bias) {
-            DirectionBias.LEFT -> "event_suggest_left"
-            DirectionBias.RIGHT -> "event_suggest_right"
-        }
-
-        return SceneEvent(
-            timestamp = now,
-            category = EventCategory.DIRECTION_ADVICE,
-            priority = EventPriority.MEDIUM,
-            messageKey = messageKey,
-            expiresAt = now + 5000,
-            dedupeKey = "direction_$bias"
-        )
-    }
-
     private fun createObstacleEvents(
         obstacles: List<DetectedObstacle>,
         now: Long,
@@ -295,6 +298,9 @@ class EventGenerator(
             ) ?: zoneObstacles.first()
             val maxUrgency = zoneObstacles.maxOf { it.urgency }
             val priority = obstacleEventPriority(primaryObstacle, maxUrgency)
+            // 用该方位里**最近**的那个障碍物定紧迫度：主障碍物是按紧急度/类别选出来的，
+            // 未必是离得最近的，而"要不要立刻停下"取决于最近的那个。
+            val nearestDistance = zoneObstacles.minOf { it.distance }
 
             SceneEvent(
                 timestamp = now,
@@ -305,7 +311,8 @@ class EventGenerator(
                 expiresAt = now + 3000,
                 dedupeKey = "obstacle_${zone.name}",
                 cooldownKeys = obstacleCooldownKeys(listOf(zone)),
-                relatedZones = listOf(zone)
+                relatedZones = listOf(zone),
+                distance = nearestDistance.takeIf { config.enableProximityPrefix },
             )
         }
     }
@@ -314,16 +321,29 @@ class EventGenerator(
         zone: DirectionZone,
         category: ObstacleCategory,
     ): String {
-        return "event_obstacle_${zone.name.lowercase()}_${obstacleCategorySuffix(category)}"
+        val zoneKey = "event_obstacle_${zone.name.lowercase()}"
+        val suffix = obstacleCategorySuffix(category) ?: return zoneKey
+        return "${zoneKey}_$suffix"
     }
 
-    private fun obstacleCategorySuffix(category: ObstacleCategory): String {
+    /**
+     * 播报用的类别词，比感知类别更粗。返回 null 表示不带类别后缀（"前方有障碍"）。
+     *
+     * 按**用户的处置动作**归并，而不是按模型类别：
+     * - 自行车/摩托车与汽车归到"车"：两者都是停下让行，而模型分不清一辆自行车是停在路边
+     *   还是正骑过来——归到更保守的那一侧。
+     * - 静态障碍与未知归到无后缀：原先 `_static` 那组文案和无后缀组逐字相同，纯属重复。
+     *
+     * 注意这里只影响措辞。[ObstacleCategory.BICYCLE] 在感知侧仍然独立存在，
+     * 因为 RoadSafetyAnalyzer 依赖它——停在路边的自行车不该触发机动车道警告。
+     */
+    private fun obstacleCategorySuffix(category: ObstacleCategory): String? {
         return when (category) {
             ObstacleCategory.PERSON -> "person"
-            ObstacleCategory.BICYCLE -> "bicycle"
+            ObstacleCategory.BICYCLE,
             ObstacleCategory.VEHICLE -> "vehicle"
             ObstacleCategory.STATIC_OBSTACLE,
-            ObstacleCategory.UNKNOWN -> "static"
+            ObstacleCategory.UNKNOWN -> null
         }
     }
 
@@ -417,17 +437,6 @@ class EventGenerator(
         )
     }
 
-    private fun createRoadExitEvent(now: Long): SceneEvent {
-        return SceneEvent(
-            timestamp = now,
-            category = EventCategory.ROAD_EXIT,
-            priority = EventPriority.LOW,
-            messageKey = "event_road_exit",
-            expiresAt = now + 3000,
-            dedupeKey = "road_exit"
-        )
-    }
-
     private fun createGroundChangeEvent(change: GroundTypeChange, now: Long): SceneEvent {
         val messageKey = when (change.to) {
             GroundType.ROAD -> "event_ground_to_road"
@@ -449,10 +458,6 @@ class EventGenerator(
             expiresAt = now + 4000,
             dedupeKey = "ground_change_${change.to.name}"
         )
-    }
-
-    fun reset() {
-        wasOnRoad = false
     }
 
     private fun obstacleCooldownKeys(zones: List<DirectionZone>): Set<String> {

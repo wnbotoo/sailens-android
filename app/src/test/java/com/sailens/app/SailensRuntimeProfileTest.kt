@@ -34,8 +34,10 @@ class SailensRuntimeProfileTest {
         assertEquals(false, profile.analysis.enableIntersectionFallback)
         assertTrue(profile.analysis.enableIntersectionEvents)
         assertEquals(false, profile.analysis.enableRoadWarningEvents)
-        assertEquals(false, profile.analysis.enableRoadExitEvents)
         assertEquals(false, profile.analysis.enableGroundChangeEvents)
+        assertTrue(profile.analysis.enableProximityPrefix)
+        // 镜头遮挡/过暗是用户无法自行察觉的失效，必须默认开。
+        assertTrue(profile.analysis.enableSensorQualityEvents)
         assertTrue(profile.trace.enabled)
         assertTrue(profile.sceneOverlay.enablePassableAreaMaskOverlay)
         assertTrue(profile.sceneOverlay.enableSemanticClassMaskOverlay)

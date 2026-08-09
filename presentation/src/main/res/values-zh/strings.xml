@@ -29,6 +29,14 @@
     <string name="status_speech_ready">语音就绪</string>
     <string name="status_speech_initializing">语音启动中</string>
     <string name="status_speech_off">语音已关闭</string>
+    <string name="status_speech_unavailable">语音不可用</string>
+    <string name="status_speech_screen_reader">由读屏播报</string>
+    <string name="status_interrupted_title">辅助已中断</string>
+    <string name="status_interrupted_detail">回到本应用即可继续。中断期间不会有任何提示。</string>
+    <string name="status_speech_unavailable_title">语音无法启动</string>
+    <string name="status_speech_unavailable_detail">设备的语音引擎没有响应，当前只能依靠震动提醒。请检查系统的文字转语音设置。</string>
+    <string name="notice_guidance_interrupted">辅助已中断</string>
+    <string name="action_replay_last_guidance">重播上一条提示</string>
     <string name="btn_start_guidance">开启辅助</string>
     <string name="btn_stop_guidance">停止辅助</string>
     <string name="btn_open_trace_reports">Trace 报告</string>
@@ -49,12 +57,36 @@
     <string name="settings_open_source_label">开源许可</string>
     <string name="about_tagline">Sailens 是一款端侧智能镜头，为盲人/低视力用户描述前方道路。</string>
     <string name="oss_title">开源许可</string>
-    <string name="label_speech_rate">语音速度</string>
-    <string name="label_min_interval">最小播报间隔</string>
+    <string name="label_speech_rate">语速</string>
+    <string name="settings_speech_rate_value">%1$.1f 倍速</string>
+    <string name="settings_speech_rate_sample">前方有人，靠左</string>
+    <string name="btn_preview_speech_rate">试听当前语速</string>
     <string name="label_feedback_speech">语音提醒</string>
     <string name="label_feedback_haptics">震动提醒</string>
     <string name="settings_feedback_speech_supporting">开启后，在辅助过程中播报前方风险和行走提示。</string>
-    <string name="settings_feedback_haptics_supporting">开启后，遇到重要提示时使用震动提醒。</string>
+    <string name="settings_feedback_haptics_supporting">开启后用震动传达方位。关闭语音后，震动就是唯一的提示通道。</string>
+
+    <!-- 震动词汇表 -->
+    <string name="settings_section_haptic_vocabulary">震动含义</string>
+    <string name="settings_haptic_vocabulary_intro">点按任意一行可以试一下手感。记住这几种节奏后，关掉语音也能出行。</string>
+    <string name="haptic_label_left">左侧有障碍</string>
+    <string name="haptic_label_ahead">前方有障碍</string>
+    <string name="haptic_label_right">右侧有障碍</string>
+    <string name="haptic_label_multiple">两侧都有障碍</string>
+    <string name="haptic_label_blocked">前方不通，请停下</string>
+    <string name="haptic_label_notice">一般提示，如路口、红绿灯</string>
+    <string name="haptic_label_sensor_failure">看不见了，请检查镜头</string>
+    <string name="haptic_label_speech_unavailable">语音坏了，只剩震动</string>
+    <string name="haptic_label_interrupted">辅助已中断</string>
+    <string name="haptic_rhythm_left">一下短震</string>
+    <string name="haptic_rhythm_ahead">两下短震</string>
+    <string name="haptic_rhythm_right">三下短震</string>
+    <string name="haptic_rhythm_multiple">四下短震</string>
+    <string name="haptic_rhythm_blocked">一下长震</string>
+    <string name="haptic_rhythm_notice">一下中等长度的震动</string>
+    <string name="haptic_rhythm_sensor_failure">长、短、长</string>
+    <string name="haptic_rhythm_speech_unavailable">短、短、一下特长</string>
+    <string name="haptic_rhythm_interrupted">三下最长的震动</string>
     <string name="label_overlay_mode">叠加层模式</string>
     <string name="label_current_overlay_mode">当前叠加层：%1$s</string>
     <string name="btn_overlay_off">关闭</string>
@@ -176,7 +208,22 @@
     <string name="btn_reset">重置</string>
     <string name="settings_saved">设置已保存</string>
 
-    <!-- 事件消息 -->
+    <!--
+      事件消息。
+
+      行走场景的文案守则：
+      1. 越短越好。中文 TTS 1.0x 下每字约 0.18 秒；按 1.2 m/s 步速，多两个字就多走 0.4 米。
+      2. 不写"请小心/请注意"。它不改变用户的任何动作（用户本来就在小心），只增加播报时长。
+      3. 不写"疑似"。盲人无法验证不确定性，"疑似有车"和"有车"对应的动作完全一样（停下）。
+         该说就直说，不够确定就提高阈值别说。
+      4. 只描述"是什么/在哪"。紧迫前缀和方向后缀由 event_modifier_* 拼上去，见 SceneEventTextResolver。
+    -->
+
+    <!-- 修饰：前缀/后缀模板。%1$s 是基础文案。 -->
+    <string name="event_modifier_near">注意，%1$s</string>
+    <string name="event_modifier_bias_left">%1$s，靠左</string>
+    <string name="event_modifier_bias_right">%1$s，靠右</string>
+
     <string name="event_obstacle_left">左侧有障碍</string>
     <string name="event_obstacle_center">前方有障碍</string>
     <string name="event_obstacle_right">右侧有障碍</string>
@@ -204,37 +251,26 @@
     <string name="event_obstacle_center_right_vehicle">前方和右侧有车辆</string>
     <string name="event_obstacle_left_right_vehicle">左右两侧有车辆</string>
     <string name="event_obstacle_multiple_vehicle">多个方向有车辆</string>
-    <string name="event_obstacle_left_bicycle">左侧有自行车</string>
-    <string name="event_obstacle_center_bicycle">前方有自行车</string>
-    <string name="event_obstacle_right_bicycle">右侧有自行车</string>
-    <string name="event_obstacle_front_left_bicycle">左前方有自行车</string>
-    <string name="event_obstacle_front_right_bicycle">右前方有自行车</string>
-    <string name="event_obstacle_left_center_bicycle">左侧和前方有自行车</string>
-    <string name="event_obstacle_center_right_bicycle">前方和右侧有自行车</string>
-    <string name="event_obstacle_left_right_bicycle">左右两侧有自行车</string>
-    <string name="event_obstacle_multiple_bicycle">多个方向有自行车</string>
-    <string name="event_obstacle_left_static">左侧有障碍物</string>
-    <string name="event_obstacle_center_static">前方有障碍物</string>
-    <string name="event_obstacle_right_static">右侧有障碍物</string>
-    <string name="event_obstacle_front_left_static">左前方有障碍物</string>
-    <string name="event_obstacle_front_right_static">右前方有障碍物</string>
-    <string name="event_obstacle_left_center_static">左侧和前方有障碍物</string>
-    <string name="event_obstacle_center_right_static">前方和右侧有障碍物</string>
-    <string name="event_obstacle_left_right_static">左右两侧有障碍物</string>
-    <string name="event_obstacle_multiple_static">多个方向有障碍物</string>
-    <string name="event_blocked">前方无法通行</string>
-    <string name="event_path_complex">前方道路复杂，请小心</string>
-    <string name="event_narrowing">通道正在收窄</string>
-    <string name="event_suggest_left">建议靠左行走</string>
-    <string name="event_suggest_right">建议靠右行走</string>
-    <string name="event_intersection">前方疑似路口，请小心</string>
-    <string name="event_traffic_light">检测到红绿灯，请留意通行</string>
-    <string name="event_road_warning">前方交通环境复杂，请小心</string>
-    <string name="event_road_warning_vehicle">前方疑似有车辆，请注意</string>
-    <string name="event_road_exit">前方交通环境变化</string>
-    <string name="event_ground_change">前方路面可能变化</string>
-    <string name="event_ground_to_road">前方路面可能变化</string>
-    <string name="event_ground_to_terrain">前方路面可能变化</string>
-    <string name="event_ground_to_sidewalk">前方路面可能变化</string>
-    <string name="event_ground_to_indoor">前方路面可能变化</string>
+    <string name="event_blocked">前方不通</string>
+    <string name="event_path_complex">前方路况复杂</string>
+    <string name="event_narrowing">通道变窄</string>
+    <string name="event_intersection">前方路口</string>
+    <string name="event_traffic_light">前方红绿灯</string>
+    <string name="event_road_warning">前方车道</string>
+    <string name="event_road_warning_vehicle">前方有车</string>
+
+    <!--
+      地面变化：原先 5 个 key 是同一句话，等于 5 倍维护成本换 0 信息量，且把"走进机动车道"
+      （危险）和"走上人行道"（安全）说成了同一件事。现在只保留真正需要提醒的那一个方向，
+      其余映射到统一兜底。整组事件默认关闭，见 AnalysisConfig.enableGroundChangeEvents。
+    -->
+    <string name="event_ground_change">路面变化</string>
+    <string name="event_ground_to_road">前方车道</string>
+    <string name="event_ground_to_terrain">路面变化</string>
+    <string name="event_ground_to_sidewalk">路面变化</string>
+    <string name="event_ground_to_indoor">路面变化</string>
+
+    <!-- 输入质量。用户无法自行察觉这类失效，所以措辞直接给出可执行动作。 -->
+    <string name="event_camera_blocked">镜头被遮挡</string>
+    <string name="event_low_light">光线不足</string>
 </resources>

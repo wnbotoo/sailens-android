@@ -184,13 +184,29 @@ enum class EventCategory(val value: Int) {
     OBSTACLE(0),
     BLOCKED(1),
     NARROWING(2),
-    DIRECTION_ADVICE(3),
+
+    // 3 曾是 DIRECTION_ADVICE（"建议靠左行走"）。SceneEvent.directionHint 暂为兼容字段；
+    // 在分析层能证明建议侧与用户脚下前向连通之前，事件生成器不会输出可执行方向。
+
     INTERSECTION(4),
     ROAD_WARNING(5),
-    ROAD_EXIT(6),
+
+    // 6 曾是 ROAD_EXIT（"前方交通环境变化"）。它在用户已经走过之后才触发，
+    // 且把"离开机动车道"这件好事播成了警告，纯噪音，已移除。
+
+    // 空缺的值保留不复用，避免历史 trace 的 fromValue 映射到别的语义。
+
     GROUND_CHANGE(7),
     PATH_COMPLEX(8),
-    TRAFFIC_LIGHT(9);
+    TRAFFIC_LIGHT(9),
+
+    /**
+     * 传感器/输入质量问题（镜头被遮挡、环境过暗）。
+     *
+     * 与其他类别的关键区别：它说明"本应用现在看不见"，因此必须抑制其余全部事件——
+     * 此时任何基于画面的判断都是不可信的，而用户无法靠自己察觉这一点。
+     */
+    SENSOR_QUALITY(10);
 
     companion object {
         fun fromValue(value: Int): EventCategory {

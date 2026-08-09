@@ -609,14 +609,20 @@ bbox 接地带（det∩sem 交叉验证）从 sem 可行走区抠除后的占比
 调优判断：
 
 - 只有 `event_obstacle_center`：场景决策过于集中，可能需要更丰富的事件类别或更细的障碍物位置判断。
-- 出现 `event_obstacle_center_person` / `event_obstacle_center_vehicle` / `event_obstacle_center_bicycle` / `event_obstacle_center_static`：表示障碍物提示保留了类别。
+- 出现 `event_obstacle_center_person` / `event_obstacle_center_vehicle`：表示障碍物提示保留了类别。现在只剩这两个类别后缀——播报类别按**用户要做的动作**归并，而不是按模型类别：
+  - `_bicycle` 已移除，自行车/摩托车统一播成 `_vehicle`。两者的处置动作都是停下让行，而模型分不清一辆自行车是停着还是正骑过来，归到更保守的那一侧。感知侧的 `ObstacleCategory.BICYCLE` 仍然保留，因为 `RoadSafetyAnalyzer` 依赖它——停在路边的自行车不该触发机动车道警告。
+  - `_static` 已移除，静态与未知障碍不带类别后缀（`event_obstacle_center`）。原先的 `_static` 那组文案与无后缀组逐字相同。
 - 出现 `event_obstacle_center_right_person` / `event_obstacle_left_center_vehicle` 这类多方向类别 key：表示合并后的多个方向属于同一类别，会继续播报类别。
 - 前方行人提示比侧边行人更保守：正前方 person 需要更近或更大才播，左右 / 左前 / 右前 person 有独立的较早 side gate，并允许中等紧急度的侧边 person 通过，避免“前方提前、侧边太晚”的体感。
 - 前方 / 左前 / 右前 vehicle 会升为 `CRITICAL`，并且同一区域内 vehicle 与 person / bicycle 同紧急度竞争时优先选择 vehicle；混合 vehicle 与其他类别时不会合并成泛化 key，以免把车辆语义吞掉。
 - 出现 `event_obstacle_center_right` / `event_obstacle_multiple` 这类泛化 key：通常表示合并的多个方向类别不一致，或上游事件没有类别后缀。
 - 出现 `event_path_complex`：表示前方连通性证据复杂或不稳定，但还没有达到高确定性 `event_blocked`。此时应优先结合具体障碍物 key 判断现场，例如同时出现 `event_obstacle_center_person`。
-- 默认不应再出现 `event_road_warning_vehicle` / `event_road_exit` / `event_ground_to_*`。这些车道和路面变化语义容易误导，当前保留在显式配置开关后面，日常体验优先依赖具体障碍物、复杂路况和疑似路口提示。
-- 出现 `event_intersection`：表示 scene element 判断为疑似路口；文案使用“疑似路口”而不是确定断言，避免过度承诺。当前发布 profile 不启用 traffic-light/road-ratio fallback，因为该 fallback 误报偏多；只有显式可靠的路口信号才应进入用户播报。
+- 默认不应再出现 `event_road_warning_vehicle` / `event_ground_to_*`。这些车道和路面变化语义容易误导，当前保留在显式配置开关后面，日常体验优先依赖具体障碍物、复杂路况和路口提示。
+- `event_road_exit` 与 `event_suggest_*` 已删除：前者在用户走过之后才触发，纯噪音；后者依赖的 `suggestedBias` 没有建议侧连通性证据，因此当前不生成可执行方向后缀。
+- **所有事件当前都不带方向后缀。** `suggestedBias` 是每个扫描层里最宽通行段中心相对中线的加权偏移（`ConnectivityStatsExtractor.computeDirectionBias`），而 `layer.isValid` 是宽度检查不是连通性检查——几段互不相连的通行区域偏左，同样会得出 `bias = LEFT`。全局 `floodReachRatio` 合格也只能证明某处存在前向通道，不能证明 bias 指向的那一侧连通。
+  *后续能力：* 需要对左右候选路线分别做洪泛连通性与安全性判定，让方向指向一条真的走得通的路。`SceneEvent.directionHint` 在此之前仅作为 trace/replay 兼容字段保留。
+- 出现 `event_camera_blocked` / `event_low_light`：表示输入帧不可用（镜头被遮挡、环境过暗），该帧会抑制其余全部事件——此时任何基于画面的判断都不可信，而保持沉默会被用户理解成"前方安全"。一次运行里这类事件占比不低时，先复查采集本身，其余指标才有意义。
+- 出现 `event_intersection`：表示 scene element 判断为路口。文案不再用“疑似”——盲人无法验证这份不确定性，而“疑似有路口”和“有路口”对应的动作完全一样，含糊措辞只多占播报时长。确定性现在由阈值表达而不是措辞：当前发布 profile 不启用 traffic-light/road-ratio fallback，因为该 fallback 误报偏多；只有显式可靠的路口信号才应进入用户播报。
 - 出现 `event_traffic_light`：表示语义分割稳定检测到红绿灯，但没有把它升级成“疑似路口”。该提示是低优先级、长冷却的宽泛交通提示，应排在车辆、行人、blocked / path-complex 之后；触发前需要满足 traffic-light 像素占比、道路语境和稳定帧门槛，避免远处小目标或单帧误分割过早播报。
 - 出现已禁用策略类提示：检查 EventGenerator / EventMerger 配置。
 

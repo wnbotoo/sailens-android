@@ -29,6 +29,14 @@
     <string name="status_speech_ready">Voice ready</string>
     <string name="status_speech_initializing">Voice starting</string>
     <string name="status_speech_off">Voice off</string>
+    <string name="status_speech_unavailable">Voice unavailable</string>
+    <string name="status_speech_screen_reader">Screen reader</string>
+    <string name="status_interrupted_title">Guidance interrupted</string>
+    <string name="status_interrupted_detail">Return to the app to continue. Nothing is announced while interrupted.</string>
+    <string name="status_speech_unavailable_title">Voice could not start</string>
+    <string name="status_speech_unavailable_detail">This device\'s speech engine is not responding, so only vibration alerts are available. Check the system text-to-speech settings.</string>
+    <string name="notice_guidance_interrupted">Guidance interrupted</string>
+    <string name="action_replay_last_guidance">Replay last guidance</string>
     <string name="btn_start_guidance">Start guidance</string>
     <string name="btn_stop_guidance">Stop guidance</string>
     <string name="btn_open_trace_reports">Trace reports</string>
@@ -49,12 +57,36 @@
     <string name="settings_open_source_label">Open-source licenses</string>
     <string name="about_tagline">Sailens is an on-device smart lens that describes the path ahead for blind and low-vision users.</string>
     <string name="oss_title">Open-source licenses</string>
-    <string name="label_speech_rate">Speech Rate</string>
-    <string name="label_min_interval">Min Interval</string>
+    <string name="label_speech_rate">Speech rate</string>
+    <string name="settings_speech_rate_value">%1$.1f×</string>
+    <string name="settings_speech_rate_sample">Person ahead, keep left</string>
+    <string name="btn_preview_speech_rate">Preview speech rate</string>
     <string name="label_feedback_speech">Voice alerts</string>
     <string name="label_feedback_haptics">Vibration alerts</string>
     <string name="settings_feedback_speech_supporting">Speak guidance and urgent risks during navigation.</string>
-    <string name="settings_feedback_haptics_supporting">Vibrate for important guidance during navigation.</string>
+    <string name="settings_feedback_haptics_supporting">Convey direction through vibration. With voice off, vibration is the only channel.</string>
+
+    <!-- Haptic vocabulary -->
+    <string name="settings_section_haptic_vocabulary">What the vibrations mean</string>
+    <string name="settings_haptic_vocabulary_intro">Tap any row to feel it. Once these rhythms are familiar you can walk with voice turned off.</string>
+    <string name="haptic_label_left">Obstacle on the left</string>
+    <string name="haptic_label_ahead">Obstacle ahead</string>
+    <string name="haptic_label_right">Obstacle on the right</string>
+    <string name="haptic_label_multiple">Obstacles on both sides</string>
+    <string name="haptic_label_blocked">Path blocked, stop</string>
+    <string name="haptic_label_notice">General notice, such as an intersection</string>
+    <string name="haptic_label_sensor_failure">Cannot see, check the camera</string>
+    <string name="haptic_label_speech_unavailable">Voice is broken, vibration only</string>
+    <string name="haptic_label_interrupted">Guidance interrupted</string>
+    <string name="haptic_rhythm_left">One short buzz</string>
+    <string name="haptic_rhythm_ahead">Two short buzzes</string>
+    <string name="haptic_rhythm_right">Three short buzzes</string>
+    <string name="haptic_rhythm_multiple">Four short buzzes</string>
+    <string name="haptic_rhythm_blocked">One long buzz</string>
+    <string name="haptic_rhythm_notice">One medium buzz</string>
+    <string name="haptic_rhythm_sensor_failure">Long, short, long</string>
+    <string name="haptic_rhythm_speech_unavailable">Short, short, one extra-long</string>
+    <string name="haptic_rhythm_interrupted">Three longest buzzes</string>
     <string name="label_overlay_mode">Overlay mode</string>
     <string name="label_current_overlay_mode">Current overlay: %1$s</string>
     <string name="btn_overlay_off">Off</string>
@@ -176,7 +208,25 @@
     <string name="btn_reset">Reset</string>
     <string name="settings_saved">Settings saved</string>
 
-    <!-- 事件消息 -->
+    <!--
+      Event messages.
+
+      Copy rules for the walking context:
+      1. Shorter is safer. Every extra word is extra latency; at 1.2 m/s the user keeps moving
+         while the phrase plays.
+      2. No "please be careful". It changes nothing about what the user does and only adds
+         speaking time.
+      3. No hedging ("possible", "suspected"). A blind user cannot verify the uncertainty, and
+         the action is identical either way. Pick a threshold you trust and speak plainly.
+      4. Say only what and where. The urgency prefix and direction suffix are composed from
+         event_modifier_* — see SceneEventTextResolver.
+    -->
+
+    <!-- Modifier templates. %1$s is the base message. -->
+    <string name="event_modifier_near">Careful, %1$s</string>
+    <string name="event_modifier_bias_left">%1$s, keep left</string>
+    <string name="event_modifier_bias_right">%1$s, keep right</string>
+
     <string name="event_obstacle_left">Obstacle on the left</string>
     <string name="event_obstacle_center">Obstacle ahead</string>
     <string name="event_obstacle_right">Obstacle on the right</string>
@@ -204,37 +254,28 @@
     <string name="event_obstacle_center_right_vehicle">Vehicle ahead and on the right</string>
     <string name="event_obstacle_left_right_vehicle">Vehicles on both sides</string>
     <string name="event_obstacle_multiple_vehicle">Vehicles in multiple directions</string>
-    <string name="event_obstacle_left_bicycle">Bicycle on the left</string>
-    <string name="event_obstacle_center_bicycle">Bicycle ahead</string>
-    <string name="event_obstacle_right_bicycle">Bicycle on the right</string>
-    <string name="event_obstacle_front_left_bicycle">Bicycle on the front left</string>
-    <string name="event_obstacle_front_right_bicycle">Bicycle on the front right</string>
-    <string name="event_obstacle_left_center_bicycle">Bicycle on the left and ahead</string>
-    <string name="event_obstacle_center_right_bicycle">Bicycle ahead and on the right</string>
-    <string name="event_obstacle_left_right_bicycle">Bicycles on both sides</string>
-    <string name="event_obstacle_multiple_bicycle">Bicycles in multiple directions</string>
-    <string name="event_obstacle_left_static">Obstacle on the left</string>
-    <string name="event_obstacle_center_static">Obstacle ahead</string>
-    <string name="event_obstacle_right_static">Obstacle on the right</string>
-    <string name="event_obstacle_front_left_static">Obstacle on the front left</string>
-    <string name="event_obstacle_front_right_static">Obstacle on the front right</string>
-    <string name="event_obstacle_left_center_static">Obstacle on the left and ahead</string>
-    <string name="event_obstacle_center_right_static">Obstacle ahead and on the right</string>
-    <string name="event_obstacle_left_right_static">Obstacles on both sides</string>
-    <string name="event_obstacle_multiple_static">Obstacles in multiple directions</string>
-    <string name="event_blocked">Path blocked ahead</string>
-    <string name="event_path_complex">Road ahead is complex, please be careful</string>
-    <string name="event_narrowing">Path is narrowing</string>
-    <string name="event_suggest_left">Suggest moving left</string>
-    <string name="event_suggest_right">Suggest moving right</string>
-    <string name="event_intersection">Possible intersection ahead, please be careful</string>
-    <string name="event_traffic_light">Traffic light detected, pay attention before crossing</string>
-    <string name="event_road_warning">Traffic area ahead, please be careful</string>
-    <string name="event_road_warning_vehicle">Possible vehicle ahead, please be careful</string>
-    <string name="event_road_exit">Traffic area changed</string>
-    <string name="event_ground_change">Ground surface may be changing</string>
-    <string name="event_ground_to_road">Ground surface may be changing</string>
-    <string name="event_ground_to_terrain">Ground surface may be changing</string>
-    <string name="event_ground_to_sidewalk">Ground surface may be changing</string>
-    <string name="event_ground_to_indoor">Ground surface may be changing</string>
+    <string name="event_blocked">Path blocked</string>
+    <string name="event_path_complex">Complex path ahead</string>
+    <string name="event_narrowing">Path narrowing</string>
+    <string name="event_intersection">Intersection ahead</string>
+    <string name="event_traffic_light">Traffic light ahead</string>
+    <string name="event_road_warning">Roadway ahead</string>
+    <string name="event_road_warning_vehicle">Vehicle ahead</string>
+
+    <!--
+      Ground changes: these were five keys carrying one identical sentence — five times the
+      translation cost for zero information — and they conflated stepping into a roadway
+      (dangerous) with stepping onto a sidewalk (safe). Only the direction worth warning about
+      keeps a distinct string. The whole group is off by default; see
+      AnalysisConfig.enableGroundChangeEvents.
+    -->
+    <string name="event_ground_change">Surface changing</string>
+    <string name="event_ground_to_road">Roadway ahead</string>
+    <string name="event_ground_to_terrain">Surface changing</string>
+    <string name="event_ground_to_sidewalk">Surface changing</string>
+    <string name="event_ground_to_indoor">Surface changing</string>
+
+    <!-- Input quality. The user cannot notice these failures unaided, so the wording is actionable. -->
+    <string name="event_camera_blocked">Camera is covered</string>
+    <string name="event_low_light">Too dark to see</string>
 </resources>

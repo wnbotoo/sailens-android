@@ -12,8 +12,13 @@ import com.sailens.domain.service.TraceService
 import com.sailens.domain.usecase.scene.StartSceneAnalysisUseCase
 import com.sailens.domain.usecase.scene.StopSceneAnalysisUseCase
 import com.sailens.presentation.diagnostics.GuidanceDiagnosticsStore
+import com.sailens.presentation.device.AccessibilityStatusProvider
+import com.sailens.presentation.device.GuidanceHaptic
 import com.sailens.presentation.device.HapticManager
+import com.sailens.presentation.device.SceneEventTextResolver
+import com.sailens.presentation.device.SpeechEngineState
 import com.sailens.presentation.device.SpeechManager
+import com.sailens.presentation.device.toSceneEventText
 import com.sailens.presentation.ext.OverlayBitmapRenderer
 import com.sailens.presentation.settings.GuidanceFeedbackSettings
 import com.sailens.presentation.settings.GuidanceSettingsStore
@@ -56,12 +61,15 @@ class SceneAnalysisViewModel(
     private val sceneOverlayConfig: SceneOverlayConfig,
     private val guidanceSettingsStore: GuidanceSettingsStore,
     private val guidanceDiagnosticsStore: GuidanceDiagnosticsStore,
+    private val accessibilityStatusProvider: AccessibilityStatusProvider,
+    private val textResolver: SceneEventTextResolver,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(
         SceneAnalysisUiState(
             isSpeechEnabled = guidanceSettingsStore.settings.value.speechEnabled,
             isHapticsEnabled = guidanceSettingsStore.settings.value.hapticsEnabled,
+            isScreenReaderActive = accessibilityStatusProvider.isScreenReaderActive.value,
             showDiagnostics = guidanceDiagnosticsStore.state.value.showDiagnostics,
             enabledOverlayModes = guidanceDiagnosticsStore.state.value.enabledOverlayModes,
             overlayMode = guidanceDiagnosticsStore.state.value.overlayMode,
@@ -87,12 +95,38 @@ class SceneAnalysisViewModel(
     private var isReleasingResources = false
 
     init {
+        speechManager.setSpeechRate(guidanceSettingsStore.settings.value.speechRate)
         if (guidanceSettingsStore.settings.value.speechEnabled) {
             initializeSpeech()
         }
         viewModelScope.launch {
             guidanceSettingsStore.settings.collect { settings ->
                 applyFeedbackSettings(settings)
+            }
+        }
+        viewModelScope.launch {
+            accessibilityStatusProvider.isScreenReaderActive.collect { active ->
+                applyScreenReaderMode(active)
+            }
+        }
+        viewModelScope.launch {
+            speechManager.state.collect { engineState ->
+                val previousState = _uiState.value
+                val shouldAlert = shouldAlertSpeechUnavailable(
+                    previousEngineState = previousState.speechEngineState,
+                    newEngineState = engineState,
+                    speechEnabled = previousState.isSpeechEnabled,
+                    screenReaderActive = previousState.isScreenReaderActive,
+                )
+                _uiState.update {
+                    it.copy(
+                        speechEngineState = engineState,
+                        isSpeechReady = engineState == SpeechEngineState.READY,
+                    )
+                }
+                if (shouldAlert) {
+                    onSpeechEngineUnavailable()
+                }
             }
         }
         viewModelScope.launch {
@@ -106,9 +140,28 @@ class SceneAnalysisViewModel(
     }
 
     private fun initializeSpeech() {
+        // 屏幕阅读器在工作时不初始化自带引擎：播报全部交给它，起一个用不到的 TTS
+        // 只会白占资源，还可能在切换时抢音频焦点。
+        if (_uiState.value.isScreenReaderActive) {
+            logger.info(TAG, "Screen reader active; deferring to it instead of starting own TTS")
+            return
+        }
         speechManager.initialize {
             logger.debug(TAG, "SpeechManager initialized")
-            _uiState.update { it.copy(isSpeechReady = true, errorMessage = null) }
+            _uiState.update { it.copy(errorMessage = null) }
+        }
+    }
+
+    private fun applyScreenReaderMode(active: Boolean) {
+        val wasActive = _uiState.value.isScreenReaderActive
+        _uiState.update { it.copy(isScreenReaderActive = active) }
+        if (active == wasActive) return
+
+        if (active) {
+            // 让位给屏幕阅读器，并把自带引擎彻底停掉（含归还音频焦点）。
+            speechManager.stop()
+        } else if (_uiState.value.isSpeechEnabled) {
+            initializeSpeech()
         }
     }
 
@@ -129,6 +182,10 @@ class SceneAnalysisViewModel(
         guidanceSettingsStore.setHapticsEnabled(enabled)
     }
 
+    fun setSpeechRate(rate: Float) {
+        guidanceSettingsStore.setSpeechRate(rate)
+    }
+
     private fun applyFeedbackSettings(settings: GuidanceFeedbackSettings) {
         val previous = _uiState.value
         _uiState.update {
@@ -137,6 +194,8 @@ class SceneAnalysisViewModel(
                 isHapticsEnabled = settings.hapticsEnabled,
             )
         }
+
+        speechManager.setSpeechRate(settings.speechRate)
 
         if (!settings.speechEnabled && previous.isSpeechEnabled) {
             speechManager.stop()
@@ -219,6 +278,7 @@ class SceneAnalysisViewModel(
                         isLoading = false,
                         segMask = null,
                         obstacleDetections = emptyList(),
+                        activeStatusEvent = null,
                         errorMessage = e.message ?: "Unknown error"
                     )
                 }
@@ -231,12 +291,11 @@ class SceneAnalysisViewModel(
                     sceneOverlayConfig.enableDebugPanel && guidanceDiagnosticsStore.state.value.showDiagnostics
                 }
                 _uiState.update {
-                    it.copy(
+                    it.withFrameEvents(events, System.currentTimeMillis()).copy(
                         frameDisplayWidth = result.frameDisplayWidth,
                         frameDisplayHeight = result.frameDisplayHeight,
                         obstacleDetections = result.obstacleDetectionsForOverlay(overlayMode),
                         latestSceneDebugInfo = latestSceneDebugInfo,
-                        lastEvents = events,
                     )
                 }
                 scheduleOverlayRender(result, overlayMode)
@@ -265,12 +324,104 @@ class SceneAnalysisViewModel(
 
         logger.debug(TAG, "Scene events generated, ${primaryEvent.messageKey}", mapOf("count" to events.size))
 
+        if (state.hasGuidanceOutputChannel()) {
+            _uiState.update { it.copy(lastAnnouncedEvent = primaryEvent) }
+        }
+
         if (state.isSpeechEnabled) {
-            speechManager.speak(primaryEvent)
+            // 两条播报通道互斥。屏幕阅读器在工作时由它来念——这样语速/音量/语言跟随用户
+            // 在 TalkBack 里的既有设置，也避免同一句被念两遍。
+            if (state.isScreenReaderActive) {
+                val text = textResolver.resolve(primaryEvent.toSceneEventText())
+                viewModelScope.launch {
+                    _uiEffect.emit(SceneAnalysisUiEffect.Announce(text))
+                }
+            } else {
+                speechManager.speak(primaryEvent)
+            }
         }
 
         if (state.isHapticsEnabled) {
             hapticManager.trigger(primaryEvent)
+        }
+    }
+
+    /**
+     * 分析在用户没有主动停止的情况下断了（息屏、来电、被系统回收）。
+     *
+     * 这是整条链路最危险的失效：用户以为辅助还在跑，实际上已经什么都不检测了，而"没有提示"
+     * 恰好和"前方安全"是同一种体验。所以这里必须主动出声 + 震动，绝不能只写日志。
+     */
+    fun onGuidanceInterrupted(noticeText: String) {
+        if (!_uiState.value.isRunning) return
+
+        logger.warning(TAG, "Guidance interrupted while running")
+        _uiState.update { it.copy(wasInterrupted = true) }
+
+        // 震动先行：它不依赖 TTS 引擎，是最后一道能穿透的通知手段。
+        hapticManager.play(GuidanceHaptic.INTERRUPTED)
+
+        val state = _uiState.value
+        if (!state.isSpeechEnabled) return
+        if (state.isScreenReaderActive) {
+            viewModelScope.launch {
+                _uiEffect.emit(SceneAnalysisUiEffect.Announce(noticeText))
+            }
+        } else {
+            speechManager.speakSystemNotice(noticeText)
+        }
+    }
+
+    fun acknowledgeInterruption() {
+        _uiState.update { it.copy(wasInterrupted = false) }
+    }
+
+    /**
+     * 语音引擎彻底失效（多次重试后放弃）。
+     *
+     * 这条失效必须走非视觉通道，否则等于没告知：TTS 已经死了、说不出话；视觉卡片对盲人不存在；
+     * 而"收不到任何提示"和"前方没有危险"在用户体验上是同一件事。
+     *
+     * 震动**不看 hapticsEnabled 开关**。理由：用户当初选的输出通道是语音，现在那条通道坏了，
+     * 这一下震动不是导航提示，而是"应用无法工作"的一次性告知——它是仅剩的可达通道。
+     * 只震一次，不会变成持续打扰。
+     */
+    private fun onSpeechEngineUnavailable() {
+        val state = _uiState.value
+        if (!state.isSpeechEnabled) return
+        // 读屏在工作时我们根本不会初始化自带引擎，所以这个状态到不了这里；留一道判断只是
+        // 为了让"读屏用户不会收到与他无关的告警"这件事显式成立。
+        if (state.isScreenReaderActive) return
+
+        logger.error(TAG, "Speech engine unavailable; alerting through haptics")
+        hapticManager.play(GuidanceHaptic.SPEECH_UNAVAILABLE)
+    }
+
+    /**
+     * 重播最近一条提示。
+     *
+     * 走路时漏听是常态——风声、车声、正好在过马路。没有重播就只能等下一次冷却结束，
+     * 而那可能是好几秒之后，或者障碍已经过去、再也不播了。
+     *
+     * 这里刻意**不检查 expiresAt**：过期检查是为了防止自动播报滞后于场景，而重播是用户
+     * 主动要求的，他要的就是"刚才那句到底说了什么"。
+     */
+    fun replayLastGuidance() {
+        val state = _uiState.value
+        val event = state.lastAnnouncedEvent ?: return
+        if (!state.isSpeechEnabled) {
+            // 语音关着时用震动重放同一个符号，纯震动模式下重播同样可用。
+            if (state.isHapticsEnabled) hapticManager.trigger(event)
+            return
+        }
+
+        val text = textResolver.resolve(event.toSceneEventText())
+        if (state.isScreenReaderActive) {
+            viewModelScope.launch {
+                _uiEffect.emit(SceneAnalysisUiEffect.Announce(text))
+            }
+        } else {
+            speechManager.speakSystemNotice(text)
         }
     }
 
@@ -289,6 +440,11 @@ class SceneAnalysisViewModel(
                 isRunning = false,
                 isInitializing = false,
                 isLoading = false,
+                // 用户主动停止，中断告警自然作废。
+                wasInterrupted = false,
+                lastEvents = emptyList(),
+                activeStatusEvent = null,
+                lastAnnouncedEvent = null,
                 segMask = null,
                 maskSourceAgeMs = 0L,
                 frameDisplayWidth = null,
@@ -438,4 +594,5 @@ class SceneAnalysisViewModel(
         if (sourcePipelineCompletedAt <= 0L) return 0L
         return (renderedAt - sourcePipelineCompletedAt).coerceAtLeast(0L)
     }
+
 }

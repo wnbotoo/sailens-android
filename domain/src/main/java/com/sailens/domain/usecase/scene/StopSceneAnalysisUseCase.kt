@@ -1,11 +1,11 @@
 package com.sailens.domain.usecase.scene
 
 import com.sailens.domain.processor.analysis.ConnectivityAnalysisProcessor
+import com.sailens.domain.processor.analysis.FrameQualityAnalyzer
 import com.sailens.domain.processor.analysis.GroundTypeDetector
 import com.sailens.domain.processor.analysis.RoadSafetyAnalyzer
 import com.sailens.domain.processor.analysis.SceneClassifier
 import com.sailens.domain.processor.decision.CooldownManager
-import com.sailens.domain.processor.decision.EventGenerator
 import com.sailens.domain.processor.perception.ObstacleTracker
 import com.sailens.domain.processor.perception.SegmentationAnalysisProcessor
 import com.sailens.domain.repository.ObstacleProvider
@@ -26,7 +26,7 @@ class StopSceneAnalysisUseCase(
     private val roadSafetyAnalyzer: RoadSafetyAnalyzer,
     private val groundTypeDetector: GroundTypeDetector,
     private val sceneClassifier: SceneClassifier,
-    private val eventGenerator: EventGenerator,
+    private val frameQualityAnalyzer: FrameQualityAnalyzer,
     private val cooldownManager: CooldownManager,
     private val logService: LogService,
 ) {
@@ -43,7 +43,7 @@ class StopSceneAnalysisUseCase(
         roadSafetyAnalyzer.reset()
         groundTypeDetector.reset()
         sceneClassifier.reset()
-        eventGenerator.reset()
+        frameQualityAnalyzer.reset()
         cooldownManager.reset()
     }
 

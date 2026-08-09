@@ -45,11 +45,10 @@ class EventConflictResolverTest {
     }
 
     @Test
-    fun `blocked suppresses narrowing and direction advice`() {
+    fun `blocked suppresses narrowing`() {
         val events = listOf(
             sceneEvent(category = EventCategory.BLOCKED, messageKey = "event_blocked"),
             sceneEvent(category = EventCategory.NARROWING, messageKey = "event_narrowing"),
-            sceneEvent(category = EventCategory.DIRECTION_ADVICE, messageKey = "event_suggest_left")
         )
 
         val resolved = resolver.resolve(events)
@@ -58,7 +57,7 @@ class EventConflictResolverTest {
     }
 
     @Test
-    fun `path complex keeps center obstacle but suppresses generic path advice`() {
+    fun `path complex keeps center obstacle but suppresses generic narrowing`() {
         val events = listOf(
             sceneEvent(category = EventCategory.PATH_COMPLEX, messageKey = "event_path_complex"),
             sceneEvent(
@@ -67,7 +66,6 @@ class EventConflictResolverTest {
                 relatedZones = listOf(DirectionZone.CENTER)
             ),
             sceneEvent(category = EventCategory.NARROWING, messageKey = "event_narrowing"),
-            sceneEvent(category = EventCategory.DIRECTION_ADVICE, messageKey = "event_suggest_left")
         )
 
         val resolved = resolver.resolve(events)
@@ -76,6 +74,36 @@ class EventConflictResolverTest {
             listOf(EventCategory.PATH_COMPLEX, EventCategory.OBSTACLE),
             resolved.map { it.category },
         )
+    }
+
+    @Test
+    fun `sensor quality suppresses every other event`() {
+        val events = listOf(
+            sceneEvent(
+                category = EventCategory.OBSTACLE,
+                messageKey = "event_obstacle_center",
+                relatedZones = listOf(DirectionZone.CENTER),
+            ),
+            sceneEvent(category = EventCategory.BLOCKED, messageKey = "event_blocked"),
+            sceneEvent(category = EventCategory.SENSOR_QUALITY, messageKey = "event_camera_blocked"),
+            sceneEvent(category = EventCategory.INTERSECTION, messageKey = "event_intersection"),
+        )
+
+        val resolved = resolver.resolve(events)
+
+        // 镜头看不见时，其余事件全部建立在一张不可信的画面上。播出去比不播更危险：
+        // 用户会把"有提示、没说危险"理解成"前方安全"。
+        assertEquals(1, resolved.size)
+        assertEquals(EventCategory.SENSOR_QUALITY, resolved.single().category)
+    }
+
+    @Test
+    fun `resolution is unchanged when frame quality is fine`() {
+        val events = listOf(
+            sceneEvent(category = EventCategory.INTERSECTION, messageKey = "event_intersection"),
+        )
+
+        assertEquals(events, resolver.resolve(events))
     }
 
     private fun sceneEvent(

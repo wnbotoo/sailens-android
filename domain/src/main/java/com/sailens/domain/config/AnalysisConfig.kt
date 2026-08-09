@@ -6,9 +6,11 @@ package com.sailens.domain.config
 data class AnalysisConfig(
     // 事件输出策略
     val enableNarrowingEvents: Boolean = false,
-    val enableDirectionAdviceEvents: Boolean = false,
+    /** 障碍物在近距离时加紧迫前缀（"注意，前方有人"）。 */
+    val enableProximityPrefix: Boolean = true,
+    /** 镜头遮挡 / 环境过暗的状态提示。用户无法自行察觉这类失效，默认必开。 */
+    val enableSensorQualityEvents: Boolean = true,
     val enableRoadWarningEvents: Boolean = false,
-    val enableRoadExitEvents: Boolean = false,
     val enableGroundChangeEvents: Boolean = false,
     val enableIntersectionEvents: Boolean = true,
     val enableTrafficLightEvents: Boolean = true,

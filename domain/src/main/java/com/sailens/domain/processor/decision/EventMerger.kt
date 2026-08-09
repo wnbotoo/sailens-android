@@ -1,5 +1,6 @@
 package com.sailens.domain.processor.decision
 
+import com.sailens.domain.model.common.DirectionBias
 import com.sailens.domain.model.common.DirectionZone
 import com.sailens.domain.model.common.EventCategory
 import com.sailens.domain.model.scene.SceneEvent
@@ -61,6 +62,15 @@ class EventMerger {
         val maxConfidence = events.maxOf { it.confidence }
         val maxSeverity = events.maxOf { it.severity }
         val firstEvent = events.first()
+        // 合并后取最近的距离：一旦任一方位上有近处障碍，整条提示都该带紧迫前缀。
+        val nearestDistance = events.mapNotNull { it.distance }.minOrNull()
+        // 方向后缀必须按**合并后**的方位集合重新校验。单条事件各自合规不代表合起来合规：
+        // "前方有人（靠左）" 和 "左侧有人（无后缀）" 合并后是"左侧和前方有人"，
+        // 此时再说"靠左"就是把用户往左边那个人身上引。
+        val directionHint = events.mapNotNull { it.directionHint }
+            .distinct()
+            .singleOrNull()
+            ?.takeUnless { hint -> allZones.any { it in conflictingZones(hint) } }
 
         val messageKey = mergedObstacleMessageKey(
             zones = allZones,
@@ -90,7 +100,9 @@ class EventMerger {
             cooldownKeys = cooldownKeys,
             confidence = maxConfidence,
             severity = maxSeverity,
-            relatedZones = allZones
+            relatedZones = allZones,
+            distance = nearestDistance,
+            directionHint = directionHint,
         )
     }
 
@@ -114,21 +126,32 @@ class EventMerger {
         return "${zoneKey}_$suffix"
     }
 
+    /**
+     * 只有全部事件同属一个类别时才保留类别后缀，否则退回只带方位的泛化文案。
+     *
+     * 这里必须保留 null（无后缀 = 静态/未知障碍）参与比较，不能用 mapNotNull 过滤掉：
+     * 把"行人 + 静态障碍"过滤成只剩 person，会播成"左侧和前方有行人"，等于凭空把一个
+     * 静止物体说成了人。
+     */
     private fun sharedObstacleCategorySuffix(events: List<SceneEvent>): String? {
         val suffixes = events
-            .mapNotNull { obstacleCategorySuffix(it.messageKey) }
+            .map { obstacleCategorySuffix(it.messageKey) }
             .distinct()
         return suffixes.singleOrNull()
     }
 
+    /** 与 EventGenerator.obstacleCategorySuffix 对应的反向解析；null 表示无类别后缀。 */
     private fun obstacleCategorySuffix(messageKey: String): String? {
         return when {
             messageKey.endsWith("_person") -> "person"
             messageKey.endsWith("_vehicle") -> "vehicle"
-            messageKey.endsWith("_bicycle") -> "bicycle"
-            messageKey.endsWith("_static") -> "static"
             else -> null
         }
+    }
+
+    private fun conflictingZones(bias: DirectionBias): Set<DirectionZone> = when (bias) {
+        DirectionBias.LEFT -> setOf(DirectionZone.LEFT, DirectionZone.FRONT_LEFT)
+        DirectionBias.RIGHT -> setOf(DirectionZone.RIGHT, DirectionZone.FRONT_RIGHT)
     }
 
     private fun primaryObstacleCooldownKey(zones: List<DirectionZone>): String {

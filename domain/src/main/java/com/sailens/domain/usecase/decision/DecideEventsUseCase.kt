@@ -6,6 +6,7 @@ import com.sailens.domain.processor.decision.CooldownManager
 import com.sailens.domain.processor.decision.EventConflictResolver
 import com.sailens.domain.processor.decision.EventGenerator
 import com.sailens.domain.processor.decision.EventMerger
+import com.sailens.domain.repository.DeviceSensorRepository
 import com.sailens.domain.util.Timestamp
 
 /**
@@ -16,9 +17,13 @@ class DecideEventsUseCase(
     private val conflictResolver: EventConflictResolver,
     private val eventMerger: EventMerger,
     private val cooldownManager: CooldownManager,
+    private val deviceSensorRepository: DeviceSensorRepository,
 ) {
     operator fun invoke(snapshot: SceneSnapshot): List<SceneEvent> {
         val now = Timestamp.now()
+
+        // 0. 把运动状态喂给冷却器：站着不动时同一个场景不该被反复播报。
+        cooldownManager.setStationary(deviceSensorRepository.isStationary.value)
 
         // 1.  生成原始事件
         val rawEvents = eventGenerator.generate(snapshot, now)

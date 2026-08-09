@@ -95,6 +95,8 @@ Every document below has a Chinese version alongside it (`*.zh-CN.md`), linked f
 | [`docs/trace_metrics_guide.md`](docs/trace_metrics_guide.md) | [中文](docs/trace_metrics_guide.zh-CN.md) | Trace / replay metric definitions |
 | [`docs/trace_replay_workflow.md`](docs/trace_replay_workflow.md) | [中文](docs/trace_replay_workflow.zh-CN.md) | Observe → replay → evaluate loop |
 | [`docs/vlm-asr-assistant-plan.md`](docs/vlm-asr-assistant-plan.md) | [中文](docs/vlm-asr-assistant-plan.zh-CN.md) | Planned VLM / ASR assistant path |
+| [`docs/background-guidance-plan.md`](docs/background-guidance-plan.md) | [中文](docs/background-guidance-plan.zh-CN.md) | Planned camera foreground service (screen-off guidance) |
+| [`docs/guidance-validation-roadmap.md`](docs/guidance-validation-roadmap.md) | [中文](docs/guidance-validation-roadmap.zh-CN.md) | Deferred device validation and spatial earcon gates |
 
 `AGENTS.md` is the repo guide for coding agents (English only — it is read by tools, not people).
 

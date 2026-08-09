@@ -11,6 +11,7 @@ import com.sailens.domain.model.trace.SessionTraceMetadata
 import com.sailens.domain.model.perception.ImageFrame
 import com.sailens.domain.model.scene.SceneDebugInfo
 import com.sailens.domain.model.scene.SceneResult
+import com.sailens.domain.processor.analysis.FrameQualityAnalyzer
 import com.sailens.domain.repository.ObstacleProvider
 import com.sailens.domain.repository.PerceptionRepository
 import com.sailens.domain.service.LogService
@@ -47,6 +48,7 @@ class StartSceneAnalysisUseCase(
     private val processFrameUseCase: ProcessFrameUseCase,
     private val analyzeSceneUseCase: AnalyzeSceneUseCase,
     private val decideEventsUseCase: DecideEventsUseCase,
+    private val frameQualityAnalyzer: FrameQualityAnalyzer,
     private val logService: LogService,
     private val traceService: TraceService,
     private val traceRuntimeConfig: TraceRuntimeConfig,
@@ -64,6 +66,7 @@ class StartSceneAnalysisUseCase(
             null
         }
         val runtimeWindow = PipelineRuntimeWindow()
+        frameQualityAnalyzer.reset()
         var lastSequenceNumber: Long? = null
         var lastFrameTimestamp: Long? = null
         var lastPipelineCompletedAt: Long? = null
@@ -149,8 +152,11 @@ class StartSceneAnalysisUseCase(
                     )
                 )
 
-                // 分析场景
-                val sceneSnapshot = analyzeSceneUseCase(perceptionResult)
+                // 分析场景。帧质量单独判定后回填：它看的是原始画面而非模型输出，
+                // 恰恰要在模型"照常给出结果"时告诉用户这些结果不可信。
+                val sceneSnapshot = analyzeSceneUseCase(perceptionResult).copy(
+                    frameQuality = frameQualityAnalyzer.analyze(frame),
+                )
                 val analyzeCompletedAt = Timestamp.now()
 
                 // 决策事件

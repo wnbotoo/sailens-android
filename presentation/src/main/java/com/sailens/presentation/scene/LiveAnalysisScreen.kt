@@ -1,6 +1,5 @@
 package com.sailens.presentation.scene
 
-import android.content.Context
 import android.graphics.Paint
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
@@ -31,6 +30,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.windowsizeclass.WindowHeightSizeClass
 import androidx.compose.material3.windowsizeclass.WindowSizeClass
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -47,29 +47,34 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.heading
-import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.sailens.camera.CameraView
 import com.sailens.domain.model.common.EventPriority
 import com.sailens.domain.model.common.NormalizedRect
 import com.sailens.domain.model.common.ObstacleCategory
 import com.sailens.domain.model.perception.ObstacleDetection
-import com.sailens.domain.model.scene.SceneEvent
 import com.sailens.presentation.R
+import com.sailens.presentation.device.SceneEventTextResolver
+import com.sailens.presentation.device.SpeechEngineState
+import com.sailens.presentation.device.toSceneEventText
 import com.sailens.ux.component.PrimaryActionButton
 import com.sailens.ux.theme.SailensDimens
 import org.koin.androidx.compose.koinViewModel
-import java.util.IllegalFormatException
 
 /**
  * The primary guidance screen. Camera-forward, with an oversized start/stop control, accessible
@@ -83,6 +88,7 @@ fun LiveAnalysisScreen(
     viewModel: SceneAnalysisViewModel = koinViewModel(),
 ) {
     val context = LocalContext.current
+    val view = LocalView.current
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val isLandscape = windowSizeClass.heightSizeClass == WindowHeightSizeClass.Compact
 
@@ -91,11 +97,48 @@ fun LiveAnalysisScreen(
             when (effect) {
                 is SceneAnalysisUiEffect.ShowToast ->
                     Toast.makeText(context, effect.message, Toast.LENGTH_SHORT).show()
+
+                // 屏幕阅读器模式下的唯一播报出口。用显式 announce 而不是给状态卡片挂
+                // liveRegion，是为了播报**简短的提示原文**，而不是卡片上那串带标签和补充说明的
+                // 完整描述——后者在行走时太长了。
+                is SceneAnalysisUiEffect.Announce ->
+                    view.announceForAccessibility(effect.text)
             }
         }
     }
 
+    // 辅助运行期间保持屏幕常亮。
+    //
+    // 相机是绑在 Activity 生命周期上的（CameraX bindToLifecycle）：屏幕一灭，Activity 走
+    // onStop，相机解绑，整条分析链路**静默停止**。盲人用户不会察觉——他会继续举着一个
+    // 已经瞎掉的手机往前走。这是防住这个失效的第一道，也是最重要的一道。
+    DisposableEffect(view, state.isRunning) {
+        view.keepScreenOn = state.isRunning
+        onDispose { view.keepScreenOn = false }
+    }
+
+    // 第二道：常亮挡不住电源键、来电和系统回收。真断了就必须让用户可感知。
+    //
+    // 用 ProcessLifecycleOwner 而不是 LocalLifecycleOwner：后者会在转屏（Activity 重建）
+    // 时也走一遍 ON_STOP，从而误报一句"辅助已中断"。安全提示一旦有误报，用户很快就会学会
+    // 忽略它，那就等于没有。ProcessLifecycleOwner 只在整个应用真的进入后台时才派发，
+    // 且自带跨配置变更的延迟去抖。
+    val interruptionNotice = stringResource(R.string.notice_guidance_interrupted)
+    val processLifecycle = remember { ProcessLifecycleOwner.get().lifecycle }
+    DisposableEffect(processLifecycle, interruptionNotice) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_STOP -> viewModel.onGuidanceInterrupted(interruptionNotice)
+                Lifecycle.Event.ON_START -> viewModel.acknowledgeInterruption()
+                else -> Unit
+            }
+        }
+        processLifecycle.addObserver(observer)
+        onDispose { processLifecycle.removeObserver(observer) }
+    }
+
     val onToggleClick = viewModel::toggleAnalysis
+    val onReplay = viewModel::replayLastGuidance
     val onOverlayModeChange: (SceneOverlayMode) -> Unit = viewModel::setOverlayMode
 
     if (isLandscape) {
@@ -103,6 +146,7 @@ fun LiveAnalysisScreen(
             state = state,
             onToggleClick = onToggleClick,
             onOpenSettings = onOpenSettings,
+            onReplay = onReplay,
             onOverlayModeChange = onOverlayModeChange,
             modifier = modifier,
         )
@@ -111,6 +155,7 @@ fun LiveAnalysisScreen(
             state = state,
             onToggleClick = onToggleClick,
             onOpenSettings = onOpenSettings,
+            onReplay = onReplay,
             onOverlayModeChange = onOverlayModeChange,
             modifier = modifier,
         )
@@ -122,6 +167,7 @@ private fun ContentForLandscape(
     state: SceneAnalysisUiState,
     onToggleClick: () -> Unit,
     onOpenSettings: () -> Unit,
+    onReplay: () -> Unit,
     onOverlayModeChange: (SceneOverlayMode) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -142,6 +188,7 @@ private fun ContentForLandscape(
             PreviewPanel(state = state, maxPreviewHeight = 240.dp, contentScale = ContentScale.Fit)
             PrimaryStatusView(
                 state = state,
+                onReplay = onReplay,
                 isLandscape = true,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -158,7 +205,8 @@ private fun ContentForLandscape(
             HomeTopBar(
                 isRunning = state.isRunning,
                 isSpeechEnabled = state.isSpeechEnabled,
-                isSpeechReady = state.isSpeechReady,
+                speechEngineState = state.speechEngineState,
+                isScreenReaderActive = state.isScreenReaderActive,
                 onOpenSettings = onOpenSettings,
             )
             ControlView(
@@ -175,6 +223,7 @@ private fun ContentForPortrait(
     state: SceneAnalysisUiState,
     onToggleClick: () -> Unit,
     onOpenSettings: () -> Unit,
+    onReplay: () -> Unit,
     onOverlayModeChange: (SceneOverlayMode) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -188,7 +237,8 @@ private fun ContentForPortrait(
         HomeTopBar(
             isRunning = state.isRunning,
             isSpeechEnabled = state.isSpeechEnabled,
-            isSpeechReady = state.isSpeechReady,
+            speechEngineState = state.speechEngineState,
+            isScreenReaderActive = state.isScreenReaderActive,
             onOpenSettings = onOpenSettings,
         )
         PreviewPanel(
@@ -199,6 +249,7 @@ private fun ContentForPortrait(
         )
         PrimaryStatusView(
             state = state,
+            onReplay = onReplay,
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f),
@@ -248,7 +299,8 @@ private fun PreviewPanel(
 private fun HomeTopBar(
     isRunning: Boolean,
     isSpeechEnabled: Boolean,
-    isSpeechReady: Boolean,
+    speechEngineState: SpeechEngineState,
+    isScreenReaderActive: Boolean,
     onOpenSettings: () -> Unit,
 ) {
     val runningLabel = stringResource(
@@ -257,7 +309,10 @@ private fun HomeTopBar(
     val speechLabel = stringResource(
         when {
             !isSpeechEnabled -> R.string.status_speech_off
-            isSpeechReady -> R.string.status_speech_ready
+            // 屏幕阅读器接管播报时自带引擎本就不启动，不该显示成"语音启动中"。
+            isScreenReaderActive -> R.string.status_speech_screen_reader
+            speechEngineState == SpeechEngineState.UNAVAILABLE -> R.string.status_speech_unavailable
+            speechEngineState == SpeechEngineState.READY -> R.string.status_speech_ready
             else -> R.string.status_speech_initializing
         }
     )
@@ -305,7 +360,8 @@ private fun HomeTopBar(
             )
             HeaderStatusText(
                 text = speechLabel,
-                highlighted = isSpeechEnabled && isSpeechReady,
+                highlighted = isSpeechEnabled &&
+                    (isScreenReaderActive || speechEngineState == SpeechEngineState.READY),
             )
         }
     }
@@ -332,15 +388,31 @@ private fun HeaderStatusText(
 @Composable
 private fun PrimaryStatusView(
     state: SceneAnalysisUiState,
+    onReplay: () -> Unit,
     modifier: Modifier = Modifier,
     isLandscape: Boolean = false,
 ) {
     val context = LocalContext.current
-    val primaryEvent = state.lastEvents.firstOrNull()
-    val eventMessage = primaryEvent?.resolveMessage(context)
+    val canReplay = state.lastAnnouncedEvent != null
+    // 与语音播报共用同一个渲染器：卡片上的字和听到的话必须逐字一致，否则开/关 TalkBack
+    // 会得到两套措辞。
+    val textResolver = remember(context) { SceneEventTextResolver(context) }
+    // 实时卡片与重播历史必须分开：冷却后的空帧不能让卡片闪退，但已经过期的旧风险也不能
+    // 因为还能重播就在屏幕上无限停留。
+    val primaryEvent = state.activeStatusEvent
+    val eventMessage = primaryEvent?.let { textResolver.resolve(it.toSceneEventText()) }
     val hasHighPriorityEvent = primaryEvent?.priority?.let { it >= EventPriority.HIGH } ?: false
+    // 语音是主要输出通道，它挂了等于用户什么都收不到，所以优先级仅次于分析本身失败。
+    // 屏幕阅读器接管时自带引擎本就不启动，不算故障。
+    val isSpeechBroken = state.isRunning &&
+        state.isSpeechEnabled &&
+        !state.isScreenReaderActive &&
+        state.speechEngineState == SpeechEngineState.UNAVAILABLE
+
     val title = when {
         state.errorMessage != null -> stringResource(R.string.status_error_title)
+        state.wasInterrupted -> stringResource(R.string.status_interrupted_title)
+        isSpeechBroken -> stringResource(R.string.status_speech_unavailable_title)
         state.isLoading -> stringResource(R.string.status_starting_title)
         !state.isRunning -> stringResource(R.string.status_idle_title)
         eventMessage != null -> eventMessage
@@ -348,6 +420,8 @@ private fun PrimaryStatusView(
     }
     val detail = when {
         state.errorMessage != null -> stringResource(R.string.error_analysis_start_failed)
+        state.wasInterrupted -> stringResource(R.string.status_interrupted_detail)
+        isSpeechBroken -> stringResource(R.string.status_speech_unavailable_detail)
         state.isLoading -> stringResource(R.string.status_starting_detail)
         !state.isRunning -> stringResource(R.string.status_idle_detail)
         eventMessage != null -> stringResource(R.string.status_guidance_detail)
@@ -355,12 +429,16 @@ private fun PrimaryStatusView(
     }
     val label = when {
         state.errorMessage != null -> stringResource(R.string.status_label_error)
+        state.wasInterrupted || isSpeechBroken -> stringResource(R.string.status_label_error)
         state.isLoading -> stringResource(R.string.status_label_starting)
         !state.isRunning -> stringResource(R.string.status_label_standby)
         eventMessage != null -> stringResource(R.string.status_label_latest_guidance)
         else -> stringResource(R.string.status_label_monitoring)
     }
-    val isAlert = state.errorMessage != null || hasHighPriorityEvent
+    val isAlert = state.errorMessage != null ||
+        state.wasInterrupted ||
+        isSpeechBroken ||
+        hasHighPriorityEvent
     val containerColor = when {
         isAlert -> MaterialTheme.colorScheme.errorContainer
         state.isRunning -> MaterialTheme.colorScheme.primaryContainer
@@ -373,11 +451,26 @@ private fun PrimaryStatusView(
     }
     val spokenDescription = if (isLandscape) "$label. $title" else "$label. $title. $detail"
 
+    // 这里刻意**不挂 liveRegion**。挂上会让每条提示被念两遍：一遍走播报通道，一遍由
+    // TalkBack 朗读变化的 live region，两者还不同步。自动播报统一由 ViewModel 决定走哪条通道
+    // （见 SceneAnalysisUiEffect.Announce）；contentDescription 保留，供用户手动浏览到这张卡片时朗读。
+    //
+    // 整张卡片可点击 = 重播上一条提示。选它当重播入口是因为它是屏幕上最大的一块区域
+    // （portrait 下占满剩余空间），走路时不需要任何视觉定位就能戳中；同时挂了自定义无障碍
+    // 动作，TalkBack 用户可以从局部菜单直接触发，不必先把焦点移过来。
+    val replayLabel = stringResource(R.string.action_replay_last_guidance)
     Surface(
         modifier = modifier.semantics(mergeDescendants = true) {
-            liveRegion = if (isAlert) LiveRegionMode.Assertive else LiveRegionMode.Polite
             contentDescription = spokenDescription
+            customActions = listOf(
+                CustomAccessibilityAction(replayLabel) {
+                    onReplay()
+                    true
+                }
+            )
         },
+        onClick = onReplay,
+        enabled = canReplay,
         color = containerColor,
         contentColor = contentColor,
         shape = MaterialTheme.shapes.medium,
@@ -617,19 +710,6 @@ private fun OverlayModeChips(
                 },
             )
         }
-    }
-}
-
-@Suppress("DiscouragedApi")
-private fun SceneEvent.resolveMessage(context: Context): String {
-    val resId = context.resources.getIdentifier(messageKey, "string", context.packageName)
-    if (resId == 0) return messageKey
-    if (messageParams.isEmpty()) return context.getString(resId)
-    val args = messageParams.toSortedMap().values.toTypedArray()
-    return try {
-        context.getString(resId, *args)
-    } catch (_: IllegalFormatException) {
-        context.getString(resId)
     }
 }
 

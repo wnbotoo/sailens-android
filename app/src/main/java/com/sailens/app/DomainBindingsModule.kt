@@ -6,6 +6,7 @@ import com.sailens.domain.processor.analysis.CrossValidator
 import com.sailens.domain.processor.analysis.GroundTypeDetector
 import com.sailens.domain.processor.analysis.ObstacleOcclusionAnalyzer
 import com.sailens.domain.processor.analysis.RoadSafetyAnalyzer
+import com.sailens.domain.processor.analysis.FrameQualityAnalyzer
 import com.sailens.domain.processor.analysis.SceneClassifier
 import com.sailens.domain.processor.decision.CooldownManager
 import com.sailens.domain.processor.decision.EventConflictResolver
@@ -49,6 +50,8 @@ val domainBindingsModule = module {
     single { GroundTypeDetector(config = get()) }
     single { SceneClassifier(config = get()) }
     single { CrossValidator(config = get()) }
+    // 有跨帧去抖状态，必须和其他 stabilizer 一样由 Start/Stop 对称 reset。
+    single { FrameQualityAnalyzer() }
     single { EventGenerator(config = get()) }
     single { EventConflictResolver() }
     single { EventMerger() }
@@ -88,6 +91,7 @@ val domainBindingsModule = module {
             conflictResolver = get(),
             eventMerger = get(),
             cooldownManager = get(),
+            deviceSensorRepository = get(),
         )
     }
     factory {
@@ -98,6 +102,7 @@ val domainBindingsModule = module {
             processFrameUseCase = get(),
             analyzeSceneUseCase = get(),
             decideEventsUseCase = get(),
+            frameQualityAnalyzer = get(),
             logService = get(),
             traceService = get(),
             traceRuntimeConfig = get(),
@@ -115,7 +120,7 @@ val domainBindingsModule = module {
             roadSafetyAnalyzer = get(),
             groundTypeDetector = get(),
             sceneClassifier = get(),
-            eventGenerator = get(),
+            frameQualityAnalyzer = get(),
             cooldownManager = get(),
             logService = get(),
         )

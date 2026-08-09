@@ -4,6 +4,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.sailens.domain.model.common.PerceptionProfile
 import com.sailens.domain.processor.perception.PerceptionProfileManager
+import com.sailens.presentation.device.GuidanceHaptic
+import com.sailens.presentation.device.HapticManager
+import com.sailens.presentation.device.SpeechManager
 import com.sailens.presentation.diagnostics.GuidanceDiagnosticsState
 import com.sailens.presentation.diagnostics.GuidanceDiagnosticsStore
 import kotlinx.coroutines.flow.SharingStarted
@@ -24,6 +27,8 @@ class SettingsViewModel(
     private val perceptionSettingsStore: PerceptionSettingsStore,
     private val perceptionProfileManager: PerceptionProfileManager,
     private val guidanceDiagnosticsStore: GuidanceDiagnosticsStore,
+    private val speechManager: SpeechManager,
+    private val hapticManager: HapticManager,
 ) : ViewModel() {
 
     val uiState: StateFlow<SettingsUiState> = combine(
@@ -50,6 +55,30 @@ class SettingsViewModel(
 
     fun setHapticsEnabled(enabled: Boolean) {
         guidanceSettingsStore.setHapticsEnabled(enabled)
+    }
+
+    fun setSpeechRate(rate: Float) {
+        guidanceSettingsStore.setSpeechRate(rate)
+    }
+
+    /**
+     * 用当前语速念一句示例，让用户能听着调而不是盲调。
+     *
+     * 语速这个设置只能靠听来判断合不合适——看数字对目标用户毫无意义。
+     */
+    fun previewSpeechRate(sampleText: String) {
+        speechManager.setSpeechRate(guidanceSettingsStore.settings.value.speechRate)
+        speechManager.speakSystemNotice(sampleText)
+    }
+
+    /**
+     * 播放一个震动符号让用户体会。
+     *
+     * 震动词汇表只有先学会才有用；关掉语音后它就是唯一的信息通道，没有一个能反复试的地方，
+     * 用户永远学不会"2 短 = 前方"。
+     */
+    fun previewHaptic(haptic: GuidanceHaptic) {
+        hapticManager.play(haptic)
     }
 
     fun setPerceptionProfile(profile: PerceptionProfile) {

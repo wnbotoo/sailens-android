@@ -15,6 +15,11 @@ data class SceneSnapshot(
     val groundTypeChange: GroundTypeChange?,
     /** det 跟踪框接地带从可行走区抠除的像素比例（用于观察 det/sem 交叉验证影响）。 */
     val occludedPassableRatio: Float = 0f,
+    /**
+     * 本帧输入是否可用。由 [com.sailens.domain.processor.analysis.FrameQualityAnalyzer] 在
+     * 感知链路之外单独判定后回填——它看的是原始画面，而不是模型输出。
+     */
+    val frameQuality: FrameQuality = FrameQuality.OK,
 )
 
 /**

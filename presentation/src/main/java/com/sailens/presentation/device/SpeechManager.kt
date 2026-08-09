@@ -1,23 +1,49 @@
 package com.sailens.presentation.device
 
 import android.content.Context
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
-import com.sailens.domain.model.common.EventPriority
 import com.sailens.domain.model.scene.SceneEvent
 import com.sailens.domain.service.LogService
-import java.util.IllegalFormatException
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import java.util.Locale
 
 /**
- * Android TTS 服务实现
+ * 语音引擎对外可见的状态。
+ *
+ * [UNAVAILABLE] 必须能传到 UI：TTS 起不来时，用户听不到任何提示，而"听不到提示"和
+ * "前方没有危险"在盲人那里是同一种体验。以前这个失败只写进日志，用户完全无从察觉。
+ */
+enum class SpeechEngineState {
+    IDLE,
+    INITIALIZING,
+    READY,
+    UNAVAILABLE,
+}
+
+/**
+ * Android TTS 服务实现。
+ *
+ * 三条与"边走边听"直接相关的策略，和普通 App 的 TTS 用法不同：
+ *
+ * 1. **默认 QUEUE_FLUSH 而不是 QUEUE_ADD**。实时避障里，最新的一句永远比排队的旧句有价值。
+ *    排队会让用户听到 2–4 秒前的场景——按 1.2 m/s 步速，那已经是身后好几米的事了。
+ * 2. **播报前检查 expiresAt**。引擎初始化、耳机切换等都会引入延迟，过期的提示宁可丢掉。
+ * 3. **USAGE_ASSISTANCE_ACCESSIBILITY + 瞬时降低音量的音频焦点**。目标用户几乎总在同时听
+ *    TalkBack、导航或播客；不申请焦点的话两路声音会直接叠在一起，谁也听不清。
  */
 class SpeechManager(
     private val context: Context,
     private val logger: LogService,
+    private val textResolver: SceneEventTextResolver = SceneEventTextResolver(context),
 ) {
     private var tts: TextToSpeech? = null
     @Volatile
@@ -31,7 +57,38 @@ class SpeechManager(
     private val onReadyCallbacks = mutableListOf<() -> Unit>()
     private val mainHandler = Handler(Looper.getMainLooper())
 
+    private val audioManager =
+        context.applicationContext.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+    private var audioFocusRequest: AudioFocusRequest? = null
+    /**
+     * 最后一次请求播报的 utterance id。只有它结束时才归还音频焦点。
+     *
+     * 不用"在播条数"计数：QUEUE_FLUSH 打断上一条时，被打断那条的 onStop 会晚于新一条的
+     * speak() 到达，计数法会因此在新一条还在播的时候就把焦点还回去，别人的音频瞬间恢复原音量
+     * 盖住提示。比对 id 天然不受回调顺序影响。
+     */
+    private var latestUtteranceId: String? = null
+    private var nextSystemNoticeId = 0L
+
+    private var speechRate = DEFAULT_SPEECH_RATE
+
+    private val _state = MutableStateFlow(SpeechEngineState.IDLE)
+    val state: StateFlow<SpeechEngineState> = _state.asStateFlow()
+
     val isReady: Boolean get() = _isReady
+
+    /**
+     * 设置语速（相对正常语速的倍率）。
+     *
+     * 盲人 TalkBack 重度用户的常用语速在 1.5–3x；固定 1.0 对他们不只是慢，更直接等于每条提示
+     * 多占 0.5–1 秒的响应延迟。引擎已就绪时立即生效，否则等初始化完成时一并应用。
+     */
+    fun setSpeechRate(rate: Float) {
+        runOnMain {
+            speechRate = rate.coerceIn(MIN_SPEECH_RATE, MAX_SPEECH_RATE)
+            tts?.takeIf { _isReady }?.setSpeechRate(speechRate)
+        }
+    }
 
     fun initialize(onReady: (() -> Unit)? = null) {
         runOnMain {
@@ -87,6 +144,7 @@ class SpeechManager(
         }
 
         isInitializing = true
+        _state.value = SpeechEngineState.INITIALIZING
         val attempt = ++initAttempt
         logger.info(
             TAG,
@@ -120,6 +178,15 @@ class SpeechManager(
     }
 
     private fun speakOnMain(event: SceneEvent) {
+        if (event.isExpired(System.currentTimeMillis())) {
+            logger.debug(
+                TAG,
+                "Dropping expired scene event before speaking",
+                mapOf("messageKey" to event.messageKey)
+            )
+            return
+        }
+
         if (!_isReady) {
             logger.warning(
                 TAG,
@@ -138,16 +205,22 @@ class SpeechManager(
 
     private fun speakReadyEvent(event: SceneEvent) {
         if (!_isReady) return
+        // 引擎就绪前排队的事件也要再验一次时效：pending 到就绪之间可能又过去了几百毫秒。
+        if (event.isExpired(System.currentTimeMillis())) return
 
-        val text = resolveMessage(event)
-        val queueMode = if (event.priority == EventPriority.CRITICAL) {
-            TextToSpeech.QUEUE_FLUSH
-        } else {
-            TextToSpeech.QUEUE_ADD
-        }
+        val text = textResolver.resolve(event.toSceneEventText())
+        // 一律 FLUSH。唯一的例外是"辅助已停止/已恢复"这类系统状态提示，它们必须说完，
+        // 但那条路径走的是 speakSystemNotice()，不经过这里。
+        val queueMode = TextToSpeech.QUEUE_FLUSH
 
-        val result = tts?.speak(text, queueMode, null, event.id.toString()) ?: TextToSpeech.ERROR
+        val utteranceId = event.id.toString()
+        requestAudioFocus()
+        latestUtteranceId = utteranceId
+        val result = tts?.speak(text, queueMode, null, utteranceId) ?: TextToSpeech.ERROR
         if (result == TextToSpeech.ERROR) {
+            // speak() 直接失败时不会有任何 utterance 回调，必须就地归还焦点，
+            // 否则别人的音频会一直被压着。
+            releaseAudioFocus()
             logger.warning(
                 TAG,
                 "TTS speak failed",
@@ -169,6 +242,66 @@ class SpeechManager(
         }
     }
 
+    /**
+     * 播报一条系统状态提示（辅助中断/恢复、语音不可用等）。
+     *
+     * 与场景事件的区别：它没有时效，也不该被下一条场景提示打断——用户必须完整听到
+     * "辅助已停止"，否则就会继续举着一个不工作的手机往前走。所以这里用 QUEUE_ADD。
+     */
+    fun speakSystemNotice(text: String) {
+        runOnMain {
+            if (!_isReady) {
+                logger.warning(TAG, "Dropping system notice because TTS is not ready")
+                return@runOnMain
+            }
+            val utteranceId = "$SYSTEM_NOTICE_UTTERANCE_ID_PREFIX${nextSystemNoticeId++}"
+            requestAudioFocus()
+            latestUtteranceId = utteranceId
+            val result = tts?.speak(text, TextToSpeech.QUEUE_ADD, null, utteranceId)
+                ?: TextToSpeech.ERROR
+            if (result == TextToSpeech.ERROR) {
+                releaseAudioFocus()
+                logger.warning(TAG, "TTS system notice failed")
+            }
+        }
+    }
+
+    private fun requestAudioFocus() {
+        val manager = audioManager ?: return
+        if (audioFocusRequest != null) return
+
+        // TRANSIENT_MAY_DUCK：让音乐/播客/导航自动降到背景音量而不是暂停。对同时开着
+        // TalkBack 的用户尤其重要——完全打断会让他丢失正在听的上下文。
+        val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+            .setAudioAttributes(guidanceAudioAttributes())
+            .setWillPauseWhenDucked(false)
+            .build()
+        val result = manager.requestAudioFocus(request)
+        if (result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
+            audioFocusRequest = request
+        } else {
+            // 拿不到焦点也照常播：提示的重要性高于礼貌。
+            logger.warning(TAG, "Audio focus request was not granted", mapOf("result" to result))
+        }
+    }
+
+    private fun releaseAudioFocus() {
+        latestUtteranceId = null
+        val manager = audioManager ?: return
+        val request = audioFocusRequest ?: return
+        audioFocusRequest = null
+        manager.abandonAudioFocusRequest(request)
+    }
+
+    private fun guidanceAudioAttributes(): AudioAttributes {
+        return AudioAttributes.Builder()
+            // ASSISTANCE_ACCESSIBILITY 让系统按"无障碍播报"处理：跟随无障碍音量、
+            // 在勿扰模式下仍可发声，且不会被当成媒体播放。
+            .setUsage(AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+            .build()
+    }
+
     fun stop() {
         runOnMain {
             stopOnMain()
@@ -181,6 +314,8 @@ class SpeechManager(
         } else {
             logger.debug(TAG, "Ignoring TTS stop before engine is ready")
         }
+        // stop() 之后不保证每条被取消的 utterance 都回调，所以这里强制归还焦点。
+        releaseAudioFocus()
     }
 
     fun release() {
@@ -202,6 +337,7 @@ class SpeechManager(
         pendingSpeech = null
         onReadyCallbacks.clear()
         initAttempt++
+        _state.value = SpeechEngineState.IDLE
     }
 
     private fun scheduleInitTimeout(attempt: Int) {
@@ -295,11 +431,13 @@ class SpeechManager(
             return
         }
 
-        engine.setSpeechRate(1.0f)
+        engine.setAudioAttributes(guidanceAudioAttributes())
+        engine.setSpeechRate(speechRate)
         engine.setOnUtteranceProgressListener(createUtteranceListener())
         _isReady = true
         initFailureCount = 0
         nextInitRetryAtMs = 0L
+        _state.value = SpeechEngineState.READY
         logger.info(
             TAG,
             "TTS initialized",
@@ -334,10 +472,19 @@ class SpeechManager(
             tts = null
         }
 
+        releaseAudioFocus()
+
         initFailureCount++
         val retryDelayMs = retryDelayForFailure(initFailureCount)
         nextInitRetryAtMs = SystemClock.elapsedRealtime() + retryDelayMs
         val automaticRetriesPaused = initFailureCount >= MAX_AUTOMATIC_INIT_FAILURES
+        // 只有放弃自动重试时才对外报 UNAVAILABLE：中间的几次失败还会自己恢复，
+        // 过早报错会让用户白白关掉一个其实能用的功能。
+        _state.value = if (automaticRetriesPaused) {
+            SpeechEngineState.UNAVAILABLE
+        } else {
+            SpeechEngineState.INITIALIZING
+        }
 
         logger.warning(
             TAG,
@@ -416,11 +563,22 @@ class SpeechManager(
         }
     }
 
+    /**
+     * 语音候选语言，必须跟随**应用实际解析到的** locale，而不是 `Locale.getDefault()`。
+     *
+     * 播报文本来自 strings.xml，而 strings.xml 用哪一份是由资源解析结果决定的。原先的候选表是
+     * `默认 locale → 简体中文 → 中文`：系统语言是英文、而设备恰好没装英文 TTS 时，会退到中文
+     * 引擎去念英文文案，输出完全无法听懂——比不出声更糟，因为用户不会意识到出了问题。
+     *
+     * 现在只退到"同语言的宽松变体"（zh-Hans-CN → zh）。跨语言的兜底一律不做：宁可报
+     * [SpeechEngineState.UNAVAILABLE]，让用户看到/听到"语音无法启动、请检查系统语音设置"，
+     * 也不要给他一段读不通的声音。
+     */
     private fun languageCandidates(): List<Locale> {
-        return listOf(
-            Locale.getDefault(),
-            Locale.SIMPLIFIED_CHINESE,
-            Locale.CHINESE,
+        val appLocale = context.resources.configuration.locales.get(0) ?: Locale.getDefault()
+        return listOfNotNull(
+            appLocale,
+            appLocale.language.takeIf { it.isNotEmpty() }?.let(::Locale),
         ).distinctBy { it.toLanguageTag() }
     }
 
@@ -429,6 +587,7 @@ class SpeechManager(
     }
 
     private fun createUtteranceListener(): UtteranceProgressListener {
+        // 回调来自引擎线程，而焦点/计数状态都只在主线程上改，所以统一 post 回主线程。
         return object : UtteranceProgressListener() {
             override fun onStart(utteranceId: String?) {
                 logger.debug(TAG, "TTS utterance started", mapOf("utteranceId" to (utteranceId ?: "unknown")))
@@ -436,11 +595,18 @@ class SpeechManager(
 
             override fun onDone(utteranceId: String?) {
                 logger.debug(TAG, "TTS utterance completed", mapOf("utteranceId" to (utteranceId ?: "unknown")))
+                onUtteranceFinished(utteranceId)
+            }
+
+            override fun onStop(utteranceId: String?, interrupted: Boolean) {
+                // QUEUE_FLUSH 打断上一条时走这里。不减计数会让焦点永远归还不了。
+                onUtteranceFinished(utteranceId)
             }
 
             @Deprecated("Deprecated in Java")
             override fun onError(utteranceId: String?) {
                 logger.warning(TAG, "TTS utterance failed", mapOf("utteranceId" to (utteranceId ?: "unknown")))
+                onUtteranceFinished(utteranceId)
             }
 
             override fun onError(utteranceId: String?, errorCode: Int) {
@@ -452,24 +618,19 @@ class SpeechManager(
                         "errorCode" to errorCode,
                     )
                 )
+                onUtteranceFinished(utteranceId)
             }
         }
     }
 
-    @Suppress("DiscouragedApi")
-    private fun resolveMessage(event: SceneEvent): String {
-        val resId = context.resources.getIdentifier(event.messageKey, "string", context.packageName)
-        if (resId == 0) return event.messageKey
-
-        if (event.messageParams.isEmpty()) {
-            return context.getString(resId)
-        }
-
-        val args = event.messageParams.toSortedMap().values.toTypedArray()
-        return try {
-            context.getString(resId, *args)
-        } catch (_: IllegalFormatException) {
-            context.getString(resId)
+    /**
+     * 只有最后请求的那条播完，才说明队列真的空了。被 FLUSH 掉的旧条目也会走到这里，
+     * 但它的 id 已经不是最新的，直接忽略。
+     */
+    private fun onUtteranceFinished(utteranceId: String?) {
+        runOnMain {
+            if (utteranceId != null && utteranceId != latestUtteranceId) return@runOnMain
+            releaseAudioFocus()
         }
     }
 
@@ -486,8 +647,13 @@ class SpeechManager(
         val enqueuedAtMs: Long,
     )
 
-    private companion object {
+    companion object {
+        const val DEFAULT_SPEECH_RATE = 1.3f
+        const val MIN_SPEECH_RATE = 0.7f
+        const val MAX_SPEECH_RATE = 3.0f
+
         private const val TAG = "SpeechManager"
+        private const val SYSTEM_NOTICE_UTTERANCE_ID_PREFIX = "system_notice_"
         private const val INIT_TIMEOUT_MS = 5_000L
         private const val INITIAL_INIT_RETRY_DELAY_MS = 1_000L
         private const val MAX_INIT_RETRY_DELAY_MS = 30_000L

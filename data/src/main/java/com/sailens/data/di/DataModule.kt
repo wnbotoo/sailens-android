@@ -9,6 +9,7 @@ import com.sailens.data.service.FileTraceReplayService
 import com.sailens.data.service.FileTraceService
 import com.sailens.data.service.NoOpTraceService
 import com.sailens.data.source.depth.ImagePositionDepthEstimator
+import com.sailens.data.source.device.DeviceMotionDataSource
 import com.sailens.data.source.device.DeviceRotationDataSource
 import com.sailens.data.source.mapper.ClassMapperProviderImpl
 import com.sailens.data.source.ml.CatalogModelSourceResolver
@@ -96,11 +97,12 @@ val dataModule = module {
     }
     single { ImagePositionDepthEstimator() }
     single { DeviceRotationDataSource(context = androidContext()) }
+    single { DeviceMotionDataSource(context = androidContext()) }
 
     // Repository
     single<PerceptionRepository> { MLPerceptionRepository(get()) }
     single<DepthRepository> { DefaultDepthRepository(get(), null) }
-    single<DeviceSensorRepository> { DefaultDeviceSensorRepository(get()) }
+    single<DeviceSensorRepository> { DefaultDeviceSensorRepository(get(), get()) }
 
 
     // service

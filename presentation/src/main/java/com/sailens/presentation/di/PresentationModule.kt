@@ -1,7 +1,9 @@
 package com.sailens.presentation.di
 
 import com.sailens.presentation.diagnostics.GuidanceDiagnosticsStore
+import com.sailens.presentation.device.AccessibilityStatusProvider
 import com.sailens.presentation.device.HapticManager
+import com.sailens.presentation.device.SceneEventTextResolver
 import com.sailens.presentation.device.SpeechManager
 import com.sailens.presentation.scene.SceneAnalysisViewModel
 import com.sailens.presentation.settings.GuidanceSettingsStore
@@ -13,7 +15,9 @@ import org.koin.dsl.module
 
 val presentationModule = module {
     single { HapticManager(androidContext()) }
-    single { SpeechManager(androidContext(), get()) }
+    single { SceneEventTextResolver(androidContext()) }
+    single { SpeechManager(androidContext(), get(), get()) }
+    single { AccessibilityStatusProvider(androidContext()) }
     single { GuidanceSettingsStore(androidContext()) }
     single { PerceptionSettingsStore(androidContext()) }
     single { GuidanceDiagnosticsStore(sceneOverlayConfig = get(), uiFeatureFlags = get()) }
@@ -29,6 +33,8 @@ val presentationModule = module {
             sceneOverlayConfig = get(),
             guidanceSettingsStore = get(),
             guidanceDiagnosticsStore = get(),
+            accessibilityStatusProvider = get(),
+            textResolver = get(),
         )
     }
     viewModel {
@@ -38,6 +44,8 @@ val presentationModule = module {
             perceptionSettingsStore = get(),
             perceptionProfileManager = get(),
             guidanceDiagnosticsStore = get(),
+            speechManager = get(),
+            hapticManager = get(),
         )
     }
 }

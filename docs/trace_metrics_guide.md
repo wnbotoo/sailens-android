@@ -710,9 +710,16 @@ Reading it:
 
 - Only `event_obstacle_center`: scene decisions are over-concentrated; you may need richer event
   categories or finer obstacle position judgement.
-- `event_obstacle_center_person` / `event_obstacle_center_vehicle` /
-  `event_obstacle_center_bicycle` / `event_obstacle_center_static` appearing: obstacle prompts are
-  retaining category.
+- `event_obstacle_center_person` / `event_obstacle_center_vehicle` appearing: obstacle prompts are
+  retaining category. Only two category suffixes exist now — announcement categories are grouped by
+  what the user has to *do*, not by model class:
+  - `_bicycle` is gone; bicycles and motorcycles announce as `_vehicle`. Both mean stop and yield,
+    and the model cannot tell a parked bicycle from an approaching one, so it groups to the more
+    conservative side. `ObstacleCategory.BICYCLE` still exists in perception because
+    `RoadSafetyAnalyzer` needs it — a parked bicycle must not raise a vehicle-on-road warning.
+  - `_static` is gone; static and unknown obstacles announce with no suffix
+    (`event_obstacle_center`). The old `_static` strings were word-for-word identical to the
+    suffix-less ones.
 - Multi-direction category keys like `event_obstacle_center_right_person` /
   `event_obstacle_left_center_vehicle`: several merged directions share one category, and the
   category is still announced.
@@ -727,14 +734,32 @@ Reading it:
 - `event_path_complex`: forward connectivity evidence is complex or unstable but has not reached
   high-certainty `event_blocked`. Judge the scene together with a specific obstacle key, e.g. a
   concurrent `event_obstacle_center_person`.
-- `event_road_warning_vehicle` / `event_road_exit` / `event_ground_to_*` should not appear by
+- `event_road_warning_vehicle` / `event_ground_to_*` should not appear by
   default. These lane and surface-change semantics mislead easily and are kept behind explicit
   config switches; day-to-day experience relies on concrete obstacles, complex road conditions, and
-  possible-intersection prompts.
-- `event_intersection`: a scene element judged a possible intersection. The copy says "possible
-  intersection" rather than asserting one, to avoid over-promising. The shipping profile does not
-  enable the traffic-light/road-ratio fallback because it false-positives too often; only explicitly
-  reliable intersection signals should reach the user.
+  intersection prompts. `event_road_exit` and `event_suggest_*` no longer exist: the former fired
+  after the user had already passed the spot. The latter relied on `suggestedBias`, which has no
+  side-specific connectivity proof, so no executable direction suffix is emitted.
+- **Direction suffixes are currently disabled for every event.** `suggestedBias` is
+  a weighted centroid offset of the widest passable run per scan layer
+  (`ConnectivityStatsExtractor.computeDirectionBias`); `layer.isValid` is a width check, not a
+  connectivity check. So several mutually disconnected fragments leaning left still yield
+  `bias = LEFT`. Since "blocked" means forward flood fill could not advance, "path blocked, keep
+  left" would present a statistic as a walkable route. A global positive flood reach only proves
+  that some forward corridor exists, not that the side named by the bias is connected.
+  *Deferred capability:* per-side flood connectivity and safety judgement is needed so a direction
+  names a route that actually goes somewhere. `SceneEvent.directionHint` remains only for
+  trace/replay compatibility until then.
+- `event_camera_blocked` / `event_low_light`: the input frame is unusable (covered lens, too dark).
+  These suppress every other event for that frame — any judgement built on that frame is untrusted,
+  and staying silent would read to the user as "nothing ahead". A run with a non-trivial share of
+  these needs the capture re-checked before its other metrics mean anything.
+- `event_intersection`: a scene element judged an intersection. The copy no longer hedges
+  ("possible intersection" became "intersection ahead"): a blind user cannot verify the
+  uncertainty, and the action is the same either way, so the hedge only cost speaking time.
+  Certainty is now expressed by the threshold, not the wording — the shipping profile does not
+  enable the traffic-light/road-ratio fallback because it false-positives too often, and only
+  explicitly reliable intersection signals should reach the user.
 - `event_traffic_light`: semantic segmentation stably detected a traffic light without escalating it
   to "possible intersection". This is a low-priority, long-cooldown, broad traffic hint and should
   rank after vehicles, people, and blocked / path-complex. It requires traffic-light pixel ratio,
