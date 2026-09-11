@@ -20,6 +20,7 @@ import com.sailens.domain.processor.perception.SegmentationAnalyzer
 import com.sailens.domain.usecase.decision.DecideEventsUseCase
 import com.sailens.domain.usecase.perception.AnalyzeSceneUseCase
 import com.sailens.domain.usecase.perception.ProcessFrameUseCase
+import com.sailens.domain.usecase.scene.DescribeSceneUseCase
 import com.sailens.domain.usecase.scene.StartSceneAnalysisUseCase
 import com.sailens.domain.usecase.scene.StopSceneAnalysisUseCase
 import com.sailens.domain.usecase.trace.BuildTraceReplayReportUseCase
@@ -125,6 +126,7 @@ val domainBindingsModule = module {
             logService = get(),
         )
     }
+    factory { DescribeSceneUseCase(sceneDescriber = get(), logService = get()) }
     factory { BuildTraceReplayReportUseCase() }
     factory { EvaluateTraceReplayBudgetUseCase(get()) }
     factory { ListTraceSessionsUseCase(get()) }

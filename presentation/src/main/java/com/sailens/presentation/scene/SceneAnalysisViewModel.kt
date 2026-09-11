@@ -7,8 +7,11 @@ import android.os.SystemClock
 import com.sailens.camera.ImageFrameProvider
 import com.sailens.domain.model.scene.SceneEvent
 import com.sailens.domain.model.scene.SceneResult
+import com.sailens.domain.repository.SceneDescriber
+import com.sailens.domain.repository.SceneDescriptionChunk
 import com.sailens.domain.service.LogService
 import com.sailens.domain.service.TraceService
+import com.sailens.domain.usecase.scene.DescribeSceneUseCase
 import com.sailens.domain.usecase.scene.StartSceneAnalysisUseCase
 import com.sailens.domain.usecase.scene.StopSceneAnalysisUseCase
 import com.sailens.presentation.diagnostics.GuidanceDiagnosticsStore
@@ -16,12 +19,14 @@ import com.sailens.presentation.device.AccessibilityStatusProvider
 import com.sailens.presentation.device.GuidanceHaptic
 import com.sailens.presentation.device.HapticManager
 import com.sailens.presentation.device.SceneEventTextResolver
+import com.sailens.presentation.device.SpeechClauseBuffer
 import com.sailens.presentation.device.SpeechEngineState
 import com.sailens.presentation.device.SpeechManager
 import com.sailens.presentation.device.toSceneEventText
 import com.sailens.presentation.ext.OverlayBitmapRenderer
 import com.sailens.presentation.settings.GuidanceFeedbackSettings
 import com.sailens.presentation.settings.GuidanceSettingsStore
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.CoroutineScope
@@ -54,6 +59,8 @@ class SceneAnalysisViewModel(
     private val imageFrameProvider: ImageFrameProvider,
     private val startSceneAnalysisUseCase: StartSceneAnalysisUseCase,
     private val stopSceneAnalysisUseCase: StopSceneAnalysisUseCase,
+    private val describeSceneUseCase: DescribeSceneUseCase,
+    private val sceneDescriber: SceneDescriber,
     private val hapticManager: HapticManager,
     private val speechManager: SpeechManager,
     private val logger: LogService,
@@ -83,6 +90,7 @@ class SceneAnalysisViewModel(
     private var analysisJob: Job? = null
     private var releaseJob: Job? = null
     private var overlayRenderJob: Job? = null
+    private var describeJob: Job? = null
     private val releaseScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var frameCount: Long = 0
     private var latestSceneResult: SceneResult? = null
@@ -95,6 +103,9 @@ class SceneAnalysisViewModel(
     private var isReleasingResources = false
 
     init {
+        // 只问"有没有模型"，不加载。VLM 权重比 sem/det 大一个量级，冷启动时加载会明显拖慢
+        // 进入引导的时间，而多数会话根本不会用到它——真正的加载推迟到用户第一次发问。
+        _uiState.update { it.copy(isSceneDescriptionAvailable = sceneDescriber.isAvailable) }
         speechManager.setSpeechRate(guidanceSettingsStore.settings.value.speechRate)
         if (guidanceSettingsStore.settings.value.speechEnabled) {
             initializeSpeech()
@@ -425,12 +436,120 @@ class SceneAnalysisViewModel(
         }
     }
 
+    /**
+     * 用户主动发问一次"我面前是什么"，由 VLM 回答。
+     *
+     * 与自动播报是两回事，几个刻意的区别：
+     * - **不过冷却。**冷却是为了防止自动播报刷屏；这一句是用户要来的。
+     * - **可以被导航提示打断。**子句走 [SpeechManager.speakSystemNotice]（QUEUE_ADD）排队，
+     *   而场景事件走 `speak()`（QUEUE_FLUSH）。所以描述念到一半撞上障碍告警时，告警会把剩下的
+     *   描述冲掉——这个优先级正是我们要的："别撞上"永远压过"那是什么"。
+     * - **边解码边念。**VLM 一次推理数秒，等整段出齐再开口就是数秒静默，而用户看不到进度。
+     *   [SpeechClauseBuffer] 把 token 流攒成子句，出一句念一句。
+     *
+     * @param failureNotice 失败时说出来的话。用户已经主动发问，静默失败在他那里和"前方什么都
+     *   没有"是同一种体验，所以这条链路上的失败必须出声，不能只写日志。
+     */
+    fun describeScene(failureNotice: String) {
+        val state = _uiState.value
+        if (!state.canDescribeScene()) {
+            logger.debug(
+                TAG,
+                "Scene description request ignored",
+                mapOf(
+                    "available" to state.isSceneDescriptionAvailable,
+                    "inFlight" to state.isDescribingScene,
+                    "speechChannel" to state.hasSpeechOutputChannel(),
+                ),
+            )
+            return
+        }
+
+        describeJob?.cancel()
+        describeJob = viewModelScope.launch {
+            _uiState.update { it.copy(isDescribingScene = true) }
+            // 读屏在工作时不逐句播：announceForAccessibility 会打断上一条未念完的公告，
+            // 流式喂给它只会得到一串互相截断的碎句。那条通道整段说完再交出去。
+            //
+            // 这里**刻意只读一次**，而不是每片都重新取：一次描述必须整段走同一条通道。生成中途
+            // 用户开关了 TalkBack 的话，半句走自带 TTS、半句走读屏，得到的是两个引擎念出来的
+            // 一句被劈开的话。下一次发问自然会用新通道。
+            val screenReaderActive = state.isScreenReaderActive
+            val clauseBuffer = SpeechClauseBuffer()
+            var spokeAnyClause = false
+            try {
+                describeSceneUseCase(imageFrameProvider.frames).collect { chunk ->
+                    when (chunk) {
+                        is SceneDescriptionChunk.Delta -> {
+                            if (screenReaderActive) return@collect
+                            clauseBuffer.append(chunk.text)?.let { clause ->
+                                speechManager.speakSystemNotice(clause)
+                                spokeAnyClause = true
+                            }
+                        }
+
+                        is SceneDescriptionChunk.Completed -> {
+                            val description = chunk.description
+                            _uiState.update { it.copy(lastSceneDescription = description.text) }
+                            logger.info(
+                                TAG,
+                                "Scene description completed",
+                                mapOf(
+                                    "timeToFirstTokenMs" to description.timeToFirstTokenMs,
+                                    "latencyMs" to description.latencyMs,
+                                    "backend" to description.backend,
+                                    "streamed" to spokeAnyClause,
+                                ),
+                            )
+                            if (description.text.isBlank()) return@collect
+
+                            if (screenReaderActive) {
+                                _uiEffect.emit(SceneAnalysisUiEffect.Announce(description.text))
+                                return@collect
+                            }
+                            clauseBuffer.drain()?.let { tail ->
+                                speechManager.speakSystemNotice(tail)
+                                spokeAnyClause = true
+                            }
+                            // 一个 Delta 都没来过：runtime 不支持流式，整段文本只在这里出现一次。
+                            if (!spokeAnyClause) {
+                                speechManager.speakSystemNotice(description.text)
+                            }
+                        }
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                logger.error(TAG, "Scene description failed", e)
+                announceThroughSpeechChannel(failureNotice)
+            } finally {
+                _uiState.update { it.copy(isDescribingScene = false) }
+            }
+        }
+    }
+
+    /**
+     * 把一句话送上当前生效的那条语音通道。两条通道互斥，见 [applyScreenReaderMode]。
+     */
+    private suspend fun announceThroughSpeechChannel(text: String) {
+        if (_uiState.value.isScreenReaderActive) {
+            _uiEffect.emit(SceneAnalysisUiEffect.Announce(text))
+        } else {
+            speechManager.speakSystemNotice(text)
+        }
+    }
+
     private fun stopSceneAnalysis() {
         analysisJob?.cancel()
         analysisJob = null
         overlayRenderRequestId++
         overlayRenderJob?.cancel()
         overlayRenderJob = null
+        // 正在解码的描述跟着会话一起结束：用户已经停了引导，几秒后再冒出一句场景描述
+        // 只会让他以为辅助还在跑。
+        describeJob?.cancel()
+        describeJob = null
         latestSceneResult = null
         stopSceneAnalysisUseCase()
         speechManager.stop()
@@ -451,6 +570,8 @@ class SceneAnalysisViewModel(
                 frameDisplayHeight = null,
                 obstacleDetections = emptyList(),
                 latestSceneDebugInfo = null,
+                isDescribingScene = false,
+                lastSceneDescription = null,
             )
         }
     }
@@ -460,6 +581,8 @@ class SceneAnalysisViewModel(
         analysisJob = null
         overlayRenderJob?.cancel()
         overlayRenderJob = null
+        describeJob?.cancel()
+        describeJob = null
         stopSceneAnalysisUseCase()
         speechManager.stop()
         hapticManager.cancel()
@@ -536,6 +659,13 @@ class SceneAnalysisViewModel(
                         stopSceneAnalysisUseCase.release()
                     }.onFailure { error ->
                         logger.error(TAG, "Error releasing scene analysis resources", error)
+                    }
+                    // VLM 是懒加载的，多数会话根本没加载过——release() 那时是个空操作。
+                    // 但一旦加载过，它占的显存比 sem/det 都大，不能跟着进程一起漏到下一次。
+                    runCatching {
+                        sceneDescriber.release()
+                    }.onFailure { error ->
+                        logger.error(TAG, "Error releasing VLM", error)
                     }
                 }
             } finally {

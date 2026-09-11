@@ -37,6 +37,10 @@
     <string name="status_speech_unavailable_detail">设备的语音引擎没有响应，当前只能依靠震动提醒。请检查系统的文字转语音设置。</string>
     <string name="notice_guidance_interrupted">辅助已中断</string>
     <string name="action_replay_last_guidance">重播上一条提示</string>
+    <string name="action_describe_scene">描述前方场景</string>
+    <string name="btn_describe_scene">描述场景</string>
+    <string name="btn_describing_scene">正在描述…</string>
+    <string name="notice_scene_description_failed">无法描述当前场景</string>
     <string name="btn_start_guidance">开启辅助</string>
     <string name="btn_stop_guidance">停止辅助</string>
     <string name="btn_open_trace_reports">Trace 报告</string>

@@ -7,14 +7,17 @@ import com.sailens.data.source.ml.session.AcceleratorSelector
 import com.sailens.domain.model.perception.MlRuntimeInfo
 import com.sailens.domain.repository.SceneDescriber
 import com.sailens.domain.repository.SceneDescription
+import com.sailens.domain.repository.SceneDescriptionChunk
 import com.sailens.domain.repository.SceneDescriptionRequest
 import com.sailens.domain.service.LogService
 import com.google.ai.edge.litert.Accelerator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.channels.trySendBlocking
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
-import kotlin.coroutines.cancellation.CancellationException
 
 /**
  * VLM scene-description engine. Reuses the CNN path's accelerator-selection policy
@@ -23,8 +26,8 @@ import kotlin.coroutines.cancellation.CancellationException
  *
  * The actual LLM library is injected via [runtimeFactory]; with the default
  * [UnavailableVlmRuntimeFactory] the engine reports `isReady == false` and [initialize] throws, so
- * the app can simply hide the "describe scene" action until a model is wired. See
- * docs/npu-litert-qnn.md → "VLM 引擎" for the MediaPipe/LiteRT-LM runtime wiring.
+ * the app simply hides the "describe scene" action until a model is wired. See
+ * docs/vlm-asr-assistant-plan.md for the LiteRT-LM / MediaPipe runtime wiring.
  */
 class LiteRtVlmEngine(
     private val context: Context,
@@ -42,6 +45,8 @@ class LiteRtVlmEngine(
     @Volatile
     private var _isReady = false
     override val isReady: Boolean get() = _isReady
+
+    override val isAvailable: Boolean get() = runtimeFactory.isAvailable(context)
 
     override suspend fun initialize() {
         if (_isReady) return
@@ -72,21 +77,55 @@ class LiteRtVlmEngine(
         }
     }
 
-    override suspend fun describe(request: SceneDescriptionRequest): Result<SceneDescription> {
-        val activeRuntime = runtime
-            ?: return Result.failure(IllegalStateException("VLM engine not initialized"))
+    /**
+     * Bridges [VlmRuntime]'s token callback into a cold Flow.
+     *
+     * `trySendBlocking` rather than `trySend`: the callback fires on [singleThreadDispatcher]'s
+     * thread while the collector runs elsewhere, so blocking the producer for a moment is harmless,
+     * whereas `trySend` on a rendezvous channel would silently DROP tokens — and a dropped token is
+     * a word missing from the middle of a sentence spoken to someone who cannot check the screen.
+     *
+     * A runtime that cannot stream (returns everything at the end and never calls `onToken`) is
+     * still correct here: it simply produces no [SceneDescriptionChunk.Delta], and the single
+     * [SceneDescriptionChunk.Completed] carries the whole text. Consumers must handle that.
+     */
+    override fun describe(request: SceneDescriptionRequest): Flow<SceneDescriptionChunk> = channelFlow {
+        val activeRuntime = runtime ?: error("VLM engine not initialized")
 
-        return withContext(singleThreadDispatcher) {
-            if (!isActive) return@withContext Result.failure(CancellationException("Coroutine cancelled"))
-            runCatching {
-                val start = SystemClock.uptimeMillis()
-                val text = activeRuntime.generate(buildPrompt(request.userPrompt), request.frame)
-                SceneDescription(
-                    text = text.trim(),
-                    backend = backendLabel,
-                    latencyMs = SystemClock.uptimeMillis() - start,
-                )
-            }
+        withContext(singleThreadDispatcher) {
+            val start = SystemClock.uptimeMillis()
+            var firstTokenAt = 0L
+
+            val text = activeRuntime.generate(
+                prompt = buildPrompt(request.userPrompt),
+                image = request.frame,
+                shouldStop = { !isActive },
+                onToken = { token ->
+                    if (firstTokenAt == 0L) firstTokenAt = SystemClock.uptimeMillis()
+                    if (token.isNotEmpty()) trySendBlocking(SceneDescriptionChunk.Delta(token))
+                },
+            )
+
+            val finishedAt = SystemClock.uptimeMillis()
+            val description = SceneDescription(
+                text = text.trim(),
+                backend = backendLabel,
+                latencyMs = finishedAt - start,
+                // No token ever arrived (non-streaming runtime): time-to-first-token is the whole
+                // generation, which is the honest number — the user heard nothing until the end.
+                timeToFirstTokenMs = (if (firstTokenAt == 0L) finishedAt else firstTokenAt) - start,
+            )
+            logService?.info(
+                TAG,
+                "Scene description generated",
+                mapOf(
+                    "latencyMs" to description.latencyMs,
+                    "timeToFirstTokenMs" to description.timeToFirstTokenMs,
+                    "chars" to description.text.length,
+                    "backend" to description.backend,
+                ),
+            )
+            send(SceneDescriptionChunk.Completed(description))
         }
     }
 
@@ -108,7 +147,10 @@ class LiteRtVlmEngine(
     private companion object {
         const val TAG = "LiteRtVlmEngine"
 
-        // VLM benefits most from the NPU; degrade to GPU then CPU on devices without it.
+        // Preference order, not an availability claim: as of the 2026-09 device testing a plain
+        // .litertlm bundle does NOT get the Qualcomm NPU (that needs per-SoC TF_LITE_AUX embedded in
+        // the model), so in practice this resolves to GPU today. Keeping NPU first costs nothing and
+        // means the path lights up on its own if/when an NPU-capable bundle is wired.
         val ACCELERATOR_FALLBACK_ORDER = listOf(
             Accelerator.NPU,
             Accelerator.GPU,

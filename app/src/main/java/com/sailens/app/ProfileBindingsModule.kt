@@ -4,6 +4,7 @@ import com.sailens.BuildConfig
 import com.sailens.camera.CameraRuntimeConfig
 import com.sailens.data.source.ml.obstacle.ObstacleModelConfig
 import com.sailens.data.source.ml.semantic.SemanticModelConfig
+import com.sailens.data.source.ml.vlm.VlmModelConfig
 import com.sailens.domain.config.AnalysisConfig
 import com.sailens.domain.config.PerceptionConfig
 import com.sailens.domain.config.PipelinePerformanceBudget
@@ -32,6 +33,14 @@ val profileBindingsModule = module {
     single<CameraRuntimeConfig> { get<SailensRuntimeProfile>().camera }
     single<SemanticModelConfig> { get<SailensRuntimeProfile>().semanticModel }
     single<ObstacleModelConfig> { get<SailensRuntimeProfile>().realtimeObstacleModel }
+    // The VLM's backend is the profile's call (the ultra tier reserves NPU for it); everything else
+    // about it — prompt, decode budget — is the model config's own default.
+    single {
+        VlmModelConfig(
+            modelPath = VlmModelConfig.DEFAULT_MODEL_ASSET,
+            acceleratorBackend = get<SailensRuntimeProfile>().vlmModelBackend,
+        )
+    }
     single<PerceptionConfig> { get<SailensRuntimeProfile>().perception }
     single<AnalysisConfig> { get<SailensRuntimeProfile>().analysis }
     single<PipelinePerformanceBudget> { get<SailensRuntimeProfile>().pipelineBudget }

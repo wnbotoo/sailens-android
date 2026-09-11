@@ -23,6 +23,7 @@ import com.sailens.data.source.ml.semantic.NativeSemanticScorePostprocessor
 import com.sailens.data.source.ml.semantic.SegmentationModel
 import com.sailens.data.source.ml.semantic.SemanticModelConfig
 import com.sailens.data.source.ml.semantic.LiteRtSemanticSegmentationModel
+import com.sailens.data.source.ml.vlm.LiteRtVlmEngine
 import com.sailens.domain.config.PerceptionConfig
 import com.sailens.domain.config.TraceRuntimeConfig
 import com.sailens.domain.model.common.ObstacleProviderType
@@ -34,6 +35,7 @@ import com.sailens.domain.repository.DepthRepository
 import com.sailens.domain.repository.DeviceSensorRepository
 import com.sailens.domain.repository.ObstacleProvider
 import com.sailens.domain.repository.PerceptionRepository
+import com.sailens.domain.repository.SceneDescriber
 import com.sailens.domain.service.LogService
 import com.sailens.domain.service.TraceReplayService
 import com.sailens.domain.service.TraceService
@@ -51,6 +53,18 @@ val dataModule = module {
     }
 
     single<ModelSourceResolver> { CatalogModelSourceResolver }
+
+    // On-demand scene description. A `single` because it owns a loaded model, but it stays unloaded
+    // until the first request (see DescribeSceneUseCase) — and with the default
+    // UnavailableVlmRuntimeFactory it reports isAvailable == false and the UI hides the action, so
+    // constructing it here costs nothing until a real runtime is injected.
+    single<SceneDescriber> {
+        LiteRtVlmEngine(
+            context = androidContext(),
+            config = get(),
+            logService = get(),
+        )
+    }
 
     single {
         NativeSemanticScorePostprocessor(

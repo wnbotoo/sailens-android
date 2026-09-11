@@ -56,6 +56,22 @@ data class SceneAnalysisUiState(
      * 它是重播历史，不代表风险仍然存在；实时状态请使用 [activeStatusEvent]。
      */
     val lastAnnouncedEvent: SceneEvent? = null,
+    /**
+     * 有可用的 VLM，"描述场景"这个动作可以提供。
+     *
+     * 为 false 时入口**不显示**，而不是显示成灰的：对盲人用户来说，一个永远不能用的控件只是
+     * 多一次徒劳的焦点停留。模型有没有装好属于诊断信息，归设置页。
+     */
+    val isSceneDescriptionAvailable: Boolean = false,
+    /** 一次场景描述正在生成中（模型加载 + 解码，秒级）。 */
+    val isDescribingScene: Boolean = false,
+    /**
+     * 最近一次成功的场景描述全文，会话停止时清空。
+     *
+     * 它是历史，不是当前场景——VLM 看的是用户按下按钮那一刻的画面，几秒后画面早就变了。
+     * 不要用它驱动任何实时判断。
+     */
+    val lastSceneDescription: String? = null,
     val errorMessage: String? = null,
 )
 
@@ -87,8 +103,22 @@ internal fun shouldAlertSpeechUnavailable(
         speechEnabled &&
         !screenReaderActive
 
-internal fun SceneAnalysisUiState.hasGuidanceOutputChannel(): Boolean {
-    val hasSpeechOutput = isSpeechEnabled &&
-        (isScreenReaderActive || speechEngineState != SpeechEngineState.UNAVAILABLE)
-    return hasSpeechOutput || isHapticsEnabled
-}
+internal fun SceneAnalysisUiState.hasGuidanceOutputChannel(): Boolean =
+    hasSpeechOutputChannel() || isHapticsEnabled
+
+/**
+ * 语音那一条通道当前可用（自带 TTS 活着，或者读屏在替它播报）。
+ */
+internal fun SceneAnalysisUiState.hasSpeechOutputChannel(): Boolean =
+    isSpeechEnabled && (isScreenReaderActive || speechEngineState != SpeechEngineState.UNAVAILABLE)
+
+/**
+ * 现在可以发起一次场景描述。
+ *
+ * 除了要有模型、且没有正在生成中，还必须有**语音**通道：一句自然语言描述没有触觉编码，
+ * 震动词汇是一套封闭的方位/失效符号（见 [com.sailens.presentation.device.GuidanceHaptic]），
+ * 没法用来表达"前方三米有一根电线杆"。纯震动模式下提供这个入口等于提供一个按下去没有回应
+ * 的按钮，而用户看不到屏幕上的任何补偿性提示。
+ */
+internal fun SceneAnalysisUiState.canDescribeScene(): Boolean =
+    isSceneDescriptionAvailable && !isDescribingScene && hasSpeechOutputChannel()

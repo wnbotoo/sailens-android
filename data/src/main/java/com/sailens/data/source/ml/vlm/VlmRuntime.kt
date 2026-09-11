@@ -11,13 +11,34 @@ import com.google.ai.edge.litert.Accelerator
  * own runtime — but it reuses the same accelerator-selection policy
  * ([com.sailens.data.source.ml.session.AcceleratorSelector]).
  *
- * To enable VLM: implement [VlmRuntimeFactory] with MediaPipe LLM Inference (`LlmInference` +
- * vision modality) or LiteRT-LM, add the dependency, and inject it into [LiteRtVlmEngine]. See
- * docs/npu-litert-qnn.md → "VLM 引擎".
+ * To enable VLM: implement [VlmRuntimeFactory] with LiteRT-LM or MediaPipe LLM Inference
+ * (`LlmInference` + vision modality), add the dependency, and inject it into [LiteRtVlmEngine]. See
+ * docs/vlm-asr-assistant-plan.md.
  */
 interface VlmRuntime : AutoCloseable {
-    /** One-shot generation: full text for [prompt] grounded on [image] (null = text-only). */
-    fun generate(prompt: String, image: ImageFrame?): String
+
+    /**
+     * Generates text for [prompt] grounded on [image] (null = text-only), reporting each decoded
+     * piece to [onToken] as it arrives, and returning the full text.
+     *
+     * A callback rather than a `Flow` on purpose: every candidate library (LiteRT-LM,
+     * MediaPipe `LlmInference`) hands tokens to a listener from its own thread, so a callback is
+     * what an implementation actually has. [LiteRtVlmEngine] is what turns this into a Flow —
+     * keeping the coroutine machinery on one side of the seam instead of in every runtime.
+     *
+     * Called on a single dedicated thread, so implementations need no internal locking. Runs to
+     * completion; [shouldStop] is how cancellation gets in.
+     *
+     * @param shouldStop polled between tokens. Returning true ends generation early and the
+     *   partial text is returned. An autoregressive decode can run for seconds, so a cancelled
+     *   request that cannot stop mid-decode keeps the accelerator busy and delays the next one.
+     */
+    fun generate(
+        prompt: String,
+        image: ImageFrame?,
+        shouldStop: () -> Boolean = { false },
+        onToken: (String) -> Unit = {},
+    ): String
 }
 
 interface VlmRuntimeFactory {
@@ -31,13 +52,13 @@ interface VlmRuntimeFactory {
 
 /**
  * Default factory: no GenAI runtime wired. Keeps [LiteRtVlmEngine] gracefully unavailable (the app
- * can hide the "describe scene" action) until a real [VlmRuntimeFactory] is provided.
+ * hides the "describe scene" action) until a real [VlmRuntimeFactory] is provided.
  */
 object UnavailableVlmRuntimeFactory : VlmRuntimeFactory {
     override fun isAvailable(context: Context): Boolean = false
 
     override fun create(context: Context, config: VlmModelConfig, accelerator: Accelerator): VlmRuntime =
         throw IllegalStateException(
-            "No VLM runtime wired. Provide a MediaPipe/LiteRT-LM VlmRuntimeFactory (see docs/npu-litert-qnn.md)."
+            "No VLM runtime wired. Provide a LiteRT-LM / MediaPipe VlmRuntimeFactory (see docs/vlm-asr-assistant-plan.md)."
         )
 }

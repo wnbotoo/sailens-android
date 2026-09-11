@@ -141,12 +141,17 @@ fun LiveAnalysisScreen(
     val onReplay = viewModel::replayLastGuidance
     val onOverlayModeChange: (SceneOverlayMode) -> Unit = viewModel::setOverlayMode
 
+    // 失败话术在这里取，和 interruptionNotice 同理：ViewModel 不碰资源，而这条失败必须说出口。
+    val describeFailureNotice = stringResource(R.string.notice_scene_description_failed)
+    val onDescribeScene = { viewModel.describeScene(describeFailureNotice) }
+
     if (isLandscape) {
         ContentForLandscape(
             state = state,
             onToggleClick = onToggleClick,
             onOpenSettings = onOpenSettings,
             onReplay = onReplay,
+            onDescribeScene = onDescribeScene,
             onOverlayModeChange = onOverlayModeChange,
             modifier = modifier,
         )
@@ -156,6 +161,7 @@ fun LiveAnalysisScreen(
             onToggleClick = onToggleClick,
             onOpenSettings = onOpenSettings,
             onReplay = onReplay,
+            onDescribeScene = onDescribeScene,
             onOverlayModeChange = onOverlayModeChange,
             modifier = modifier,
         )
@@ -168,6 +174,7 @@ private fun ContentForLandscape(
     onToggleClick: () -> Unit,
     onOpenSettings: () -> Unit,
     onReplay: () -> Unit,
+    onDescribeScene: () -> Unit,
     onOverlayModeChange: (SceneOverlayMode) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -189,6 +196,7 @@ private fun ContentForLandscape(
             PrimaryStatusView(
                 state = state,
                 onReplay = onReplay,
+                onDescribeScene = onDescribeScene,
                 isLandscape = true,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -213,6 +221,7 @@ private fun ContentForLandscape(
                 state = state,
                 onOverlayModeChange = onOverlayModeChange,
                 onToggleClick = onToggleClick,
+                onDescribeScene = onDescribeScene,
             )
         }
     }
@@ -224,6 +233,7 @@ private fun ContentForPortrait(
     onToggleClick: () -> Unit,
     onOpenSettings: () -> Unit,
     onReplay: () -> Unit,
+    onDescribeScene: () -> Unit,
     onOverlayModeChange: (SceneOverlayMode) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -250,6 +260,7 @@ private fun ContentForPortrait(
         PrimaryStatusView(
             state = state,
             onReplay = onReplay,
+            onDescribeScene = onDescribeScene,
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f),
@@ -258,6 +269,7 @@ private fun ContentForPortrait(
             state = state,
             onOverlayModeChange = onOverlayModeChange,
             onToggleClick = onToggleClick,
+            onDescribeScene = onDescribeScene,
             modifier = Modifier.fillMaxWidth(),
         )
     }
@@ -389,6 +401,7 @@ private fun HeaderStatusText(
 private fun PrimaryStatusView(
     state: SceneAnalysisUiState,
     onReplay: () -> Unit,
+    onDescribeScene: () -> Unit,
     modifier: Modifier = Modifier,
     isLandscape: Boolean = false,
 ) {
@@ -458,16 +471,31 @@ private fun PrimaryStatusView(
     // 整张卡片可点击 = 重播上一条提示。选它当重播入口是因为它是屏幕上最大的一块区域
     // （portrait 下占满剩余空间），走路时不需要任何视觉定位就能戳中；同时挂了自定义无障碍
     // 动作，TalkBack 用户可以从局部菜单直接触发，不必先把焦点移过来。
+    //
+    // "描述前方场景"也挂成这张卡片的自定义动作：它在控制面板里有自己的按钮，但 TalkBack 用户
+    // 从局部菜单直接触发比把焦点移到面板底部更快，而这个动作的价值恰恰在于"临时想问一下"。
     val replayLabel = stringResource(R.string.action_replay_last_guidance)
+    val describeLabel = stringResource(R.string.action_describe_scene)
+    val canDescribe = state.canDescribeScene()
     Surface(
         modifier = modifier.semantics(mergeDescendants = true) {
             contentDescription = spokenDescription
-            customActions = listOf(
-                CustomAccessibilityAction(replayLabel) {
-                    onReplay()
-                    true
+            customActions = buildList {
+                add(
+                    CustomAccessibilityAction(replayLabel) {
+                        onReplay()
+                        true
+                    }
+                )
+                if (canDescribe) {
+                    add(
+                        CustomAccessibilityAction(describeLabel) {
+                            onDescribeScene()
+                            true
+                        }
+                    )
                 }
-            )
+            }
         },
         onClick = onReplay,
         enabled = canReplay,
@@ -592,6 +620,7 @@ private fun ControlView(
     state: SceneAnalysisUiState,
     onOverlayModeChange: (SceneOverlayMode) -> Unit,
     onToggleClick: () -> Unit,
+    onDescribeScene: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Surface(
@@ -621,6 +650,22 @@ private fun ControlView(
                 loading = state.isLoading,
                 modifier = Modifier.fillMaxWidth(),
             )
+
+            // 没有可用的 VLM 时整个入口不出现，而不是出现一个灰的：对盲人用户来说，一个永远
+            // 按不动的控件只是多一次徒劳的焦点停留。同尺寸的大按钮（不是图标按钮），因为走路时
+            // 戳得中比省地方重要。
+            if (state.isSceneDescriptionAvailable) {
+                PrimaryActionButton(
+                    text = stringResource(
+                        if (state.isDescribingScene) R.string.btn_describing_scene
+                        else R.string.btn_describe_scene
+                    ),
+                    onClick = onDescribeScene,
+                    enabled = state.canDescribeScene(),
+                    loading = state.isDescribingScene,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
 
             if (state.showDiagnostics) {
                 HomePanelDivider()
