@@ -37,10 +37,6 @@
     <string name="status_speech_unavailable_detail">This device\'s speech engine is not responding, so only vibration alerts are available. Check the system text-to-speech settings.</string>
     <string name="notice_guidance_interrupted">Guidance interrupted</string>
     <string name="action_replay_last_guidance">Replay last guidance</string>
-    <string name="action_describe_scene">Describe what is ahead</string>
-    <string name="btn_describe_scene">Describe scene</string>
-    <string name="btn_describing_scene">Describing…</string>
-    <string name="notice_scene_description_failed">Could not describe the scene</string>
     <string name="btn_start_guidance">Start guidance</string>
     <string name="btn_stop_guidance">Stop guidance</string>
     <string name="btn_open_trace_reports">Trace reports</string>

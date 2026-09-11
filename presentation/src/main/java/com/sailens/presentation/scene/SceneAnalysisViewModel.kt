@@ -439,6 +439,11 @@ class SceneAnalysisViewModel(
     /**
      * 用户主动发问一次"我面前是什么"，由 VLM 回答。
      *
+     * **目前没有任何调用方，这是刻意的。**没有可用的 VLM 之前不往屏幕上加入口：一个按下去
+     * 不会回答的按钮，对盲人用户就是一次徒劳的焦点停留，而"按了没反应"和"前方没东西"在他
+     * 那里是同一种体验。这条链路做到 ViewModel 为止，接 UI 等模型到位（届时入口应当由
+     * [SceneAnalysisUiState.isSceneDescriptionAvailable] 把关，见 [canDescribeScene]）。
+     *
      * 与自动播报是两回事，几个刻意的区别：
      * - **不过冷却。**冷却是为了防止自动播报刷屏；这一句是用户要来的。
      * - **可以被导航提示打断。**子句走 [SpeechManager.speakSystemNotice]（QUEUE_ADD）排队，
@@ -447,8 +452,9 @@ class SceneAnalysisViewModel(
      * - **边解码边念。**VLM 一次推理数秒，等整段出齐再开口就是数秒静默，而用户看不到进度。
      *   [SpeechClauseBuffer] 把 token 流攒成子句，出一句念一句。
      *
-     * @param failureNotice 失败时说出来的话。用户已经主动发问，静默失败在他那里和"前方什么都
-     *   没有"是同一种体验，所以这条链路上的失败必须出声，不能只写日志。
+     * @param failureNotice 失败时说出来的话，由调用方给出本地化文本（同
+     *   [onGuidanceInterrupted] 的约定：ViewModel 不碰资源）。用户已经主动发问，静默失败在他
+     *   那里和"前方什么都没有"是同一种体验，所以这条链路上的失败必须出声，不能只写日志。
      */
     fun describeScene(failureNotice: String) {
         val state = _uiState.value
