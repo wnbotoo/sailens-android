@@ -89,6 +89,7 @@ Every document below has a Chinese version alongside it (`*.zh-CN.md`), linked f
 
 | | | |
 |---|---|---|
+| [`docs/architecture.md`](docs/architecture.md) | [中文](docs/architecture.zh-CN.md) | Proposed lens-framework restructure (under review, not implemented) |
 | [`docs/models.md`](docs/models.md) | [中文](docs/models.zh-CN.md) | Model contract, backend config, performance red lines |
 | [`docs/perception-profiles.md`](docs/perception-profiles.md) | [中文](docs/perception-profiles.zh-CN.md) | Perception tiers, scheduling, tracker TTL |
 | [`docs/npu-litert-qnn.md`](docs/npu-litert-qnn.md) | [中文](docs/npu-litert-qnn.zh-CN.md) | Qualcomm NPU wiring, delivery, diagnosis |

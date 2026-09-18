@@ -84,6 +84,7 @@ metadata 自动读取**，所以**换模型通常不需要改代码**。
 
 | | | |
 |---|---|---|
+| [`docs/architecture.zh-CN.md`](docs/architecture.zh-CN.md) | [English](docs/architecture.md) | lens 框架重构方案（评审中，尚未实现） |
 | [`docs/models.zh-CN.md`](docs/models.zh-CN.md) | [English](docs/models.md) | 模型契约、backend 配置、性能红线 |
 | [`docs/perception-profiles.zh-CN.md`](docs/perception-profiles.zh-CN.md) | [English](docs/perception-profiles.md) | 感知挡位、调度、tracker TTL |
 | [`docs/npu-litert-qnn.zh-CN.md`](docs/npu-litert-qnn.zh-CN.md) | [English](docs/npu-litert-qnn.md) | 高通 NPU 接线、交付、诊断 |
