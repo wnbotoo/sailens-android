@@ -94,7 +94,7 @@ Kotlin class 可能编译完全成功，却只在第一次调用 native 方法�
 | Module | 职责 |
 |---|---|
 | sailens-core | 最小共享 contract/value types：ImageFrame/YUV planes、geometry、BinaryMask、MlRuntimeInfo、LogService |
-| sailens-camera | CameraX 采集、连续 frame source、带 freshness 上限的当前帧 snapshot、preview composable、权限流程 |
+| sailens-camera | CameraX 采集、连续 frame source、带 freshness 上限的当前帧 snapshot、preview composable、相机权限状态/请求 primitive |
 | sailens-runtime | LiteRT session、加速器选择、模型来源、metadata、YUV→tensor 预处理、共享预处理 cache、硬件画像、资源仲裁机制 |
 | sailens-vision | segmentation/detection runner、数据集 taxonomy、默认后处理器 |
 | sailens-vlm | VLM engine contract：frame + 完整 prompt → streamed text；不放产品 prompt policy |
@@ -110,6 +110,10 @@ sailens-shell 内部 package 存在。
 原因是它们没有足够价值支撑独立 compile/dependency/API boundary。UI、design system、
 settings、navigation 本来就作为一个可复用 application presentation shell 一起变化。
 Guidance 算法仍保持独立，因为它包含大量安全逻辑、测试，并且变化轴与 UI 不同。
+
+相机权限的**策略 UI**属于 presentation，不属于 capture。sailens-camera 可以暴露权限状态以及
+触发权限请求的动作，但 rationale dialog、文案和 design-system 依赖都放在 sailens-shell。
+这样旧 ux module 删除之后，sailens-camera 也不会反向依赖 shell。
 
 ### 4.2 依赖图
 
@@ -219,13 +223,15 @@ B 不再要求与 A 代码完全一致。
 可以提供 Guidance、Describe、两者都有或两者都没有。需要 VLM 时由 edition 显式提供
 concrete runtime。
 
-### 5.2 configured、available、expected 是三个不同概念
+### 5.2 configured、expected、available 与 runtime state 是四个不同概念
 
-平台不能把它们混在一起：
+平台不能把四个问题混在一起：
 
 1. **Configured** —— edition 打算提供这条 pipeline。
-2. **Available** —— 当前所需 runtime/model/contract 全部健康。
-3. **Expected** —— edition 把它作为产品能力承诺。
+2. **Expected** —— edition 把它作为产品能力承诺。
+3. **Availability / preflight** —— 低成本静态检查确认 implementation、model source 与可机器
+   验证的 contract 存在；**不会**初始化模型或加速器。
+4. **Runtime state** —— 用户真正开始使用后，session 的运行状态：未开始、初始化中、运行中或失败。
 
 代表性结构：
 
@@ -239,18 +245,44 @@ data class SailensAppSpec(
 sealed interface PipelineAvailability {
     data object NotConfigured : PipelineAvailability
     data object Available : PipelineAvailability
-    data class Unavailable(val reason: Reason) : PipelineAvailability
+    data class Unavailable(val reason: StaticUnavailableReason) : PipelineAvailability
+}
+
+sealed interface PipelineRuntimeState {
+    data object NotStarted : PipelineRuntimeState
+    data object Initializing : PipelineRuntimeState
+    data object Running : PipelineRuntimeState
+    data class Failed(val reason: RuntimeFailure) : PipelineRuntimeState
 }
 ~~~
 
 pipeline spec 为 null 表示 NotConfigured；两条都 null 完全合法。
 
-expectation 是 edition-level validation，不是 framework 限制。例如 sailens-yolo 可以声明
-Guidance required。如果它打包的 sem model 丢失或非法，这是 B 自己的 startup/configuration
-failure，即使 Sailens framework 本身允许 zero-pipeline。
+**Available 不等于 runtime ready。**preflight 可以检查 implementation 是否已接线、配置的 model
+source 是否能解析、低成本 metadata/shape/count 是否通过、以及 TaxonomyId ↔
+NavigationSemantics 等静态 binding 是否一致。它不能为了决定一个入口是否存在，就提前创建
+compiled model、初始化 GPU/NPU delegate、分配 inference buffer 或跑一次 probe inference。
+真正的模型/加速器初始化继续保持 lazy，在 session 启动时发生，和今天一样。
 
-optional 但 unavailable 的 pipeline 不应作为一个死控件暴露给用户。shell 可以隐藏它，
-或者在普通 action path 之外提供明确的 edition-level explanation。
+expectation 是 edition-level validation，不是 framework 限制。例如 sailens-yolo 可以声明
+Guidance required。如果它打包的 sem model 缺失、声明的 taxonomy 不兼容，或其他**静态配置**
+contract 失败，这是 edition configuration failure，即使 Sailens framework 本身允许
+zero-pipeline。
+
+静态配置失败按 build type 区分处理：
+
+- **debug/development：**fail fast，让 packaging/wiring 错误尽早暴露；
+- **release：**进入明确的 fatal configuration state，不 crash、不进入 restart loop。这个状态必须
+  对 accessibility 可达，并且至少主动通过当前可用的非视觉通道通知一次；speech 不可用时由
+  haptic 兜底。
+
+pipeline 也可能通过 preflight，却在某台设备上真正初始化 session 时失败，例如 GPU delegate
+或 output buffer allocation 失败。这是 **runtime failure**，并不与 Available 矛盾。
+Guidance 继续走今天已有、用户可见且可重试的 analysis-start-failed 路径；Describe 走对应的
+request/runtime error 路径。
+
+optional 但静态 unavailable 的 pipeline 不应作为死控件暴露。shell 可以隐藏它，或者在普通
+action path 之外提供明确的 edition-level explanation。
 
 ## 6. 设计决策
 
@@ -278,7 +310,7 @@ assistant plan 的安全意图保持一致。
 
 Describe 仍然不依赖 CameraX；未来其他 source 只需要实现 FrameSnapshotProvider。
 
-### 6.2 Taxonomy 与 NavigationSemantics 分离，并且必须证明兼容
+### 6.2 Taxonomy 与 NavigationSemantics 分离；机器校验只能做到证据允许的程度
 
 当前 ClassMapper 混着：
 
@@ -290,7 +322,8 @@ Describe 仍然不依赖 CameraX；未来其他 source 只需要实现 FrameSnap
 - **Taxonomy**，归 sailens-vision；
 - **NavigationSemantics**，归 sailens-guidance。
 
-两者都带稳定 TaxonomyId 和 class count。Guidance model binding 在 analysis 启动前验证一致性。
+两者都带稳定 TaxonomyId 和 class count。Guidance binding 在 static preflight 阶段验证
+**声明的** taxonomy id 与 class count 是否和 NavigationSemantics 一致。
 
 ~~~kotlin
 @JvmInline
@@ -307,11 +340,20 @@ interface NavigationSemantics {
 }
 ~~~
 
-如果 model metadata 带 labels，就进一步验证完整 label order。如果没有，edition 必须显式
-声明 taxonomy，并在 model 旁边保留 contract test。
+但这**不能证明**一个 opaque model 的实际输出通道就真的具有声明的语义。如果可信 model
+metadata 带 labels，就进一步机器校验完整 label order；如果没有，channel semantics/order
+仍然是人工 release gate。一个 shape 与 class count 都正确的模型，完全可能正常运行，却把
+类别含义映射错。
 
-不存在 neutral NavigationSemantics fallback。缺失或不兼容会让 Guidance unavailable；
-如果 edition 声明 Guidance required，则升级为 edition startup failure。
+因此，model 旁边的 contract test 只能检查机器真正看得到的东西：shape、dtype、layout、
+class count、声明的 taxonomy binding，以及 metadata 里确实存在的 labels。labels 不存在时，
+contract test 绝不能声称自己验证了 semantic order。edition 还可以把一次人工确认的 taxonomy
+声明绑定到模型的精确 hash；一旦替换权重，就让这次人工验证自动失效。
+
+不存在 neutral NavigationSemantics fallback。缺失或机器可检测到的不兼容会让 Guidance
+静态 unavailable；如果 edition 声明 Guidance required，则这是 static configuration failure。
+至于 metadata 无法观察到的错误 channel order，它仍然是 release-process safety failure，
+不是 startup validation 能凭空检测出来的东西。
 
 ### 6.3 Detection output 保持通用
 
@@ -511,20 +553,25 @@ A 中：
 | # | 步骤 | 真机/native 检查 |
 |---|---|---|
 | 1 | JNI 改成 RegisterNatives，**并在挪 package 前补 native contract coverage** | 是 |
-| 2 | 抽 sailens-shell；root Compose/navigation/settings/design/Guidance UI 进入 shell；Application/MainActivity 留在 app | app launch |
+| 2 | 抽 sailens-shell；root Compose/navigation/settings/design/Guidance UI **以及 camera permission rationale UI** 进入 shell；camera 改为只暴露权限状态/请求 primitive，解除对 :ux 的依赖；Application/MainActivity 留在 app | app launch |
 | 3 | B 变成薄 composite-build consumer；移除 B 的 fork-only guardrail，不删除 A 的 append-only 规则 | B build/launch |
-| 4 | 抽 sailens-core 与 sailens-camera；引入 FrameSource + FrameSnapshotProvider | camera session |
+| 4 | 抽 sailens-core 与 sailens-camera；引入 FrameSource + FrameSnapshotProvider；验证 camera 仍不依赖 shell/design UI | camera session |
 | 5 | 抽 sailens-runtime；拆 native runtime preprocessing | 是 |
 | 6 | 抽 sailens-vision；Taxonomy / NavigationSemantics 拆分并加入 TaxonomyId 校验；拆 vision native | 是 |
 | 7 | 导航逻辑迁到 sailens-guidance；Guidance presentation 只进 shell；拆 Guidance native | 是 |
 | 8 | 抽 sailens-output；把 arbitration primitive 显式化，同时保持当前行为 | 是 |
 | 9 | 抽 sailens-vlm 与 sailens-describe；prompt/snapshot/scheduling policy 迁入 Describe | targeted tests |
-| 10 | **行为变更：**实现 configured/available/expected capability model 与合法 zero-pipeline state | 是 |
+| 10 | **行为变更：**实现 configured/expected/static-availability/runtime-state model、fatal static-configuration handling 与合法 zero-pipeline state | 是 |
 | 11 | 更新 README、AGENTS.md、models.md asset 路径、B 文档与所有 architecture reference | — |
 
 sailens-vlm 是唯一允许延迟物理 Gradle extraction 的边界：如果一开始真的只有几个 trivial
-interface 且没有 concrete implementation，可以先保持 logical boundary，等它具备真实
-dependency/API 价值再拆 module。
+interface 且没有 concrete implementation，可以先保持 logical boundary。推迟期间，VLM contract
+先作为 sailens-describe 内部的一个 package 存在，sailens-describe 暂时直接依赖
+sailens-runtime。现有 LiteRtVlmEngine 是未来 sailens-vlm-litert implementation module 的自然起点。
+
+一旦要真正接入 heavyweight concrete VLM runtime/native dependency，这个延迟就必须结束：
+必须先把 contract 与 concrete implementation 物理拆开，避免 Guidance-only edition 被拖入
+VLM runtime 成本。即使暂时不拆 Gradle module，logical boundary 也已经固定。
 
 ## 12. 验证
 
@@ -535,17 +582,43 @@ dependency/API 价值再拆 module。
 - 数量不能下降，除非有明确记录的理由。
 - 数量不下降只是 regression guardrail，不代表行为等价。
 
-### 12.2 Native contract tests
+### 12.2 Native 验证分三层
 
-在挪 native package 前增加 instrumentation/native contract coverage，至少做到：
+当前代码一共有 13 个 JNI entry point：9 个 array-based kernel，加上 4 个 LiteRT
+TensorBuffer-handle 路径。A 在没有真实 compiled model 的情况下无法制造合法 LiteRT handle，
+所以“在 A 中把 13 个 JNI entry 全部至少调用一次”不能作为 Step 1 的可执行退出条件。验证按
+实际能证明的内容拆成三层：
+
+**A. Binding coverage —— 挪 package 前在 A 中强制通过**
 
 - load 每一个目标 native library；
-- 验证全部 RegisterNatives binding；
-- 每个 native entry point 至少执行一次，包括冷门 int8 路径；
-- 用固定 synthetic tensor 覆盖 semantic/detection postprocessor；
+- JNI_OnLoad/RegisterNatives 的每次注册都检查并向上传播失败；
+- registration table 覆盖全部 13 个 Kotlin native declaration；
+- class name、method name 或 JNI signature 任意错误都会让 library load 失败。
+
+这已经完整覆盖 RegisterNatives 最初要解决的迁移风险：漏改或改错 binding 不会再隐藏到某条
+冷路径第一次执行时才暴露。
+
+**B. Kernel behavior —— A 中强制通过**
+
+- 使用 deterministic synthetic input 真正调用全部 9 个 array-based native entry；
+- 覆盖 float 与 int8 array kernel；
+- 按实际职责覆盖 semantic、detection、YUV/quantization、connectivity；
 - 能做的地方，对关键输出做 pre/post refactor equivalence 对比。
 
-仅手工跑一次 Guidance session 不够，因为它覆盖不到冷路径 native function。
+**C. Handle integration —— 需要真实模型**
+
+- B 使用实际打包的 float 模型覆盖两条 float handle 热路径：
+  native_score 与 native_bbox_nms_float_handle；
+- 同时保住 §12.3 的两条性能红线；
+- 两条 int8 handle 路径暂时明确记录为 known coverage gap，直到某个 edition 提供合适的
+  int8 model fixture。不要仅为了满足本次重构，就向 A 引入第三方 model weights。
+
+如果以后 B 或其他 edition 正式声明/支持 int8 handle execution，那么对应 model-backed
+integration coverage 就升级为该 edition 的 release gate。
+
+仅手工跑一次 Guidance session 仍然不够：它可以覆盖当前 float 热路径，但不能证明全部 binding
+和 array kernel。
 
 ### 12.3 性能红线
 
@@ -590,7 +663,7 @@ trace compare 仍然只是 coarse integration check，不是 golden frame replay
 6. **Pipeline 组合：**零 pipeline、仅 Guidance、仅 Describe、两者都有，全部合法。
 7. **Host boundary：**Application/MainActivity 留在每个 app；shell 提供可复用 Compose/composition。
 8. **Frame contract：**Guidance 消费 stream；Describe 消费带 freshness 上限的 snapshot。
-9. **Semantics safety：**taxonomy identity/order compatibility 是显式 startup contract。
+9. **Semantics safety：**声明的 taxonomy id + class count 在 static preflight 中机器校验；只有可信 metadata 真正带 labels 时才额外校验 label order，否则 channel order 仍是人工 release gate。
 10. **A 的历史：**sailens-android/main 保持 append-only。
 
 下一步设计工作应该集中在这些固定边界内部的实现细节，而不是继续增加 module 或继续把
