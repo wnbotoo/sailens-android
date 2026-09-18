@@ -102,7 +102,7 @@ The initial target is **9 library modules + 1 reference app**:
 | Module | Responsibility |
 |---|---|
 | sailens-core | smallest shared contracts and value types: ImageFrame/YUV planes, geometry, BinaryMask, MlRuntimeInfo, LogService |
-| sailens-camera | CameraX capture, continuous frame source, bounded current-frame snapshot, preview composable, permission flow |
+| sailens-camera | CameraX capture, continuous frame source, bounded current-frame snapshot, preview composable, camera-permission state/request primitives |
 | sailens-runtime | LiteRT sessions, accelerator selection, model sources, metadata, YUV→tensor preprocessing, shared preprocessing cache, hardware profile, resource-arbitration mechanism |
 | sailens-vision | segmentation and detection runners, dataset taxonomies, default postprocessors |
 | sailens-vlm | VLM engine contract: frame + complete prompt → streamed text; no product prompt policy |
@@ -119,6 +119,11 @@ Reason: those modules did not earn independent compile/dependency/API boundaries
 settings and navigation change together as one reusable application presentation shell. The
 Guidance algorithm boundary remains separate because it has substantial safety logic, tests and a
 different change axis.
+
+Camera permission **policy UI** is part of presentation, not capture. sailens-camera may expose the
+permission state and the action that requests permission, but the rationale dialog, its copy and its
+design-system dependency live in sailens-shell. This keeps sailens-camera from depending back on the
+shell after the old ux module is retired.
 
 ### 4.2 Dependency graph
 
@@ -230,13 +235,16 @@ B is no longer required to stay code-identical to A.
 May provide Guidance, Describe, both, or neither. A concrete VLM runtime is supplied explicitly by
 the edition if needed.
 
-### 5.2 Configured, available and expected are different concepts
+### 5.2 Configured, expected, available and runtime state are different concepts
 
-The platform must not conflate these:
+The platform must not conflate four different questions:
 
 1. **Configured** — the edition intends to expose a pipeline.
-2. **Available** — the required runtime/model/contracts are healthy now.
-3. **Expected** — the edition promises that capability as part of its product.
+2. **Expected** — the edition promises that capability as part of its product.
+3. **Availability / preflight** — a cheap, static check says the implementation, model source and
+   statically verifiable contracts are present. It does **not** initialize the model or accelerator.
+4. **Runtime state** — the real session lifecycle after the user starts work: not started,
+   initializing, running or failed.
 
 A representative shape is:
 
@@ -250,18 +258,44 @@ data class SailensAppSpec(
 sealed interface PipelineAvailability {
     data object NotConfigured : PipelineAvailability
     data object Available : PipelineAvailability
-    data class Unavailable(val reason: Reason) : PipelineAvailability
+    data class Unavailable(val reason: StaticUnavailableReason) : PipelineAvailability
+}
+
+sealed interface PipelineRuntimeState {
+    data object NotStarted : PipelineRuntimeState
+    data object Initializing : PipelineRuntimeState
+    data object Running : PipelineRuntimeState
+    data class Failed(val reason: RuntimeFailure) : PipelineRuntimeState
 }
 ~~~
 
 A null pipeline spec means NotConfigured. All-null is valid.
 
-Application expectations are edition-level validation, not a framework restriction. For example,
-sailens-yolo may declare Guidance required. If its packaged semantic model is missing or invalid,
-that is a B startup/configuration failure even though Sailens itself supports a zero-pipeline state.
+**Available is deliberately not "runtime ready".** Preflight may check that an implementation is
+wired, a configured model source resolves, cheap metadata/shape/count checks pass, and required
+static bindings such as TaxonomyId ↔ NavigationSemantics agree. It must not create a compiled model,
+initialize GPU/NPU delegates, allocate inference buffers or run a probe inference merely to decide
+whether a control should exist. That work stays lazy at session start, as it does today.
 
-An optional but unavailable pipeline is not presented as a dead control. The shell either hides it
-or presents an explicit edition-level explanation outside the normal action path.
+Application expectations are edition-level validation, not a framework restriction. For example,
+sailens-yolo may declare Guidance required. If its packaged semantic model is missing, its declared
+taxonomy is incompatible, or another **static configuration** contract fails, that is an edition
+configuration failure even though Sailens itself supports a zero-pipeline state.
+
+Static configuration failure has build-type-specific handling:
+
+- **debug/development:** fail fast so packaging/wiring mistakes are discovered immediately;
+- **release:** enter an explicit fatal configuration state instead of crashing/restarting. The state
+  must be accessible and must actively signal the failure through an available non-visual channel
+  at least once; if speech is unavailable, haptics are the fallback.
+
+A pipeline may still pass preflight and fail when the real session initializes on a particular
+device (for example a GPU delegate or output-buffer allocation fails). That is a **runtime failure**,
+not a contradiction of Available. Guidance keeps the existing user-visible, retryable
+analysis-start-failed path; Describe follows the equivalent request/runtime error path.
+
+An optional but statically unavailable pipeline is not presented as a dead control. The shell either
+hides it or presents an explicit edition-level explanation outside the normal action path.
 
 ## 6. Design decisions
 
@@ -289,7 +323,7 @@ This preserves the intent already documented in the VLM/ASR assistant plan.
 
 Describe remains independent of CameraX: another source can implement FrameSnapshotProvider later.
 
-### 6.2 Taxonomy and navigation semantics are separate and must prove compatibility
+### 6.2 Taxonomy and navigation semantics are separate; machine checks stop where evidence stops
 
 ClassMapper currently mixes:
 
@@ -301,8 +335,8 @@ It splits into:
 - **Taxonomy** in sailens-vision;
 - **NavigationSemantics** in sailens-guidance.
 
-Both carry a stable TaxonomyId and class count. A Guidance model binding validates them before
-analysis starts.
+Both carry a stable TaxonomyId and class count. A Guidance binding validates the **declared**
+taxonomy id and class count against NavigationSemantics during static preflight.
 
 ~~~kotlin
 @JvmInline
@@ -319,11 +353,21 @@ interface NavigationSemantics {
 }
 ~~~
 
-If model metadata contains labels, validate the exact label order as well. If it does not, the
-edition must explicitly declare the taxonomy and keep a contract test beside the model.
+This does **not** prove that an opaque model's output channels really have the declared meaning.
+If trustworthy model metadata contains labels, validate the exact label order too. If it does not,
+channel semantics/order remain a manual release gate. A model with the right shape and class count
+can otherwise run successfully while assigning the wrong meaning to classes.
 
-There is no neutral NavigationSemantics fallback. Missing or incompatible semantics makes Guidance
-unavailable. If the edition declares Guidance required, that becomes an edition startup failure.
+The model-adjacent contract test therefore checks only what is machine-observable: shape, dtype,
+layout, class count, declared taxonomy binding and any labels that actually exist in metadata. It
+must never claim to verify semantic order when labels are absent. An edition may additionally pin a
+human-verified taxonomy declaration to the exact model hash so replacing the weight invalidates that
+manual verification.
+
+There is no neutral NavigationSemantics fallback. Missing or machine-detectably incompatible
+semantics makes Guidance statically unavailable. If the edition declares Guidance required, that is
+a static configuration failure. A wrong channel order that cannot be observed from metadata remains
+a release-process safety failure, not something startup validation can magically detect.
 
 ### 6.3 Detection output stays generic
 
@@ -527,20 +571,27 @@ Every step ends with A building, B building against the current A commit, and te
 | # | Step | Device/native check |
 |---|---|---|
 | 1 | Convert JNI to RegisterNatives **and add native contract coverage** before package moves | yes |
-| 2 | Extract sailens-shell; move root Compose/navigation/settings/design/Guidance UI into it; keep Application/MainActivity in app | app launch |
+| 2 | Extract sailens-shell; move root Compose/navigation/settings/design/Guidance UI **and camera permission rationale UI** into it; refactor camera to expose only permission state/request primitives so its :ux dependency is gone; keep Application/MainActivity in app | app launch |
 | 3 | Convert B into a thin composite-build consumer; retire fork-only guardrails in B, not A's append-only history rule | B build/launch |
-| 4 | Extract sailens-core and sailens-camera; introduce FrameSource + FrameSnapshotProvider | camera session |
+| 4 | Extract sailens-core and sailens-camera; introduce FrameSource + FrameSnapshotProvider; verify camera remains independent of shell/design UI | camera session |
 | 5 | Extract sailens-runtime; split native runtime preprocessing | yes |
 | 6 | Extract sailens-vision; split Taxonomy / NavigationSemantics with TaxonomyId validation; split vision native code | yes |
 | 7 | Move navigation logic into sailens-guidance; move Guidance presentation only into shell; split Guidance native code | yes |
 | 8 | Extract sailens-output and make arbitration primitives explicit while preserving current behaviour | yes |
 | 9 | Extract sailens-vlm and sailens-describe; move prompt/snapshot/scheduling policy into Describe | targeted tests |
-| 10 | **Behaviour change:** implement configured/available/expected capability model and legal zero-pipeline state | yes |
+| 10 | **Behaviour change:** implement configured/expected/static-availability/runtime-state model, fatal static-configuration handling and legal zero-pipeline state | yes |
 | 11 | Update README, AGENTS.md, models.md asset path, B documentation and architecture references | — |
 
 sailens-vlm is the one extraction that may be deferred if it would initially contain only trivial
-interfaces and no concrete implementation. The logical boundary is fixed; the Gradle boundary can be
-created when it has real dependency/API value.
+interfaces and no concrete implementation. While deferred, the VLM contract lives as a package
+inside sailens-describe and sailens-describe temporarily depends directly on sailens-runtime.
+The existing LiteRtVlmEngine is the natural starting point for the future sailens-vlm-litert
+implementation module.
+
+This deferral ends **before** a heavyweight concrete VLM runtime/native dependency is integrated:
+contract and concrete implementation must be physically separated first so Guidance-only editions
+do not inherit VLM runtime cost. The logical boundary is fixed even while its Gradle boundary is
+temporarily deferred.
 
 ## 12. Verification
 
@@ -551,17 +602,43 @@ created when it has real dependency/API value.
 - The count must not fall without an explicit documented reason.
 - Count preservation is only a regression guardrail; it is not proof of behavioural equivalence.
 
-### 12.2 Native contract tests
+### 12.2 Native verification has three layers
 
-Before native package movement, add instrumentation/native contract coverage that:
+The current code has 13 JNI entry points: 9 array-based kernels and 4 LiteRT TensorBuffer-handle
+paths. A cannot manufacture valid LiteRT handles without a real compiled model, so "invoke every JNI
+entry in A" is not a feasible step-1 exit condition. Verification is split by what can actually be
+proven:
 
-- loads every target native library;
-- proves every RegisterNatives binding;
-- invokes every native entry point at least once, including rarely used int8 paths;
-- exercises semantic and detection postprocessors with fixed synthetic tensors;
-- compares key outputs against the pre-refactor implementation where practical.
+**A. Binding coverage — required in A before package movement**
 
-A manual Guidance session alone is insufficient because it does not cover cold native paths.
+- load every target native library;
+- each JNI_OnLoad/RegisterNatives registration checks and propagates failure;
+- the registration tables cover all 13 Kotlin native declarations;
+- a wrong class name, method name or JNI signature makes library loading fail.
+
+This is the complete guard against the migration risk that motivated RegisterNatives: a renamed or
+missed binding cannot hide until a rare code path is executed.
+
+**B. Kernel behaviour — required in A**
+
+- invoke all 9 array-based native entries with deterministic synthetic inputs;
+- include the float and int8 array kernels;
+- exercise semantic, detection, YUV/quantization and connectivity behaviour as applicable;
+- compare key outputs against the pre-refactor implementation where practical.
+
+**C. Handle integration — model-backed**
+
+- in B, real packaged float models exercise the two float handle hot paths:
+  native_score and native_bbox_nms_float_handle;
+- preserve their performance red lines in §12.3;
+- the two int8 handle paths are an explicit known coverage gap until an edition supplies suitable
+  int8 model fixtures. Do not add third-party model weights to A merely to satisfy this refactor.
+
+If B later claims/supports int8 handle execution as a product path, model-backed integration coverage
+for those paths becomes a release gate for that edition.
+
+A manual Guidance session alone is still insufficient: it covers the current float hot paths but
+does not prove every binding or array kernel.
 
 ### 12.3 Performance red lines
 
@@ -608,7 +685,7 @@ The following are no longer open questions:
 7. **Host boundary:** Application/MainActivity stay in each app; shell provides reusable Compose and
    composition.
 8. **Frame contract:** Guidance consumes a stream; Describe consumes a freshness-bounded snapshot.
-9. **Semantics safety:** taxonomy identity/order compatibility is an explicit startup contract.
+9. **Semantics safety:** declared taxonomy id + class count are machine-checked during static preflight; label order is additionally checked only when trustworthy labels exist in metadata, otherwise channel order remains a manual release gate.
 10. **A history:** sailens-android/main remains append-only.
 
 The next design work should focus on implementation details inside these fixed boundaries rather than
