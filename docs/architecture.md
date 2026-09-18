@@ -1,338 +1,462 @@
 **English** | [简体中文](architecture.zh-CN.md)
 
-# Sailens architecture: the lens framework
+# Sailens architecture
 
-> Status: **proposal, under review.** Nothing in this document is implemented. It replaces the
-> current layer-first module structure and the fork-based A/B repository relationship.
+> Status: **proposal, reviewed and revised.** Nothing in this document is implemented yet. It
+> replaces the current layer-first module structure and the fork-based A/B repository relationship.
 
 ## 1. Summary
 
-Sailens is repositioned as **Smart AI Lens**: capture (camera today, voice later) → pipelines → AI
-results → output. Navigation assistance for blind and low-vision users is its first application, not
-its identity.
+Sailens is **Smart AI Lens**: capture (camera today, voice later) → pipelines → AI results → output.
+Navigation assistance for blind and low-vision users is its first application, not the identity of
+the reusable code.
 
-Two pipelines exist, and an app may contain either one or both:
+Two product pipelines exist:
 
-- **Guidance** — continuous. Semantic segmentation (+ optional detection) every frame, answering
-  "will I walk into something".
-- **Describe** — on demand. A vision-language model, answering "what is in front of me" when asked.
+- **Guidance** — continuous perception for navigation safety. Semantic segmentation is required;
+  detection is optional.
+- **Describe** — on demand. A vision-language model answers what is in front of the user or answers
+  a question about the current view.
 
-The code is reorganised around those two pipelines plus the infrastructure they share. The
-`sailens-yolo` repository stops being a fork of this one and becomes a thin app that **depends on**
-it through a Gradle composite build.
+The platform accepts all four product combinations:
+
+| Guidance | Describe | Valid |
+|---|---|---|
+| no | no | yes |
+| yes | no | yes |
+| no | yes | yes |
+| yes | yes | yes |
+
+Zero pipelines is a legitimate shell state. Whether a particular application edition is expected to
+provide one of them is a separate application-level contract.
+
+The code is reorganised around those two pipelines plus shared Sailens infrastructure. The
+sailens-yolo repository stops being a fork and becomes a thin application that depends on this
+repository through a Gradle composite build.
 
 ## 2. Goals and non-goals
 
-**Goals**
+### Goals
 
-- Replace fork-and-merge between the two repositories with an ordinary build dependency.
-- Make each pipeline independently usable, with shared infrastructure that belongs to neither.
-- Keep the licence boundary equal to the dependency graph.
-- Keep every performance property that exists today (listed in §6.3 and §6.7).
-- Leave the app working after every migration step.
+- Replace fork-and-merge between sailens-android and sailens-yolo with an ordinary dependency.
+- Organise code around stable product and runtime boundaries instead of horizontal Clean
+  Architecture layers.
+- Make Guidance and Describe independently configurable and independently available at runtime.
+- Keep heavy concrete runtimes optional so an application does not inherit a VLM runtime merely
+  because the shell knows that Describe exists.
+- Keep the licence boundary aligned with the dependency graph.
+- Preserve the performance properties listed in §6.5 and §6.9.
+- Keep A and B buildable after every migration step.
+- Make public library API explicit instead of exposing every Kotlin symbol by accident.
 
-**Non-goals** — explicitly out of scope for this refactor:
+### Non-goals
 
-- A generic pipeline graph, plugin discovery, or any configurable DAG. Guidance and describe have
-  fixed shapes; only their stage implementations vary, and interfaces + DI already handle that.
-- Publishing to Maven, or versioned artifacts of any kind.
-- Applications other than navigation assistance. No abstraction is shaped for a hypothetical one.
-- Excluding a pipeline at build time. Pipelines are pluggable at **runtime** (§6.1).
-- Voice / ASR input. The structure leaves room for it (§6.10); nothing is built.
-- A GPU arbitration policy between the pipelines. There is no VLM runtime yet (§6.7).
-- Behaviour changes. Every step is behaviour-preserving except step 10 (§11), which is marked.
+- A generic pipeline graph, plugin discovery system, or configurable DAG.
+- A generic AI-lens SDK shaped for hypothetical products.
+- Publishing to Maven or introducing artifact versioning.
+- Voice / ASR implementation in this refactor.
+- A final GPU arbitration policy before a real VLM runtime exists.
+- Turning every logical boundary into a Gradle module. A Gradle module is justified only when an
+  independent compile, dependency, test, native, or public-API boundary is useful.
+- Behaviour changes, except the explicit pipeline-availability behaviour in step 10.
 
 ## 3. Where the code is today
 
-Six modules, split by clean-architecture **layer**:
+The repository has six modules split primarily by technical layer:
 
-```text
+~~~text
 :domain         (no deps)
 :data           → :domain
 :camera         → :domain, :ux
 :presentation   → :camera, :domain, :ux
 :ux             (no deps)
 :app            → everything
-```
+~~~
 
-Measured against the two pipelines, the layers already *roughly* separate navigation logic from lens
-infrastructure — but the boundary items sit on the wrong side:
+This works for a single application, but the product has already evolved into two different
+pipelines. Several boundaries therefore sit on the wrong side:
 
-| Module | Size | What it mostly is |
-|---|---|---|
-| `:domain` | ~7,000 lines | ~70 % navigation logic (connectivity, events, cooldown, road safety, trace) |
-| `:data` | ~6,100 lines + 2,185 lines C++ | ~75 % generic lens runtime (LiteRT, accelerators, preprocessing, runners) |
-
-Things that look generic but are shaped by navigation:
-
-| Item | Why it is not generic |
+| Item | Problem |
 |---|---|
-| `ClassMapper` | Its methods are `isPassable`, `isRoad`, `isTrafficLight`, `toGroundType`, `toObstacleCategory` |
-| `FrameTrace` | Fields are `isBlocked`, `navigationPassableRatio`, `blockageConfidence`, … |
-| `ObstacleDetection` | Carries `category: ObstacleCategory`, a navigation classification, straight out of the runner |
-| `SegmentationOutput.analysisStats` | The sem runner's native pass already computes passable mask, road ratio, ground-type distribution |
-| `libsailens_ml.so` | One file mixes YUV preprocessing (generic) with connectivity statistics (navigation) |
-| `:camera` | Depends on `:domain` for four frame types, so reusing capture drags in the whole navigation core |
+| ClassMapper | mixes dataset facts with navigation judgements |
+| FrameTrace | navigation-specific but placed in a broad domain layer |
+| ObstacleDetection.category | a Guidance classification leaks out of the detector |
+| SegmentationOutput.analysisStats | generic inference output already carries navigation statistics |
+| libsailens_ml.so | generic preprocessing and navigation kernels share one native library |
+| :camera → :domain | reusing capture pulls in the whole navigation domain |
+| :presentation | Guidance UI, shared output devices, navigation shell and future Describe UI are mixed |
 
-And one mechanical hazard: all 13 native functions (5 Kotlin classes) are bound **by static name**
-(`Java_com_sailens_data_source_ml_*`); `RegisterNatives` is used zero times. Moving any of those
-classes to another package fails at **runtime**, not at build time.
+There is also a JNI migration hazard: the current native functions are bound by static Java symbol
+names. Moving a Kotlin class can therefore compile successfully and fail only when a native method is
+first called.
 
-Baseline for the migration: **171 unit tests** (`:domain` 129, `:presentation` 17, `:data` 14,
-`:app` 9, `:camera` 1, `:ux` 1).
+Migration baseline: **171 unit tests**. Tests move with their code and the total must not silently
+decrease.
 
 ## 4. Target structure
 
-### 4.1 Modules
+### 4.1 Gradle modules
 
-| Module | Responsibility | Comes from |
-|---|---|---|
-| `lens-core` | Frame types (`ImageFrame`, YUV planes), geometry, `BinaryMask`, `MlRuntimeInfo`, `LogService` + `FileLogService` | `:domain` model/util, `:data` service |
-| `lens-camera` | CameraX capture → `ImageFrame` stream, preview composable, permission flow | `:camera` |
-| `lens-runtime` | LiteRT sessions, accelerator selection, model sources, metadata reader, YUV→tensor native preprocessing, the shared preprocessing cache, hardware profile detection | `:data` source/ml + session, `:app` `DeviceHardwareProfileProvider` |
-| `lens-vision` | Segmentation runner (→ class map), detection runner (→ boxes with class ids), dataset taxonomies (label lists), default postprocessors | `:data` semantic + obstacle, mapper label tables |
-| `lens-vlm` | VLM engine seam: frame + prompt → streamed text | `:data` source/ml/vlm |
-| `lens-output` | TTS engine, audio focus, screen-reader detection, haptic primitive, speech router, clause buffering | `:presentation` device/* |
-| `guidance` | Everything navigational: `NavigationSemantics`, fused sem kernel, connectivity, road safety, events, cooldown, tracking, depth, sensors, trace/replay | the rest of `:domain` and `:data` |
-| `guidance-ui` | Live screen, guidance ViewModel, haptic vocabulary, event text, overlays, guidance settings sections, debug trace screens | `:presentation` |
-| `describe` | Scene-description pipeline: prompt, use case, controller. **No UI** until a VLM runtime exists | `DescribeSceneUseCase`, the describe half of `SceneAnalysisViewModel` |
-| `ux` | Design system, plus the about / open-source-licences screens (they are generic lists) | `:ux`, `:presentation` about/* |
-| `shell` | The whole app as a library: activity, navigation, settings composition, DI aggregation, runtime profile | `:app` (except the application module itself), `:presentation` navigation |
-| `app` | A's reference application: bring-your-own-model, zero weights. Only identity and config | `:app` |
+The initial target is **9 library modules + 1 reference app**:
 
-### 4.2 Dependencies
+| Module | Responsibility |
+|---|---|
+| sailens-core | smallest shared contracts and value types: ImageFrame/YUV planes, geometry, BinaryMask, MlRuntimeInfo, LogService |
+| sailens-camera | CameraX capture, continuous frame source, bounded current-frame snapshot, preview composable, permission flow |
+| sailens-runtime | LiteRT sessions, accelerator selection, model sources, metadata, YUV→tensor preprocessing, shared preprocessing cache, hardware profile, resource-arbitration mechanism |
+| sailens-vision | segmentation and detection runners, dataset taxonomies, default postprocessors |
+| sailens-vlm | VLM engine contract: frame + complete prompt → streamed text; no product prompt policy |
+| sailens-output | TTS, audio focus, screen-reader detection, haptic primitive, speech-routing mechanism, clause buffering |
+| sailens-guidance | navigation logic: NavigationSemantics, fused semantic kernel, connectivity, safety analysis, events, cooldown, tracking, depth, sensors, trace/replay |
+| sailens-describe | Describe product logic: prompt policy, snapshot freshness, request scheduling, use cases/controller |
+| sailens-shell | reusable Sailens presentation and composition: root Compose, navigation, settings, design system, Guidance UI, future Describe UI, diagnostics/about, DI aggregation |
+| app | A's thin Android host: Application, MainActivity, manifest/window ownership, identity and edition config |
 
-```text
-app / B / C ──► shell
-shell       ──► guidance-ui, describe, lens-camera, lens-output, ux
-guidance-ui ──► guidance, lens-output, lens-camera, ux
-guidance    ──► lens-vision, lens-runtime, lens-core
-describe    ──► lens-vlm, lens-output, lens-core
-lens-vision ──► lens-runtime, lens-core
-lens-vlm    ──► lens-runtime, lens-core
-lens-camera ──► lens-core, ux
-lens-output ──► lens-core
-lens-runtime──► lens-core
-lens-core, ux  (no project deps)
-```
+There is **no separate sailens-ux or sailens-guidance-ui Gradle module**. Their boundaries remain as
+packages inside sailens-shell.
+
+Reason: those modules did not earn independent compile/dependency/API boundaries. UI, design system,
+settings and navigation change together as one reusable application presentation shell. The
+Guidance algorithm boundary remains separate because it has substantial safety logic, tests and a
+different change axis.
+
+### 4.2 Dependency graph
+
+~~~text
+app / B / C ─────────────► sailens-shell
+                              │
+                              ├──► sailens-guidance
+                              ├──► sailens-describe
+                              ├──► sailens-camera
+                              └──► sailens-output
+
+sailens-guidance ─────────► sailens-vision ───► sailens-runtime ───► sailens-core
+        │                         │                     │
+        └─────────────────────────┴─────────────────────┘
+
+sailens-describe ─────────► sailens-vlm ─────► sailens-runtime
+        └────────────────────────────────────► sailens-core
+
+sailens-camera ───────────────────────────────► sailens-core
+sailens-output ───────────────────────────────► sailens-core
+~~~
 
 Rules:
 
-1. Depend downward only.
-2. **No edge between the pipelines.** `guidance` never sees `describe`, and vice versa. Everything
-   they must coordinate on (speech priority, GPU) lives below both of them.
-3. No `lens-*` module depends on `guidance`, `describe`, or `shell`.
-4. `describe` does not depend on `lens-camera`: it takes a `Flow<ImageFrame>` from whoever wires it,
-   so any frame source works.
+1. Dependencies point downward.
+2. sailens-guidance and sailens-describe never depend on one another.
+3. sailens-guidance remains UI-free.
+4. sailens-shell owns presentation policy and application composition, but not concrete model
+   runtimes.
+5. sailens-runtime provides resource-arbitration **mechanism**, not Guidance/Describe product policy.
+6. No shared infrastructure module may depend on sailens-guidance, sailens-describe or sailens-shell.
 
-### 4.3 Packages
+A future concrete LiteRT-LM implementation should normally be a separate module such as
+sailens-vlm-litert. An edition that does not use it should not pay its binary/native dependency cost.
 
-`com.sailens.lens.{core,camera,runtime,vision,vlm,output}`, `com.sailens.guidance`,
-`com.sailens.guidance.ui`, `com.sailens.describe`, `com.sailens.ux`, `com.sailens.shell`. Modules are
-flat top-level directories (`lens-core/`, …), not nested Gradle paths.
+### 4.3 Packages and coordinates
 
-Library modules enable Kotlin `explicitApi()`. Today everything is public by default; once B depends
-on these modules, every public symbol is something B can break on.
+Gradle module names use the full Sailens prefix because these are Sailens framework modules, not a
+generic Lens SDK.
 
-## 5. What A, B and C become
+Packages do not repeat the product name:
 
-**A (`sailens-android`, Apache-2.0)** — all library modules plus `app`, the bring-your-own-model
-reference app. Still zero weights. BYO weights move from `data/src/main/assets/` to
-`app/src/main/assets/` (still git-ignored); assets are APK-wide, so the runners find them unchanged.
+| Module | Package root |
+|---|---|
+| sailens-core | com.sailens.core |
+| sailens-camera | com.sailens.camera |
+| sailens-runtime | com.sailens.runtime |
+| sailens-vision | com.sailens.vision |
+| sailens-vlm | com.sailens.vlm |
+| sailens-output | com.sailens.output |
+| sailens-guidance | com.sailens.guidance |
+| sailens-describe | com.sailens.describe |
+| sailens-shell | com.sailens.shell |
 
-**B (`sailens-yolo`, AGPL-3.0)** — a single application module on top of `shell`. It has no
-YOLO-specific code, because nothing about YOLO needs any: the runners are driven by model metadata and
-the output layouts are generic. Its only Kotlin is its `Application`, which hands `shell` the things
-`shell` cannot read for itself — the identity from B's own `BuildConfig`, and which
-`NavigationSemantics` to bind.
+Composite-build coordinates follow the module names, for example
+com.sailens:sailens-shell.
 
-```text
-sailens-yolo/
-├── sailens/                 git submodule → sailens-android, pinned commit
-├── settings.gradle.kts      includeBuild("sailens")
-├── app/
-│   ├── build.gradle.kts     applicationId com.sailens.yolo, APP_LICENSE, APP_SOURCE_URL → shell
-│   └── src/
-│       ├── main/kotlin/     YoloApplication: AppInfo + OSS list + semantics selection → shell
-│       ├── main/assets/     sem.tflite, det.tflite (Git LFS)
-│       ├── main/res/        app_name
-│       └── test/            TfliteModelMetadataReaderTest (contract guard)
-├── LICENSE  NOTICE  README*  YOLO_EDITION_NOTICE*  docs/yolo-models*
-```
+Reusable library modules enable Kotlin explicit API mode. Internal implementation symbols stay
+internal unless another module genuinely needs them.
 
-B *may* own YOLO-specific code when it needs some — a new decode head, say. The difference from
-today is that it can, because it is an ordinary dependent project, not a fork that must stay
-code-identical.
+### 4.4 sailens-shell package structure
 
-**C (hypothetical)** — same shape: weights, a `VlmRuntimeFactory` wiring, and a `NavigationSemantics`
-binding if its detector uses a different taxonomy. A LiteRT-LM runtime implementation itself belongs
-in A's `lens-vlm` (Apache, per the Gemma 4 E2B decision); C supplies the model.
+The UI consolidation is a Gradle consolidation, not a loss of logical boundaries:
+
+~~~text
+sailens-shell/
+└── com/sailens/shell/
+    ├── app/
+    ├── navigation/
+    ├── design/
+    │   ├── theme/
+    │   └── components/
+    ├── guidance/
+    │   ├── screen/
+    │   ├── overlay/
+    │   └── settings/
+    ├── describe/
+    ├── settings/
+    ├── diagnostics/
+    ├── about/
+    └── di/
+~~~
+
+The host application still owns Application, MainActivity and its manifest/window lifecycle. The
+shell exposes reusable composition such as SailensRoot(), navigation entries and Koin modules.
+
+## 5. Application editions and capability model
+
+### 5.1 A, B and C
+
+**A — sailens-android, Apache-2.0**
+
+All reusable Sailens modules plus the thin reference app. It remains zero-weights and supports
+bring-your-own-model. BYO weights move from data/src/main/assets to app/src/main/assets.
+
+A may legitimately start with zero available pipelines and show a clear zero-pipeline state that
+points to model/runtime setup documentation.
+
+**B — sailens-yolo, AGPL-3.0**
+
+A thin application over sailens-shell. It pins A as a git submodule and consumes it through a
+composite build. B owns its model weights, identity, product expectations and any genuinely
+YOLO-specific decoder/runtime code that becomes necessary.
+
+B is no longer required to stay code-identical to A.
+
+**C — future edition**
+
+May provide Guidance, Describe, both, or neither. A concrete VLM runtime is supplied explicitly by
+the edition if needed.
+
+### 5.2 Configured, available and expected are different concepts
+
+The platform must not conflate these:
+
+1. **Configured** — the edition intends to expose a pipeline.
+2. **Available** — the required runtime/model/contracts are healthy now.
+3. **Expected** — the edition promises that capability as part of its product.
+
+A representative shape is:
+
+~~~kotlin
+data class SailensAppSpec(
+    val guidance: GuidanceSpec? = null,
+    val describe: DescribeSpec? = null,
+    val expectations: CapabilityExpectations = CapabilityExpectations(),
+)
+
+sealed interface PipelineAvailability {
+    data object NotConfigured : PipelineAvailability
+    data object Available : PipelineAvailability
+    data class Unavailable(val reason: Reason) : PipelineAvailability
+}
+~~~
+
+A null pipeline spec means NotConfigured. All-null is valid.
+
+Application expectations are edition-level validation, not a framework restriction. For example,
+sailens-yolo may declare Guidance required. If its packaged semantic model is missing or invalid,
+that is a B startup/configuration failure even though Sailens itself supports a zero-pipeline state.
+
+An optional but unavailable pipeline is not presented as a dead control. The shell either hides it
+or presents an explicit edition-level explanation outside the normal action path.
 
 ## 6. Design decisions
 
-### 6.1 Pipelines are pluggable at runtime
+### 6.1 Continuous frames and on-demand snapshots are separate contracts
 
-Every app built on `shell` compiles both pipelines in. Each reports whether it can run:
+Guidance consumes a continuous stream. Describe is on demand and must not own or collect a frame
+stream merely to obtain the current view.
 
-| Pipeline | Available when |
-|---|---|
-| guidance | a sem model resolves **and** a `NavigationSemantics` is bound (det optional, as today) |
-| describe | a `VlmRuntimeFactory` reports a runtime and model |
+sailens-camera therefore exposes two concepts:
 
-An unavailable pipeline is **not offered** — hidden, not disabled. A control that can never respond
-is one more dead focus stop for a screen-reader user, and "I pressed it and nothing happened" is
-indistinguishable from "nothing is ahead".
+~~~kotlin
+interface FrameSource {
+    val frames: Flow<ImageFrame>
+}
 
-This covers every combination with one shell: A with no weights (neither available — the app says so
-and points at `docs/models.md`), B (guidance only), C (both), a VLM-only app (describe only).
+interface FrameSnapshotProvider {
+    fun currentFrame(maxAgeMs: Long): ImageFrame?
+}
+~~~
 
-It also dissolves the previously deferred "make sem optional" refactor. Guidance still **requires**
-sem. What becomes optional is the guidance pipeline itself.
+Both can be backed by the same camera session.
 
-Describe stays headless: per the earlier decision, no UI entry point exists until a VLM runtime does.
+Describe rejects a stale snapshot. It must never silently describe a frame from several seconds ago.
+This preserves the intent already documented in the VLM/ASR assistant plan.
 
-### 6.2 `ClassMapper` splits into `Taxonomy` and `NavigationSemantics`
+Describe remains independent of CameraX: another source can implement FrameSnapshotProvider later.
 
-`ClassMapper` mixes a dataset fact with a navigation judgement:
+### 6.2 Taxonomy and navigation semantics are separate and must prove compatibility
 
-- **`Taxonomy`** (`lens-vision`) — class count and label names in model output order. A fact about
-  the dataset. `CityscapesTaxonomy`, `CocoTaxonomy`.
-- **`NavigationSemantics`** (`guidance`) — per-class tables: passable, obstacle, road, traffic light,
-  ground type, obstacle category. A decision about walking. `CityscapesNavigationSemantics`,
-  `CocoNavigationSemantics`.
+ClassMapper currently mixes:
 
-Tables, not per-call methods, because tables are what the native kernel consumes: today's
-`SemanticClassLookup` is exactly `classCount` + `passable` + `obstacle` + `road` + `trafficLight` +
-`groundType` arrays.
+- dataset facts: class count, output order, labels;
+- Guidance policy: passable, obstacle, road, traffic light, ground type, obstacle category.
 
-The Cityscapes and COCO semantics stay in A. Cityscapes is a dataset taxonomy, not a YOLO one; any
-Cityscapes-trained sem model needs it, including a BYO model in A (`docs/models.md` already fixes the
-BYO contract at Cityscapes trainId + COCO 80). B selects them rather than owning them — one line in
-its `Application`.
+It splits into:
 
-**Semantics are always bound explicitly, and there is no neutral fallback. Missing semantics is a
-startup error.** A neutral mapping is not safe, it is maximally unsafe. With every class non-passable
-the mask is empty, and `ConnectivityChecker` computes:
+- **Taxonomy** in sailens-vision;
+- **NavigationSemantics** in sailens-guidance.
 
-```text
-verticalReachRatio = 0, floodReachRatio = 0, widthRetentionP25 = 0
-score = 0.35 + 0.35 + 0.30 = 1.0    →  blockageConfidence 1.0  →  SEVERE  →  CRITICAL
-```
+Both carry a stable TaxonomyId and class count. A Guidance model binding validates them before
+analysis starts.
 
-That clears `MIN_HARD_BLOCKED_CONFIDENCE` (0.75) and all three hard-blocked reach gates. The app would
-announce a top-priority "path blocked" on the first frame and stay latched there.
+~~~kotlin
+@JvmInline
+value class TaxonomyId(val value: String)
 
-### 6.3 Segmentation keeps its single native pass
+interface Taxonomy {
+    val id: TaxonomyId
+    val classCount: Int
+}
 
-The documented red line for sem is `postprocessBackend = native_score` with `outputReadTimeMs ≈ 0`.
-It holds because one native pass reads the LiteRT output buffer **by handle** (zero copy) and computes
-argmax *and* the navigation statistics together. Splitting "generic runner" from "navigation
-statistics" naively means two passes over a 640×640×19 tensor.
+interface NavigationSemantics {
+    val taxonomyId: TaxonomyId
+    val classCount: Int
+}
+~~~
 
-So the runner takes an injected postprocessor:
+If model metadata contains labels, validate the exact label order as well. If it does not, the
+edition must explicitly declare the taxonomy and keep a contract test beside the model.
 
-```text
-lens-vision   SegmentationRunner<R>(…, postprocessor: SemanticPostprocessor<R>)
-lens-vision   ArgmaxPostprocessor : SemanticPostprocessor<SegmentationMask>          (default)
-guidance      NavigationScorePostprocessor : SemanticPostprocessor<SegmentationAnalysisStats>
-```
+There is no neutral NavigationSemantics fallback. Missing or incompatible semantics makes Guidance
+unavailable. If the edition declares Guidance required, that becomes an edition startup failure.
 
-`NavigationScorePostprocessor` is today's `NativeSemanticScorePostprocessor`, moved. The seam already
-exists — that postprocessor is injected through DI now. One pass, same as today.
+### 6.3 Detection output stays generic
 
-### 6.4 Detections carry class ids; categories belong to guidance
+Detection runners emit class id, optional label, confidence and box. ObstacleCategory belongs to
+Guidance and is resolved through NavigationSemantics after inference.
 
-`ObstacleDetection` loses `category`. The detection runner emits class id, label, confidence and box;
-`guidance` maps class id → `ObstacleCategory` through `NavigationSemantics`. NMS, letterbox geometry
-and layout decoding stay in `lens-vision`. The det red line
-(`postprocessBackend = native_bbox_nms_float_handle`) is unaffected: the category lookup is a table
-read per surviving box.
+NMS, tensor-layout decoding and letterbox geometry stay in sailens-vision.
 
-### 6.5 One speech router, shared by both pipelines
+### 6.4 Describe owns prompts and request policy
 
-When both pipelines exist they speak through one channel, and the rules for sharing it live in
-`lens-output`, below both:
+sailens-vlm receives a complete prompt and returns streamed text. It does not know that the user is
+blind, that Sailens is a navigation product, or how stale a frame may be.
 
-1. **Channel exclusivity** — app TTS *or* the screen reader, decided once, as today.
-2. **Priority** — a guidance alert pre-empts anything describe is saying. Describe never pre-empts
-   guidance. Today this is implicit (`speak` flushes, `speakSystemNotice` queues); it becomes an
-   explicit `ALERT` / `INFORMATION` priority on the router.
-3. **Screen-reader announcements** — the router exposes them as a flow; `shell` collects it in one
-   place and performs the announcement (it needs a `View`). Today `LiveAnalysisScreen` does this for
-   guidance only. One collector also means the deprecated `announceForAccessibility` has one call
-   site to replace.
+sailens-describe owns:
 
-The haptic vocabulary splits by concern. The one symbol about the output channel itself —
-`SPEECH_UNAVAILABLE` — goes to `lens-output`, because a describe-only app needs "speech is dead" too.
-Everything else is about guidance and stays in `guidance-ui`: the direction symbols, `BLOCKED`,
-`NOTICE`, `SENSOR_FAILURE` (the camera cannot see — detected by guidance's frame-quality analysis) and
-`INTERRUPTED` (continuous protection was lost — describe has none to lose). The Phase B blind test
-still validates the union as one set: splitting ownership does not split the confusion matrix, and
-`SPEECH_UNAVAILABLE`'s documented contrast with `SENSOR_FAILURE` still has to hold.
+- system/user prompt assembly;
+- current-frame freshness;
+- single-flight/cancellation;
+- quick-describe versus question semantics;
+- result validity when generation finishes late.
 
-### 6.6 The prompt belongs to describe, not the engine
+A concrete runtime such as LiteRT-LM belongs in a separate implementation module when it exists.
 
-`VlmModelConfig` carries `"你是盲人出行助手…"`. That is application text. `lens-vlm` takes a complete
-prompt; `describe` owns the system prompt and assembles it. `SceneDescriber` becomes a generic
-`VisionLanguageModel` (frame + prompt → `Flow` of chunks); the streaming contract, `trySendBlocking`,
-`timeToFirstTokenMs` and `SpeechClauseBuffer` are unchanged.
+### 6.5 Segmentation keeps one native pass
 
-### 6.7 `lens-runtime` owns what the pipelines contend for
+The current semantic performance red line remains:
 
-- **The preprocessing cache.** sem and det reuse one YUV→tensor conversion per frame through
-  `InputPreprocessCache`. It stays a single shared instance owned by `lens-runtime`, never one per
-  runner.
-- **GPU arbitration (future).** VLM and YOLO contend for the GPU when both pipelines exist.
-  `lens-runtime` is where the policy will live. It is not built now — there is no VLM runtime — but
-  the safety constraint is recorded here: if guidance pauses while describe runs, the pause is a loss
-  of protection and must be signalled through a non-visual channel.
+- postprocessBackend = native_score
+- outputReadTimeMs approximately 0
 
-### 6.8 JNI: `RegisterNatives`, three native libraries
+The native path reads the LiteRT output buffer by handle and computes argmax plus Guidance statistics
+in one pass. The refactor must not introduce a second scan over the full semantic tensor merely to
+make the module diagram cleaner.
 
-Each library registers its own natives in `JNI_OnLoad`:
+The seam stays generic:
 
-| Library | Module | Functions |
+~~~text
+sailens-vision    SegmentationRunner<R>(..., SemanticPostprocessor<R>)
+sailens-vision    ArgmaxPostprocessor
+sailens-guidance  NavigationScorePostprocessor
+~~~
+
+NavigationScorePostprocessor is the moved form of the current fused Guidance postprocessor.
+
+### 6.6 Output arbitration: mechanism below, product policy above
+
+sailens-output provides shared output mechanisms:
+
+- TTS and audio focus;
+- screen-reader channel handling;
+- haptic primitive;
+- priority/preemption primitives;
+- clause buffering;
+- announcement flow.
+
+It must not know what Guidance or Describe are.
+
+The product policy that a Guidance safety alert outranks Describe information belongs in
+sailens-shell / edition composition. Guidance emits typed events/urgency; Describe emits information
+results; the shell maps them onto output priorities.
+
+Screen-reader announcements have one collector in sailens-shell because the actual Android View
+belongs to presentation.
+
+Guidance-specific haptic vocabulary stays in the shell's Guidance presentation package.
+SPEECH_UNAVAILABLE may remain a shared output-level signal because it describes the output channel,
+not navigation semantics.
+
+### 6.7 sailens-core stays deliberately small
+
+sailens-core is not a new miscellaneous domain module.
+
+It contains only stable types/contracts needed by multiple lower modules. In particular:
+
+- LogService interface may live in sailens-core.
+- FileLogService does **not**. It depends on Android Context/files and is an application-platform
+  implementation; initially it belongs in sailens-shell composition.
+- Trace/replay remains in sailens-guidance until a second real consumer exists.
+- Sensors, depth, Stabilizer and FrameQualityAnalyzer remain in sailens-guidance for the same reason.
+
+### 6.8 Shared preprocessing cache
+
+Semantic and detection inference reuse one same-frame YUV→tensor conversion through
+InputPreprocessCache. The cache remains a single shared runtime instance, not one cache per runner.
+
+This belongs in sailens-runtime.
+
+### 6.9 Runtime resource arbitration is mechanism, not pipeline policy
+
+A future VLM and realtime vision models may contend for GPU/NPU resources.
+
+sailens-runtime may provide a neutral resource coordinator such as acquire/release with priority and
+preemptibility. It must not contain rules named after Guidance or Describe.
+
+Which work is safety-critical and what user feedback is required when Guidance protection pauses are
+higher-level product decisions. If Guidance is paused for Describe, that loss of protection must be
+communicated through a non-visual channel.
+
+### 6.10 JNI: RegisterNatives and per-module native libraries
+
+Move away from static Java JNI symbol names before package movement.
+
+Target native libraries:
+
+| Library | Module | Responsibility |
 |---|---|---|
-| `libsailens_runtime.so` | `lens-runtime` | YUV preprocessing (3) |
-| `libsailens_vision.so` | `lens-vision` | obstacle postprocessing (4), semantic argmax (1) |
-| `libsailens_guidance.so` | `guidance` | fused navigation score kernel (4), connectivity statistics (1) |
+| libsailens_runtime.so | sailens-runtime | YUV preprocessing |
+| libsailens_vision.so | sailens-vision | generic semantic argmax and detection postprocessing |
+| libsailens_guidance.so | sailens-guidance | fused Guidance semantic scoring and connectivity statistics |
 
-Why `RegisterNatives` is step 1: a missed rename then fails at library load, on first launch. With
-static names it fails on the **first call** — and some of these functions are on paths almost never
-exercised (the int8 postprocessors; the shipped models are float16). A missed rename there would ship.
-Keep rules are still needed: `FindClass` looks up class names.
+Each library registers its own methods in JNI_OnLoad. Keep rules are still required for classes
+resolved through FindClass.
 
-Why per-module libraries rather than one: with `RegisterNatives`, `JNI_OnLoad` must find every class
-it registers. One shared library in `lens-runtime` would have to know guidance's class names — an
-inverted dependency.
+A shared native library in sailens-runtime must not register Guidance classes because that would
+invert the module dependency.
 
-The zero-copy handle path resolves LiteRT's buffer lock/unlock with `dlsym` at runtime (today's
-`LiteRtApi` helper); nothing links against LiteRT at build time. That helper becomes a small header in
-`lens-runtime`, included by path from the other two modules' CMake. Same repository, so no prefab.
+The LiteRT zero-copy helper remains a small runtime-owned native header/helper used by the vision and
+Guidance CMake builds without introducing an inverse Kotlin/Gradle dependency.
 
-### 6.9 Configuration
+### 6.11 Configuration
 
-Each module keeps depending only on its own config type — already the pattern
-(`ProfileBindingsModule` fans `SailensRuntimeProfile` out into per-layer configs). The profile splits
-accordingly: hardware detection → `lens-runtime`; per-module defaults → each module; tier selection
-and composition → `shell`. Apps pass identity (`AppInfo`, OSS list) into `shell`; `shell` never reads
-an app's `BuildConfig`.
+Each lower module owns its own config type. Hardware detection belongs in sailens-runtime. Per-module
+defaults belong with their modules. Edition/tier composition belongs in sailens-shell and the host
+application.
 
-### 6.10 What stays in guidance until a second consumer exists
-
-Trace/replay, depth, device sensors, `Stabilizer`, `FrameQualityAnalyzer`: only guidance uses them.
-Some are generic in form, but moving them down now would be guessing at a second consumer's needs.
-They move when one appears.
-
-Voice input will be a new source module (`lens-audio`) beside `lens-camera`, consumed by `describe`
-for spoken questions. Nothing in this structure has to change to add it.
+sailens-shell never reads another application's BuildConfig directly. The host passes AppInfo,
+product capability specs, diagnostics flags and OSS metadata explicitly.
 
 ## 7. Development setup: composite build, no Maven
 
-B pins A as a git submodule and includes it as a Gradle composite build:
+sailens-yolo pins sailens-android as a git submodule and includes it as a Gradle composite build.
 
-```kotlin
-// sailens-yolo/settings.gradle.kts
+~~~kotlin
 includeBuild("sailens")
 
 dependencyResolutionManagement {
@@ -340,86 +464,152 @@ dependencyResolutionManagement {
         create("libs") { from(files("sailens/gradle/libs.versions.toml")) }
     }
 }
-```
+~~~
 
-- **No publishing, no version numbers.** B's `implementation("com.sailens:shell")` resolves to A's
-  project through dependency substitution; A's modules only need `group = "com.sailens"` for the
-  coordinates to match.
-- **One version catalog.** B reads A's; composite builds need consistent AGP and Kotlin versions.
-- **Day to day:** develop A in its own checkout; in B, `git submodule update --remote` and commit the
-  new pointer. For tight iteration, edit inside B's submodule directly — it is a full clone of A.
-- **AGPL corresponding source for free:** a B release tag plus the submodule commit it pins is the
-  exact source of that build.
+B consumes coordinates such as:
 
-Composite builds with Android libraries, resources, assets and CMake are standard, but step 3 (§11)
-validates this on the real project before any large move depends on it.
+~~~kotlin
+implementation("com.sailens:sailens-shell")
+~~~
 
-## 8. Licensing after the change
+No Maven publishing or version numbers are introduced. The submodule commit is the version boundary.
 
-- A: Apache-2.0, all modules, zero weights — unchanged.
-- B: AGPL-3.0 combined work = A's modules (Apache, pinned) + YOLO26 weights. Apache → AGPL
-  combination is permitted; A is unaffected.
-- The licence boundary is now the dependency graph. No git history is shared, so nothing has to guard
-  against AGPL history entering A.
-- **Unchanged and still open:** whether Cityscapes' non-commercial terms permit public distribution of
-  B's sem weights. This refactor does not touch that question.
+B intentionally consumes A's version catalog so AGP/Kotlin/tooling stay aligned during this phase.
+
+The composite build must be proven on the real Android resources, assets and CMake setup before most
+module movement depends on it.
+
+## 8. Licensing boundary
+
+- A remains Apache-2.0 and ships no model weights.
+- B remains AGPL-3.0 and owns its model weights and edition-specific notices.
+- The repository dependency graph, not shared source history, becomes the code boundary.
+- Cityscapes dataset/model distribution terms remain a separate unresolved release question; this
+  refactor does not decide them.
+
+A's published main history remains append-only. Removing the fork relationship is **not** a reason to
+rewrite sailens-android/main.
+
+B may choose fresh history when it stops being a fork, because that is a B repository migration
+decision.
 
 ## 9. What goes away
 
-In B: `.gitattributes` `merge=ours`, the `merge.ours.driver` setup, the `upstream` remote and its
-`DISABLED` push URL, the sync recipe, the AGENTS.md prefix convention, and the "zero code changes"
-invariant. B gets fresh history (force-push is acceptable for both repositories).
+From B:
 
-In A: the `data/src/main/assets` BYO convention (→ `app/src/main/assets`), `mlModelBinding`.
+- merge=ours fork machinery;
+- upstream sync recipe and disabled push remote;
+- the zero-code-difference invariant;
+- repository conventions whose only purpose was preserving a fork merge base.
 
-## 10. Where pending release items land
+From A:
+
+- data/src/main/assets as the BYO location;
+- the old mlModelBinding arrangement after its replacement is proven;
+- Gradle modules :domain, :data, :presentation and :ux after their code has migrated.
+
+There is no standalone sailens-ux or sailens-guidance-ui module in the target.
+
+## 10. Pending release items
 
 | Item | Home |
 |---|---|
-| Remove the unused `dataSync` foreground service (from `litert → ai-delivery → work-runtime`) | `lens-runtime` manifest, so every app inherits it — verify a library-level `tools:node="remove"` propagates |
-| Privacy policy | per app |
-| Safety disclaimer / first run | `shell`, text per pipeline |
-| Release signing | per app |
-| Cityscapes non-commercial decision | unchanged, B |
+| remove unused dataSync foreground service inherited through LiteRT dependencies | the lowest module whose manifest can safely own the removal; verify manifest propagation before fixing the final home |
+| privacy policy | per application |
+| safety disclaimer / first-run content | sailens-shell, selected by configured pipelines |
+| release signing | per application |
+| Cityscapes non-commercial/distribution decision | B / model-distribution decision |
 
 ## 11. Migration plan
 
-Every step ends with A building, B building against it, and tests green. Steps that touch native code
-also need an on-device launch and a guidance session.
+Every step ends with A building, B building against the current A commit, and tests green.
 
-| # | Step | Device check |
+| # | Step | Device/native check |
 |---|---|---|
-| 1 | JNI → `RegisterNatives`, no package moves yet | yes |
-| 2 | Extract `shell` from `:app`; `app` becomes identity + config only | — |
-| 3 | **B becomes a thin app on a composite build** (fresh history). Validates §7 early; from here B is a consumer, never a fork. Retire the "`main` is append-only" guardrail in both `AGENTS.md` files in the same step: it existed to protect the fork's merge-base, which this step removes | — |
-| 4 | Extract `lens-core`; `lens-camera` stops depending on the navigation core | — |
-| 5 | Extract `lens-runtime`; native split part 1 | yes |
-| 6 | Extract `lens-vision`; `Taxonomy` / `NavigationSemantics` split; postprocessor seam; native split part 2 | yes |
-| 7 | Rename the remainder to `guidance` / `guidance-ui`; native split part 3 | yes |
-| 8 | Extract `lens-output`; speech router with explicit priority | yes |
-| 9 | Extract `lens-vlm` and `describe`; prompt moves to `describe` | — |
-| 10 | **Behaviour change:** pipeline availability, hidden unavailable pipelines, zero-model state in A | yes |
-| 11 | Docs: README architecture, `AGENTS.md`, `models.md` asset path, B's README and `yolo-models.md` | — |
+| 1 | Convert JNI to RegisterNatives **and add native contract coverage** before package moves | yes |
+| 2 | Extract sailens-shell; move root Compose/navigation/settings/design/Guidance UI into it; keep Application/MainActivity in app | app launch |
+| 3 | Convert B into a thin composite-build consumer; retire fork-only guardrails in B, not A's append-only history rule | B build/launch |
+| 4 | Extract sailens-core and sailens-camera; introduce FrameSource + FrameSnapshotProvider | camera session |
+| 5 | Extract sailens-runtime; split native runtime preprocessing | yes |
+| 6 | Extract sailens-vision; split Taxonomy / NavigationSemantics with TaxonomyId validation; split vision native code | yes |
+| 7 | Move navigation logic into sailens-guidance; move Guidance presentation only into shell; split Guidance native code | yes |
+| 8 | Extract sailens-output and make arbitration primitives explicit while preserving current behaviour | yes |
+| 9 | Extract sailens-vlm and sailens-describe; move prompt/snapshot/scheduling policy into Describe | targeted tests |
+| 10 | **Behaviour change:** implement configured/available/expected capability model and legal zero-pipeline state | yes |
+| 11 | Update README, AGENTS.md, models.md asset path, B documentation and architecture references | — |
 
-Step 3 comes this early on purpose. It removes the fork immediately, and it proves the composite build
-before twelve modules depend on it. B touches only `shell`'s entry point (identity + selections), so
-the internal moves in steps 4–9 do not reach it; step 10 may change what that entry point takes.
+sailens-vlm is the one extraction that may be deferred if it would initially contain only trivial
+interfaces and no concrete implementation. The logical boundary is fixed; the Gradle boundary can be
+created when it has real dependency/API value.
 
 ## 12. Verification
 
-- **Tests are counted, not just run.** Baseline 171. Tests move with their code; the total after each
-  step must not drop without an explained reason.
-- **Performance red lines** (from `models.md`), checked on device after steps 5–7:
-  `sem: postprocessBackend = native_score, outputReadTimeMs ≈ 0` and
-  `det: postprocessBackend = native_bbox_nms_float_handle`.
-- **Before/after session traces** on the same device and route: blocked frames, event count, average
-  and p95 pipeline time. The trace tooling compares recorded sessions; it does not replay frames, so
-  this is a coarse check, not a golden-output test.
-- Native code has no JVM test coverage. Every native step is a device step.
+### 12.1 Test preservation
 
-## 13. Open questions
+- Baseline: 171 unit tests.
+- Tests move with code.
+- The count must not fall without an explicit documented reason.
+- Count preservation is only a regression guardrail; it is not proof of behavioural equivalence.
 
-1. **Names.** `lens-*`, `guidance`, `describe`, `shell` — and the `com.sailens.lens.*` package root.
-2. **Fewer modules?** Twelve replaces six. The two cheap merges, if wanted: `guidance` + `guidance-ui`
-   (loses a pure-logic boundary, nothing else), and `lens-vlm` + `describe` (the engine/prompt split
-   becomes package-level).
+### 12.2 Native contract tests
+
+Before native package movement, add instrumentation/native contract coverage that:
+
+- loads every target native library;
+- proves every RegisterNatives binding;
+- invokes every native entry point at least once, including rarely used int8 paths;
+- exercises semantic and detection postprocessors with fixed synthetic tensors;
+- compares key outputs against the pre-refactor implementation where practical.
+
+A manual Guidance session alone is insufficient because it does not cover cold native paths.
+
+### 12.3 Performance red lines
+
+After runtime/vision/Guidance native extraction, validate on the same target device:
+
+- sem: postprocessBackend = native_score and outputReadTimeMs approximately 0;
+- det: postprocessBackend = native_bbox_nms_float_handle;
+- preprocessing cache still reports same-frame reuse;
+- no extra full semantic-tensor read is introduced.
+
+### 12.4 Session comparison
+
+Compare before/after traces on the same device and route:
+
+- blocked frames;
+- event counts/categories;
+- average and p95 pipeline time;
+- backend reporting;
+- unexpected startup/unavailability states.
+
+Trace comparison remains a coarse integration check, not a golden frame replay.
+
+### 12.5 Structural checks
+
+During migration, verify:
+
+- sailens-guidance has no Compose/UI dependency;
+- sailens-core does not accumulate Android application services;
+- no shared lower module depends on sailens-shell;
+- concrete VLM runtime dependencies are not pulled into Guidance-only editions;
+- explicit API compilation prevents accidental library-surface growth.
+
+## 13. Decisions resolved by this review
+
+The following are no longer open questions:
+
+1. **Module prefix:** use sailens-*, not lens-*.
+2. **Package root:** use com.sailens.*, not com.sailens.sailens.* or com.sailens.lens.*.
+3. **UI modules:** merge the old ux and guidance-ui concepts into sailens-shell.
+4. **Guidance boundary:** keep sailens-guidance separate from UI.
+5. **Initial size:** target 9 library modules + app, with sailens-vlm allowed to defer its physical
+   Gradle extraction until useful.
+6. **Pipeline combinations:** zero, Guidance-only, Describe-only and both are all valid.
+7. **Host boundary:** Application/MainActivity stay in each app; shell provides reusable Compose and
+   composition.
+8. **Frame contract:** Guidance consumes a stream; Describe consumes a freshness-bounded snapshot.
+9. **Semantics safety:** taxonomy identity/order compatibility is an explicit startup contract.
+10. **A history:** sailens-android/main remains append-only.
+
+The next design work should focus on implementation details inside these fixed boundaries rather than
+creating more modules or a more generic pipeline framework.
