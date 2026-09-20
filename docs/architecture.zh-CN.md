@@ -1,255 +1,491 @@
 [English](architecture.md) | **简体中文**
 
-# Sailens 架构：lens 框架
+# Sailens 架构
 
-> 状态：**方案，评审中。**本文所述内容均未实现。它将取代现有的按层划分的模块结构，以及基于 fork 的 A/B 双仓关系。
+> 状态：**提案，已完成本轮 review 并修订。**本文档中的结构尚未实施。它将替代当前按
+> 技术层拆分的模块结构，以及 A/B 两仓库之间基于 fork 的关系。
 
-## 1. 概要
+## 1. 摘要
 
-Sailens 重新定位为 **Smart AI Lens**：采集（今天是摄像头，以后加语音）→ pipeline → AI 结果 → 输出。面向盲人和低视力用户的出行辅助是它的第一个应用，而不是它本身。
+Sailens 是 **Smart AI Lens**：采集（今天是相机，未来可以是语音）→ pipeline → AI 结果
+→ 输出。面向盲人和低视力用户的导航辅助是它的第一个应用，但不是可复用代码本身的身份。
 
-现有两条 pipeline，一个应用可以只包含其中一条，也可以两条都有：
+目前有两条产品 pipeline：
 
-- **引导（guidance）**——连续的。每帧跑语义分割（+ 可选的检测），回答"我会不会撞上什么"。
-- **描述（describe）**——按需的。视觉语言模型，在用户发问时回答"我面前是什么"。
+- **Guidance** —— 连续运行，用于导航安全。语义分割必需，检测可选。
+- **Describe** —— 按需运行。VLM 用于回答“眼前有什么”或针对当前画面回答问题。
 
-代码围绕这两条 pipeline 以及它们共享的基础设施重新组织。`sailens-yolo` 仓库不再是本仓库的 fork，而是一个通过 Gradle composite build **依赖**本仓库的薄应用。
+平台接受全部四种产品组合：
+
+| Guidance | Describe | 是否合法 |
+|---|---|---|
+| 无 | 无 | 是 |
+| 有 | 无 | 是 |
+| 无 | 有 | 是 |
+| 有 | 有 | 是 |
+
+零 pipeline 是合法的 shell 状态。某个具体发行版是否承诺必须提供其中一条，是另外一层
+application-level contract。
+
+代码将围绕这两条 pipeline 和它们共享的 Sailens 基础能力重组。sailens-yolo 不再作为
+本仓库的 fork，而是通过 Gradle composite build 依赖本仓库的薄应用。
 
 ## 2. 目标与非目标
 
-**目标**
+### 目标
 
-- 用普通的构建依赖，取代两个仓库之间的 fork + merge。
-- 每条 pipeline 都能独立使用；共享基础设施不属于任何一条。
-- 许可证边界 = 依赖图。
-- 保住今天已有的全部性能特性（见 §6.3、§6.7）。
-- 每一步迁移之后，应用都能正常运行。
+- 用普通依赖替代 sailens-android 与 sailens-yolo 之间的 fork-and-merge。
+- 从横向 Clean Architecture 技术层，转为围绕稳定产品边界和 runtime 边界组织代码。
+- Guidance 与 Describe 可以独立配置，各自由自己的静态可用性和自己的 runtime state 决定是否
+  呈现（§5.2）。
+- 重型 concrete runtime 保持可选；不能因为 shell 知道 Describe 存在，就让不使用 VLM
+  的应用也被迫带上 VLM runtime。
+- 许可证边界与依赖图一致。
+- 保留 §6.5 和 §6.9 中列出的现有性能性质。
+- 每一步迁移结束后 A、B 都保持可构建。
+- 显式控制 library public API，而不是让所有 Kotlin 符号默认暴露。
 
-**非目标**——明确不在本次重构范围内：
+### 非目标
 
-- 通用的 pipeline 图、插件发现，或任何可配置的 DAG。引导和描述的形状是固定的，变化的只是各阶段的实现，而接口 + DI 已经能处理这一点。
-- 发布到 Maven，或任何形式的带版本号的产物。
-- 出行辅助以外的应用。不为假想中的应用设计任何抽象。
-- 在构建期排除某条 pipeline。pipeline 在**运行时**可插拔（§6.1）。
-- 语音 / ASR 输入。结构上为它留了位置（§6.10），但什么都不做。
-- 两条 pipeline 之间的 GPU 仲裁策略。现在还没有 VLM runtime（§6.7）。
-- 行为变更。除了明确标出的第 10 步（§11），每一步都保持行为不变。
+- 通用 pipeline graph、plugin discovery 或可配置 DAG。
+- 为假想产品提前设计一个通用 AI Lens SDK。
+- 发布到 Maven 或引入 artifact versioning。
+- 在本次重构中实现 Voice / ASR。
+- 在真正 VLM runtime 出现前确定最终 GPU 仲裁策略。
+- 把每个逻辑边界都做成 Gradle module。只有独立 compile、dependency、test、native 或
+  public-API boundary 有价值时才拆 module。
+- 行为变更；唯一例外是第 10 步明确标出的 pipeline availability 行为。
 
-## 3. 代码现状
+## 3. 当前代码结构
 
-六个模块，按 clean architecture 的**层**划分：
+仓库目前有六个主要 module，主要按技术层拆分：
 
-```text
+~~~text
 :domain         (无依赖)
 :data           → :domain
 :camera         → :domain, :ux
 :presentation   → :camera, :domain, :ux
 :ux             (无依赖)
 :app            → 全部
-```
+~~~
 
-拿两条 pipeline 来衡量，现有分层已经*大致*把导航逻辑和 lens 基础设施分开了——但边界上的东西放错了边：
+这个结构对单一应用能工作，但产品已经演进出两条不同 pipeline，因此一些边界开始落错位置：
 
-| 模块 | 规模 | 主要内容 |
-|---|---|---|
-| `:domain` | 约 7,000 行 | 约七成是导航逻辑（连通性、事件、冷却、道路安全、trace） |
-| `:data` | 约 6,100 行 + 2,185 行 C++ | 约四分之三是通用的 lens 运行时（LiteRT、加速器、预处理、runner） |
-
-看起来通用、实际上被导航塑形的东西：
-
-| 项 | 为什么不是通用的 |
+| 项目 | 问题 |
 |---|---|
-| `ClassMapper` | 方法是 `isPassable`、`isRoad`、`isTrafficLight`、`toGroundType`、`toObstacleCategory` |
-| `FrameTrace` | 字段是 `isBlocked`、`navigationPassableRatio`、`blockageConfidence`…… |
-| `ObstacleDetection` | runner 直接输出 `category: ObstacleCategory`，这是导航上的分类 |
-| `SegmentationOutput.analysisStats` | sem runner 的 native pass 里已经算好了可通行 mask、道路占比、地面类型分布 |
-| `libsailens_ml.so` | 一个文件里混着 YUV 预处理（通用）和连通性统计（导航） |
-| `:camera` | 为了四个帧类型依赖 `:domain`，于是复用相机采集就要把整个导航核心拖进来 |
+| ClassMapper | 把数据集事实和导航判断混在一起 |
+| FrameTrace | 明显是 Guidance 专属，却放在宽泛 domain 层 |
+| ObstacleDetection.category | Guidance 分类直接泄漏到 detector 输出 |
+| SegmentationOutput.analysisStats | 通用 inference 输出里已经带了导航统计 |
+| libsailens_ml.so | 通用预处理与导航 kernel 共用一个 native 库 |
+| :camera → :domain | 复用 capture 会连整个导航 domain 一起拖进来 |
+| :presentation | Guidance UI、共享输出设备、app shell 与未来 Describe UI 混在一起 |
 
-还有一个机械性的隐患：全部 13 个 native 函数（分属 5 个 Kotlin 类）都是**静态名字绑定**（`Java_com_sailens_data_source_ml_*`），`RegisterNatives` 一次都没用。挪动其中任何一个类的包名，失败都发生在**运行时**，而不是编译期。
+另外还有一个 JNI 迁移风险：当前 native 方法通过静态 Java JNI symbol name 绑定。移动
+Kotlin class 可能编译完全成功，却只在第一次调用 native 方法时崩溃。
 
-迁移基线：**171 个单元测试**（`:domain` 129、`:presentation` 17、`:data` 14、`:app` 9、`:camera` 1、`:ux` 1）。
+迁移基线：**171 个 unit test**。测试必须跟代码一起迁移，总数不能无声下降。
 
 ## 4. 目标结构
 
-### 4.1 模块
+### 4.1 Gradle modules
 
-| 模块 | 职责 | 来源 |
-|---|---|---|
-| `lens-core` | 帧类型（`ImageFrame`、YUV 平面）、几何、`BinaryMask`、`MlRuntimeInfo`、`LogService` + `FileLogService` | `:domain` model/util，`:data` service |
-| `lens-camera` | CameraX 采集 → `ImageFrame` 流、预览 composable、权限流程 | `:camera` |
-| `lens-runtime` | LiteRT 会话、加速器选择、模型来源、metadata 读取、YUV→tensor native 预处理、共享预处理缓存、硬件画像检测 | `:data` source/ml + session，`:app` 的 `DeviceHardwareProfileProvider` |
-| `lens-vision` | 分割 runner（→ 类别图）、检测 runner（→ 带类别 id 的框）、数据集分类法（标签表）、默认后处理器 | `:data` semantic + obstacle，mapper 里的标签表 |
-| `lens-vlm` | VLM 引擎 seam：帧 + prompt → 流式文本 | `:data` source/ml/vlm |
-| `lens-output` | TTS 引擎、音频焦点、读屏检测、震动原语、语音路由、子句缓冲 | `:presentation` device/* |
-| `guidance` | 一切导航相关：`NavigationSemantics`、融合的 sem kernel、连通性、道路安全、事件、冷却、跟踪、深度、传感器、trace/replay | `:domain` 和 `:data` 的其余部分 |
-| `guidance-ui` | 实时界面、引导 ViewModel、触觉词汇、事件文案、叠加层、引导相关的设置分区、debug trace 界面 | `:presentation` |
-| `describe` | 场景描述 pipeline：prompt、use case、controller。在有 VLM runtime 之前**没有 UI** | `DescribeSceneUseCase`、`SceneAnalysisViewModel` 里描述那一半 |
-| `ux` | 设计系统，外加关于 / 开源许可界面（它们是通用列表） | `:ux`，`:presentation` about/* |
-| `shell` | 以 library 形式存在的整个应用：Activity、导航、设置界面组装、DI 聚合、运行时画像 | `:app`（application 模块本身除外），`:presentation` navigation |
-| `app` | A 的参考应用：自带模型（BYO），零权重。只有身份和配置 | `:app` |
+初始目标是 **9 个 library module + 1 个 reference app**：
 
-### 4.2 依赖
+| Module | 职责 |
+|---|---|
+| sailens-core | 最小共享 contract/value types：ImageFrame/YUV planes、geometry、BinaryMask、MlRuntimeInfo、LogService |
+| sailens-camera | CameraX 采集、连续 frame source、带 freshness 上限的当前帧 snapshot、preview composable、相机权限状态/请求 primitive |
+| sailens-runtime | LiteRT session、加速器选择、模型来源、metadata、YUV→tensor 预处理、共享预处理 cache、硬件画像、资源仲裁机制 |
+| sailens-vision | segmentation/detection runner、数据集 taxonomy、默认后处理器 |
+| sailens-vlm | VLM engine contract：frame + 完整 prompt → streamed text；不放产品 prompt policy |
+| sailens-output | TTS、audio focus、读屏检测、haptic primitive、speech routing mechanism、clause buffering |
+| sailens-guidance | 导航逻辑：NavigationSemantics、fused semantic kernel、连通性、安全分析、事件、cooldown、tracking、depth、sensor、trace/replay |
+| sailens-describe | Describe 产品逻辑：prompt policy、snapshot freshness、请求调度、use case/controller |
+| sailens-shell | 可复用 Sailens presentation/composition：root Compose、navigation、settings、design system、Guidance UI、未来 Describe UI、diagnostics/about、DI 聚合 |
+| app | A 的薄 Android host：Application、MainActivity、manifest/window ownership、身份和 edition config |
 
-```text
-app / B / C ──► shell
-shell       ──► guidance-ui, describe, lens-camera, lens-output, ux
-guidance-ui ──► guidance, lens-output, lens-camera, ux
-guidance    ──► lens-vision, lens-runtime, lens-core
-describe    ──► lens-vlm, lens-output, lens-core
-lens-vision ──► lens-runtime, lens-core
-lens-vlm    ──► lens-runtime, lens-core
-lens-camera ──► lens-core, ux
-lens-output ──► lens-core
-lens-runtime──► lens-core
-lens-core, ux  (无 project 依赖)
-```
+目标中**没有独立 sailens-ux 或 sailens-guidance-ui Gradle module**。它们的逻辑边界继续作为
+sailens-shell 内部 package 存在。
+
+原因是它们没有足够价值支撑独立 compile/dependency/API boundary。UI、design system、
+settings、navigation 本来就作为一个可复用 application presentation shell 一起变化。
+Guidance 算法仍保持独立，因为它包含大量安全逻辑、测试，并且变化轴与 UI 不同。
+
+相机权限的**策略 UI**属于 presentation，不属于 capture。sailens-camera 可以暴露权限状态以及
+触发权限请求的动作，但 rationale dialog、文案和 design-system 依赖都放在 sailens-shell。
+这样旧 ux module 删除之后，sailens-camera 也不会反向依赖 shell。
+
+### 4.2 依赖图
+
+~~~text
+app / B / C ─────────────► sailens-shell
+                              │
+                              ├──► sailens-guidance
+                              ├──► sailens-describe
+                              ├──► sailens-camera
+                              └──► sailens-output
+
+sailens-guidance ─────────► sailens-vision ───► sailens-runtime ───► sailens-core
+        │                         │                     │
+        └─────────────────────────┴─────────────────────┘
+
+sailens-describe ─────────► sailens-vlm ─────► sailens-runtime
+        └────────────────────────────────────► sailens-core
+
+sailens-camera ───────────────────────────────► sailens-core
+sailens-output ───────────────────────────────► sailens-core
+~~~
 
 规则：
 
-1. 只向下依赖。
-2. **两条 pipeline 之间没有依赖边。**`guidance` 看不见 `describe`，反之亦然。它们需要协调的一切（语音优先级、GPU）都放在两者之下。
-3. 任何 `lens-*` 模块都不依赖 `guidance`、`describe` 或 `shell`。
-4. `describe` 不依赖 `lens-camera`：它从接线方拿一个 `Flow<ImageFrame>`，任何帧源都能用。
+1. 依赖只向下。
+2. sailens-guidance 和 sailens-describe 互不依赖。
+3. sailens-guidance 保持无 UI。
+4. sailens-shell 持有 presentation policy 与 app composition，但不持有具体 model runtime。
+5. sailens-runtime 只提供资源仲裁**机制**，不放 Guidance/Describe 产品策略。
+6. 任何共享基础模块都不能依赖 sailens-guidance、sailens-describe 或 sailens-shell。
 
-### 4.3 包名
+未来真正的 LiteRT-LM concrete runtime 应优先单独做成例如 sailens-vlm-litert。完全不用
+VLM 的 edition 不应承担它的 binary/native dependency cost。
 
-`com.sailens.lens.{core,camera,runtime,vision,vlm,output}`、`com.sailens.guidance`、`com.sailens.guidance.ui`、`com.sailens.describe`、`com.sailens.ux`、`com.sailens.shell`。模块是扁平的顶层目录（`lens-core/`……），不用嵌套的 Gradle 路径。
+### 4.3 包名与坐标
 
-library 模块开启 Kotlin 的 `explicitApi()`。今天所有东西默认都是 public；一旦 B 依赖这些模块，每个 public 符号都是 B 可能因之出错的地方。
+Gradle module 使用完整 sailens-* 前缀，因为这些是 Sailens 自己的 framework module，
+不是独立的通用 Lens SDK。
 
-## 5. A、B、C 分别变成什么
+Kotlin/Java package 不重复产品名：
 
-**A（`sailens-android`，Apache-2.0）**——全部 library 模块，加上 `app` 这个 BYO 参考应用。仍然零权重。BYO 权重从 `data/src/main/assets/` 挪到 `app/src/main/assets/`（仍被 git 忽略）；asset 是整个 APK 共享的，所以 runner 找模型的方式不变。
+| Module | Package root |
+|---|---|
+| sailens-core | com.sailens.core |
+| sailens-camera | com.sailens.camera |
+| sailens-runtime | com.sailens.runtime |
+| sailens-vision | com.sailens.vision |
+| sailens-vlm | com.sailens.vlm |
+| sailens-output | com.sailens.output |
+| sailens-guidance | com.sailens.guidance |
+| sailens-describe | com.sailens.describe |
+| sailens-shell | com.sailens.shell |
 
-**B（`sailens-yolo`，AGPL-3.0）**——一个建在 `shell` 之上的 application 模块。它没有任何 YOLO 专属代码，因为 YOLO 本来就不需要：runner 由模型 metadata 驱动，输出布局是通用的。它唯一的 Kotlin 是自己的 `Application`，负责把 `shell` 自己读不到的东西交给它——来自 B 自己 `BuildConfig` 的身份信息，以及绑定哪个 `NavigationSemantics`。
+Composite build 坐标跟 module 名一致，例如 com.sailens:sailens-shell。
 
-```text
-sailens-yolo/
-├── sailens/                 git submodule → sailens-android，钉在具体 commit
-├── settings.gradle.kts      includeBuild("sailens")
-├── app/
-│   ├── build.gradle.kts     applicationId com.sailens.yolo、APP_LICENSE、APP_SOURCE_URL → shell
-│   └── src/
-│       ├── main/kotlin/     YoloApplication：AppInfo + OSS 列表 + 语义选择 → shell
-│       ├── main/assets/     sem.tflite、det.tflite（Git LFS）
-│       ├── main/res/        app_name
-│       └── test/            TfliteModelMetadataReaderTest（契约守卫）
-├── LICENSE  NOTICE  README*  YOLO_EDITION_NOTICE*  docs/yolo-models*
-```
+所有可复用 library module 开启 Kotlin explicit API mode。除非确实需要跨模块使用，内部
+实现符号保持 internal。
 
-B 需要时*可以*拥有 YOLO 专属代码——比如一个新的解码头。和今天的区别在于它能这么做了，因为它是一个普通的依赖方项目，而不是一个必须保持代码完全一致的 fork。
+### 4.4 sailens-shell 内部 package
 
-**C（假想的）**——同样的形状：权重、一个 `VlmRuntimeFactory` 的接线，以及当它的检测器用了不同分类法时绑定的 `NavigationSemantics`。LiteRT-LM runtime 的实现本身属于 A 的 `lens-vlm`（Apache，依据 Gemma 4 E2B 的选型结论）；C 只提供模型。
+UI 合并只是 Gradle boundary 合并，不代表逻辑边界消失：
+
+~~~text
+sailens-shell/
+└── com/sailens/shell/
+    ├── app/
+    ├── navigation/
+    ├── design/
+    │   ├── theme/
+    │   └── components/
+    ├── guidance/
+    │   ├── screen/
+    │   ├── overlay/
+    │   └── settings/
+    ├── describe/
+    ├── settings/
+    ├── diagnostics/
+    ├── about/
+    └── di/
+~~~
+
+每个 host application 仍然自己拥有 Application、MainActivity 以及 manifest/window
+lifecycle。shell 提供 SailensRoot()、navigation entries 和 Koin modules 等可复用组装能力。
+
+## 5. Application editions 与 capability model
+
+### 5.1 A、B、C
+
+**A —— sailens-android，Apache-2.0**
+
+包含全部可复用 Sailens modules 与薄 reference app。继续保持零权重，支持 BYO model。
+BYO weights 从 data/src/main/assets 移到 app/src/main/assets。
+
+A 可以合法地以零 available pipeline 启动，并显示清晰的 zero-pipeline state，指向
+model/runtime 设置文档。
+
+**B —— sailens-yolo，AGPL-3.0**
+
+建在 sailens-shell 上的薄应用。它把 A 作为 git submodule pin 到具体 commit，再通过
+composite build 消费。B 自己拥有 model weights、产品身份、capability expectation，以及
+未来真正需要的 YOLO-specific decoder/runtime code。
+
+B 不再要求与 A 代码完全一致。
+
+**C —— 未来 edition**
+
+可以提供 Guidance、Describe、两者都有或两者都没有。需要 VLM 时由 edition 显式提供
+concrete runtime。
+
+### 5.2 configured、expected、available 与 runtime state 是四个不同概念
+
+平台不能把四个问题混在一起：
+
+1. **Configured** —— edition 打算提供这条 pipeline。
+2. **Expected** —— edition 把它作为产品能力承诺。
+3. **Availability / preflight** —— 低成本静态检查确认 implementation、model source 与可机器
+   验证的 contract 存在；**不会**初始化模型或加速器。
+4. **Runtime state** —— 用户真正开始使用后，session 的运行状态：未开始、初始化中、运行中或失败。
+
+代表性结构：
+
+~~~kotlin
+data class SailensAppSpec(
+    val guidance: GuidanceSpec? = null,
+    val describe: DescribeSpec? = null,
+    val expectations: CapabilityExpectations = CapabilityExpectations(),
+)
+
+sealed interface PipelineAvailability {
+    data object NotConfigured : PipelineAvailability
+    data object Available : PipelineAvailability
+    data class Unavailable(val reason: StaticUnavailableReason) : PipelineAvailability
+}
+
+sealed interface PipelineRuntimeState {
+    data object NotStarted : PipelineRuntimeState
+    data object Initializing : PipelineRuntimeState
+    data object Running : PipelineRuntimeState
+    data class Failed(val reason: RuntimeFailure) : PipelineRuntimeState
+}
+~~~
+
+pipeline spec 为 null 表示 NotConfigured；两条都 null 完全合法。
+
+**Available 不等于 runtime ready。**preflight 可以检查 implementation 是否已接线、配置的 model
+source 是否能解析、低成本 metadata/shape/count 是否通过、以及 TaxonomyId ↔
+NavigationSemantics 等静态 binding 是否一致。它不能为了决定一个入口是否存在，就提前创建
+compiled model、初始化 GPU/NPU delegate、分配 inference buffer 或跑一次 probe inference。
+真正的模型/加速器初始化继续保持 lazy，在 session 启动时发生，和今天一样。
+
+expectation 是 edition-level validation，不是 framework 限制。例如 sailens-yolo 可以声明
+Guidance required。如果它打包的 sem model 缺失、声明的 taxonomy 不兼容，或其他**静态配置**
+contract 失败，这是 edition configuration failure，即使 Sailens framework 本身允许
+zero-pipeline。
+
+静态配置失败按 build type 区分处理：
+
+- **debug/development：**fail fast，让 packaging/wiring 错误尽早暴露；
+- **release：**进入明确的 fatal configuration state，不 crash、不进入 restart loop。这个状态必须
+  对 accessibility 可达，并且至少主动通过当前可用的非视觉通道通知一次；speech 不可用时由
+  haptic 兜底。
+
+pipeline 也可能通过 preflight，却在某台设备上真正初始化 session 时失败，例如 GPU delegate
+或 output buffer allocation 失败。这是 **runtime failure**，并不与 Available 矛盾。
+Guidance 继续走今天已有、用户可见且可重试的 analysis-start-failed 路径；Describe 走对应的
+request/runtime error 路径。
+
+optional 但静态 unavailable 的 pipeline 不应作为死控件暴露。shell 可以隐藏它，或者在普通
+action path 之外提供明确的 edition-level explanation。
 
 ## 6. 设计决策
 
-### 6.1 pipeline 在运行时可插拔
+### 6.1 Continuous frame 与 on-demand snapshot 是不同 contract
 
-每个建在 `shell` 上的应用都把两条 pipeline 编译进去。每条 pipeline 各自报告能不能跑：
+Guidance 消费连续 frame stream。Describe 是按需的，不应该为了拿“当前画面”而自己长期
+collect frame stream。
 
-| pipeline | 可用条件 |
-|---|---|
-| guidance | 能解析到 sem 模型，**并且**绑定了 `NavigationSemantics`（det 可选，和今天一样） |
-| describe | `VlmRuntimeFactory` 报告有 runtime 和模型 |
+因此 sailens-camera 暴露两个概念：
 
-不可用的 pipeline **不提供入口**——隐藏，而不是置灰。一个永远不会响应的控件，对读屏用户只是又一个无效的焦点停留；而"按了没反应"和"前方什么都没有"在他那里无法区分。
+~~~kotlin
+interface FrameSource {
+    val frames: Flow<ImageFrame>
+}
 
-一个 shell 覆盖所有组合：A 没有权重（两条都不可用——应用明说这一点，并指向 `docs/models.md`）、B（只有引导）、C（两条都有）、纯 VLM 应用（只有描述）。
+interface FrameSnapshotProvider {
+    fun currentFrame(maxAgeMs: Long): ImageFrame?
+}
+~~~
 
-这也让此前 defer 的"sem 可选"重构不再需要。引导仍然**要求** sem；变成可选的是引导这条 pipeline 本身。
+二者可以由同一个 camera session 实现。
 
-描述保持无界面：按之前的决定，在 VLM runtime 出现之前不提供任何 UI 入口。
+Describe 必须拒绝过旧 snapshot，绝不能静默描述几秒前的旧画面。这与已有 VLM/ASR
+assistant plan 的安全意图保持一致。
 
-### 6.2 `ClassMapper` 拆成 `Taxonomy` 和 `NavigationSemantics`
+Describe 仍然不依赖 CameraX；未来其他 source 只需要实现 FrameSnapshotProvider。
 
-`ClassMapper` 混着一个数据集事实和一个导航判断：
+### 6.2 Taxonomy 与 NavigationSemantics 分离；机器校验只能做到证据允许的程度
 
-- **`Taxonomy`**（`lens-vision`）——类别数和按模型输出顺序排列的标签名。关于数据集的事实。`CityscapesTaxonomy`、`CocoTaxonomy`。
-- **`NavigationSemantics`**（`guidance`）——逐类别的查找表：可通行、障碍物、道路、交通灯、地面类型、障碍物类别。关于行走的判断。`CityscapesNavigationSemantics`、`CocoNavigationSemantics`。
+当前 ClassMapper 混着：
 
-用查找表而不是逐次调用的方法，是因为 native kernel 要的就是表：今天的 `SemanticClassLookup` 正好就是 `classCount` + `passable` + `obstacle` + `road` + `trafficLight` + `groundType` 几个数组。
+- 数据集事实：class count、output order、labels；
+- Guidance policy：passable、obstacle、road、traffic light、ground type、obstacle category。
 
-Cityscapes 和 COCO 的语义留在 A。Cityscapes 是数据集分类法，不是 YOLO 的；任何用 Cityscapes 训练的 sem 模型都需要它，包括 A 里的 BYO 模型（`docs/models.md` 已经把 BYO 契约定为 Cityscapes trainId + COCO 80）。B 是选用它们，而不是持有它们——在它的 `Application` 里一行。
+拆成：
 
-**语义永远显式绑定，不存在中性兜底。缺少语义是启动错误。**中性映射不是"安全"，而是"最不安全"。所有类别都不可通行时 mask 为空，`ConnectivityChecker` 算出：
+- **Taxonomy**，归 sailens-vision；
+- **NavigationSemantics**，归 sailens-guidance。
 
-```text
-verticalReachRatio = 0, floodReachRatio = 0, widthRetentionP25 = 0
-score = 0.35 + 0.35 + 0.30 = 1.0    →  blockageConfidence 1.0  →  SEVERE  →  CRITICAL
-```
+两者都带稳定 TaxonomyId 和 class count。Guidance binding 在 static preflight 阶段验证
+**声明的** taxonomy id 与 class count 是否和 NavigationSemantics 一致。
 
-它越过 `MIN_HARD_BLOCKED_CONFIDENCE`（0.75）和全部三道 hard-blocked 门槛。应用会在第一帧就播出一条最高优先级的"前方不通"，然后一直锁在那里。
+~~~kotlin
+@JvmInline
+value class TaxonomyId(val value: String)
 
-### 6.3 分割保持单次 native pass
+interface Taxonomy {
+    val id: TaxonomyId
+    val classCount: Int
+}
 
-sem 有文档化的性能红线：`postprocessBackend = native_score` 且 `outputReadTimeMs ≈ 0`。它成立的原因是：一次 native pass **通过 handle** 读取 LiteRT 的输出 buffer（零拷贝），同时算出 argmax *和*导航统计。把"通用 runner"和"导航统计"天真地拆开，就意味着对一个 640×640×19 的 tensor 扫两遍。
+interface NavigationSemantics {
+    val taxonomyId: TaxonomyId
+    val classCount: Int
+}
+~~~
 
-所以 runner 接收一个注入的后处理器：
+但这**不能证明**一个 opaque model 的实际输出通道就真的具有声明的语义。如果可信 model
+metadata 带 labels，就进一步机器校验完整 label order；如果没有，channel semantics/order
+仍然是人工 release gate。一个 shape 与 class count 都正确的模型，完全可能正常运行，却把
+类别含义映射错。
 
-```text
-lens-vision   SegmentationRunner<R>(…, postprocessor: SemanticPostprocessor<R>)
-lens-vision   ArgmaxPostprocessor : SemanticPostprocessor<SegmentationMask>          (默认)
-guidance      NavigationScorePostprocessor : SemanticPostprocessor<SegmentationAnalysisStats>
-```
+因此，model 旁边的 contract test 只能检查机器真正看得到的东西：shape、dtype、layout、
+class count、声明的 taxonomy binding，以及 metadata 里确实存在的 labels。labels 不存在时，
+contract test 绝不能声称自己验证了 semantic order。edition 还可以把一次人工确认的 taxonomy
+声明绑定到模型的精确 hash；一旦替换权重，就让这次人工验证自动失效。
 
-`NavigationScorePostprocessor` 就是今天的 `NativeSemanticScorePostprocessor` 挪了位置。这个 seam 已经存在——那个后处理器今天就是通过 DI 注入的。一次 pass，和今天一样。
+不存在 neutral NavigationSemantics fallback。缺失或机器可检测到的不兼容会让 Guidance
+静态 unavailable；如果 edition 声明 Guidance required，则这是 static configuration failure。
+至于 metadata 无法观察到的错误 channel order，它仍然是 release-process safety failure，
+不是 startup validation 能凭空检测出来的东西。
 
-### 6.4 检测结果携带类别 id；类别归引导
+### 6.3 Detection output 保持通用
 
-`ObstacleDetection` 去掉 `category`。检测 runner 输出类别 id、标签、置信度和框；`guidance` 通过 `NavigationSemantics` 把类别 id 映射成 `ObstacleCategory`。NMS、letterbox 几何和布局解码留在 `lens-vision`。det 的红线（`postprocessBackend = native_bbox_nms_float_handle`）不受影响：类别映射只是对每个保留下来的框查一次表。
+Detection runner 只输出 class id、可选 label、confidence 和 box。ObstacleCategory 属于
+Guidance，通过 NavigationSemantics 在 inference 之后映射。
 
-### 6.5 一个语音路由，两条 pipeline 共用
+NMS、tensor layout decoding 和 letterbox geometry 保留在 sailens-vision。
 
-两条 pipeline 同时存在时，它们通过同一个通道说话，共享规则放在两者之下的 `lens-output`：
+### 6.4 Describe 持有 prompt 和请求策略
 
-1. **通道互斥**——自带 TTS *或*读屏，只选一次，和今天一样。
-2. **优先级**——引导告警会抢占描述正在说的任何内容。描述永远不抢占引导。今天这是隐式的（`speak` 冲掉队列，`speakSystemNotice` 排队）；之后变成路由上显式的 `ALERT` / `INFORMATION` 优先级。
-3. **读屏播报**——路由把它们作为一个 flow 暴露出来；`shell` 在唯一一处收集并执行播报（这需要一个 `View`）。今天是 `LiveAnalysisScreen` 只为引导做这件事。只有一个收集点，也意味着已被废弃的 `announceForAccessibility` 将来只有一处要替换。
+sailens-vlm 只接收完整 prompt 并返回 streamed text。它不知道用户是否是盲人，也不知道
+Sailens 是导航产品，更不知道 frame stale policy。
 
-触觉词汇按关注点拆分。唯一一个关于输出通道本身的符号——`SPEECH_UNAVAILABLE`——归 `lens-output`，因为纯描述应用同样需要"语音已失效"。其余都是关于引导的，留在 `guidance-ui`：方位符号、`BLOCKED`、`NOTICE`、`SENSOR_FAILURE`（相机看不见——由引导的画面质量分析检出）和 `INTERRUPTED`（连续保护丢失了——描述没有连续保护可丢）。Phase B 盲测仍然把它们的并集当成一套来验证：拆分归属不等于拆分混淆矩阵，`SPEECH_UNAVAILABLE` 与 `SENSOR_FAILURE` 之间文档化的区分仍然必须成立。
+sailens-describe 持有：
 
-### 6.6 prompt 属于描述，不属于引擎
+- system/user prompt assembly；
+- current-frame freshness；
+- single-flight/cancellation；
+- quick describe 与 question 的产品语义；
+- generation 太慢时结果是否仍有效。
 
-`VlmModelConfig` 里带着 `"你是盲人出行助手…"`。这是应用层文本。`lens-vlm` 接收完整的 prompt；`describe` 持有系统提示词并负责拼装。`SceneDescriber` 变成通用的 `VisionLanguageModel`（帧 + prompt → 分片的 `Flow`）；流式契约、`trySendBlocking`、`timeToFirstTokenMs` 和 `SpeechClauseBuffer` 都不变。
+真正的 LiteRT-LM concrete runtime 出现时放在独立 implementation module。
 
-### 6.7 `lens-runtime` 持有两条 pipeline 会争抢的东西
+### 6.5 Segmentation 继续只做一次 native pass
 
-- **预处理缓存。**sem 和 det 通过 `InputPreprocessCache` 共用同一帧的 YUV→tensor 转换。它保持为 `lens-runtime` 持有的单一共享实例，绝不每个 runner 各一份。
-- **GPU 仲裁（未来）。**两条 pipeline 同时存在时，VLM 和 YOLO 会抢 GPU。`lens-runtime` 就是这个策略将来所在的位置。现在不做——还没有 VLM runtime——但安全约束先记在这里：如果描述运行期间引导暂停，这个暂停就是保护的丢失，必须通过非视觉通道告知。
+现有 semantic 性能红线保持：
 
-### 6.8 JNI：`RegisterNatives`，三个 native 库
+- postprocessBackend = native_score
+- outputReadTimeMs ≈ 0
 
-每个库在 `JNI_OnLoad` 里注册自己的 native 方法：
+native path 通过 handle 读取 LiteRT output buffer，一次 pass 同时计算 argmax 与 Guidance
+统计。本次重构不能为了让模块图更漂亮，又重新扫描一次完整 semantic tensor。
 
-| 库 | 模块 | 函数 |
+保持通用 seam：
+
+~~~text
+sailens-vision    SegmentationRunner<R>(..., SemanticPostprocessor<R>)
+sailens-vision    ArgmaxPostprocessor
+sailens-guidance  NavigationScorePostprocessor
+~~~
+
+NavigationScorePostprocessor 就是当前 fused Guidance postprocessor 的迁移版本。
+
+### 6.6 Output arbitration：底层提供机制，上层决定产品策略
+
+sailens-output 提供共享 output mechanism：
+
+- TTS 与 audio focus；
+- screen-reader channel；
+- haptic primitive；
+- priority/preemption primitive；
+- clause buffering；
+- announcement flow。
+
+它不能知道 Guidance 或 Describe 是什么。
+
+“Guidance safety alert 永远高于 Describe information”属于 sailens-shell / edition composition
+的产品策略。Guidance 产生 typed event/urgency；Describe 产生 information result；shell
+再把它们映射到 output priority。
+
+Screen-reader announcement 在 sailens-shell 里只有一个 collector，因为真实 Android View
+属于 presentation。
+
+Guidance-specific haptic vocabulary 留在 shell 的 Guidance presentation package。
+SPEECH_UNAVAILABLE 可以继续作为共享 output-level signal，因为它描述的是输出通道本身，
+不是导航语义。
+
+### 6.7 sailens-core 必须刻意保持小
+
+sailens-core 不能变成新的“什么都往里扔”的 domain module。
+
+只放真正被多个低层模块共享的稳定 type/contract。特别是：
+
+- LogService interface 可以放 sailens-core。
+- FileLogService **不能**放进去。它依赖 Android Context/files，是 app-platform
+  implementation；初始放在 sailens-shell composition。
+- trace/replay 在出现第二个真实 consumer 之前继续留在 sailens-guidance。
+- sensor、depth、Stabilizer、FrameQualityAnalyzer 同理。
+
+### 6.8 共享 preprocessing cache
+
+sem 与 det 通过 InputPreprocessCache 复用同一帧的 YUV→tensor conversion。必须保持一个
+runtime 级共享实例，不能每个 runner 各自一份。
+
+归 sailens-runtime。
+
+### 6.9 Runtime resource arbitration 只做机制，不做 pipeline policy
+
+未来 VLM 与 realtime vision model 可能争抢 GPU/NPU。
+
+sailens-runtime 可以提供中性的 resource coordinator，例如 acquire/release + priority +
+preemptibility，但不能出现以 Guidance 或 Describe 命名的策略。
+
+哪些任务是 safety-critical，以及 Guidance protection 暂停时要给用户什么反馈，都是上层
+产品决策。如果为了 Describe 暂停 Guidance，这种 protection loss 必须通过非视觉通道告知。
+
+### 6.10 JNI：RegisterNatives + 每模块 native library
+
+先摆脱静态 Java JNI symbol，再移动 package。
+
+目标 native library：
+
+| Library | Module | 职责 |
 |---|---|---|
-| `libsailens_runtime.so` | `lens-runtime` | YUV 预处理（3） |
-| `libsailens_vision.so` | `lens-vision` | 障碍物后处理（4）、语义 argmax（1） |
-| `libsailens_guidance.so` | `guidance` | 融合的导航打分 kernel（4）、连通性统计（1） |
+| libsailens_runtime.so | sailens-runtime | YUV 预处理 |
+| libsailens_vision.so | sailens-vision | 通用 semantic argmax 与 detection postprocess |
+| libsailens_guidance.so | sailens-guidance | fused Guidance semantic score 与 connectivity stats |
 
-为什么 `RegisterNatives` 是第 1 步：改成它之后，漏改的名字会在加载库时失败，也就是第一次启动就暴露。静态名字则是在**第一次调用**时才失败——而其中有些函数所在的路径几乎从不执行（int8 后处理器；实际打包的模型是 float16）。那里漏改一个名字，就会随版本发出去。keep 规则仍然需要：`FindClass` 要按类名查找。
+每个 library 在自己的 JNI_OnLoad 注册 native method。通过 FindClass 找类的场景仍需要
+keep rule。
 
-为什么按模块拆成多个库而不是一个：用了 `RegisterNatives` 之后，`JNI_OnLoad` 必须找得到它注册的每一个类。放在 `lens-runtime` 里的单一共享库就得知道引导的类名——依赖方向反了。
+不能让 sailens-runtime 里的共享 native library 去注册 Guidance class，否则 module dependency
+会反向。
 
-零拷贝的 handle 路径在运行时用 `dlsym` 解析 LiteRT 的 buffer lock/unlock（今天的 `LiteRtApi` helper）；构建期没有任何东西链接 LiteRT。这个 helper 变成 `lens-runtime` 里的一个小头文件，由另外两个模块的 CMake 按路径 include。同一个仓库，所以不需要 prefab。
+LiteRT zero-copy helper 继续作为 runtime-owned 的小型 native header/helper，供 vision 与
+Guidance 的 CMake 使用，不引入反向 Kotlin/Gradle dependency。
 
-### 6.9 配置
+### 6.11 配置
 
-每个模块仍然只依赖自己的配置类型——这已经是现有的模式（`ProfileBindingsModule` 把 `SailensRuntimeProfile` 分发成各层的配置）。画像随之拆分：硬件检测 → `lens-runtime`；各模块的默认值 → 各自模块；档位选择与组装 → `shell`。应用把身份信息（`AppInfo`、OSS 列表）交给 `shell`；`shell` 从不读取某个应用的 `BuildConfig`。
+每个低层 module 只持有自己的 config type。硬件检测归 sailens-runtime，各模块默认值归各
+模块，edition/tier composition 归 sailens-shell 与 host app。
 
-### 6.10 在出现第二个使用方之前留在引导里的东西
+sailens-shell 绝不直接读取别的应用的 BuildConfig。host 显式传入 AppInfo、product
+capability spec、diagnostics flags 和 OSS metadata。
 
-trace/replay、深度、设备传感器、`Stabilizer`、`FrameQualityAnalyzer`：只有引导在用。其中有些在形式上是通用的，但现在把它们往下挪，等于在猜测一个还不存在的使用方需要什么。等它出现再挪。
+## 7. 开发方式：composite build，不上 Maven
 
-语音输入将是 `lens-camera` 旁边的一个新的源模块（`lens-audio`），由 `describe` 消费，用于语音提问。加它不需要改动这套结构里的任何东西。
+sailens-yolo 把 sailens-android 作为 git submodule pin 到具体 commit，并通过 Gradle
+composite build 引入。
 
-## 7. 开发配置：composite build，不上 Maven
-
-B 以 git submodule 的形式钉住 A，并把它作为 Gradle composite build 引入：
-
-```kotlin
-// sailens-yolo/settings.gradle.kts
+~~~kotlin
 includeBuild("sailens")
 
 dependencyResolutionManagement {
@@ -257,66 +493,183 @@ dependencyResolutionManagement {
         create("libs") { from(files("sailens/gradle/libs.versions.toml")) }
     }
 }
-```
+~~~
 
-- **不发布，没有版本号。**B 的 `implementation("com.sailens:shell")` 通过依赖替换解析到 A 的 project；A 的模块只需要设 `group = "com.sailens"`，坐标就能对上。
-- **只有一份 version catalog。**B 读 A 的那份；composite build 需要一致的 AGP 和 Kotlin 版本。
-- **日常：**在 A 自己的 checkout 里开发；在 B 里 `git submodule update --remote`，提交新的指针。需要紧密迭代时，直接在 B 的 submodule 目录里改——它就是一个完整的 A clone。
-- **AGPL 对应源码自然满足：**B 的一个 release tag，加上它钉住的 submodule commit，就是那个构建的确切源码。
+B 消费例如：
 
-Android library、资源、asset 和 CMake 在 composite build 里都是标准用法，但第 3 步（§11）会在任何大规模挪动依赖它之前，先在真实项目上验证它。
+~~~kotlin
+implementation("com.sailens:sailens-shell")
+~~~
 
-## 8. 变更后的许可证
+不引入 Maven publishing，也不增加版本号；submodule commit 本身就是版本边界。
 
-- A：Apache-2.0，全部模块，零权重——不变。
-- B：AGPL-3.0 组合作品 = A 的模块（Apache，钉住版本）+ YOLO26 权重。Apache → AGPL 的组合是允许的；A 不受影响。
-- 许可证边界现在就是依赖图。两边不共享 git 历史，所以不再需要任何东西去防止 AGPL 历史进入 A。
-- **不变且仍然悬而未决：**Cityscapes 的非商用条款是否允许公开分发 B 的 sem 权重。本次重构不涉及这个问题。
+当前阶段 B 有意直接读取 A 的 version catalog，让 AGP/Kotlin/tooling 保持一致。
 
-## 9. 会被删掉的东西
+在大量 module movement 依赖它之前，必须先用真实 Android resources、assets、CMake
+验证 composite build。
 
-B 里：`.gitattributes` 的 `merge=ours`、`merge.ours.driver` 设置、`upstream` remote 及其 `DISABLED` 的 push URL、同步流程、AGENTS.md 前缀约定，以及"零代码改动"这条不变量。B 重开历史（两个仓库都可以强推）。
+## 8. 许可证与仓库边界
 
-A 里：`data/src/main/assets` 的 BYO 约定（→ `app/src/main/assets`）、`mlModelBinding`。
+- A 继续是 Apache-2.0，且不提交 model weights。
+- B 继续是 AGPL-3.0，自行持有 model weights 与 edition-specific notice。
+- 仓库依赖图，而不是共享 source history，成为代码边界。
+- Cityscapes dataset/model distribution terms 仍然是单独的 release 问题，本次重构不决定。
 
-## 10. 待办的发布事项落在哪里
+A 已发布的 main history 继续 append-only。取消 fork 关系**不是**重写
+sailens-android/main 的理由。
 
-| 事项 | 归属 |
+B 在停止作为 fork 时可以选择 fresh history，这是 B 自己的 repository migration decision。
+
+## 9. 会消失的东西
+
+B 中：
+
+- merge=ours fork machinery；
+- upstream sync recipe 与 disabled push remote；
+- “两边零代码差异”不变量；
+- 只为维护 fork merge-base 存在的 repository convention。
+
+A 中：
+
+- data/src/main/assets 作为 BYO 路径；
+- 新替代方案验证后，旧 mlModelBinding；
+- 代码迁移完成后，旧 :domain、:data、:presentation、:ux modules。
+
+目标中没有单独 sailens-ux 或 sailens-guidance-ui module。
+
+## 10. 待办 release item 的归属
+
+| Item | Home |
 |---|---|
-| 摘掉用不到的 `dataSync` 前台服务（来自 `litert → ai-delivery → work-runtime`） | `lens-runtime` 的 manifest，这样每个应用都继承——需验证 library 级的 `tools:node="remove"` 能传递 |
-| 隐私政策 | 各应用 |
-| 安全免责 / 首次启动 | `shell`，文案按 pipeline 区分 |
-| release 签名 | 各应用 |
-| Cityscapes 非商用的结论 | 不变，B |
+| 移除 LiteRT 依赖链带来的未使用 dataSync foreground service | 放在能安全移除它的最低 module；先验证 manifest propagation，再确定最终归属 |
+| privacy policy | 各 app |
+| safety disclaimer / first-run | sailens-shell，按 configured pipeline 选择 |
+| release signing | 各 app |
+| Cityscapes non-commercial/distribution 结论 | B / model distribution decision |
 
 ## 11. 迁移计划
 
-每一步结束时：A 能构建，B 依赖它也能构建，测试全绿。涉及 native 代码的步骤还需要真机启动并跑一次引导会话。
+每一步结束后：A 构建成功、B 依赖当前 A commit 构建成功、测试全绿。
 
-| # | 步骤 | 真机检查 |
+| # | 步骤 | 真机/native 检查 |
 |---|---|---|
-| 1 | JNI → `RegisterNatives`，暂不挪包 | 是 |
-| 2 | 从 `:app` 抽出 `shell`；`app` 只剩身份 + 配置 | — |
-| 3 | **B 变成建在 composite build 上的薄应用**（重开历史）。尽早验证 §7；从此 B 是使用方，不再是 fork。同一步里撤掉两份 `AGENTS.md` 中"`main` 是 append-only"的护栏：它存在的唯一理由是保护 fork 的 merge-base，而这一步把它去掉了 | — |
-| 4 | 抽出 `lens-core`；`lens-camera` 不再依赖导航核心 | — |
-| 5 | 抽出 `lens-runtime`；native 拆分第 1 部分 | 是 |
-| 6 | 抽出 `lens-vision`；拆分 `Taxonomy` / `NavigationSemantics`；后处理器 seam；native 拆分第 2 部分 | 是 |
-| 7 | 其余部分改名为 `guidance` / `guidance-ui`；native 拆分第 3 部分 | 是 |
-| 8 | 抽出 `lens-output`；带显式优先级的语音路由 | 是 |
-| 9 | 抽出 `lens-vlm` 和 `describe`；prompt 挪到 `describe` | — |
-| 10 | **行为变更：**pipeline 可用性、隐藏不可用的 pipeline、A 的零模型状态 | 是 |
-| 11 | 文档：README 架构、`AGENTS.md`、`models.md` 的 asset 路径、B 的 README 和 `yolo-models.md` | — |
+| 1 | JNI 改成 RegisterNatives，**并在挪 package 前补 native contract coverage** | 是 |
+| 2 | 抽 sailens-shell；root Compose/navigation/settings/design/Guidance UI **以及 camera permission rationale UI** 进入 shell；camera 改为只暴露权限状态/请求 primitive，解除对 :ux 的依赖；Application/MainActivity 留在 app | app launch |
+| 3 | B 变成薄 composite-build consumer；移除 B 的 fork-only guardrail，不删除 A 的 append-only 规则 | B build/launch |
+| 4 | 抽 sailens-core 与 sailens-camera；引入 FrameSource + FrameSnapshotProvider；验证 camera 仍不依赖 shell/design UI | camera session |
+| 5 | 抽 sailens-runtime；拆 native runtime preprocessing | 是 |
+| 6 | 抽 sailens-vision；Taxonomy / NavigationSemantics 拆分并加入 TaxonomyId 校验；拆 vision native | 是 |
+| 7 | 导航逻辑迁到 sailens-guidance；Guidance presentation 只进 shell；拆 Guidance native | 是 |
+| 8 | 抽 sailens-output；把 arbitration primitive 显式化，同时保持当前行为 | 是 |
+| 9 | 抽 sailens-vlm 与 sailens-describe；prompt/snapshot/scheduling policy 迁入 Describe | targeted tests |
+| 10 | **行为变更：**实现 configured/expected/static-availability/runtime-state model、fatal static-configuration handling 与合法 zero-pipeline state | 是 |
+| 11 | 更新 README、AGENTS.md、models.md asset 路径、B 文档与所有 architecture reference | — |
 
-第 3 步刻意排得这么靠前。它立刻去掉 fork，并在十二个模块依赖它之前先把 composite build 验证掉。B 只接触 `shell` 的入口（身份 + 选择），所以第 4–9 步的内部挪动影响不到它；第 10 步可能会改变这个入口接收的内容。
+sailens-vlm 是唯一允许延迟物理 Gradle extraction 的边界：如果一开始真的只有几个 trivial
+interface 且没有 concrete implementation，可以先保持 logical boundary。推迟期间，VLM contract
+先作为 sailens-describe 内部的一个 package 存在，sailens-describe 暂时直接依赖
+sailens-runtime。现有 LiteRtVlmEngine 是未来 sailens-vlm-litert implementation module 的自然起点。
+
+一旦要真正接入 heavyweight concrete VLM runtime/native dependency，这个延迟就必须结束：
+必须先把 contract 与 concrete implementation 物理拆开，避免 Guidance-only edition 被拖入
+VLM runtime 成本。即使暂时不拆 Gradle module，logical boundary 也已经固定。
 
 ## 12. 验证
 
-- **测试要数数量，不只是跑通。**基线 171。测试跟着代码一起挪；每一步之后总数不得下降，除非有明确的理由。
-- **性能红线**（来自 `models.md`），在第 5–7 步之后上真机检查：`sem: postprocessBackend = native_score, outputReadTimeMs ≈ 0` 和 `det: postprocessBackend = native_bbox_nms_float_handle`。
-- **同一台设备、同一条路线的前后会话 trace 对比**：blocked 帧数、事件数、pipeline 平均耗时和 p95。trace 工具比较的是录下来的会话，不会重放帧，所以这是粗粒度检查，不是逐帧的黄金输出测试。
-- native 代码没有 JVM 测试覆盖。每个涉及 native 的步骤都是真机步骤。
+### 12.1 测试保持
 
-## 13. 待定问题
+- 基线：171 个 unit test。
+- 测试随代码一起迁移。
+- 数量不能下降，除非有明确记录的理由。
+- 数量不下降只是 regression guardrail，不代表行为等价。
 
-1. **命名。**`lens-*`、`guidance`、`describe`、`shell`——以及 `com.sailens.lens.*` 这个包根。
-2. **模块少一点？**十二个取代六个。如果需要，两个代价最低的合并：`guidance` + `guidance-ui`（失去一条纯逻辑边界，别无其他代价），以及 `lens-vlm` + `describe`（引擎 / prompt 的拆分降级为包级别）。
+### 12.2 Native 验证分三层
+
+当前代码一共有 13 个 JNI entry point：9 个 array-based kernel，加上 4 个 LiteRT
+TensorBuffer-handle 路径。A 在没有真实 compiled model 的情况下无法制造合法 LiteRT handle，
+所以“在 A 中把 13 个 JNI entry 全部至少调用一次”不能作为 Step 1 的可执行退出条件。验证按
+实际能证明的内容拆成三层：
+
+A、B 两层是 instrumentation test，跑在 arm64 真机上，不是 JVM unit test：项目只构建
+arm64-v8a，x86 模拟器加载不了这些库。因此它们不属于 §12.1 的 171 个测试基线，也不会在只跑
+JVM 的 CI 里执行。
+
+**A. Binding coverage —— 挪 package 前在 A 中强制通过**
+
+- load 每一个目标 native library；
+- JNI_OnLoad/RegisterNatives 的每次注册都检查并向上传播失败；
+- registration table 覆盖全部 13 个 Kotlin native declaration；
+- class name、method name 或 JNI signature 任意错误都会让 library load 失败。
+
+这已经完整覆盖 RegisterNatives 最初要解决的迁移风险：漏改或改错 binding 不会再隐藏到某条
+冷路径第一次执行时才暴露。
+
+**B. Kernel behavior —— A 中强制通过**
+
+- 使用 deterministic synthetic input 真正调用全部 9 个 array-based native entry；
+- 覆盖 float 与 int8 array kernel；
+- 按实际职责覆盖 semantic、detection、YUV/quantization、connectivity；
+- 能做的地方，对关键输出做 pre/post refactor equivalence 对比。
+
+**C. Handle integration —— 需要真实模型**
+
+- B 使用实际打包的 float 模型覆盖两条 float handle 热路径：
+  native_score 与 native_bbox_nms_float_handle；
+- 同时保住 §12.3 的两条性能红线；
+- 两条 int8 handle 路径暂时明确记录为 known coverage gap，直到某个 edition 提供合适的
+  int8 model fixture。不要仅为了满足本次重构，就向 A 引入第三方 model weights。
+
+如果以后 B 或其他 edition 正式声明/支持 int8 handle execution，那么对应 model-backed
+integration coverage 就升级为该 edition 的 release gate。
+
+仅手工跑一次 Guidance session 仍然不够：它可以覆盖当前 float 热路径，但不能证明全部 binding
+和 array kernel。
+
+### 12.3 性能红线
+
+runtime/vision/Guidance native 拆分后，在同一目标设备验证：
+
+- sem: postprocessBackend = native_score 且 outputReadTimeMs ≈ 0；
+- det: postprocessBackend = native_bbox_nms_float_handle；
+- preprocessing cache 仍然命中 same-frame reuse；
+- 没有新增完整 semantic tensor 的额外读取。
+
+### 12.4 Session 对比
+
+同一设备、同一路线比较重构前后 trace：
+
+- blocked frames；
+- event count/category；
+- pipeline average 与 p95；
+- backend reporting；
+- 异常 startup/unavailability state。
+
+trace compare 仍然只是 coarse integration check，不是 golden frame replay。
+
+### 12.5 结构检查
+
+迁移期间持续验证：
+
+- sailens-guidance 没有 Compose/UI dependency；
+- sailens-core 没有逐渐吸收 Android application service；
+- 低层 shared module 不依赖 sailens-shell；
+- Guidance-only edition 不会被拖入 concrete VLM runtime dependency；
+- explicit API compile 能阻止 public surface 无意扩大。
+
+## 13. 本轮 review 已确定的决策
+
+以下项目不再是 open question：
+
+1. **Module 前缀：**使用 sailens-*，不用 lens-*。
+2. **Package root：**使用 com.sailens.*，不用 com.sailens.sailens.* 或 com.sailens.lens.*。
+3. **UI modules：**原 ux 与 guidance-ui 概念合并进 sailens-shell。
+4. **Guidance boundary：**sailens-guidance 与 UI 分离并保留独立 module。
+5. **初始规模：**目标 9 library modules + app；sailens-vlm 允许在没有实际价值时延迟物理拆分。
+6. **Pipeline 组合：**零 pipeline、仅 Guidance、仅 Describe、两者都有，全部合法。
+7. **Host boundary：**Application/MainActivity 留在每个 app；shell 提供可复用 Compose/composition。
+8. **Frame contract：**Guidance 消费 stream；Describe 消费带 freshness 上限的 snapshot。
+9. **Semantics safety：**声明的 taxonomy id + class count 在 static preflight 中机器校验；只有可信 metadata 真正带 labels 时才额外校验 label order，否则 channel order 仍是人工 release gate。
+10. **A 的历史：**sailens-android/main 保持 append-only。
+
+下一步设计工作应该集中在这些固定边界内部的实现细节，而不是继续增加 module 或继续把
+pipeline 抽象成更通用的 framework。
