@@ -567,21 +567,111 @@ There is no standalone sailens-ux or sailens-guidance-ui module in the target.
 
 ## 11. Migration plan
 
-Every step ends with A building, B building against the current A commit, and tests green.
+The implementation keeps eleven small **steps** because that makes dependency movement, commits and
+regression diagnosis manageable. A step is not an artificial human-review stop.
 
-| # | Step | Device/native check |
+After each step, run the targeted build/tests needed to prove that the tree is still internally
+consistent. If they pass, implementation continues directly to the next step in the same gate.
+Human review happens only at the five **review gates** below. A failed intermediate check is fixed
+inside the current gate rather than handed off as a half-migrated architecture.
+
+| # | Implementation step | Review gate |
 |---|---|---|
-| 1 | Convert JNI to RegisterNatives **and add native contract coverage** before package moves | yes |
-| 2 | Extract sailens-shell; move root Compose/navigation/settings/design/Guidance UI **and camera permission rationale UI** into it; refactor camera to expose only permission state/request primitives so its :ux dependency is gone; keep Application/MainActivity in app | app launch |
-| 3 | Convert B into a thin composite-build consumer; retire fork-only guardrails in B, not A's append-only history rule | B build/launch |
-| 4 | Extract sailens-core and sailens-camera; introduce FrameSource + FrameSnapshotProvider; verify camera remains independent of shell/design UI | camera session |
-| 5 | Extract sailens-runtime; split native runtime preprocessing | yes |
-| 6 | Extract sailens-vision; split Taxonomy / NavigationSemantics with TaxonomyId validation; split vision native code | yes |
-| 7 | Move navigation logic into sailens-guidance; move Guidance presentation only into shell; split Guidance native code | yes |
-| 8 | Extract sailens-output and make arbitration primitives explicit while preserving current behaviour | yes |
-| 9 | Extract sailens-vlm and sailens-describe; move prompt/snapshot/scheduling policy into Describe | targeted tests |
-| 10 | **Behaviour change:** implement configured/expected/static-availability/runtime-state model, fatal static-configuration handling and legal zero-pipeline state | yes |
-| 11 | Update README, AGENTS.md, models.md asset path, B documentation and architecture references | — |
+| 1 | Convert JNI to RegisterNatives and add binding + array-kernel contract coverage before package moves | **G1 — native safety foundation** |
+| 2 | Extract sailens-shell; move root Compose/navigation/settings/design/Guidance UI **and camera permission rationale UI** into it; refactor camera to expose only permission state/request primitives so its :ux dependency is gone; keep Application/MainActivity in app | **G2 — app/composition foundation** |
+| 3 | Convert B into a thin composite-build consumer; retire fork-only guardrails in B, not A's append-only history rule | G2 |
+| 4 | Extract sailens-core and sailens-camera; introduce FrameSource + FrameSnapshotProvider; verify camera remains independent of shell/design UI | G2 |
+| 5 | Extract sailens-runtime; split native runtime preprocessing | **G3 — vision/Guidance runtime** |
+| 6 | Extract sailens-vision; split Taxonomy / NavigationSemantics with TaxonomyId validation; split vision native code | G3 |
+| 7 | Move navigation logic into sailens-guidance; move Guidance presentation only into shell; split Guidance native code | G3 |
+| 8 | Extract sailens-output and make arbitration primitives explicit while preserving current behaviour | **G4 — output + Describe** |
+| 9 | Extract sailens-vlm and sailens-describe; move prompt/snapshot/scheduling policy into Describe | G4 |
+| 10 | **Behaviour change:** implement configured/expected/static-availability/runtime-state model, fatal static-configuration handling and legal zero-pipeline state | **G5 — capability semantics + closeout** |
+| 11 | Update README, AGENTS.md, models.md asset path, B documentation and architecture references | G5 |
+
+### 11.1 Review gates
+
+**G1 — native safety foundation**
+
+Stop before any package/module movement. Required evidence:
+
+- A builds and its existing JVM tests stay green;
+- Layer A binding coverage and Layer B array-kernel instrumentation tests in §12.2 pass on an arm64
+  device;
+- all 13 current JNI declarations are registered through RegisterNatives;
+- the built library has no exported Java_<mangled> JNI entry points; JNI_OnLoad is the sole JNI
+  registration entry point;
+- no inference behaviour is intentionally changed.
+
+This gate isolates JNI migration risk from every later package move.
+
+**G2 — app/composition foundation (steps 2–4)**
+
+Complete shell, B composite consumption, core and camera as one migration phase. Stop only after:
+
+- A builds/tests;
+- B resolves A through the real composite build and builds/launches;
+- A launches;
+- a camera session works;
+- camera has no dependency back to shell/design UI;
+- Application/MainActivity remain host-owned;
+- FrameSource and freshness-bounded FrameSnapshotProvider have their intended ownership.
+
+Steps 2–4 may be separate commits, but they should not create three separate review handoffs.
+
+**G3 — vision/Guidance runtime (steps 5–7)**
+
+Treat runtime, vision and Guidance as one coupled extraction. Stop only when the final dependency
+direction and all three native-library homes exist. Required evidence includes:
+
+- full A/B builds and tests;
+- libsailens_runtime.so, libsailens_vision.so and libsailens_guidance.so preserve the registration
+  guarantees from G1;
+- array-kernel contract tests still pass after the split;
+- B's real float models exercise native_score and native_bbox_nms_float_handle;
+- §12.3 performance red lines and same-frame preprocessing-cache reuse hold on the same target
+  device;
+- a real Guidance session completes without behavioural regression;
+- sailens-guidance has no Compose/UI dependency.
+
+This is the highest-risk structural gate and must not be merged into G4.
+
+**G4 — output + Describe (steps 8–9)**
+
+Complete the shared output mechanism and the headless Describe pipeline together, then verify:
+
+- current Guidance speech/haptic behaviour is preserved;
+- Guidance safety output can pre-empt Describe information according to shell policy while
+  sailens-output itself remains policy-neutral;
+- Describe uses FrameSnapshotProvider rather than collecting the continuous frame stream;
+- stale snapshots, cancellation and single-flight behaviour have targeted tests;
+- Guidance-only editions do not acquire a heavyweight concrete VLM runtime dependency;
+- if physical sailens-vlm extraction is deferred, the temporary dependency arrangement below is
+  still respected.
+
+**G5 — capability semantics + closeout (steps 10–11)**
+
+This is deliberately separate because step 10 changes product behaviour rather than merely moving
+code. Verify the complete state model and then update documentation against the implemented result:
+
+- all four pipeline combinations are valid;
+- static availability/preflight does not eagerly initialize LiteRT/GPU/NPU sessions;
+- required static-configuration failures follow the debug fail-fast / release accessible-fatal-state
+  contract;
+- device-specific session initialization failures remain runtime failures on the retryable path;
+- unavailable pipelines do not become dead accessibility controls;
+- final A/B build, tests, launch, native/performance checks and structural checks in §12 pass;
+- README, AGENTS.md and model/repository documentation describe the code that actually landed.
+
+### 11.2 Continuous verification inside a gate
+
+Review gates reduce handoffs, **not verification**. Each implementation step still runs the smallest
+useful checks immediately after its change (for example compile + targeted tests, a composite build,
+or a native instrumentation test). The implementer continues automatically when those checks pass
+and stops early only when a failure cannot be resolved inside the current gate.
+
+A gate may contain multiple focused commits. There is no requirement to squash a gate into one
+commit merely to make the review boundary match the Git history.
 
 sailens-vlm is the one extraction that may be deferred if it would initially contain only trivial
 interfaces and no concrete implementation. While deferred, the VLM contract lives as a package
@@ -625,7 +715,7 @@ the 171-test baseline in §12.1 and do not run in a JVM-only CI.
   thing that can bind a method. Without this, a stale export could keep a method working while its
   table row is wrong or missing, which is the failure the layer is here to catch. Each library
   split in steps 5–7 must preserve the property; it is checkable with
-  `llvm-nm -D --defined-only <lib>.so`, which should print `JNI_OnLoad` and nothing else.
+  `llvm-nm -D --defined-only <lib>.so | grep -E 'Java_|JNI_OnLoad'`, which should show `JNI_OnLoad` and no `Java_` entry points.
 
 This is the complete guard against the migration risk that motivated RegisterNatives: a renamed or
 missed binding cannot hide until a rare code path is executed.
