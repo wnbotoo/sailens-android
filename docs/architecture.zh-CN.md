@@ -700,6 +700,13 @@ JVM 的 CI 里执行。
 - 按实际职责覆盖 semantic、detection、YUV/quantization、connectivity；
 - 能做的地方，对关键输出做 pre/post refactor equivalence 对比。
 
+某个 kernel 和它的 Kotlin fallback **本来就不等价**时，测试钉住 native 的实际取值，而不是钉住
+那个对比 —— 因为 native 才是出货路径。G1 发现了一例:connectivity kernel 不做
+`KotlinConnectivityStatsExtractor` 的透视宽度缩放，而且根本没拿到所需的那两个 config 值。
+对一条正常向远处收窄的走廊，两者在 9 个输出里有 5 个不一致，**包括 `floodReachRatio`** ——
+因为洪泛的提前终止判据用的就是同一个 retention。这是既有的产品级分歧，不是重构造成的，
+已记录在 `NativeConnectivityKernelTest`，留作单独的行为决策。
+
 **C. Handle integration —— 需要真实模型**
 
 - B 使用实际打包的 float 模型覆盖两条 float handle 热路径：

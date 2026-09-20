@@ -727,6 +727,15 @@ missed binding cannot hide until a rare code path is executed.
 - exercise semantic, detection, YUV/quantization and connectivity behaviour as applicable;
 - compare key outputs against the pre-refactor implementation where practical.
 
+Where a kernel and its Kotlin fallback are **not** equivalent, the test pins the native values
+rather than the comparison, because the native kernel is the shipping path. G1 found one such case:
+the connectivity kernel does not apply the perspective width scale that
+`KotlinConnectivityStatsExtractor` applies, and is not passed the two config values it would need.
+On a corridor that recedes normally the two disagree on five of nine outputs, including
+`floodReachRatio`, because the flood's early-stop test consumes that same retention. This is a
+pre-existing product divergence, not a refactor artefact; it is recorded in
+`NativeConnectivityKernelTest` and left for a separate behavioural decision.
+
 **C. Handle integration — model-backed**
 
 - in B, real packaged float models exercise the two float handle hot paths:
