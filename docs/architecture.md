@@ -2,8 +2,9 @@
 
 # Sailens architecture
 
-> Status: **proposal, reviewed and revised.** Nothing in this document is implemented yet. It
-> replaces the current layer-first module structure and the fork-based A/B repository relationship.
+> Status: **agreed and in progress.** It replaces the layer-first module structure and the
+> fork-based A/B repository relationship. Gate G1 and steps 2 and 4 of G2 have landed; step 3 (B as
+> a composite-build consumer) and gates G3-G5 have not. §11 tracks the plan, not the progress.
 
 ## 1. Summary
 
@@ -61,9 +62,10 @@ repository through a Gradle composite build.
   independent compile, dependency, test, native, or public-API boundary is useful.
 - Behaviour changes, except the explicit pipeline-availability behaviour in step 10.
 
-## 3. Where the code is today
+## 3. Where the code started
 
-The repository has six modules split primarily by technical layer:
+This is the pre-migration baseline the plan below replaces. It had six modules split primarily by
+technical layer:
 
 ~~~text
 :domain         (no deps)

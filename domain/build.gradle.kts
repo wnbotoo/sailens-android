@@ -35,6 +35,8 @@ android {
 
 dependencies {
 
+    api(project(":sailens-core"))
+
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.serialization.json)
     testImplementation(libs.junit)

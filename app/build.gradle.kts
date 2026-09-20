@@ -125,9 +125,10 @@ dependencies {
     if (enableLitertNpuRuntime) {
         implementation(project(":litert_npu_runtime_libraries_jit:runtime_strings"))
     }
+    implementation(project(":sailens-core"))
     implementation(project(":domain"))
     implementation(project(":data"))
-    implementation(project(":camera"))
+    implementation(project(":sailens-camera"))
     implementation(project(":sailens-shell"))
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

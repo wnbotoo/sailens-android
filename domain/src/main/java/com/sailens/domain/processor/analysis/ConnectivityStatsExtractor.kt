@@ -2,8 +2,8 @@ package com.sailens.domain.processor.analysis
 
 import com.sailens.domain.config.AnalysisConfig
 import com.sailens.domain.model.analysis.ConnectivityStats
-import com.sailens.domain.model.common.BinaryMask
-import com.sailens.domain.model.common.BottomStats
+import com.sailens.core.mask.BinaryMask
+import com.sailens.core.mask.BottomStats
 import com.sailens.domain.model.common.DirectionBias
 import com.sailens.domain.util.IntArrayQueue
 import com.sailens.domain.util.packCoordinate

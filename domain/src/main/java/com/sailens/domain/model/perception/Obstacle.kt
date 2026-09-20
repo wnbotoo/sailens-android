@@ -2,7 +2,7 @@ package com.sailens.domain.model.perception
 
 import com.sailens.domain.model.common.DirectionZone
 import com.sailens.domain.model.common.DistanceLevel
-import com.sailens.domain.model.common.NormalizedRect
+import com.sailens.core.geometry.NormalizedRect
 import com.sailens.domain.model.common.ObstacleCategory
 import com.sailens.domain.model.common.UrgencyLevel
 import java.util.UUID

@@ -1,8 +1,8 @@
 package com.sailens.data.source.ml
 
-import com.sailens.domain.model.perception.ImageFrame
-import com.sailens.domain.model.perception.ImagePixelFormat
-import com.sailens.domain.model.perception.Yuv420FrameData
+import com.sailens.core.frame.ImageFrame
+import com.sailens.core.frame.ImagePixelFormat
+import com.sailens.core.frame.Yuv420FrameData
 import org.opencv.core.Core
 import org.opencv.core.CvType
 import org.opencv.core.Mat

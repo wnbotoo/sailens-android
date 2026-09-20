@@ -1,7 +1,7 @@
 package com.sailens.domain.repository
 
 import com.sailens.domain.model.common.DistanceLevel
-import com.sailens.domain.model.common.NormalizedRect
+import com.sailens.core.geometry.NormalizedRect
 
 /**
  * 深度估计仓库接口

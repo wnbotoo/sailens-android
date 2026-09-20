@@ -1,4 +1,4 @@
-package com.sailens.domain.model.common
+package com.sailens.core.geometry
 
 /**
  * 归一化矩形

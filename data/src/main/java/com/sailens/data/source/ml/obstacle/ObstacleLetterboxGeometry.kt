@@ -1,6 +1,6 @@
 package com.sailens.data.source.ml.obstacle
 
-import com.sailens.domain.model.perception.ImageFrame
+import com.sailens.core.frame.ImageFrame
 
 /**
  * Letterbox geometry for the obstacle bbox decoder. Maps between the rotated camera frame and the

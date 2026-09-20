@@ -4,12 +4,12 @@ import android.content.Context
 import android.os.SystemClock
 import com.sailens.data.source.ml.session.AcceleratorSelection
 import com.sailens.data.source.ml.session.AcceleratorSelector
-import com.sailens.domain.model.perception.MlRuntimeInfo
+import com.sailens.core.runtime.MlRuntimeInfo
 import com.sailens.domain.repository.SceneDescriber
 import com.sailens.domain.repository.SceneDescription
 import com.sailens.domain.repository.SceneDescriptionChunk
 import com.sailens.domain.repository.SceneDescriptionRequest
-import com.sailens.domain.service.LogService
+import com.sailens.core.log.LogService
 import com.google.ai.edge.litert.Accelerator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi

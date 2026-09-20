@@ -4,7 +4,7 @@ import android.content.Context
 import com.sailens.data.source.ml.LiteRtCompiledModelFactory
 import com.sailens.data.source.ml.LiteRtCompiledModelHandle
 import com.sailens.data.source.ml.ModelSource
-import com.sailens.domain.service.LogService
+import com.sailens.core.log.LogService
 import com.google.ai.edge.litert.Accelerator
 import com.google.ai.edge.litert.TensorBuffer
 import kotlin.coroutines.cancellation.CancellationException

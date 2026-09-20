@@ -3,7 +3,7 @@ package com.sailens.domain.processor.analysis
 import com.sailens.domain.config.AnalysisConfig
 import com.sailens.domain.model.analysis.ConnectivityStats
 import com.sailens.domain.model.analysis.WalkPathConnectivity
-import com.sailens.domain.model.common.BinaryMask
+import com.sailens.core.mask.BinaryMask
 import com.sailens.domain.model.common.DirectionBias
 import com.sailens.domain.model.common.Severity
 import com.sailens.domain.model.perception.SegmentationAnalysis

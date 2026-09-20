@@ -2,12 +2,13 @@ package com.sailens.camera
 
 import android.graphics.ImageFormat
 import android.graphics.PixelFormat
+import android.os.SystemClock
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
-import com.sailens.domain.model.perception.ImageFrame
-import com.sailens.domain.model.perception.ImagePixelFormat
-import com.sailens.domain.model.perception.Yuv420FrameData
-import com.sailens.domain.model.perception.YuvPlaneData
+import com.sailens.core.frame.ImageFrame
+import com.sailens.core.frame.ImagePixelFormat
+import com.sailens.core.frame.Yuv420FrameData
+import com.sailens.core.frame.YuvPlaneData
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -16,11 +17,13 @@ import java.util.concurrent.atomic.AtomicLong
 
 class ImageFrameAnalyzer(
     private val frameConverter: ImageFrameConverter = ImageProxyToFrameConverter(),
-) : ImageAnalysis.Analyzer, ImageFrameProvider {
+    private val elapsedRealtimeMs: () -> Long = SystemClock::elapsedRealtime,
+) : ImageAnalysis.Analyzer, FrameSource, FrameSnapshotProvider {
     private var nextSequenceNumber = 0L
     private val emittedFrames = AtomicLong(0L)
     private val droppedFrames = AtomicLong(0L)
     private val skippedFramesWithoutSubscribers = AtomicLong(0L)
+    private val latestFrame = LatestFrameHolder(elapsedRealtimeMs)
 
     private val _frames = MutableSharedFlow<ImageFrame>(
         extraBufferCapacity = 1,
@@ -44,6 +47,7 @@ class ImageFrameAnalyzer(
                 image = proxy,
                 sequenceNumber = nextSequenceNumber++,
             )
+            latestFrame.record(frame)
             if (_frames.tryEmit(frame)) {
                 emittedFrames.incrementAndGet()
             } else {
@@ -51,6 +55,13 @@ class ImageFrameAnalyzer(
             }
         }
     }
+
+    /**
+     * The snapshot is the last frame this analyzer converted, which only happens while something
+     * collects [frames] -- see the gap noted on [FrameSnapshotProvider]. A dropped frame still
+     * counts: it was current, it just lost the race into the buffer.
+     */
+    override fun currentFrame(maxAgeMs: Long): ImageFrame? = latestFrame.currentFrame(maxAgeMs)
 }
 
 data class ImageFrameAnalyzerStats(

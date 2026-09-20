@@ -21,11 +21,11 @@ import com.sailens.data.source.ml.session.AcceleratorSelection
 import com.sailens.data.source.ml.session.LiteRtSession
 import com.sailens.data.source.ml.session.LiteRtSessionFactory
 import com.sailens.domain.config.PerceptionConfig
-import com.sailens.domain.model.perception.ImageFrame
-import com.sailens.domain.model.perception.MlRuntimeInfo
+import com.sailens.core.frame.ImageFrame
+import com.sailens.core.runtime.MlRuntimeInfo
 import com.sailens.domain.model.perception.ObstacleModelOutput
 import com.sailens.domain.repository.ObstacleProvider
-import com.sailens.domain.service.LogService
+import com.sailens.core.log.LogService
 import com.google.ai.edge.litert.Accelerator
 import com.google.ai.edge.litert.TensorBuffer
 import kotlinx.coroutines.Dispatchers

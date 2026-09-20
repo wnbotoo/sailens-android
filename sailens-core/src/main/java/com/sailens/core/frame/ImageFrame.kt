@@ -1,4 +1,4 @@
-package com.sailens.domain.model.perception
+package com.sailens.core.frame
 
 /**
  * 图像数据（平台无关）。

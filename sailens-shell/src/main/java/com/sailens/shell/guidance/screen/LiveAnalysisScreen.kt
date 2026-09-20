@@ -65,7 +65,7 @@ import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.sailens.shell.camera.CameraViewWithPermission
 import com.sailens.domain.model.common.EventPriority
-import com.sailens.domain.model.common.NormalizedRect
+import com.sailens.core.geometry.NormalizedRect
 import com.sailens.domain.model.common.ObstacleCategory
 import com.sailens.domain.model.perception.ObstacleDetection
 import com.sailens.shell.R

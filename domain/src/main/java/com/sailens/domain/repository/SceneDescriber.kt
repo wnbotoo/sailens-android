@@ -1,6 +1,6 @@
 package com.sailens.domain.repository
 
-import com.sailens.domain.model.perception.ImageFrame
+import com.sailens.core.frame.ImageFrame
 import kotlinx.coroutines.flow.Flow
 
 /**

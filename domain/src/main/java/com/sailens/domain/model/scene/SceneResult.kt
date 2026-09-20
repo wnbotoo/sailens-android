@@ -1,6 +1,6 @@
 package com.sailens.domain.model.scene
 
-import com.sailens.domain.model.common.BinaryMask
+import com.sailens.core.mask.BinaryMask
 import com.sailens.domain.model.perception.ObstacleDetection
 import com.sailens.domain.model.perception.DetectedObstacle
 import com.sailens.domain.model.perception.SegmentationMask

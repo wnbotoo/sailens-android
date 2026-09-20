@@ -2,12 +2,12 @@ package com.sailens.domain.usecase.perception
 
 import com.sailens.domain.config.PerceptionConfig
 import com.sailens.domain.model.common.DistanceLevel
-import com.sailens.domain.model.common.NormalizedRect
+import com.sailens.core.geometry.NormalizedRect
 import com.sailens.domain.model.common.ObstacleRunKind
 import com.sailens.domain.model.perception.ObstacleDetection
 import com.sailens.domain.model.perception.DetectedObstacle
-import com.sailens.domain.model.perception.ImageFrame
-import com.sailens.domain.model.perception.MlRuntimeInfo
+import com.sailens.core.frame.ImageFrame
+import com.sailens.core.runtime.MlRuntimeInfo
 import com.sailens.domain.model.perception.PerceptionResult
 import com.sailens.domain.model.perception.SegmentationAnalysis
 import com.sailens.domain.processor.perception.ObstacleExtractor

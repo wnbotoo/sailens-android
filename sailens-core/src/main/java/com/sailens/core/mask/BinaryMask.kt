@@ -1,4 +1,4 @@
-package com.sailens.domain.model.common
+package com.sailens.core.mask
 
 import java.util.BitSet
 

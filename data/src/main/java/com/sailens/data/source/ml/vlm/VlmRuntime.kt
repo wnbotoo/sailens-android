@@ -1,7 +1,7 @@
 package com.sailens.data.source.ml.vlm
 
 import android.content.Context
-import com.sailens.domain.model.perception.ImageFrame
+import com.sailens.core.frame.ImageFrame
 import com.google.ai.edge.litert.Accelerator
 
 /**

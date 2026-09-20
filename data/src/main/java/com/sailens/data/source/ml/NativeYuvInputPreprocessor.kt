@@ -1,7 +1,7 @@
 package com.sailens.data.source.ml
 
-import com.sailens.domain.model.perception.ImageFrame
-import com.sailens.domain.model.perception.ImagePixelFormat
+import com.sailens.core.frame.ImageFrame
+import com.sailens.core.frame.ImagePixelFormat
 
 internal class NativeYuvInputPreprocessor(
     private val config: ModelTensorConfig,

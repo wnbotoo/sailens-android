@@ -1,4 +1,5 @@
 package com.sailens.domain.model.perception
+import com.sailens.core.runtime.MlRuntimeInfo
 
 /**
  * 语义分割模型输出

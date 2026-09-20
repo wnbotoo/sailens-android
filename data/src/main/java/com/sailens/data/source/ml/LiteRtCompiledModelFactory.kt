@@ -2,7 +2,7 @@ package com.sailens.data.source.ml
 
 import android.content.Context
 import android.os.Build
-import com.sailens.domain.service.LogService
+import com.sailens.core.log.LogService
 import com.google.ai.edge.litert.Accelerator
 import com.google.ai.edge.litert.BuiltinNpuAcceleratorProvider
 import com.google.ai.edge.litert.CompiledModel

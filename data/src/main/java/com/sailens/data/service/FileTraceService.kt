@@ -5,7 +5,7 @@ import com.sailens.domain.config.TraceRuntimeConfig
 import com.sailens.domain.model.trace.FrameTrace
 import com.sailens.domain.model.trace.SessionTraceMetadata
 import com.sailens.domain.model.trace.SessionTraceSummary
-import com.sailens.domain.service.LogService
+import com.sailens.core.log.LogService
 import com.sailens.domain.service.TraceService
 import org.json.JSONObject
 import java.io.File

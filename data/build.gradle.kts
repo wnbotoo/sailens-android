@@ -46,6 +46,7 @@ android {
 dependencies {
 
     implementation(libs.androidx.core.ktx)
+    implementation(project(":sailens-core"))
     implementation(project(":domain"))
     implementation(libs.koin.android)
     implementation(libs.google.litert)

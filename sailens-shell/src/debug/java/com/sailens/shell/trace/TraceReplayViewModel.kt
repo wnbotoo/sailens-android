@@ -4,7 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.sailens.domain.model.trace.TraceReplayReport
 import com.sailens.domain.model.trace.TraceSessionDescriptor
-import com.sailens.domain.service.LogService
+import com.sailens.core.log.LogService
 import com.sailens.domain.usecase.trace.EvaluateTraceReplayBudgetUseCase
 import com.sailens.domain.usecase.trace.ListTraceSessionsUseCase
 import com.sailens.domain.usecase.trace.LoadLatestTraceReplayReportUseCase

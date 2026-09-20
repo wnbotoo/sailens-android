@@ -1,6 +1,6 @@
 package com.sailens.data.source.ml
 
-import com.sailens.domain.model.perception.ImageFrame
+import com.sailens.core.frame.ImageFrame
 
 interface FramePreprocessor : AutoCloseable {
     fun preprocess(frame: ImageFrame, rotationDegrees: Int, outputArray: FloatArray)

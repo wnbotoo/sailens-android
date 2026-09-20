@@ -1,7 +1,7 @@
 package com.sailens.domain.model.perception
 
-import com.sailens.domain.model.common.BinaryMask
-import com.sailens.domain.model.common.BottomStats
+import com.sailens.core.mask.BinaryMask
+import com.sailens.core.mask.BottomStats
 import com.sailens.domain.model.common.GroundType
 
 /**

@@ -2,9 +2,9 @@ package com.sailens.data.source.ml.obstacle
 
 import com.sailens.data.source.mapper.CocoClassMapper
 import com.sailens.data.source.ml.TensorQuantization
-import com.sailens.domain.model.common.NormalizedRect
+import com.sailens.core.geometry.NormalizedRect
 import com.sailens.domain.model.common.ObstacleCategory
-import com.sailens.domain.model.perception.ImageFrame
+import com.sailens.core.frame.ImageFrame
 import com.sailens.domain.model.perception.ObstacleDetection
 import kotlin.math.roundToInt
 

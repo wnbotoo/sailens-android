@@ -1,4 +1,4 @@
-package com.sailens.domain.service
+package com.sailens.core.log
 
 /**
  * 日志服务接口

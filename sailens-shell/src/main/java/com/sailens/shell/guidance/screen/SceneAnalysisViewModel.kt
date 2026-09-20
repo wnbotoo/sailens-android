@@ -4,12 +4,12 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import android.graphics.Bitmap
 import android.os.SystemClock
-import com.sailens.camera.ImageFrameProvider
+import com.sailens.camera.FrameSource
 import com.sailens.domain.model.scene.SceneEvent
 import com.sailens.domain.model.scene.SceneResult
 import com.sailens.domain.repository.SceneDescriber
 import com.sailens.domain.repository.SceneDescriptionChunk
-import com.sailens.domain.service.LogService
+import com.sailens.core.log.LogService
 import com.sailens.domain.service.TraceService
 import com.sailens.domain.usecase.scene.DescribeSceneUseCase
 import com.sailens.domain.usecase.scene.StartSceneAnalysisUseCase
@@ -58,7 +58,7 @@ private const val TAG = "SceneAnalysisViewModel"
  * (Nav3 back stack + the debug-only `TraceReplayViewModel`).
  */
 class SceneAnalysisViewModel(
-    private val imageFrameProvider: ImageFrameProvider,
+    private val frameSource: FrameSource,
     private val startSceneAnalysisUseCase: StartSceneAnalysisUseCase,
     private val stopSceneAnalysisUseCase: StopSceneAnalysisUseCase,
     private val describeSceneUseCase: DescribeSceneUseCase,
@@ -271,7 +271,7 @@ class SceneAnalysisViewModel(
             }
 
             // collectLatest is often used for high-frequency data, discarding previous incomplete processing
-            startSceneAnalysisUseCase(imageFrameProvider.frames).onStart {
+            startSceneAnalysisUseCase(frameSource.frames).onStart {
                 _uiState.update {
                     it.copy(isInitializing = false, isRunning = true, isLoading = false)
                 }
@@ -486,7 +486,7 @@ class SceneAnalysisViewModel(
             val clauseBuffer = SpeechClauseBuffer()
             var spokeAnyClause = false
             try {
-                describeSceneUseCase(imageFrameProvider.frames).collect { chunk ->
+                describeSceneUseCase(frameSource.frames).collect { chunk ->
                     when (chunk) {
                         is SceneDescriptionChunk.Delta -> {
                             if (screenReaderActive) return@collect

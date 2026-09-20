@@ -1,10 +1,10 @@
 package com.sailens.domain.usecase.scene
 
-import com.sailens.domain.model.perception.ImageFrame
+import com.sailens.core.frame.ImageFrame
 import com.sailens.domain.repository.SceneDescriber
 import com.sailens.domain.repository.SceneDescriptionChunk
 import com.sailens.domain.repository.SceneDescriptionRequest
-import com.sailens.domain.service.LogService
+import com.sailens.core.log.LogService
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.first

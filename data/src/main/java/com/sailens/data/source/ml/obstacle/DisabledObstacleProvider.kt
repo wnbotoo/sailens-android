@@ -1,7 +1,7 @@
 package com.sailens.data.source.ml.obstacle
 
-import com.sailens.domain.model.perception.ImageFrame
-import com.sailens.domain.model.perception.MlRuntimeInfo
+import com.sailens.core.frame.ImageFrame
+import com.sailens.core.runtime.MlRuntimeInfo
 import com.sailens.domain.model.perception.ObstacleModelOutput
 import com.sailens.domain.repository.ObstacleProvider
 

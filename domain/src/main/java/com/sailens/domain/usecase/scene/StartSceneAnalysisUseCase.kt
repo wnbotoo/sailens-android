@@ -8,13 +8,13 @@ import com.sailens.domain.config.TraceRuntimeConfig
 import com.sailens.domain.model.trace.FrameTrace
 import com.sailens.domain.model.trace.SessionTraceAccumulator
 import com.sailens.domain.model.trace.SessionTraceMetadata
-import com.sailens.domain.model.perception.ImageFrame
+import com.sailens.core.frame.ImageFrame
 import com.sailens.domain.model.scene.SceneDebugInfo
 import com.sailens.domain.model.scene.SceneResult
 import com.sailens.domain.processor.analysis.FrameQualityAnalyzer
 import com.sailens.domain.repository.ObstacleProvider
 import com.sailens.domain.repository.PerceptionRepository
-import com.sailens.domain.service.LogService
+import com.sailens.core.log.LogService
 import com.sailens.domain.service.TraceService
 import com.sailens.domain.usecase.decision.DecideEventsUseCase
 import com.sailens.domain.usecase.perception.AnalyzeSceneUseCase

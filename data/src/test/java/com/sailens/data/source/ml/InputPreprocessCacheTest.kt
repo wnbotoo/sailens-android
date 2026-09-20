@@ -1,7 +1,7 @@
 package com.sailens.data.source.ml
 
-import com.sailens.domain.model.perception.ImageFrame
-import com.sailens.domain.model.perception.ImagePixelFormat
+import com.sailens.core.frame.ImageFrame
+import com.sailens.core.frame.ImagePixelFormat
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull

@@ -1,4 +1,5 @@
 package com.sailens.domain.model.perception
+import com.sailens.core.runtime.MlRuntimeInfo
 
 data class ObstacleModelOutput(
     val detections: List<ObstacleDetection>,

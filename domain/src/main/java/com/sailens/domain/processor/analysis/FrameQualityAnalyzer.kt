@@ -1,8 +1,8 @@
 package com.sailens.domain.processor.analysis
 
 import com.sailens.domain.model.analysis.FrameQuality
-import com.sailens.domain.model.perception.ImageFrame
-import com.sailens.domain.model.perception.ImagePixelFormat
+import com.sailens.core.frame.ImageFrame
+import com.sailens.core.frame.ImagePixelFormat
 import com.sailens.domain.util.EnumStabilizer
 import kotlin.math.sqrt
 

@@ -14,17 +14,18 @@ pipeline that turns the scene ahead into speech and haptics. This file is the re
   Weights carry their own licenses and dataset terms independent of this code license.
 
 ## Big picture
-- Modules: `:app`, `:camera`, `:data`, `:domain`, `:sailens-shell` (`settings.gradle.kts`). The migration in `docs/architecture.md` §11 is replacing the layer-first split; `:sailens-shell` is the first target module and absorbed the old `:presentation` and `:ux`.
-- Direction: outer modules depend inward on `:domain` interfaces; keep Android/platform APIs out of `:domain`.
+- Modules: `:app`, `:data`, `:domain`, `:sailens-core`, `:sailens-camera`, `:sailens-shell` (`settings.gradle.kts`). The migration in `docs/architecture.md` §11 is replacing the layer-first split; `:sailens-core`, `:sailens-camera` and `:sailens-shell` are target modules already in place (`:sailens-shell` absorbed the old `:presentation` and `:ux`), while `:domain` and `:data` still await theirs.
+- Direction: dependencies point downward. `:sailens-core` has none; `:sailens-camera` depends only on it. `:domain` stays free of Android/platform APIs.
 - `:app` hosts Koin + root Compose (`MainApplication.kt`, `MainActivity.kt`, `app/App.kt`) and runtime wiring.
 - Runtime profile lives in `app/SailensRuntimeProfile.kt`; Koin bindings live in `app/DomainBindingsModule.kt`, `app/DiModule.kt`, and each feature module's `*Module.kt`.
-- `:camera` owns CameraX capture + frame stream (`CameraViewModel.kt`, `ImageFrameAnalyzer.kt`).
+- `:sailens-core` holds the small shared contracts: `ImageFrame`/YUV planes, `NormalizedRect`, `BinaryMask`, `MlRuntimeInfo`, `LogService`. Keep it small — navigation semantics stay out of it.
+- `:sailens-camera` owns CameraX capture and the frame contracts: `FrameSource` (continuous) and `FrameSnapshotProvider` (freshness-bounded snapshot), `CameraViewModel.kt`, `ImageFrameAnalyzer.kt`, plus `CameraPreview` and the camera-permission state primitive.
 - `:data` owns ML/depth/log/trace implementations (`data/di/DataModule.kt`).
 - `:domain` owns perception/analysis/decision/trace use cases (`domain/src/main/java/com/sailens/domain/usecase`).
-- `:sailens-shell` owns reusable presentation and composition: `SailensRoot()`, navigation, design system (`design/`), Guidance UI (`guidance/screen`, `guidance/overlay`, `guidance/settings`), settings, diagnostics, about, trace replay UI, TTS and haptics (`guidance/screen/SceneAnalysisViewModel.kt`, `device/*`). Camera permission *policy* UI lives here too (`camera/CameraViewWithPermission.kt`); `:camera` only exposes the preview and a permission-state primitive.
+- `:sailens-shell` owns reusable presentation and composition: `SailensRoot()`, navigation, design system (`design/`), Guidance UI (`guidance/screen`, `guidance/overlay`, `guidance/settings`), settings, diagnostics, about, trace replay UI, TTS and haptics (`guidance/screen/SceneAnalysisViewModel.kt`, `device/*`). Camera permission *policy* UI lives here too (`camera/CameraViewWithPermission.kt`); `:sailens-camera` only exposes the preview and a permission-state primitive.
 
 ## Runtime flow to preserve
-- `ImageAnalysis` outputs `YUV_420_888` frames -> `ImageFrameAnalyzer` -> `SharedFlow<ImageFrame>` with `DROP_OLDEST`.
+- `ImageAnalysis` outputs `YUV_420_888` frames -> `ImageFrameAnalyzer` -> `FrameSource.frames` (`SharedFlow<ImageFrame>`, `DROP_OLDEST`). The analyzer also records the latest frame for `FrameSnapshotProvider`, but only while something collects the stream.
 - `StartSceneAnalysisUseCase` initializes `PerceptionRepository`; in `DEFAULT` profile it also initializes the realtime obstacle (detection) provider.
 - `StartSceneAnalysisUseCase` starts a trace session, maps each frame to `PerceptionResult`, `SceneResult`, and `FrameTrace`, then records runtime backend fields.
 - `ProcessFrameUseCase` runs semantic segmentation, can reuse cached semantic analysis between scheduled runs, then runs obstacle detection extraction/tracking (det only; no instance-segmentation refinement).
@@ -48,7 +49,7 @@ pipeline that turns the scene ahead into speech and haptics. This file is the re
 - `BinaryMask` is `BitSet`-based and used in hot loops; avoid allocation-heavy patterns in analysis code.
 
 ## Integrations and assets
-- CameraX (`camera-core/camera2/camera-lifecycle/camera-compose`) in `:camera`.
+- CameraX (`camera-core/camera2/camera-lifecycle/camera-compose`) in `:sailens-camera`.
 - LiteRT model execution with native YUV preprocessing (`native_yuv`), OpenCV fallback (`opencv_fallback`), and same-frame preprocessing cache hits (`shared_native_yuv` / `shared_quantized_native_yuv`).
 - Semantic postprocess can use native fused score/stat extraction (`native_score`) or fallback argmax paths.
 - Obstacle detection postprocess supports raw attribute-major tensors (`[1, 4+classCount, N]`) and end-to-end tensors (`[1, N, 6]`); layout is auto-resolved from the output tensor shape. The realtime path decodes straight from the output buffer handle (zero-copy) when available.

@@ -2,7 +2,7 @@ package com.sailens.data.service
 
 import android.content.Context
 import android.util.Log
-import com.sailens.domain.service.LogService
+import com.sailens.core.log.LogService
 import org.json.JSONObject
 import java.io.File
 import java.io.FileWriter

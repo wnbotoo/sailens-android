@@ -2,7 +2,7 @@ package com.sailens.data.repository
 
 import com.sailens.data.source.depth.HardwareDepthSource
 import com.sailens.domain.model.common.DistanceLevel
-import com.sailens.domain.model.common.NormalizedRect
+import com.sailens.core.geometry.NormalizedRect
 import com.sailens.domain.repository.DepthRepository
 
 class HardwareDepthRepository(

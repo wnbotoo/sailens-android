@@ -1,7 +1,7 @@
 package com.sailens.data.repository
 
 import com.sailens.data.source.ml.semantic.SegmentationModel
-import com.sailens.domain.model.perception.ImageFrame
+import com.sailens.core.frame.ImageFrame
 import com.sailens.domain.model.perception.SegmentationOutput
 import com.sailens.domain.repository.PerceptionRepository
 

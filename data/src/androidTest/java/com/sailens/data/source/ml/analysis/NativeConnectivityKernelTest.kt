@@ -5,7 +5,7 @@ import com.sailens.data.source.ml.NativeMlLibrary
 import com.sailens.data.source.ml.SilentLogService
 import com.sailens.domain.config.AnalysisConfig
 import com.sailens.domain.model.analysis.ConnectivityStats
-import com.sailens.domain.model.common.BinaryMask
+import com.sailens.core.mask.BinaryMask
 import com.sailens.domain.model.common.DirectionBias
 import com.sailens.domain.processor.analysis.KotlinConnectivityStatsExtractor
 import org.junit.Assert.assertEquals

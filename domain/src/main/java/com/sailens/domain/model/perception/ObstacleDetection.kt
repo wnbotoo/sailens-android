@@ -1,6 +1,6 @@
 package com.sailens.domain.model.perception
 
-import com.sailens.domain.model.common.NormalizedRect
+import com.sailens.core.geometry.NormalizedRect
 import com.sailens.domain.model.common.ObstacleCategory
 
 /**

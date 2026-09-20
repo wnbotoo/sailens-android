@@ -10,8 +10,8 @@ import com.sailens.data.source.ml.ModelTensorConfig
 import com.sailens.data.source.ml.ModelInputPreprocessor
 import com.sailens.data.source.ml.InputPreprocessCache
 import com.sailens.data.source.ml.session.LiteRtSession
-import com.sailens.domain.model.perception.MlRuntimeInfo
-import com.sailens.domain.model.perception.ImageFrame
+import com.sailens.core.runtime.MlRuntimeInfo
+import com.sailens.core.frame.ImageFrame
 import com.sailens.domain.model.perception.SegmentationMask
 import com.sailens.domain.model.perception.SegmentationOutput
 import com.google.ai.edge.litert.Accelerator

@@ -1,6 +1,6 @@
 package com.sailens.data.source.ml
 
-import com.sailens.domain.model.perception.ImageFrame
+import com.sailens.core.frame.ImageFrame
 
 class InputPreprocessCache {
     // Same-frame cache only: entries keep provider-owned reusable buffers and are valid until

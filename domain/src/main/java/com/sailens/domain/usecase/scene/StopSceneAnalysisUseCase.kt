@@ -10,7 +10,7 @@ import com.sailens.domain.processor.perception.ObstacleTracker
 import com.sailens.domain.processor.perception.SegmentationAnalysisProcessor
 import com.sailens.domain.repository.ObstacleProvider
 import com.sailens.domain.repository.PerceptionRepository
-import com.sailens.domain.service.LogService
+import com.sailens.core.log.LogService
 import com.sailens.domain.usecase.perception.ProcessFrameUseCase
 
 /**

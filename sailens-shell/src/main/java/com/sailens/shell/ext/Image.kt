@@ -2,7 +2,7 @@ package com.sailens.shell.ext
 
 import android.graphics.Bitmap
 import android.graphics.Color
-import com.sailens.domain.model.common.BinaryMask
+import com.sailens.core.mask.BinaryMask
 import com.sailens.domain.model.perception.SegmentationMask
 import androidx.core.graphics.createBitmap
 import kotlin.math.roundToInt

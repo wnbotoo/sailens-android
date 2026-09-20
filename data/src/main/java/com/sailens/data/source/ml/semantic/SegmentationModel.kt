@@ -1,6 +1,6 @@
 package com.sailens.data.source.ml.semantic
 
-import com.sailens.domain.model.perception.ImageFrame
+import com.sailens.core.frame.ImageFrame
 import com.sailens.domain.model.perception.SegmentationOutput
 
 /**

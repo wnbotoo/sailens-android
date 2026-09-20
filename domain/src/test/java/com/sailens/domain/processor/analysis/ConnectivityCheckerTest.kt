@@ -1,7 +1,7 @@
 package com.sailens.domain.processor.analysis
 
 import com.sailens.domain.config.AnalysisConfig
-import com.sailens.domain.model.common.BinaryMask
+import com.sailens.core.mask.BinaryMask
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue

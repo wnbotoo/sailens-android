@@ -23,7 +23,7 @@ val shellModule = module {
     single { GuidanceDiagnosticsStore(sceneOverlayConfig = get(), uiFeatureFlags = get()) }
     viewModel {
         SceneAnalysisViewModel(
-            imageFrameProvider = get(),
+            frameSource = get(),
             startSceneAnalysisUseCase = get(),
             stopSceneAnalysisUseCase = get(),
             describeSceneUseCase = get(),

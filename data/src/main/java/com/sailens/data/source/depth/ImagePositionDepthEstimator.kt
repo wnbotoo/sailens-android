@@ -1,7 +1,7 @@
 package com.sailens.data.source.depth
 
 import com.sailens.domain.model.common.DistanceLevel
-import com.sailens.domain.model.common.NormalizedRect
+import com.sailens.core.geometry.NormalizedRect
 
 /**
  * 基于图像位置的深度估计器

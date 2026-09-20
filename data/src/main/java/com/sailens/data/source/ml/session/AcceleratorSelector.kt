@@ -1,7 +1,7 @@
 package com.sailens.data.source.ml.session
 
 import com.sailens.data.source.ml.ModelAcceleratorSelectionMode
-import com.sailens.domain.service.LogService
+import com.sailens.core.log.LogService
 import com.google.ai.edge.litert.Accelerator
 import kotlin.coroutines.cancellation.CancellationException
 

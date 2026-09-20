@@ -36,7 +36,7 @@ import com.sailens.domain.repository.DeviceSensorRepository
 import com.sailens.domain.repository.ObstacleProvider
 import com.sailens.domain.repository.PerceptionRepository
 import com.sailens.domain.repository.SceneDescriber
-import com.sailens.domain.service.LogService
+import com.sailens.core.log.LogService
 import com.sailens.domain.service.TraceReplayService
 import com.sailens.domain.service.TraceService
 import org.koin.android.ext.koin.androidContext

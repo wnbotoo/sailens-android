@@ -1,4 +1,4 @@
-package com.sailens.domain.model.perception
+package com.sailens.core.runtime
 
 data class MlRuntimeInfo(
     val accelerator: String = UNKNOWN,

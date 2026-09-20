@@ -9,7 +9,7 @@ import com.sailens.domain.model.common.DirectionBias
 import com.sailens.domain.model.common.DirectionZone
 import com.sailens.domain.model.common.DistanceLevel
 import com.sailens.domain.model.common.EventCategory
-import com.sailens.domain.model.common.NormalizedRect
+import com.sailens.core.geometry.NormalizedRect
 import com.sailens.domain.model.common.ObstacleCategory
 import com.sailens.domain.model.common.Severity
 import com.sailens.domain.model.common.UrgencyLevel

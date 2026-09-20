@@ -12,9 +12,9 @@ import com.sailens.data.source.ml.imageTensorSpec
 import com.sailens.data.source.ml.resolveModelInputDataType
 import com.sailens.data.source.ml.session.AcceleratorSelection
 import com.sailens.data.source.ml.session.LiteRtSessionFactory
-import com.sailens.domain.model.perception.ImageFrame
+import com.sailens.core.frame.ImageFrame
 import com.sailens.domain.model.perception.SegmentationOutput
-import com.sailens.domain.service.LogService
+import com.sailens.core.log.LogService
 import com.google.ai.edge.litert.Accelerator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi

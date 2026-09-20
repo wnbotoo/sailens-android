@@ -1,10 +1,10 @@
 package com.sailens.domain.processor.perception
 
 import com.sailens.domain.config.PerceptionConfig
-import com.sailens.domain.model.common.BinaryMask
+import com.sailens.core.mask.BinaryMask
 import com.sailens.domain.model.common.DirectionZone
 import com.sailens.domain.model.common.DistanceLevel
-import com.sailens.domain.model.common.NormalizedRect
+import com.sailens.core.geometry.NormalizedRect
 import com.sailens.domain.model.common.ObstacleCategory
 import com.sailens.domain.model.perception.ClassMapper
 import com.sailens.domain.model.perception.ObstacleDetection

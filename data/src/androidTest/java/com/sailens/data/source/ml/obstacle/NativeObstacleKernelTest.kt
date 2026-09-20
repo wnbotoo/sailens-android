@@ -3,8 +3,8 @@ package com.sailens.data.source.ml.obstacle
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.sailens.data.source.ml.NativeMlLibrary
 import com.sailens.data.source.ml.TensorQuantization
-import com.sailens.domain.model.perception.ImageFrame
-import com.sailens.domain.model.perception.ImagePixelFormat
+import com.sailens.core.frame.ImageFrame
+import com.sailens.core.frame.ImagePixelFormat
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before

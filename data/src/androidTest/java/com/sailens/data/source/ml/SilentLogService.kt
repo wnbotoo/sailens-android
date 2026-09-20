@@ -1,6 +1,6 @@
 package com.sailens.data.source.ml
 
-import com.sailens.domain.service.LogService
+import com.sailens.core.log.LogService
 
 /**
  * A [LogService] that drops everything.

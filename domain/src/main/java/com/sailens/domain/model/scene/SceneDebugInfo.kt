@@ -1,6 +1,6 @@
 package com.sailens.domain.model.scene
 
-import com.sailens.domain.model.perception.MlRuntimeInfo
+import com.sailens.core.runtime.MlRuntimeInfo
 
 data class SceneDebugInfo(
     val semanticProvider: String,

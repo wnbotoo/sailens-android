@@ -1,6 +1,6 @@
 package com.sailens.data.source.ml
 
-import com.sailens.domain.model.perception.ImageFrame
+import com.sailens.core.frame.ImageFrame
 import kotlin.math.roundToInt
 
 internal class ModelInputPreprocessor(
