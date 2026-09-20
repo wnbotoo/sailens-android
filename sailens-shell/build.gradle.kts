@@ -56,6 +56,7 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(project(":sailens-camera"))
     implementation(project(":sailens-output"))
+    implementation(project(":sailens-describe"))
     implementation(project(":sailens-core"))
     implementation(project(":sailens-guidance"))
     testImplementation(libs.junit)

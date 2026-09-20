@@ -1,4 +1,4 @@
-package com.sailens.data.source.ml.vlm
+package com.sailens.vlm
 
 import android.content.Context
 import com.sailens.core.frame.ImageFrame

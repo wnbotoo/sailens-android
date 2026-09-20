@@ -1,14 +1,14 @@
-package com.sailens.data.source.ml.vlm
+package com.sailens.vlm
 
 import android.content.Context
 import android.os.SystemClock
 import com.sailens.runtime.session.AcceleratorSelection
 import com.sailens.runtime.session.AcceleratorSelector
 import com.sailens.core.runtime.MlRuntimeInfo
-import com.sailens.guidance.repository.SceneDescriber
-import com.sailens.guidance.repository.SceneDescription
-import com.sailens.guidance.repository.SceneDescriptionChunk
-import com.sailens.guidance.repository.SceneDescriptionRequest
+import com.sailens.vlm.SceneDescriber
+import com.sailens.vlm.SceneDescription
+import com.sailens.vlm.SceneDescriptionChunk
+import com.sailens.vlm.SceneDescriptionRequest
 import com.sailens.core.log.LogService
 import com.google.ai.edge.litert.Accelerator
 import kotlinx.coroutines.Dispatchers

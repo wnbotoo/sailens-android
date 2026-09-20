@@ -1,4 +1,4 @@
-package com.sailens.guidance.repository
+package com.sailens.vlm
 
 import com.sailens.core.frame.ImageFrame
 import kotlinx.coroutines.flow.Flow

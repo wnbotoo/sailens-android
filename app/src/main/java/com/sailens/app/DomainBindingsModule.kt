@@ -20,7 +20,9 @@ import com.sailens.guidance.processor.perception.SegmentationAnalyzer
 import com.sailens.guidance.usecase.decision.DecideEventsUseCase
 import com.sailens.guidance.usecase.perception.AnalyzeSceneUseCase
 import com.sailens.guidance.usecase.perception.ProcessFrameUseCase
-import com.sailens.guidance.usecase.scene.DescribeSceneUseCase
+import com.sailens.describe.DescribeSceneUseCase
+import com.sailens.vlm.LiteRtVlmEngine
+import com.sailens.vlm.SceneDescriber
 import com.sailens.guidance.usecase.scene.StartSceneAnalysisUseCase
 import com.sailens.guidance.usecase.scene.StopSceneAnalysisUseCase
 import com.sailens.guidance.usecase.trace.BuildTraceReplayReportUseCase
@@ -28,6 +30,7 @@ import com.sailens.guidance.usecase.trace.EvaluateTraceReplayBudgetUseCase
 import com.sailens.guidance.usecase.trace.ListTraceSessionsUseCase
 import com.sailens.guidance.usecase.trace.LoadLatestTraceReplayReportUseCase
 import com.sailens.guidance.usecase.trace.LoadTraceReplayReportUseCase
+import org.koin.android.ext.koin.androidContext
 import org.koin.core.qualifier.named
 import org.koin.dsl.module
 
@@ -126,7 +129,24 @@ val domainBindingsModule = module {
             logService = get(),
         )
     }
-    factory { DescribeSceneUseCase(sceneDescriber = get(), logService = get()) }
+    // Which VLM engine an edition ships is an edition decision (architecture.md §6.11), so the
+    // binding lives in the host app rather than in a library module. With the default
+    // UnavailableVlmRuntimeFactory the engine reports isAvailable == false and the UI hides the
+    // action, so constructing it costs nothing until a real runtime is injected.
+    single<SceneDescriber> {
+        LiteRtVlmEngine(
+            context = androidContext(),
+            config = get(),
+            logService = get(),
+        )
+    }
+    factory {
+        DescribeSceneUseCase(
+            sceneDescriber = get(),
+            frameSnapshots = get(),
+            logService = get(),
+        )
+    }
     factory { BuildTraceReplayReportUseCase() }
     factory { EvaluateTraceReplayBudgetUseCase(get()) }
     factory { ListTraceSessionsUseCase(get()) }

@@ -4,7 +4,7 @@ import com.sailens.BuildConfig
 import com.sailens.camera.CameraRuntimeConfig
 import com.sailens.vision.detection.DetectionModelConfig
 import com.sailens.vision.semantic.SemanticModelConfig
-import com.sailens.data.source.ml.vlm.VlmModelConfig
+import com.sailens.vlm.VlmModelConfig
 import com.sailens.guidance.config.AnalysisConfig
 import com.sailens.runtime.hardware.DeviceHardwareProfileProvider
 import com.sailens.guidance.config.PerceptionConfig

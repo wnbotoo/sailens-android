@@ -1,15 +1,13 @@
-package com.sailens.guidance.usecase.scene
+package com.sailens.describe
 
-import com.sailens.core.frame.ImageFrame
-import com.sailens.guidance.repository.SceneDescriber
-import com.sailens.guidance.repository.SceneDescriptionChunk
-import com.sailens.guidance.repository.SceneDescriptionRequest
+import com.sailens.camera.FrameSnapshotProvider
+import com.sailens.vlm.SceneDescriber
+import com.sailens.vlm.SceneDescriptionChunk
+import com.sailens.vlm.SceneDescriptionRequest
 import com.sailens.core.log.LogService
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emitAll
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * 用户主动发问一次："我面前是什么？"
@@ -23,19 +21,20 @@ import kotlinx.coroutines.withTimeoutOrNull
  */
 class DescribeSceneUseCase(
     private val sceneDescriber: SceneDescriber,
+    private val frameSnapshots: FrameSnapshotProvider,
     private val logService: LogService,
 ) {
 
     /**
-     * @param frameFlow 相机帧流，只会从里面取一帧。
+     * @param maxFrameAgeMs 快照的新鲜度上限；超过就当作没有画面。
      * @param userPrompt 用户的具体问题；为 null 时用引擎的系统提示词（"描述正前方最重要的东西"）。
      * @return 流式的描述分片；集合被取消即中止生成。失败以异常形式抛给调用方，由它决定怎么告知
      *   用户——**这条链路上的失败必须被说出来或震出来，不能只写日志**：用户已经主动发问，
      *   没有回答和"前方什么都没有"在他那里是同一种体验。
      */
     operator fun invoke(
-        frameFlow: Flow<ImageFrame>,
         userPrompt: String? = null,
+        maxFrameAgeMs: Long = DEFAULT_MAX_FRAME_AGE_MS,
     ): Flow<SceneDescriptionChunk> = flow {
         if (!sceneDescriber.isReady) {
             // 首次调用才加载模型：VLM 权重比 sem/det 大得多，进程启动时就加载会拖慢冷启动，
@@ -44,10 +43,11 @@ class DescribeSceneUseCase(
             sceneDescriber.initialize()
         }
 
-        // 帧流是 SharedFlow，没有重放；相机没在推帧时 first() 会永远挂着。加超时把它变成一个
-        // 会明确失败的调用，否则用户按下按钮后得到的是无声的永久等待。
-        val frame = withTimeoutOrNull(FRAME_WAIT_TIMEOUT_MS) { frameFlow.first() }
-            ?: error("No camera frame available within ${FRAME_WAIT_TIMEOUT_MS}ms")
+        // 只取当前这一帧，并且只接受足够新的那一张（architecture.md §6.1）。描述一张几秒前的
+        // 画面比不回答更糟：用户看不见画面已经过期，会拿旧信息当成眼前的现实。
+        // 拿不到就立刻失败，而不是挂在那里等下一帧——用户按了按钮，沉默是最坏的回答。
+        val frame = frameSnapshots.currentFrame(maxFrameAgeMs)
+            ?: error("No camera frame newer than ${maxFrameAgeMs}ms is available")
 
         emitAll(sceneDescriber.describe(SceneDescriptionRequest(frame, userPrompt)))
     }
@@ -55,7 +55,7 @@ class DescribeSceneUseCase(
     private companion object {
         const val TAG = "DescribeScene"
 
-        /** 相机正常推帧时这是毫秒级的事；超过这个值说明相机根本没开。 */
-        const val FRAME_WAIT_TIMEOUT_MS = 2_000L
+        /** 相机在推帧时快照是毫秒级新鲜的；超过这个值说明相机没在跑，或者画面已经不算"眼前"。 */
+        const val DEFAULT_MAX_FRAME_AGE_MS = 2_000L
     }
 }

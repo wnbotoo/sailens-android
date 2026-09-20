@@ -1,4 +1,4 @@
-package com.sailens.data.source.ml.vlm
+package com.sailens.vlm
 
 import com.sailens.runtime.ModelAcceleratorBackend
 import com.sailens.runtime.ModelAcceleratorSelectionMode

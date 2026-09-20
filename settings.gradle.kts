@@ -33,6 +33,8 @@ include(":sailens-core")
 include(":sailens-runtime")
 include(":sailens-vision")
 include(":sailens-output")
+include(":sailens-vlm")
+include(":sailens-describe")
 
 val enableLitertNpuRuntime = providers.gradleProperty("sailens.enableLitertNpuRuntime")
     .map { it.toBooleanStrict() }

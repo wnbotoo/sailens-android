@@ -7,11 +7,11 @@ import android.os.SystemClock
 import com.sailens.camera.FrameSource
 import com.sailens.guidance.model.scene.SceneEvent
 import com.sailens.guidance.model.scene.SceneResult
-import com.sailens.guidance.repository.SceneDescriber
-import com.sailens.guidance.repository.SceneDescriptionChunk
+import com.sailens.vlm.SceneDescriber
+import com.sailens.vlm.SceneDescriptionChunk
 import com.sailens.core.log.LogService
 import com.sailens.guidance.service.TraceService
-import com.sailens.guidance.usecase.scene.DescribeSceneUseCase
+import com.sailens.describe.DescribeSceneUseCase
 import com.sailens.guidance.usecase.scene.StartSceneAnalysisUseCase
 import com.sailens.guidance.usecase.scene.StopSceneAnalysisUseCase
 import com.sailens.shell.diagnostics.GuidanceDiagnosticsStore
@@ -488,7 +488,7 @@ class SceneAnalysisViewModel(
             val clauseBuffer = SpeechClauseBuffer()
             var spokeAnyClause = false
             try {
-                describeSceneUseCase(frameSource.frames).collect { chunk ->
+                describeSceneUseCase().collect { chunk ->
                     when (chunk) {
                         is SceneDescriptionChunk.Delta -> {
                             if (screenReaderActive) return@collect
