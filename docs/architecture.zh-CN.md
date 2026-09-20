@@ -549,21 +549,105 @@ A 中：
 
 ## 11. 迁移计划
 
-每一步结束后：A 构建成功、B 依赖当前 A commit 构建成功、测试全绿。
+实现仍然保留 11 个较小的 **step**，因为这样更利于控制依赖移动、组织 commit 和定位 regression。
+但 step 不再等同于“必须停下来等人工 review”。
 
-| # | 步骤 | 真机/native 检查 |
+每个 step 做完后，立即跑能证明当前 tree 自洽的 targeted build/tests。只要通过，就直接在同一个
+gate 内继续下一步。只有到下面 5 个 **review gate** 才停下来做人审。如果中间检查失败，就在
+当前 gate 内修复，而不是把一个半迁移状态交出来。
+
+| # | Implementation step | Review gate |
 |---|---|---|
-| 1 | JNI 改成 RegisterNatives，**并在挪 package 前补 native contract coverage** | 是 |
-| 2 | 抽 sailens-shell；root Compose/navigation/settings/design/Guidance UI **以及 camera permission rationale UI** 进入 shell；camera 改为只暴露权限状态/请求 primitive，解除对 :ux 的依赖；Application/MainActivity 留在 app | app launch |
-| 3 | B 变成薄 composite-build consumer；移除 B 的 fork-only guardrail，不删除 A 的 append-only 规则 | B build/launch |
-| 4 | 抽 sailens-core 与 sailens-camera；引入 FrameSource + FrameSnapshotProvider；验证 camera 仍不依赖 shell/design UI | camera session |
-| 5 | 抽 sailens-runtime；拆 native runtime preprocessing | 是 |
-| 6 | 抽 sailens-vision；Taxonomy / NavigationSemantics 拆分并加入 TaxonomyId 校验；拆 vision native | 是 |
-| 7 | 导航逻辑迁到 sailens-guidance；Guidance presentation 只进 shell；拆 Guidance native | 是 |
-| 8 | 抽 sailens-output；把 arbitration primitive 显式化，同时保持当前行为 | 是 |
-| 9 | 抽 sailens-vlm 与 sailens-describe；prompt/snapshot/scheduling policy 迁入 Describe | targeted tests |
-| 10 | **行为变更：**实现 configured/expected/static-availability/runtime-state model、fatal static-configuration handling 与合法 zero-pipeline state | 是 |
-| 11 | 更新 README、AGENTS.md、models.md asset 路径、B 文档与所有 architecture reference | — |
+| 1 | JNI 改成 RegisterNatives，并在挪 package 前补 binding + array-kernel contract coverage | **G1 — native safety foundation** |
+| 2 | 抽 sailens-shell；root Compose/navigation/settings/design/Guidance UI **以及 camera permission rationale UI** 进入 shell；camera 改为只暴露权限状态/请求 primitive，解除对 :ux 的依赖；Application/MainActivity 留在 app | **G2 — app/composition foundation** |
+| 3 | B 变成薄 composite-build consumer；移除 B 的 fork-only guardrail，不删除 A 的 append-only 规则 | G2 |
+| 4 | 抽 sailens-core 与 sailens-camera；引入 FrameSource + FrameSnapshotProvider；验证 camera 仍不依赖 shell/design UI | G2 |
+| 5 | 抽 sailens-runtime；拆 native runtime preprocessing | **G3 — vision/Guidance runtime** |
+| 6 | 抽 sailens-vision；Taxonomy / NavigationSemantics 拆分并加入 TaxonomyId 校验；拆 vision native | G3 |
+| 7 | 导航逻辑迁到 sailens-guidance；Guidance presentation 只进 shell；拆 Guidance native | G3 |
+| 8 | 抽 sailens-output；把 arbitration primitive 显式化，同时保持当前行为 | **G4 — output + Describe** |
+| 9 | 抽 sailens-vlm 与 sailens-describe；prompt/snapshot/scheduling policy 迁入 Describe | G4 |
+| 10 | **行为变更：**实现 configured/expected/static-availability/runtime-state model、fatal static-configuration handling 与合法 zero-pipeline state | **G5 — capability semantics + closeout** |
+| 11 | 更新 README、AGENTS.md、models.md asset 路径、B 文档与所有 architecture reference | G5 |
+
+### 11.1 Review gates
+
+**G1 — native safety foundation**
+
+任何 package/module movement 开始前必须停一次。验收证据：
+
+- A 构建成功，现有 JVM tests 保持全绿；
+- §12.2 的 Layer A binding coverage 与 Layer B array-kernel instrumentation tests 在 arm64 真机通过；
+- 当前 13 个 JNI declaration 全部通过 RegisterNatives 注册；
+- 构建出的 native library 不导出任何 Java_<mangled> JNI entry point；JNI_OnLoad 是唯一 JNI
+  registration entry point；
+- 不引入任何有意的 inference 行为变化。
+
+这个 gate 的作用是把 JNI migration 风险和后续所有 package move 完全隔离开。
+
+**G2 — app/composition foundation（steps 2–4）**
+
+把 shell、B composite consumption、core、camera 当成一个完整 migration phase。完成以下检查后
+才停：
+
+- A build/tests 通过；
+- B 通过真实 composite build 解析 A，并能 build/launch；
+- A 能 launch；
+- camera session 正常；
+- camera 不反向依赖 shell/design UI；
+- Application/MainActivity 仍归各 host app；
+- FrameSource 与带 freshness 上限的 FrameSnapshotProvider ownership 正确。
+
+steps 2–4 可以各自保留独立 commit，但不再制造三个独立 review handoff。
+
+**G3 — vision/Guidance runtime（steps 5–7）**
+
+runtime、vision、Guidance 作为一次耦合较强的 extraction 连续完成。只有最终 dependency
+direction 和三个 native library 归属都形成后才停。验收至少包括：
+
+- A/B 完整 build 与 tests；
+- libsailens_runtime.so、libsailens_vision.so、libsailens_guidance.so 都保持 G1 的注册保证；
+- native 拆分后 array-kernel contract tests 仍通过；
+- B 的真实 float model 覆盖 native_score 与 native_bbox_nms_float_handle 两条 handle 热路径；
+- 同一目标设备上保持 §12.3 性能红线与 same-frame preprocessing-cache reuse；
+- 跑通真实 Guidance session，且没有行为 regression；
+- sailens-guidance 不含 Compose/UI dependency。
+
+这是整个结构重构风险最高的 gate，不能再和 G4 合并。
+
+**G4 — output + Describe（steps 8–9）**
+
+shared output mechanism 与 headless Describe pipeline 连续完成，然后验证：
+
+- 当前 Guidance speech/haptic 行为保持；
+- Guidance safety output 可以按 shell policy 抢占 Describe information，同时 sailens-output
+  自身仍保持 policy-neutral；
+- Describe 使用 FrameSnapshotProvider，而不是 collect continuous frame stream；
+- stale snapshot、cancellation、single-flight 有 targeted tests；
+- Guidance-only edition 不会被拖入 heavyweight concrete VLM runtime dependency；
+- 如果物理 sailens-vlm extraction 被延迟，下文定义的临时依赖安排仍然成立。
+
+**G5 — capability semantics + closeout（steps 10–11）**
+
+这个 gate 单独存在，因为 Step 10 已经不是纯代码搬迁，而是产品行为变化。验证完整状态模型后，
+再基于真正落地的代码做最终文档同步：
+
+- 四种 pipeline 组合全部合法；
+- static availability/preflight 不会 eager initialize LiteRT/GPU/NPU session；
+- required static-configuration failure 符合 debug fail-fast / release accessible-fatal-state contract；
+- device-specific session initialization failure 仍然属于 runtime failure，并走可重试路径；
+- unavailable pipeline 不会变成无效的 accessibility control；
+- 最终 A/B build、tests、launch、native/performance 与 §12 structural checks 全通过；
+- README、AGENTS.md 和 model/repository 文档描述的是最终真正落地的代码。
+
+### 11.2 Gate 内持续验证
+
+review gate 变少，**不代表验证变少**。每个 implementation step 完成后仍立即运行最小但有效的
+检查，例如 compile + targeted tests、composite build 或 native instrumentation test。通过后由
+实现者自动继续；只有某个失败无法在当前 gate 内解决时才提前停下来。
+
+一个 gate 可以包含多个聚焦的 commit。没有必要为了让 review boundary 和 Git history 一一对应，
+强行把整个 gate squash 成一个 commit。
 
 sailens-vlm 是唯一允许延迟物理 Gradle extraction 的边界：如果一开始真的只有几个 trivial
 interface 且没有 concrete implementation，可以先保持 logical boundary。推迟期间，VLM contract
