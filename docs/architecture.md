@@ -4,8 +4,8 @@
 
 > Status: **agreed and in progress.** It replaces the layer-first module structure and the
 > fork-based A/B repository relationship. Gate G1 and steps 2 and 4 of G2 have landed; step 3 (B as
-> a composite-build consumer) has not, and G3 is in progress (step 5 landed). §11 tracks the plan,
-> not the progress.
+> a composite-build consumer) has not, and G3 is in progress (steps 5 and 6 landed). §11 tracks the
+> plan, not the progress.
 
 ## 1. Summary
 

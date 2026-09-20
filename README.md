@@ -49,7 +49,7 @@ Apache-2.0 code license. Whatever you bring, that is yours to check.
 
 ## Architecture
 
-Seven Gradle modules wired with Koin. The layer-first split is being replaced by the
+Eight Gradle modules wired with Koin. The layer-first split is being replaced by the
 product/runtime boundaries in [docs/architecture.md](docs/architecture.md) §11. `:sailens-core`,
 `:sailens-camera` and `:sailens-shell` are target modules already in place; `:domain` and `:data`
 still await theirs.
@@ -65,6 +65,7 @@ still await theirs.
 :sailens-core    shared contracts: ImageFrame, geometry, BinaryMask, MlRuntimeInfo, LogService
 :sailens-runtime LiteRT sessions, accelerator selection, model sources/metadata,
                  YUV preprocessing, shared preprocessing cache, hardware profile
+:sailens-vision  segmentation / detection runners, dataset taxonomies, postprocessors
 ```
 
 Outer modules depend inward on `:domain` interfaces. Frames flow

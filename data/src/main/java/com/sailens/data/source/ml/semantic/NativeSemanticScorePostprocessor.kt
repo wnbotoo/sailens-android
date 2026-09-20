@@ -7,7 +7,7 @@ import com.sailens.domain.config.AnalysisConfig
 import com.sailens.core.mask.BinaryMask
 import com.sailens.core.mask.BottomStats
 import com.sailens.domain.model.common.GroundType
-import com.sailens.domain.model.perception.ClassMapper
+import com.sailens.domain.semantics.NavigationSemantics
 import com.sailens.domain.model.perception.SegmentationAnalysisStats
 import com.sailens.domain.model.perception.SegmentationMask
 import com.sailens.core.log.LogService
@@ -21,10 +21,10 @@ internal data class SemanticPostprocessResult(
 
 class NativeSemanticScorePostprocessor(
     private val config: AnalysisConfig,
-    classMapper: ClassMapper,
+    navigationSemantics: NavigationSemantics,
     private val logService: LogService,
 ) {
-    private val lookup = SemanticClassLookup.from(classMapper)
+    private val lookup = SemanticClassLookup.from(navigationSemantics)
     private var hasLoggedBackend = false
     private var reusablePassableWords = LongArray(0)
     private var reusableObstacleWords = LongArray(0)
@@ -479,16 +479,16 @@ class NativeSemanticScorePostprocessor(
         val groundType: IntArray,
     ) {
         companion object {
-            fun from(classMapper: ClassMapper): SemanticClassLookup {
-                val classCount = classMapper.classCount
+            fun from(navigationSemantics: NavigationSemantics): SemanticClassLookup {
+                val classCount = navigationSemantics.classCount
                 return SemanticClassLookup(
                     classCount = classCount,
-                    passable = BooleanArray(classCount) { classMapper.isPassable(it) },
-                    obstacle = BooleanArray(classCount) { classMapper.isObstacle(it) },
-                    road = BooleanArray(classCount) { classMapper.isRoad(it) },
-                    trafficLight = BooleanArray(classCount) { classMapper.isTrafficLight(it) },
+                    passable = BooleanArray(classCount) { navigationSemantics.isPassable(it) },
+                    obstacle = BooleanArray(classCount) { navigationSemantics.isObstacle(it) },
+                    road = BooleanArray(classCount) { navigationSemantics.isRoad(it) },
+                    trafficLight = BooleanArray(classCount) { navigationSemantics.isTrafficLight(it) },
                     groundType = IntArray(classCount) { index ->
-                        classMapper.toGroundType(index).takeIf { it != GroundType.UNKNOWN }?.ordinal ?: UNKNOWN_GROUND
+                        navigationSemantics.toGroundType(index).takeIf { it != GroundType.UNKNOWN }?.ordinal ?: UNKNOWN_GROUND
                     },
                 )
             }

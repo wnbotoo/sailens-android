@@ -1,5 +1,6 @@
 package com.sailens.domain.processor.analysis
 
+import com.sailens.vision.taxonomy.TaxonomyId
 import com.sailens.domain.config.AnalysisConfig
 import com.sailens.core.mask.BinaryMask
 import com.sailens.core.mask.BottomStats
@@ -11,7 +12,7 @@ import com.sailens.domain.model.common.ObstacleCategory
 import com.sailens.domain.model.common.UrgencyLevel
 import com.sailens.domain.model.analysis.VehicleOnRoadReason
 import com.sailens.domain.model.analysis.VehicleOnRoadSource
-import com.sailens.domain.model.perception.ClassMapper
+import com.sailens.domain.semantics.NavigationSemantics
 import com.sailens.domain.model.perception.ObstacleDetection
 import com.sailens.domain.model.perception.DetectedObstacle
 import com.sailens.domain.model.perception.SegmentationAnalysis
@@ -24,7 +25,7 @@ import org.junit.Test
 class RoadSafetyAnalyzerTest {
     private val analyzer = RoadSafetyAnalyzer(
         config = AnalysisConfig(onRoadDebounceFrames = 1),
-        classMapper = mapper,
+        navigationSemantics = mapper,
     )
 
     @Test
@@ -287,8 +288,8 @@ class RoadSafetyAnalyzerTest {
         private const val ROAD = 0
         private const val OTHER = 1
 
-        private val mapper = object : ClassMapper {
-            override val datasetName: String = "test"
+        private val mapper = object : NavigationSemantics {
+            override val taxonomyId: TaxonomyId = TaxonomyId("test")
             override val classCount: Int = 2
             override fun isPassable(classId: Int): Boolean = classId == ROAD
             override fun isObstacle(classId: Int): Boolean = false
@@ -296,7 +297,6 @@ class RoadSafetyAnalyzerTest {
             override fun isTrafficLight(classId: Int): Boolean = false
             override fun toGroundType(classId: Int): GroundType = GroundType.ROAD
             override fun toObstacleCategory(classId: Int): ObstacleCategory = ObstacleCategory.UNKNOWN
-            override fun getClassName(classId: Int): String = "road"
         }
     }
 }

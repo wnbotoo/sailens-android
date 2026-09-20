@@ -1,5 +1,6 @@
 package com.sailens.domain.usecase.perception
 
+import com.sailens.vision.taxonomy.TaxonomyId
 import com.sailens.domain.config.AnalysisConfig
 import com.sailens.domain.config.PerceptionConfig
 import com.sailens.domain.model.common.DistanceLevel
@@ -10,7 +11,7 @@ import com.sailens.domain.model.common.ObstacleCategory
 import com.sailens.domain.model.common.ObstacleRunKind
 import com.sailens.domain.model.common.PerceptionProfile
 import com.sailens.domain.model.common.SemanticProviderType
-import com.sailens.domain.model.perception.ClassMapper
+import com.sailens.domain.semantics.NavigationSemantics
 import com.sailens.domain.model.perception.ObstacleDetection
 import com.sailens.core.frame.ImageFrame
 import com.sailens.core.frame.ImagePixelFormat
@@ -210,7 +211,7 @@ class ProcessFrameUseCaseTest {
             minObstacleConfidence = 0.1f,
             trackerMinStableFrames = 1,
         )
-        val classMapper = FakeSemanticClassMapper()
+        val navigationSemantics = FakeSemanticClassMapper()
 
         return ProcessFrameUseCase(
             profileManager = PerceptionProfileManager(config),
@@ -219,8 +220,8 @@ class ProcessFrameUseCaseTest {
             depthRepository = object : DepthRepository {
                 override fun estimateDistance(boundingBox: NormalizedRect): DistanceLevel = distanceLevel
             },
-            segmentationAnalyzer = SegmentationAnalyzer(AnalysisConfig(), classMapper),
-            obstacleExtractor = ObstacleExtractor(config, classMapper),
+            segmentationAnalyzer = SegmentationAnalyzer(AnalysisConfig(), navigationSemantics),
+            obstacleExtractor = ObstacleExtractor(config, navigationSemantics),
             obstacleTracker = ObstacleTracker(config),
             clock = { clock.nowMs },
         )
@@ -299,8 +300,8 @@ class ProcessFrameUseCaseTest {
         }
     }
 
-    private class FakeSemanticClassMapper : ClassMapper {
-        override val datasetName: String = "test"
+    private class FakeSemanticClassMapper : NavigationSemantics {
+        override val taxonomyId: TaxonomyId = TaxonomyId("test")
         override val classCount: Int = 2
         override fun isPassable(classId: Int): Boolean = classId == 0
         override fun isObstacle(classId: Int): Boolean = classId == 1
@@ -310,6 +311,5 @@ class ProcessFrameUseCaseTest {
         override fun toObstacleCategory(classId: Int): ObstacleCategory =
             if (classId == 1) ObstacleCategory.STATIC_OBSTACLE else ObstacleCategory.UNKNOWN
 
-        override fun getClassName(classId: Int): String = if (classId == 0) "road" else "obstacle"
     }
 }

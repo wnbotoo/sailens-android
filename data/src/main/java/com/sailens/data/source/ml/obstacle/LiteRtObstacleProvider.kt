@@ -1,4 +1,13 @@
 package com.sailens.data.source.ml.obstacle
+import com.sailens.vision.detection.DetectionModelConfig
+import com.sailens.vision.detection.DetectionLayout
+import com.sailens.vision.detection.Detection
+import com.sailens.vision.detection.DetectionPostProcessor
+import com.sailens.vision.taxonomy.CocoTaxonomy
+import com.sailens.domain.model.common.ObstacleCategory
+import com.sailens.domain.model.perception.ObstacleDetection
+import com.sailens.domain.semantics.CocoNavigationSemantics
+import com.sailens.domain.semantics.NavigationSemantics
 
 import android.content.Context
 import android.os.SystemClock
@@ -43,11 +52,22 @@ private const val TAG = "LiteRtObstacleProvider"
 class LiteRtObstacleProvider(
     private val context: Context,
     private val perceptionConfig: PerceptionConfig,
-    private val modelConfig: ObstacleModelConfig = ObstacleModelConfig(),
+    private val modelConfig: DetectionModelConfig = DetectionModelConfig(),
     private val modelSourceResolver: ModelSourceResolver = CatalogModelSourceResolver,
     private val preprocessCache: InputPreprocessCache? = null,
     private val logService: LogService,
+    /**
+     * Turns detected classes into navigation meaning. The detector itself stays generic
+     * (architecture.md §6.3): it reports what the model saw, and this decides what that means for
+     * someone walking.
+     */
+    private val navigationSemantics: NavigationSemantics = CocoNavigationSemantics,
 ) : ObstacleProvider {
+
+    /** Classes that map to a real obstacle category. Everything else never leaves the detector. */
+    private val allowedClassIds: IntArray = (0 until modelConfig.classCount)
+        .filter { navigationSemantics.toObstacleCategory(it) != ObstacleCategory.UNKNOWN }
+        .toIntArray()
 
     @OptIn(ExperimentalCoroutinesApi::class)
     private val singleThreadDispatcher = Dispatchers.IO.limitedParallelism(1)
@@ -59,7 +79,7 @@ class LiteRtObstacleProvider(
     private var inputDataType: ModelInputDataType = ModelInputDataType.FLOAT32
     private var cachedFloatInput: FloatArray = FloatArray(0)
     private var cachedInt8Input: ByteArray = ByteArray(0)
-    private var postProcessor: ObstaclePostProcessor? = null
+    private var postProcessor: DetectionPostProcessor? = null
     private var resolvedTensorBindings: ResolvedTensorBindings? = null
     private var detectionBufferHandle: Long = 0L
     private var hasLoggedTensorInfo: Boolean = false
@@ -174,7 +194,7 @@ class LiteRtObstacleProvider(
         // multi-MB readFloat()/readInt8() allocation for raw detection outputs. Falls through to
         // the read + array path below if the handle is unavailable or declines.
         if (detectionBufferHandle != 0L &&
-            activeTensorBindings.detectionLayout == ObstacleDetectionLayout.RAW_TRANSPOSED
+            activeTensorBindings.detectionLayout == DetectionLayout.RAW_TRANSPOSED
         ) {
             val handleOutput = when (activeTensorBindings.detectionOutputElementType) {
                 TfliteTensorElementType.FLOAT32 -> activePostProcessor.postProcessFloatFromHandle(
@@ -200,7 +220,7 @@ class LiteRtObstacleProvider(
                     hasLoggedTensorInfo = true
                 }
                 return ObstacleModelOutput(
-                    detections = handleOutput.detections,
+                    detections = handleOutput.detections.toObstacleDetections(),
                     preprocessTimeMs = afterPreprocessTime - startTime,
                     inferenceTimeMs = afterModelTime - afterPreprocessTime,
                     outputReadTimeMs = 0L,
@@ -246,7 +266,7 @@ class LiteRtObstacleProvider(
         val afterPostprocessTime = SystemClock.uptimeMillis()
 
         return ObstacleModelOutput(
-            detections = postProcessOutput.detections,
+            detections = postProcessOutput.detections.toObstacleDetections(),
             preprocessTimeMs = afterPreprocessTime - startTime,
             inferenceTimeMs = afterModelTime - afterPreprocessTime,
             outputReadTimeMs = afterOutputReadTime - afterModelTime,
@@ -309,9 +329,11 @@ class LiteRtObstacleProvider(
             preferNativeYuvPreprocessing = modelConfig.preferNativeYuvPreprocessing,
             preprocessCache = preprocessCache,
         )
-        postProcessor = ObstaclePostProcessor(
+        postProcessor = DetectionPostProcessor(
+            taxonomy = CocoTaxonomy,
             inputSize = inputSpec.width,
             classCount = modelConfig.classCount,
+            allowedClassIds = allowedClassIds,
             detectionLayout = outputSpec.detectionLayout,
             confidenceThreshold = perceptionConfig.minObstacleConfidence,
             maxDetections = perceptionConfig.maxObstacles,
@@ -479,7 +501,7 @@ class LiteRtObstacleProvider(
     private data class ObstacleDetectionTensorSpec(
         val detectionCount: Int,
         val attributes: Int,
-        val layout: ObstacleDetectionLayout,
+        val layout: DetectionLayout,
         val shapeDescription: String,
     ) {
         companion object {
@@ -493,7 +515,7 @@ class LiteRtObstacleProvider(
                     return ObstacleDetectionTensorSpec(
                         detectionCount = dimensions[2],
                         attributes = dimensions[1],
-                        layout = ObstacleDetectionLayout.RAW_TRANSPOSED,
+                        layout = DetectionLayout.RAW_TRANSPOSED,
                         shapeDescription = "[1,${dimensions[1]},${dimensions[2]}]",
                     )
                 }
@@ -501,7 +523,7 @@ class LiteRtObstacleProvider(
                     return ObstacleDetectionTensorSpec(
                         detectionCount = dimensions[1],
                         attributes = dimensions[2],
-                        layout = ObstacleDetectionLayout.END_TO_END,
+                        layout = DetectionLayout.END_TO_END,
                         shapeDescription = "[1,${dimensions[1]},${dimensions[2]}]",
                     )
                 }
@@ -515,7 +537,7 @@ class LiteRtObstacleProvider(
         val detectionIndex: Int,
         val detectionCount: Int,
         val detectionAttributes: Int,
-        val detectionLayout: ObstacleDetectionLayout,
+        val detectionLayout: DetectionLayout,
         val detectionShapeDescription: String,
         val detectionElementType: TfliteTensorElementType,
         val detectionQuantization: TensorQuantization?,
@@ -528,13 +550,31 @@ class LiteRtObstacleProvider(
     private data class ResolvedTensorBindings(
         val inputBufferIndex: Int,
         val detectionBufferIndex: Int,
-        val detectionLayout: ObstacleDetectionLayout,
+        val detectionLayout: DetectionLayout,
         val detectionOutputTensorName: String,
         val detectionOutputShape: String,
         val detectionElementCount: Int,
         val detectionOutputElementType: TfliteTensorElementType,
         val detectionOutputQuantization: TensorQuantization?,
     )
+
+    /**
+     * Vision reports classes; Guidance decides what they mean. A class with no obstacle category
+     * is dropped here rather than inside the detector, so the detector stays reusable by a product
+     * that cares about a different set of classes (architecture.md §6.3).
+     */
+    private fun List<Detection>.toObstacleDetections(): List<ObstacleDetection> =
+        mapNotNull { detection ->
+            val category = navigationSemantics.toObstacleCategory(detection.classId)
+            if (category == ObstacleCategory.UNKNOWN) return@mapNotNull null
+            ObstacleDetection(
+                classId = detection.classId,
+                className = detection.label,
+                confidence = detection.confidence,
+                boundingBox = detection.boundingBox,
+                category = category,
+            )
+        }
 
     private companion object {
         const val RAW_BOX_ATTRIBUTES = 4

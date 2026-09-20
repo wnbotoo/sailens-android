@@ -1,17 +1,18 @@
 package com.sailens.domain.processor.perception
 
+import com.sailens.vision.taxonomy.TaxonomyId
 import com.sailens.domain.config.AnalysisConfig
 import com.sailens.domain.model.common.GroundType
 import com.sailens.domain.model.common.ObstacleCategory
-import com.sailens.domain.model.perception.ClassMapper
+import com.sailens.domain.semantics.NavigationSemantics
 import com.sailens.domain.model.perception.SegmentationMask
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Test
 
 class SegmentationAnalyzerTest {
-    private val classMapper = object : ClassMapper {
-        override val datasetName: String = "test"
+    private val navigationSemantics = object : NavigationSemantics {
+        override val taxonomyId: TaxonomyId = TaxonomyId("test")
         override val classCount: Int = 3
 
         override fun isPassable(classId: Int): Boolean = classId == ROAD
@@ -25,14 +26,9 @@ class SegmentationAnalyzerTest {
             ObstacleCategory.UNKNOWN
         }
 
-        override fun getClassName(classId: Int): String = when (classId) {
-            ROAD -> "road"
-            OBSTACLE -> "obstacle"
-            else -> "background"
-        }
     }
-    private val trafficLightClassMapper = object : ClassMapper {
-        override val datasetName: String = "test"
+    private val trafficLightClassMapper = object : NavigationSemantics {
+        override val taxonomyId: TaxonomyId = TaxonomyId("test")
         override val classCount: Int = 4
 
         override fun isPassable(classId: Int): Boolean = classId == ROAD
@@ -46,17 +42,11 @@ class SegmentationAnalyzerTest {
             else -> ObstacleCategory.UNKNOWN
         }
 
-        override fun getClassName(classId: Int): String = when (classId) {
-            ROAD -> "road"
-            OBSTACLE -> "obstacle"
-            TRAFFIC_LIGHT -> "traffic_light"
-            else -> "background"
-        }
     }
 
     @Test
     fun `navigation passable ratio focuses on lower image region`() {
-        val analyzer = SegmentationAnalyzer(AnalysisConfig(), classMapper)
+        val analyzer = SegmentationAnalyzer(AnalysisConfig(), navigationSemantics)
         val mask = SegmentationMask(
             width = 4,
             height = 4,
@@ -76,7 +66,7 @@ class SegmentationAnalyzerTest {
 
     @Test
     fun `passable mask uses current frame instead of pixel temporal voting`() {
-        val analyzer = SegmentationAnalyzer(AnalysisConfig(), classMapper)
+        val analyzer = SegmentationAnalyzer(AnalysisConfig(), navigationSemantics)
 
         val roadMask = SegmentationMask(width = 1, height = 1, classMap = intArrayOf(ROAD))
         val backgroundMask = SegmentationMask(width = 1, height = 1, classMap = intArrayOf(BACKGROUND))
@@ -106,9 +96,9 @@ class SegmentationAnalyzerTest {
             ),
         )
 
-        val direct = SegmentationAnalyzer(config, classMapper).analyze(mask)
-        val stats = KotlinSegmentationStatsExtractor(config, classMapper).extract(mask)
-        val fromStats = SegmentationAnalyzer(config, classMapper).analyze(mask, stats)
+        val direct = SegmentationAnalyzer(config, navigationSemantics).analyze(mask)
+        val stats = KotlinSegmentationStatsExtractor(config, navigationSemantics).extract(mask)
+        val fromStats = SegmentationAnalyzer(config, navigationSemantics).analyze(mask, stats)
 
         assertEquals(direct, fromStats)
     }
@@ -124,13 +114,13 @@ class SegmentationAnalyzerTest {
             height = 2,
             classMap = intArrayOf(ROAD, ROAD, BACKGROUND, OBSTACLE),
         )
-        val stats = KotlinSegmentationStatsExtractor(config, classMapper).extract(mask)
+        val stats = KotlinSegmentationStatsExtractor(config, navigationSemantics).extract(mask)
         val rejectingExtractor = object : SegmentationStatsExtractor {
             override fun extract(segmentation: SegmentationMask) =
                 error("stats extractor should not run when precomputed stats are supplied")
         }
 
-        val result = SegmentationAnalyzer(config, classMapper, rejectingExtractor).analyze(mask, stats)
+        val result = SegmentationAnalyzer(config, navigationSemantics, rejectingExtractor).analyze(mask, stats)
 
         assertEquals(stats.passablePixelCount, result.passablePixelCount)
         assertEquals(stats.obstaclePixelCount, result.obstaclePixelCount)

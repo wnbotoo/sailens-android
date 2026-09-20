@@ -39,6 +39,13 @@ find_library(
         log
 )
 
+# Runtime-owned headers, included by file path. Deliberately not a Gradle dependency:
+# sailens-runtime owns the LiteRT zero-copy helper and the tensor-layout constants, and sharing
+# them as headers avoids a second copy drifting (architecture.md §6.10).
+target_include_directories(sailens_ml PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../../sailens-runtime/src/main/cpp
+)
+
 target_link_libraries(
         sailens_ml
         c++_shared

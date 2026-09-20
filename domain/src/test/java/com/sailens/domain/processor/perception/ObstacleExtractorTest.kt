@@ -1,12 +1,13 @@
 package com.sailens.domain.processor.perception
 
+import com.sailens.vision.taxonomy.TaxonomyId
 import com.sailens.domain.config.AnalysisConfig
 import com.sailens.domain.config.PerceptionConfig
 import com.sailens.domain.model.common.DistanceLevel
 import com.sailens.domain.model.common.GroundType
 import com.sailens.core.geometry.NormalizedRect
 import com.sailens.domain.model.common.ObstacleCategory
-import com.sailens.domain.model.perception.ClassMapper
+import com.sailens.domain.semantics.NavigationSemantics
 import com.sailens.domain.model.perception.ObstacleDetection
 import com.sailens.domain.model.perception.SegmentationMask
 import org.junit.Assert.assertEquals
@@ -102,8 +103,8 @@ class ObstacleExtractorTest {
         private const val BUILDING = 1
         private const val PERSON = 2
 
-        private val mapper = object : ClassMapper {
-            override val datasetName: String = "test"
+        private val mapper = object : NavigationSemantics {
+            override val taxonomyId: TaxonomyId = TaxonomyId("test")
             override val classCount: Int = 3
 
             override fun isPassable(classId: Int): Boolean = classId == ROAD
@@ -122,12 +123,6 @@ class ObstacleExtractorTest {
                 ObstacleCategory.UNKNOWN
             }
 
-            override fun getClassName(classId: Int): String = when (classId) {
-                ROAD -> "road"
-                BUILDING -> "building"
-                PERSON -> "person"
-                else -> "unknown"
-            }
         }
     }
 }

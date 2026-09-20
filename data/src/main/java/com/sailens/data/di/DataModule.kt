@@ -11,25 +11,25 @@ import com.sailens.data.service.NoOpTraceService
 import com.sailens.data.source.depth.ImagePositionDepthEstimator
 import com.sailens.data.source.device.DeviceMotionDataSource
 import com.sailens.data.source.device.DeviceRotationDataSource
-import com.sailens.data.source.mapper.ClassMapperProviderImpl
+import com.sailens.domain.semantics.DefaultNavigationSemanticsProvider
 import com.sailens.runtime.CatalogModelSourceResolver
 import com.sailens.runtime.InputPreprocessCache
 import com.sailens.runtime.ModelSourceResolver
 import com.sailens.data.source.ml.analysis.NativeConnectivityStatsExtractor
 import com.sailens.data.source.ml.obstacle.DisabledObstacleProvider
-import com.sailens.data.source.ml.obstacle.ObstacleModelConfig
+import com.sailens.vision.detection.DetectionModelConfig
 import com.sailens.data.source.ml.obstacle.LiteRtObstacleProvider
 import com.sailens.data.source.ml.semantic.NativeSemanticScorePostprocessor
 import com.sailens.data.source.ml.semantic.SegmentationModel
-import com.sailens.data.source.ml.semantic.SemanticModelConfig
+import com.sailens.vision.semantic.SemanticModelConfig
 import com.sailens.data.source.ml.semantic.LiteRtSemanticSegmentationModel
 import com.sailens.data.source.ml.vlm.LiteRtVlmEngine
 import com.sailens.domain.config.PerceptionConfig
 import com.sailens.domain.config.TraceRuntimeConfig
 import com.sailens.domain.model.common.ObstacleProviderType
 import com.sailens.domain.model.common.SemanticProviderType
-import com.sailens.domain.model.perception.ClassMapper
-import com.sailens.domain.model.perception.ClassMapperProvider
+import com.sailens.domain.semantics.NavigationSemantics
+import com.sailens.domain.semantics.NavigationSemanticsProvider
 import com.sailens.domain.processor.analysis.ConnectivityStatsExtractor
 import com.sailens.domain.repository.DepthRepository
 import com.sailens.domain.repository.DeviceSensorRepository
@@ -44,12 +44,12 @@ import org.koin.core.qualifier.named
 import org.koin.dsl.module
 
 val dataModule = module {
-    single<ClassMapperProvider> {
-        ClassMapperProviderImpl()
+    single<NavigationSemanticsProvider> {
+        DefaultNavigationSemanticsProvider()
     }
 
-    single<ClassMapper> {
-        get<ClassMapperProvider>().getSemanticClassMapper()
+    single<NavigationSemantics> {
+        get<NavigationSemanticsProvider>().semanticSegmentationSemantics()
     }
 
     single<ModelSourceResolver> { CatalogModelSourceResolver }
@@ -69,7 +69,7 @@ val dataModule = module {
     single {
         NativeSemanticScorePostprocessor(
             config = get(),
-            classMapper = get(),
+            navigationSemantics = get(),
             logService = get(),
         )
     }
@@ -162,7 +162,7 @@ private fun createObstacleProvider(
     providerType: ObstacleProviderType,
     context: Context,
     perceptionConfig: PerceptionConfig,
-    modelConfig: ObstacleModelConfig,
+    modelConfig: DetectionModelConfig,
     modelSourceResolver: ModelSourceResolver,
     preprocessCache: InputPreprocessCache,
     logService: LogService,

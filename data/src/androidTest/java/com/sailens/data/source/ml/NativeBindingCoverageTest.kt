@@ -1,14 +1,11 @@
 package com.sailens.data.source.ml
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import com.sailens.data.source.mapper.CityscapesClassMapper
-import com.sailens.data.source.mapper.CocoClassMapper
+import com.sailens.domain.semantics.CityscapesNavigationSemantics
+import com.sailens.domain.semantics.CocoNavigationSemantics
 import com.sailens.data.source.ml.analysis.NativeConnectivityStatsExtractor
-import com.sailens.data.source.ml.obstacle.ObstacleNativePostProcessor
-import com.sailens.data.source.ml.semantic.NativeSemanticArgmaxPostprocessor
 import com.sailens.data.source.ml.semantic.NativeSemanticScorePostprocessor
 import com.sailens.domain.config.AnalysisConfig
-import com.sailens.runtime.ModelTensorConfig
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
@@ -59,11 +56,6 @@ class NativeBindingCoverageTest {
      */
     private val expectedBindings: List<NativeBinding> = listOf(
         NativeBinding(
-            NativeSemanticArgmaxPostprocessor::class.java,
-            "nativeArgmaxScores",
-            "([F[IIIII)Z",
-        ),
-        NativeBinding(
             NativeSemanticScorePostprocessor::class.java,
             "nativePostprocessScores",
             "([F[IIIII[Z[Z[Z[Z[IFFF[J[J[I[I[I)Z",
@@ -82,26 +74,6 @@ class NativeBindingCoverageTest {
             NativeSemanticScorePostprocessor::class.java,
             "nativePostprocessInt8ScoresFromHandle",
             "(J[IIIII[Z[Z[Z[Z[IFFF[J[J[I[I[I)Z",
-        ),
-        NativeBinding(
-            ObstacleNativePostProcessor::class.java,
-            "nativePostProcessRawFloat",
-            "([FIIIIIFI[I)[F",
-        ),
-        NativeBinding(
-            ObstacleNativePostProcessor::class.java,
-            "nativePostProcessRawInt8",
-            "([BIIIIIFIFI[I)[F",
-        ),
-        NativeBinding(
-            ObstacleNativePostProcessor::class.java,
-            "nativePostProcessRawFloatFromHandle",
-            "(JIIIIIIFI[I)[F",
-        ),
-        NativeBinding(
-            ObstacleNativePostProcessor::class.java,
-            "nativePostProcessRawInt8FromHandle",
-            "(JIIIIIIFIFI[I)[F",
         ),
         NativeBinding(
             NativeConnectivityStatsExtractor::class.java,
@@ -130,8 +102,9 @@ class NativeBindingCoverageTest {
             .sortedBy { it.key }
 
         assertEquals(
-            "These are the 10 of the migration baseline's 13 JNI entry points that stayed in " +
-                ":data when the preprocessing kernels moved to sailens-runtime in G3. A changed " +
+            "These are the 5 of the migration baseline's 13 JNI entry points still in :data after G3 " +
+                "split the preprocessing kernels into sailens-runtime and the vision kernels into " +
+                "sailens-vision. A changed " +
                 "declaration must be mirrored in the RegisterNatives table in " +
                 "data/src/main/cpp/sailens_ml_jni.cpp and in expectedBindings here.",
             expectedBindings.sortedBy { it.key }.map { it.key },
@@ -181,21 +154,10 @@ class NativeBindingCoverageTest {
         val key: String get() = "${owner.name.replace('.', '/')}#$methodName$descriptor"
 
         fun receiver(): Any = when (owner) {
-            NativeSemanticArgmaxPostprocessor::class.java ->
-                NativeSemanticArgmaxPostprocessor(config = tensorConfig)
-
             NativeSemanticScorePostprocessor::class.java -> NativeSemanticScorePostprocessor(
                 config = AnalysisConfig(),
-                classMapper = CityscapesClassMapper(),
+                navigationSemantics = CityscapesNavigationSemantics,
                 logService = SilentLogService,
-            )
-
-            ObstacleNativePostProcessor::class.java -> ObstacleNativePostProcessor(
-                classMapper = CocoClassMapper(),
-                inputSize = 640,
-                classCount = 80,
-                confidenceThreshold = 0.25f,
-                maxDetections = 10,
             )
 
             NativeConnectivityStatsExtractor::class.java -> NativeConnectivityStatsExtractor(
@@ -208,16 +170,6 @@ class NativeBindingCoverageTest {
     }
 
     private companion object {
-        val tensorConfig = ModelTensorConfig(
-            inputWidth = 8,
-            inputHeight = 8,
-            outputWidth = 8,
-            outputHeight = 8,
-            outputChannels = 4,
-            mean = Triple(0f, 0f, 0f),
-            std = Triple(1f, 1f, 1f),
-        )
-
         fun Class<*>.declaredNativeMethods(): List<Method> =
             declaredMethods.filter { Modifier.isNative(it.modifiers) }.sortedBy { it.name }
 

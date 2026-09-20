@@ -1,7 +1,9 @@
 package com.sailens.domain.processor.perception
 
 import com.sailens.domain.config.AnalysisConfig
-import com.sailens.domain.model.perception.ClassMapper
+import com.sailens.domain.semantics.NavigationSemantics
+import com.sailens.vision.taxonomy.CityscapesTaxonomy
+import com.sailens.vision.taxonomy.Taxonomy
 import com.sailens.domain.model.perception.SegmentationAnalysis
 import com.sailens.domain.model.perception.SegmentationAnalysisStats
 import com.sailens.domain.model.perception.SegmentationMask
@@ -15,8 +17,10 @@ import kotlin.math.roundToInt
  */
 class SegmentationAnalyzer(
     private val config: AnalysisConfig,
-    private val classMapper: ClassMapper,
-    private val statsExtractor: SegmentationStatsExtractor = KotlinSegmentationStatsExtractor(config, classMapper),
+    private val navigationSemantics: NavigationSemantics,
+    private val statsExtractor: SegmentationStatsExtractor = KotlinSegmentationStatsExtractor(config, navigationSemantics),
+    // Labels are a dataset fact; they appear in the debug summary only.
+    private val taxonomy: Taxonomy = CityscapesTaxonomy,
 ) : SegmentationAnalysisProcessor {
     // 稳定器
     private val roadRatioSmoother = FloatSmoother(windowSize = config.roadRatioSmoothWindow)
@@ -46,10 +50,10 @@ class SegmentationAnalyzer(
             stableRoadRatio >= config.trafficLightMinRoadRatio
         val stableHasTrafficLight = trafficLightStabilizer.update(hasTrafficLightCandidate)
         val top3Indices = buildTop3Indices(frameStats.classCounts)
-        val dominantClassNames = top3Indices.map { classMapper.getClassName(it) }
+        val dominantClassNames = top3Indices.map { taxonomy.label(it) }
         val dominantClassPercentages = top3Indices.map { i ->
             val percent = (frameStats.classCounts[i] * 100f / totalPixels).roundToInt()
-            "${classMapper.getClassName(i)}:$percent%"
+            "${taxonomy.label(i)}:$percent%"
         }
 
         return SegmentationAnalysis(
@@ -82,7 +86,7 @@ class SegmentationAnalyzer(
         if (totalPixels <= 0) return 0f
         var trafficLightPixels = 0
         for (classId in classCounts.indices) {
-            if (classMapper.isTrafficLight(classId)) {
+            if (navigationSemantics.isTrafficLight(classId)) {
                 trafficLightPixels += classCounts[classId]
             }
         }

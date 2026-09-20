@@ -36,6 +36,7 @@ android {
 dependencies {
 
     api(project(":sailens-core"))
+    api(project(":sailens-vision"))
 
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.serialization.json)

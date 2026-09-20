@@ -6,7 +6,7 @@ import com.sailens.domain.model.analysis.VehicleOnRoadReason
 import com.sailens.domain.model.analysis.VehicleOnRoadSource
 import com.sailens.core.geometry.NormalizedRect
 import com.sailens.domain.model.common.ObstacleCategory
-import com.sailens.domain.model.perception.ClassMapper
+import com.sailens.domain.semantics.NavigationSemantics
 import com.sailens.domain.model.perception.ObstacleDetection
 import com.sailens.domain.model.perception.DetectedObstacle
 import com.sailens.domain.model.perception.SegmentationAnalysis
@@ -17,7 +17,7 @@ import com.sailens.domain.util.BooleanStabilizer
  */
 class RoadSafetyAnalyzer(
     private val config: AnalysisConfig,
-    private val classMapper: ClassMapper,
+    private val navigationSemantics: NavigationSemantics,
 ) {
     private val onRoadStabilizer = BooleanStabilizer(config.onRoadDebounceFrames)
     private val rawVehicleOnRoadStabilizer =
@@ -64,7 +64,7 @@ class RoadSafetyAnalyzer(
 
     /**
      * 检查是否有车辆在道路上
-     * 使用 classMapper 判断障碍物底部是否在道路上
+     * 使用 navigationSemantics 判断障碍物底部是否在道路上
      */
     private fun checkVehicleOnRoad(
         obstacles: List<DetectedObstacle>,
@@ -206,7 +206,7 @@ class RoadSafetyAnalyzer(
         val x = (normalizedX * analysis.width).toInt().coerceIn(0, analysis.width - 1)
         val y = (normalizedY * analysis.height).toInt().coerceIn(0, analysis.height - 1)
         val classId = analysis.segmentation.getClassId(x, y)
-        return classMapper.isRoad(classId)
+        return navigationSemantics.isRoad(classId)
     }
 
     private fun evaluateDanger(

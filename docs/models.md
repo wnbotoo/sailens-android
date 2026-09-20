@@ -58,7 +58,8 @@ Pre-argmaxed label maps are **not supported** and fail cleanly at init (no 19-ch
 > error — it **silently misbehaves**: the model will call a sidewalk a road, out loud, to someone who
 > cannot see it. This is a safety hazard, not a formatting preference.
 
-Channel order must be Cityscapes trainId (hardcoded in `CityscapesClassMapper`):
+Channel order must be Cityscapes trainId (the class list lives in `CityscapesTaxonomy`, the
+navigation meaning in `CityscapesNavigationSemantics`):
 
 ```text
 0  road          5  pole          10 sky          15 bus
@@ -87,7 +88,8 @@ boxes / scores / class_idx) are **not currently supported**; they need a new `Ob
 case plus a decode branch.
 
 The runtime keeps only allowed obstacle classes and de-duplicates with class-aware NMS. Class order
-is hardcoded COCO 80 (`CocoClassMapper`) and, as with sem, **a wrong order silently misbehaves**.
+is hardcoded COCO 80 (`CocoTaxonomy`, read for meaning through `CocoNavigationSemantics`) and, as
+with sem, **a wrong order silently misbehaves**.
 
 ```kotlin
 ObstacleModelConfig(

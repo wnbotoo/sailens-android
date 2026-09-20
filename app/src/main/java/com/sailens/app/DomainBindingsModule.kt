@@ -40,13 +40,13 @@ import org.koin.dsl.module
  */
 val domainBindingsModule = module {
     // Processors — stateless, shared singletons.
-    single<SegmentationAnalysisProcessor> { SegmentationAnalyzer(config = get(), classMapper = get()) }
+    single<SegmentationAnalysisProcessor> { SegmentationAnalyzer(config = get(), navigationSemantics = get()) }
     single<ConnectivityAnalysisProcessor> { ConnectivityChecker(config = get(), statsExtractor = get()) }
-    single { ObstacleExtractor(config = get(), classMapper = get()) }
+    single { ObstacleExtractor(config = get(), navigationSemantics = get()) }
     single { ObstacleTracker(config = get()) }
     // 设置页选择的挡位经由 manager 在下一次导航会话开始时生效
     single { PerceptionProfileManager(initialConfig = get()) }
-    single { RoadSafetyAnalyzer(config = get(), classMapper = get()) }
+    single { RoadSafetyAnalyzer(config = get(), navigationSemantics = get()) }
     single { ObstacleOcclusionAnalyzer(config = get()) }
     single { GroundTypeDetector(config = get()) }
     single { SceneClassifier(config = get()) }

@@ -1,4 +1,5 @@
 package com.sailens.data.source.ml.semantic
+import com.sailens.vision.semantic.NativeSemanticArgmaxPostprocessor
 
 import android.os.SystemClock
 import com.sailens.runtime.InputPreprocessBackend

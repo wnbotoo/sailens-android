@@ -6,7 +6,9 @@ import com.sailens.domain.model.common.DirectionZone
 import com.sailens.domain.model.common.DistanceLevel
 import com.sailens.core.geometry.NormalizedRect
 import com.sailens.domain.model.common.ObstacleCategory
-import com.sailens.domain.model.perception.ClassMapper
+import com.sailens.domain.semantics.NavigationSemantics
+import com.sailens.vision.taxonomy.CityscapesTaxonomy
+import com.sailens.vision.taxonomy.Taxonomy
 import com.sailens.domain.model.perception.ObstacleDetection
 import com.sailens.domain.model.perception.RawObstacle
 import com.sailens.domain.model.perception.SegmentationAnalysis
@@ -23,12 +25,16 @@ import kotlin.math.min
  */
 class ObstacleExtractor(
     private val config: PerceptionConfig,
-    private val classMapper: ClassMapper,
+    private val navigationSemantics: NavigationSemantics,
+    // Labels come from the taxonomy, not the semantics: they are a dataset fact (§6.2). These
+    // components come off the *semantic* obstacle mask, so the default is the semantic taxonomy;
+    // they reach traces and debug overlays only, never a routing decision.
+    private val taxonomy: Taxonomy = CityscapesTaxonomy,
 ) {
     // Reused across frames to avoid per-frame allocation on the hot BFS path.
     // Single-threaded: ProcessFrameUseCase invokes this synchronously within its dispatcher.
     private var visitedMask: BinaryMask? = null
-    private val classCountsBuffer = IntArray(classMapper.classCount.coerceAtLeast(1))
+    private val classCountsBuffer = IntArray(navigationSemantics.classCount.coerceAtLeast(1))
 
     // Shared BFS queue reused across all connected-component passes within a single frame.
     // BFS always drains the queue completely, so clear() on entry is a safety-only reset.
@@ -69,7 +75,7 @@ class ObstacleExtractor(
                 RawObstacle(
                     boundingBox = box,
                     category = category,
-                    className = classMapper.getClassName(component.classId),
+                    className = taxonomy.label(component.classId),
                     zone = zone,
                     distance = distance,
                     confidence = 1.0f,
@@ -212,7 +218,7 @@ class ObstacleExtractor(
 
             val classId = segmentation.getClassId(x, y)
             if (classId in classCountsBuffer.indices &&
-                classMapper.toObstacleCategory(classId) != ObstacleCategory.UNKNOWN
+                navigationSemantics.toObstacleCategory(classId) != ObstacleCategory.UNKNOWN
             ) {
                 classCountsBuffer[classId]++
             }
@@ -241,7 +247,7 @@ class ObstacleExtractor(
             if (count > bestCount) {
                 bestClassId = i
                 bestCount = count
-                bestCategory = classMapper.toObstacleCategory(i)
+                bestCategory = navigationSemantics.toObstacleCategory(i)
             }
         }
 

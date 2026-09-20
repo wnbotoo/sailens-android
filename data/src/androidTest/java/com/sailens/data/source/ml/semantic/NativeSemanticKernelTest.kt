@@ -1,7 +1,8 @@
 package com.sailens.data.source.ml.semantic
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import com.sailens.data.source.mapper.CityscapesClassMapper
+import com.sailens.domain.semantics.CityscapesNavigationSemantics
+import com.sailens.vision.taxonomy.CityscapesTaxonomy
 import com.sailens.runtime.ImageTensorLayout
 import com.sailens.runtime.ModelTensorConfig
 import com.sailens.data.source.ml.NativeMlLibrary
@@ -20,7 +21,8 @@ import kotlin.random.Random
 
 /**
  * Layer B of the native verification plan (docs/architecture.md §12.2), semantic kernels:
- * `nativeArgmaxScores`, `nativePostprocessScores` and `nativePostprocessInt8Scores`.
+ * `nativePostprocessScores` and `nativePostprocessInt8Scores`. The generic argmax kernel moved to
+ * sailens-vision in G3 and is covered there.
  *
  * The fused score kernel does have a production Kotlin twin: [KotlinSegmentationStatsExtractor]
  * is the fallback the pipeline uses when `SegmentationOutput.analysisStats` is null, and it
@@ -36,7 +38,7 @@ import kotlin.random.Random
 @RunWith(AndroidJUnit4::class)
 class NativeSemanticKernelTest {
 
-    private val classMapper = CityscapesClassMapper()
+    private val navigationSemantics = CityscapesNavigationSemantics
     private val analysisConfig = AnalysisConfig()
 
     @Before
@@ -48,33 +50,11 @@ class NativeSemanticKernelTest {
     }
 
     @Test
-    fun argmaxMatchesKotlinForNhwcScores() {
-        val scores = syntheticScores(ImageTensorLayout.NHWC)
-        val postprocessor = NativeSemanticArgmaxPostprocessor(tensorConfig(ImageTensorLayout.NHWC))
-        val mask = IntArray(WIDTH * HEIGHT)
-
-        assertTrue(postprocessor.argmaxScores(scores, mask))
-
-        assertArrayEquals(referenceArgmax(scores, ImageTensorLayout.NHWC), mask)
-    }
-
-    @Test
-    fun argmaxMatchesKotlinForNchwScores() {
-        val scores = syntheticScores(ImageTensorLayout.NCHW)
-        val postprocessor = NativeSemanticArgmaxPostprocessor(tensorConfig(ImageTensorLayout.NCHW))
-        val mask = IntArray(WIDTH * HEIGHT)
-
-        assertTrue(postprocessor.argmaxScores(scores, mask))
-
-        assertArrayEquals(referenceArgmax(scores, ImageTensorLayout.NCHW), mask)
-    }
-
-    @Test
     fun fusedScoreKernelMatchesArgmaxPlusKotlinStats() {
         val scores = syntheticScores(ImageTensorLayout.NHWC)
         val postprocessor = NativeSemanticScorePostprocessor(
             config = analysisConfig,
-            classMapper = classMapper,
+            navigationSemantics = navigationSemantics,
             logService = SilentLogService,
         )
 
@@ -92,7 +72,7 @@ class NativeSemanticKernelTest {
         val expectedClassMap = referenceArgmax(scores, ImageTensorLayout.NHWC)
         assertArrayEquals("argmax mask", expectedClassMap, result.mask.classMap)
 
-        val expectedStats = KotlinSegmentationStatsExtractor(analysisConfig, classMapper)
+        val expectedStats = KotlinSegmentationStatsExtractor(analysisConfig, navigationSemantics)
             .extract(SegmentationMask(WIDTH, HEIGHT, expectedClassMap))
 
         // SegmentationAnalysisStats compares masks, ratios, bottom stats and class counts, so one
@@ -115,7 +95,7 @@ class NativeSemanticKernelTest {
 
         val postprocessor = NativeSemanticScorePostprocessor(
             config = analysisConfig,
-            classMapper = classMapper,
+            navigationSemantics = navigationSemantics,
             logService = SilentLogService,
         )
 
@@ -144,7 +124,7 @@ class NativeSemanticKernelTest {
         assertArrayEquals(floatResult.mask.classMap, int8Result.mask.classMap)
         assertEquals(floatResult.stats, int8Result.stats)
 
-        val expectedStats = KotlinSegmentationStatsExtractor(analysisConfig, classMapper)
+        val expectedStats = KotlinSegmentationStatsExtractor(analysisConfig, navigationSemantics)
             .extract(SegmentationMask(WIDTH, HEIGHT, int8Result.mask.classMap))
         assertEquals(expectedStats, int8Result.stats)
     }
@@ -153,7 +133,7 @@ class NativeSemanticKernelTest {
     fun fusedScoreKernelRejectsAMismatchedScoreCount() {
         val postprocessor = NativeSemanticScorePostprocessor(
             config = analysisConfig,
-            classMapper = classMapper,
+            navigationSemantics = navigationSemantics,
             logService = SilentLogService,
         )
 
@@ -201,14 +181,14 @@ class NativeSemanticKernelTest {
                 val pixelIndex = y * WIDTH + x
                 for (channel in 0 until CLASS_COUNT) {
                     val bias = when (channel) {
-                        CityscapesClassMapper.ROAD -> 3f * nearGround
-                        CityscapesClassMapper.SIDEWALK -> 2f * nearGround
-                        CityscapesClassMapper.TERRAIN -> 1.5f * nearGround
-                        CityscapesClassMapper.SKY -> 3f * (1f - nearGround)
-                        CityscapesClassMapper.BUILDING -> 2f * (1f - nearGround)
-                        CityscapesClassMapper.PERSON -> if (x % 11 == 0) 2.5f else 0f
-                        CityscapesClassMapper.CAR -> if (x % 17 == 0) 2.5f else 0f
-                        CityscapesClassMapper.TRAFFIC_LIGHT -> if (pixelIndex % 97 == 0) 4f else 0f
+                        CityscapesTaxonomy.ROAD -> 3f * nearGround
+                        CityscapesTaxonomy.SIDEWALK -> 2f * nearGround
+                        CityscapesTaxonomy.TERRAIN -> 1.5f * nearGround
+                        CityscapesTaxonomy.SKY -> 3f * (1f - nearGround)
+                        CityscapesTaxonomy.BUILDING -> 2f * (1f - nearGround)
+                        CityscapesTaxonomy.PERSON -> if (x % 11 == 0) 2.5f else 0f
+                        CityscapesTaxonomy.CAR -> if (x % 17 == 0) 2.5f else 0f
+                        CityscapesTaxonomy.TRAFFIC_LIGHT -> if (pixelIndex % 97 == 0) 4f else 0f
                         else -> 0f
                     }
                     // nextFloat() is in [0, 1); the biases are far enough apart that no two

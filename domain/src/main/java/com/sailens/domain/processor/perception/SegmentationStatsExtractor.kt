@@ -4,7 +4,7 @@ import com.sailens.domain.config.AnalysisConfig
 import com.sailens.core.mask.BinaryMask
 import com.sailens.core.mask.BottomStats
 import com.sailens.domain.model.common.GroundType
-import com.sailens.domain.model.perception.ClassMapper
+import com.sailens.domain.semantics.NavigationSemantics
 import com.sailens.domain.model.perception.SegmentationAnalysisStats
 import com.sailens.domain.model.perception.SegmentationMask
 
@@ -23,7 +23,7 @@ interface SegmentationStatsExtractor {
  */
 class KotlinSegmentationStatsExtractor(
     private val config: AnalysisConfig,
-    private val classMapper: ClassMapper,
+    private val navigationSemantics: NavigationSemantics,
 ) : SegmentationStatsExtractor {
     override fun extract(segmentation: SegmentationMask): SegmentationAnalysisStats {
         val width = segmentation.width
@@ -40,7 +40,7 @@ class KotlinSegmentationStatsExtractor(
         var passablePixelCount = 0
         var obstaclePixelCount = 0
         var hasTrafficLight = false
-        val classCounts = IntArray(classMapper.classCount)
+        val classCounts = IntArray(navigationSemantics.classCount)
 
         val bottomStartY = ((1 - config.segmentationBottomRatio) * height).toInt()
         val navigationStartY = ((1 - config.segmentationNavigationRegionRatio) * height).toInt()
@@ -68,10 +68,10 @@ class KotlinSegmentationStatsExtractor(
                     classCounts[classId]++
                 }
 
-                val isPassable = classMapper.isPassable(classId)
-                val isObstacle = classMapper.isObstacle(classId)
-                val isRoad = classMapper.isRoad(classId)
-                val isTrafficLight = classMapper.isTrafficLight(classId)
+                val isPassable = navigationSemantics.isPassable(classId)
+                val isObstacle = navigationSemantics.isObstacle(classId)
+                val isRoad = navigationSemantics.isRoad(classId)
+                val isTrafficLight = navigationSemantics.isTrafficLight(classId)
 
                 if (isPassable) {
                     passableMask.set(x, y, true)
@@ -102,7 +102,7 @@ class KotlinSegmentationStatsExtractor(
 
                     if (x in centerStartX until centerEndX) {
                         bottomCenterTotalPixels++
-                        val groundType = classMapper.toGroundType(classId)
+                        val groundType = navigationSemantics.toGroundType(classId)
                         if (groundType != GroundType.UNKNOWN) {
                             groundTypeCounts[groundType] =
                                 groundTypeCounts.getOrDefault(groundType, 0) + 1
