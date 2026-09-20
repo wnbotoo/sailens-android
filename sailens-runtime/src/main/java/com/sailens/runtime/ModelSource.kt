@@ -33,6 +33,18 @@ sealed interface ModelSource {
         override val label: String get() = file.name
     }
 
+    /**
+     * Cheap existence check for preflight: does this source resolve to bytes that are actually
+     * there? (architecture.md §5.2)
+     *
+     * Opens and immediately closes the stream. It reads no model data, compiles nothing and
+     * initialises no accelerator -- which is the whole point: preflight decides whether a control
+     * should exist, long before the user has asked for the work.
+     */
+    fun exists(context: Context): Boolean = runCatching {
+        openStream(context).close()
+    }.isSuccess
+
     /** Opens the model bytes (e.g. for metadata reading). The caller owns the stream and must close it. */
     fun openStream(context: Context): InputStream = when (this) {
         is Asset -> context.assets.open(assetPath)

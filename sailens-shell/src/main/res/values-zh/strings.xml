@@ -277,4 +277,15 @@
     <string name="permission_camera_rationale">Sailens 通过相机识别前方道路并为你导览。画面只在本机处理，不会上传。</string>
     <string name="permission_confirm">允许</string>
     <string name="permission_cancel">暂不</string>
+    <string name="pipeline_guidance">导航辅助</string>
+    <string name="pipeline_describe">场景描述</string>
+    <string name="config_failure_title">Sailens 无法启动</string>
+    <string name="config_failure_message">%1$s是必需的，但当前不可用：%2$s</string>
+    <string name="config_failure_hint">这个安装包配置有问题。请重新安装，或查看安装说明。</string>
+    <string name="config_reason_model_missing">没有找到模型文件</string>
+    <string name="config_reason_taxonomy">模型的类别定义对不上</string>
+    <string name="config_reason_engine">没有可用的引擎</string>
+    <string name="config_reason_not_configured">这个版本没有配置它</string>
+    <string name="zero_pipeline_title">尚未安装模型</string>
+    <string name="zero_pipeline_body">Sailens 本身不附带模型权重。加入语义分割模型即可启用导航辅助，见 docs/models.md。</string>
 </resources>

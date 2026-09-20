@@ -284,4 +284,17 @@
     <string name="permission_camera_rationale">Sailens uses the camera to understand the path ahead and guide you. Video stays on your device.</string>
     <string name="permission_confirm">Allow</string>
     <string name="permission_cancel">Not now</string>
+    <!-- Capability model (architecture.md §5.2). Spoken aloud on a fatal configuration state, so
+         it has to name the pipeline and the reason, not just say that something is wrong. -->
+    <string name="pipeline_guidance">Navigation assistance</string>
+    <string name="pipeline_describe">Scene description</string>
+    <string name="config_failure_title">Sailens cannot start</string>
+    <string name="config_failure_message">%1$s is required but unavailable: %2$s</string>
+    <string name="config_failure_hint">This build is misconfigured. Reinstall, or see the setup documentation.</string>
+    <string name="config_reason_model_missing">no model file was found</string>
+    <string name="config_reason_taxonomy">the class definition does not match this model</string>
+    <string name="config_reason_engine">no engine is available</string>
+    <string name="config_reason_not_configured">it is not configured in this build</string>
+    <string name="zero_pipeline_title">No model installed</string>
+    <string name="zero_pipeline_body">Sailens ships without model weights. Add a semantic model to enable navigation assistance; see docs/models.md.</string>
 </resources>
