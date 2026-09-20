@@ -762,6 +762,17 @@ After runtime/vision/Guidance native extraction, validate on the same target dev
 - preprocessing cache still reports same-frame reuse;
 - no extra full semantic-tensor read is introduced.
 
+**Measured state, G3 exit (SM8850, local BYO weights):** `native_score` holds. The two zero-copy
+lines do **not** -- det reports `native_bbox_nms` (the array path) and outputReadTimeMs is 12-55ms
+for sem, 4-26ms for det. This was verified against a build of the pre-migration commit on the same
+device and is identical there, so it is a pre-existing condition, not a refactor regression: the
+handle path has not been running. `libLiteRt.so` does export the lock/unlock symbols and the
+TensorBuffer handle reflection is valid for LiteRT 2.1.5, so the cause is further in; the
+`std::call_once` around the dlsym is a suspect but is not confirmed. Re-enabling the handle path
+changes the detection postprocess and the frame budget, so it is a product decision rather than
+part of this refactor. These two lines are therefore a target to restore, not a property that was
+preserved.
+
 ### 12.4 Session comparison
 
 Compare before/after traces on the same device and route:

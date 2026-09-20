@@ -731,6 +731,14 @@ runtime/vision/Guidance native 拆分后，在同一目标设备验证：
 - preprocessing cache 仍然命中 same-frame reuse；
 - 没有新增完整 semantic tensor 的额外读取。
 
+**G3 退出时的实测状态（SM8850，本地 BYO 权重）：**`native_score` 成立。两条 zero-copy 红线
+**不成立** —— det 报的是 `native_bbox_nms`（数组路径），outputReadTimeMs 在 sem 是 12–55ms、
+det 是 4–26ms。把重构前的 commit 在同一台机器上重新构建对跑，结果完全一致，所以这是**既有状态
+而非重构引入的回归**：handle 路径一直没在跑。`libLiteRt.so` 确实导出了 lock/unlock 符号，
+TensorBuffer 的 handle 反射在 LiteRT 2.1.5 上也合法，所以原因更靠里；dlsym 外面那层
+`std::call_once` 是嫌疑但未证实。重新启用 handle 路径会改变检测后处理和帧预算，属于产品决策，
+不在本次重构范围内。因此这两条应当视为"待恢复的目标"，而不是"已保住的性质"。
+
 ### 12.4 Session 对比
 
 同一设备、同一路线比较重构前后 trace：
