@@ -2,9 +2,9 @@
 
 # Sailens 架构
 
-> 状态：**已定案，实施中。**它替代按技术层拆分的模块结构，以及 A/B 两仓库之间基于 fork
-> 的关系。G1 以及 G2 的第 2、4 步已落地，G3 进行中（第 5、6 步已落地）；第 3 步（B 转为
-> composite build 消费方）和 G4、G5 尚未开始。§11 记录的是计划，不是进度。
+> 状态：**已定案，A 侧已实施。**它替代按技术层拆分的模块结构，以及 A/B 两仓库之间基于 fork
+> 的关系。G1、G3、G4、G5 以及 G2 的第 2、4 步都已落地；**只剩第 3 步 —— B 转为 composite
+> build 消费方。**§11 记录的是计划，不是进度。
 
 ## 1. 摘要
 
@@ -532,7 +532,7 @@ B 中：
 
 A 中：
 
-- data/src/main/assets 作为 BYO 路径；
+- data/src/main/assets 作为 BYO 路径（第 10/11 步已移到 app/src/main/assets）；
 - 新替代方案验证后，旧 mlModelBinding；
 - 代码迁移完成后，旧 :domain、:data、:presentation、:ux modules。
 

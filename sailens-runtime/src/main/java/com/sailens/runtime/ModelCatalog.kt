@@ -8,7 +8,7 @@ package com.sailens.runtime
  * No model weights ship with this repository: the app is bring-your-own-model. Drop graphs that
  * satisfy the contract in `docs/models.md` at the asset paths below and the pipeline picks them up
  * — nothing else needs to change, because shape, layout, dtype and quantization are all read back
- * from the TFLite metadata at load time. Every `.tflite` under `data/src/main/assets` is git-ignored,
+ * from the TFLite metadata at load time. Every `.tflite` under `app/src/main/assets` is git-ignored,
  * so a local working copy can carry weights without them ever entering a commit. With no weights
  * present, loading fails at init and surfaces as a start-analysis error.
  *

@@ -25,10 +25,10 @@ local.properties
 build/
 
 # Model weights are never committed here: this app is bring-your-own-model (docs/models.md).
-# Drop graphs matching the contract at data/src/main/assets/{sem,det}.tflite to run locally; they
+# Drop graphs matching the contract at app/src/main/assets/{sem,det}.tflite to run locally; they
 # stay out of every commit. A downstream distribution that does ship weights tracks them with
 # `git add -f`, which overrides this rule for good.
-data/src/main/assets/*.tflite
+app/src/main/assets/*.tflite
 
 # Qualcomm NPU runtime: large, re-fetchable vendor .so + build output are NOT tracked.
 # Reconstruct locally per docs/npu-litert-qnn.md (download the zip, extract to repo root,

@@ -21,8 +21,8 @@ Target devices are Snapdragon 8 Gen 1 and beyond class hardware.
 This repository ships **no model weights**. The app resolves two graphs at runtime:
 
 ```text
-data/src/main/assets/sem.tflite     # semantic walkable-area segmentation
-data/src/main/assets/det.tflite     # obstacle detection
+app/src/main/assets/sem.tflite     # semantic walkable-area segmentation
+app/src/main/assets/det.tflite     # obstacle detection
 ```
 
 Both paths are git-ignored, so a working copy can carry weights without them entering a commit.
@@ -49,26 +49,25 @@ Apache-2.0 code license. Whatever you bring, that is yours to check.
 
 ## Architecture
 
-Eight Gradle modules wired with Koin. The layer-first split is being replaced by the
-product/runtime boundaries in [docs/architecture.md](docs/architecture.md) §11. `:sailens-core`,
-`:sailens-camera` and `:sailens-shell` are target modules already in place; `:domain` and `:data`
-still await theirs.
+Nine reusable `sailens-*` libraries plus the reference app, organised around the two product
+pipelines rather than technical layers -- see [docs/architecture.md](docs/architecture.md). A
+transitional `:data` still holds the LiteRT providers and disappears when they move.
 
 ```text
-:domain          perception / analysis / decision use cases — no Android APIs
-:data            LiteRT inference, depth, logging, trace
-:sailens-shell   reusable presentation and composition: SailensRoot(), navigation,
-                 design system, Guidance UI, settings, TTS, haptics
-:app             Koin wiring, Application/MainActivity, runtime profile
-:sailens-camera  CameraX capture, FrameSource / FrameSnapshotProvider, preview,
-                 camera-permission state
-:sailens-core    shared contracts: ImageFrame, geometry, BinaryMask, MlRuntimeInfo, LogService
-:sailens-runtime LiteRT sessions, accelerator selection, model sources/metadata,
-                 YUV preprocessing, shared preprocessing cache, hardware profile
-:sailens-vision  segmentation / detection runners, dataset taxonomies, postprocessors
+:sailens-core     shared contracts: ImageFrame, geometry, BinaryMask, MlRuntimeInfo, LogService
+:sailens-camera   CameraX capture, FrameSource / FrameSnapshotProvider, preview, permission state
+:sailens-runtime  LiteRT sessions, accelerator selection, model sources, YUV preprocessing
+:sailens-vision   segmentation / detection runners, dataset taxonomies, postprocessors
+:sailens-vlm      VLM engine contract: frame + prompt -> streamed text
+:sailens-output   TTS, audio focus, screen-reader detection, haptic primitive
+:sailens-guidance navigation logic: semantics, connectivity, safety, events, depth, trace
+:sailens-describe Describe product logic: prompts, snapshot freshness, scheduling
+:sailens-shell    reusable presentation: SailensRoot(), navigation, design system, Guidance UI
+:app              Koin wiring, Application/MainActivity, runtime profile, edition spec
+:data             transitional: LiteRT semantic/detection providers
 ```
 
-Outer modules depend inward on `:domain` interfaces. Frames flow
+Dependencies point downward only; Guidance and Describe never depend on each other. Frames flow
 `CameraX → ImageFrameAnalyzer → SharedFlow<ImageFrame> → ProcessFrameUseCase → AnalyzeSceneUseCase
 → DecideEventsUseCase → speech/haptics`.
 

@@ -4,7 +4,7 @@
 
 > **This repository ships no model weights.** The app is bring-your-own-model: supply a TFLite graph
 > that satisfies the contract below, put it at the agreed path, and it runs.
-> `data/src/main/assets/*.tflite` is git-ignored, so a working copy can carry weights without them
+> `app/src/main/assets/*.tflite` is git-ignored, so a working copy can carry weights without them
 > entering any commit.
 > With no weights present, model loading fails at init and surfaces as a start-analysis error.
 
@@ -30,8 +30,8 @@ frames where det does not run are compensated by tracker prediction, and tracks 
 ## Where to put a model
 
 ```text
-data/src/main/assets/sem.tflite     # semantic segmentation
-data/src/main/assets/det.tflite     # obstacle detection
+app/src/main/assets/sem.tflite     # semantic segmentation
+app/src/main/assets/det.tflite     # obstacle detection
 ```
 
 File names are fixed by `ModelCatalog`. Input/output tensor names, input type, NHWC/NCHW layout, and

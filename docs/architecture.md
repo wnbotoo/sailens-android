@@ -2,10 +2,10 @@
 
 # Sailens architecture
 
-> Status: **agreed and in progress.** It replaces the layer-first module structure and the
-> fork-based A/B repository relationship. Gate G1 and steps 2 and 4 of G2 have landed; step 3 (B as
-> a composite-build consumer) has not, and G3 is in progress (steps 5 and 6 landed). §11 tracks the
-> plan, not the progress.
+> Status: **agreed, and implemented in A.** It replaces the layer-first module structure and the
+> fork-based A/B repository relationship. Gates G1, G3, G4 and G5 have landed, as have steps 2 and
+> 4 of G2. **Step 3 -- B as a composite-build consumer -- is the one outstanding item.** §11 tracks
+> the plan, not the progress.
 
 ## 1. Summary
 
@@ -552,7 +552,7 @@ From B:
 
 From A:
 
-- data/src/main/assets as the BYO location;
+- data/src/main/assets as the BYO location (moved to app/src/main/assets in step 10/11);
 - the old mlModelBinding arrangement after its replacement is proven;
 - Gradle modules :domain, :data, :presentation and :ux after their code has migrated.
 
