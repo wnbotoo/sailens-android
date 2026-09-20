@@ -41,7 +41,8 @@ repository through a Gradle composite build.
 - Replace fork-and-merge between sailens-android and sailens-yolo with an ordinary dependency.
 - Organise code around stable product and runtime boundaries instead of horizontal Clean
   Architecture layers.
-- Make Guidance and Describe independently configurable and independently available at runtime.
+- Make Guidance and Describe independently configurable, each gated by its own static availability
+  and its own runtime state (§5.2).
 - Keep heavy concrete runtimes optional so an application does not inherit a VLM runtime merely
   because the shell knows that Describe exists.
 - Keep the licence boundary aligned with the dependency graph.
@@ -608,6 +609,10 @@ The current code has 13 JNI entry points: 9 array-based kernels and 4 LiteRT Ten
 paths. A cannot manufacture valid LiteRT handles without a real compiled model, so "invoke every JNI
 entry in A" is not a feasible step-1 exit condition. Verification is split by what can actually be
 proven:
+
+Layers A and B are instrumentation tests on a physical arm64 device, not JVM unit tests: the project
+builds arm64-v8a only, so an x86 emulator cannot load these libraries. They are therefore not part of
+the 171-test baseline in §12.1 and do not run in a JVM-only CI.
 
 **A. Binding coverage — required in A before package movement**
 

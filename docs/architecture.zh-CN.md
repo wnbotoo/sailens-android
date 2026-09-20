@@ -36,7 +36,8 @@ application-level contract。
 
 - 用普通依赖替代 sailens-android 与 sailens-yolo 之间的 fork-and-merge。
 - 从横向 Clean Architecture 技术层，转为围绕稳定产品边界和 runtime 边界组织代码。
-- Guidance 与 Describe 可以独立配置，也可以独立判断运行时是否可用。
+- Guidance 与 Describe 可以独立配置，各自由自己的静态可用性和自己的 runtime state 决定是否
+  呈现（§5.2）。
 - 重型 concrete runtime 保持可选；不能因为 shell 知道 Describe 存在，就让不使用 VLM
   的应用也被迫带上 VLM runtime。
 - 许可证边界与依赖图一致。
@@ -588,6 +589,10 @@ VLM runtime 成本。即使暂时不拆 Gradle module，logical boundary 也已�
 TensorBuffer-handle 路径。A 在没有真实 compiled model 的情况下无法制造合法 LiteRT handle，
 所以“在 A 中把 13 个 JNI entry 全部至少调用一次”不能作为 Step 1 的可执行退出条件。验证按
 实际能证明的内容拆成三层：
+
+A、B 两层是 instrumentation test，跑在 arm64 真机上，不是 JVM unit test：项目只构建
+arm64-v8a，x86 模拟器加载不了这些库。因此它们不属于 §12.1 的 171 个测试基线，也不会在只跑
+JVM 的 CI 里执行。
 
 **A. Binding coverage —— 挪 package 前在 A 中强制通过**
 
