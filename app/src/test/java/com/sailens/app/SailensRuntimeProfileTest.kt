@@ -1,8 +1,8 @@
 package com.sailens.app
 
 import com.sailens.runtime.ModelAcceleratorBackend
-import com.sailens.domain.model.common.ObstacleProviderType
-import com.sailens.domain.model.common.PerceptionProfile
+import com.sailens.guidance.model.common.ObstacleProviderType
+import com.sailens.guidance.model.common.PerceptionProfile
 import com.sailens.shell.guidance.overlay.SceneOverlayMode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse

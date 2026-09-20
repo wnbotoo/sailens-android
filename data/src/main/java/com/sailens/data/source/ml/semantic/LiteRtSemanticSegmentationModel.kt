@@ -1,4 +1,6 @@
 package com.sailens.data.source.ml.semantic
+import com.sailens.guidance.kernel.NavigationScorePostprocessor
+import com.sailens.guidance.kernel.SemanticPostprocessResult
 import com.sailens.vision.semantic.SemanticModelConfig
 
 import android.content.Context
@@ -14,7 +16,7 @@ import com.sailens.runtime.resolveModelInputDataType
 import com.sailens.runtime.session.AcceleratorSelection
 import com.sailens.runtime.session.LiteRtSessionFactory
 import com.sailens.core.frame.ImageFrame
-import com.sailens.domain.model.perception.SegmentationOutput
+import com.sailens.guidance.model.perception.SegmentationOutput
 import com.sailens.core.log.LogService
 import com.google.ai.edge.litert.Accelerator
 import kotlinx.coroutines.Dispatchers
@@ -38,7 +40,7 @@ class LiteRtSemanticSegmentationModel(
     private val context: Context,
     private val modelConfig: SemanticModelConfig = SemanticModelConfig(),
     private val modelSourceResolver: ModelSourceResolver = CatalogModelSourceResolver,
-    private val nativeScorePostprocessor: NativeSemanticScorePostprocessor? = null,
+    private val nativeScorePostprocessor: NavigationScorePostprocessor? = null,
     private val preprocessCache: InputPreprocessCache? = null,
     private val logService: LogService,
 ) : SegmentationModel {

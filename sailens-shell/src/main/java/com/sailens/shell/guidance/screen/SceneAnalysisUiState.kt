@@ -1,9 +1,9 @@
 package com.sailens.shell.guidance.screen
 
 import android.graphics.Bitmap
-import com.sailens.domain.model.perception.ObstacleDetection
-import com.sailens.domain.model.scene.SceneEvent
-import com.sailens.domain.model.scene.SceneDebugInfo
+import com.sailens.guidance.model.perception.ObstacleDetection
+import com.sailens.guidance.model.scene.SceneEvent
+import com.sailens.guidance.model.scene.SceneDebugInfo
 import com.sailens.shell.device.SpeechEngineState
 import com.sailens.shell.guidance.overlay.SceneOverlayMode
 

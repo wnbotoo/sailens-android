@@ -1,8 +1,8 @@
 package com.sailens.shell.guidance.screen
 
-import com.sailens.domain.model.common.EventCategory
-import com.sailens.domain.model.common.EventPriority
-import com.sailens.domain.model.scene.SceneEvent
+import com.sailens.guidance.model.common.EventCategory
+import com.sailens.guidance.model.common.EventPriority
+import com.sailens.guidance.model.scene.SceneEvent
 import com.sailens.shell.device.SpeechEngineState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse

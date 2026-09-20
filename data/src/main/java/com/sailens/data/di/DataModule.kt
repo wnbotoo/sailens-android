@@ -1,44 +1,43 @@
 package com.sailens.data.di
 
 import android.content.Context
-import com.sailens.data.repository.DefaultDepthRepository
-import com.sailens.data.repository.DefaultDeviceSensorRepository
+import com.sailens.guidance.depth.DefaultDepthRepository
+import com.sailens.guidance.sensors.DefaultDeviceSensorRepository
 import com.sailens.data.repository.MLPerceptionRepository
-import com.sailens.data.service.FileLogService
-import com.sailens.data.service.FileTraceReplayService
-import com.sailens.data.service.FileTraceService
-import com.sailens.data.service.NoOpTraceService
-import com.sailens.data.source.depth.ImagePositionDepthEstimator
-import com.sailens.data.source.device.DeviceMotionDataSource
-import com.sailens.data.source.device.DeviceRotationDataSource
-import com.sailens.domain.semantics.DefaultNavigationSemanticsProvider
+import com.sailens.guidance.trace.FileTraceReplayService
+import com.sailens.guidance.trace.FileTraceService
+import com.sailens.guidance.trace.NoOpTraceService
+import com.sailens.guidance.depth.ImagePositionDepthEstimator
+import com.sailens.guidance.sensors.DeviceMotionDataSource
+import com.sailens.guidance.sensors.DeviceRotationDataSource
+import com.sailens.guidance.semantics.DefaultNavigationSemanticsProvider
 import com.sailens.runtime.CatalogModelSourceResolver
 import com.sailens.runtime.InputPreprocessCache
 import com.sailens.runtime.ModelSourceResolver
-import com.sailens.data.source.ml.analysis.NativeConnectivityStatsExtractor
+import com.sailens.guidance.kernel.NativeConnectivityStatsExtractor
 import com.sailens.data.source.ml.obstacle.DisabledObstacleProvider
 import com.sailens.vision.detection.DetectionModelConfig
 import com.sailens.data.source.ml.obstacle.LiteRtObstacleProvider
-import com.sailens.data.source.ml.semantic.NativeSemanticScorePostprocessor
+import com.sailens.guidance.kernel.NavigationScorePostprocessor
 import com.sailens.data.source.ml.semantic.SegmentationModel
 import com.sailens.vision.semantic.SemanticModelConfig
 import com.sailens.data.source.ml.semantic.LiteRtSemanticSegmentationModel
 import com.sailens.data.source.ml.vlm.LiteRtVlmEngine
-import com.sailens.domain.config.PerceptionConfig
-import com.sailens.domain.config.TraceRuntimeConfig
-import com.sailens.domain.model.common.ObstacleProviderType
-import com.sailens.domain.model.common.SemanticProviderType
-import com.sailens.domain.semantics.NavigationSemantics
-import com.sailens.domain.semantics.NavigationSemanticsProvider
-import com.sailens.domain.processor.analysis.ConnectivityStatsExtractor
-import com.sailens.domain.repository.DepthRepository
-import com.sailens.domain.repository.DeviceSensorRepository
-import com.sailens.domain.repository.ObstacleProvider
-import com.sailens.domain.repository.PerceptionRepository
-import com.sailens.domain.repository.SceneDescriber
+import com.sailens.guidance.config.PerceptionConfig
+import com.sailens.guidance.config.TraceRuntimeConfig
+import com.sailens.guidance.model.common.ObstacleProviderType
+import com.sailens.guidance.model.common.SemanticProviderType
+import com.sailens.guidance.semantics.NavigationSemantics
+import com.sailens.guidance.semantics.NavigationSemanticsProvider
+import com.sailens.guidance.processor.analysis.ConnectivityStatsExtractor
+import com.sailens.guidance.repository.DepthRepository
+import com.sailens.guidance.repository.DeviceSensorRepository
+import com.sailens.guidance.repository.ObstacleProvider
+import com.sailens.guidance.repository.PerceptionRepository
+import com.sailens.guidance.repository.SceneDescriber
 import com.sailens.core.log.LogService
-import com.sailens.domain.service.TraceReplayService
-import com.sailens.domain.service.TraceService
+import com.sailens.guidance.service.TraceReplayService
+import com.sailens.guidance.service.TraceService
 import org.koin.android.ext.koin.androidContext
 import org.koin.core.qualifier.named
 import org.koin.dsl.module
@@ -67,7 +66,7 @@ val dataModule = module {
     }
 
     single {
-        NativeSemanticScorePostprocessor(
+        NavigationScorePostprocessor(
             config = get(),
             navigationSemantics = get(),
             logService = get(),
@@ -93,7 +92,7 @@ val dataModule = module {
             context = androidContext(),
             modelConfig = get(),
             modelSourceResolver = get(),
-            nativeScorePostprocessor = get<NativeSemanticScorePostprocessor>(),
+            nativeScorePostprocessor = get<NavigationScorePostprocessor>(),
             preprocessCache = get(),
             logService = get(),
         )
@@ -120,7 +119,6 @@ val dataModule = module {
 
 
     // service
-    single<LogService> { FileLogService(androidContext()) }
     single<TraceService> {
         val traceRuntimeConfig = get<TraceRuntimeConfig>()
         if (traceRuntimeConfig.enabled) {
@@ -144,7 +142,7 @@ private fun createSegmentationModel(
     context: Context,
     modelConfig: SemanticModelConfig,
     modelSourceResolver: ModelSourceResolver,
-    nativeScorePostprocessor: NativeSemanticScorePostprocessor,
+    nativeScorePostprocessor: NavigationScorePostprocessor,
     preprocessCache: InputPreprocessCache,
     logService: LogService,
 ): SegmentationModel = when (providerType) {

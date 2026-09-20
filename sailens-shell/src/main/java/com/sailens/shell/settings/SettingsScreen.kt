@@ -25,7 +25,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.sailens.domain.model.common.PerceptionProfile
+import com.sailens.guidance.model.common.PerceptionProfile
 import com.sailens.shell.R
 import com.sailens.shell.device.GuidanceHaptic
 import com.sailens.shell.device.SpeechManager

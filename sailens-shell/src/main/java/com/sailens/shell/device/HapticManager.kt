@@ -7,7 +7,7 @@ import android.os.VibrationAttributes
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
-import com.sailens.domain.model.scene.SceneEvent
+import com.sailens.guidance.model.scene.SceneEvent
 
 /**
  * Android 触觉反馈服务实现。

@@ -5,10 +5,10 @@ import android.os.SystemClock
 import com.sailens.runtime.session.AcceleratorSelection
 import com.sailens.runtime.session.AcceleratorSelector
 import com.sailens.core.runtime.MlRuntimeInfo
-import com.sailens.domain.repository.SceneDescriber
-import com.sailens.domain.repository.SceneDescription
-import com.sailens.domain.repository.SceneDescriptionChunk
-import com.sailens.domain.repository.SceneDescriptionRequest
+import com.sailens.guidance.repository.SceneDescriber
+import com.sailens.guidance.repository.SceneDescription
+import com.sailens.guidance.repository.SceneDescriptionChunk
+import com.sailens.guidance.repository.SceneDescriptionRequest
 import com.sailens.core.log.LogService
 import com.google.ai.edge.litert.Accelerator
 import kotlinx.coroutines.Dispatchers

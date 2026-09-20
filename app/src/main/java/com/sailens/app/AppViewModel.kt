@@ -1,7 +1,7 @@
 package com.sailens.app
 
 import androidx.lifecycle.ViewModel
-import com.sailens.domain.repository.DeviceSensorRepository
+import com.sailens.guidance.repository.DeviceSensorRepository
 
 class AppViewModel(
     private val deviceSensorRepository: DeviceSensorRepository,

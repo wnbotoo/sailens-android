@@ -2,13 +2,13 @@ package com.sailens.shell.trace
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.sailens.domain.model.trace.TraceReplayReport
-import com.sailens.domain.model.trace.TraceSessionDescriptor
+import com.sailens.guidance.model.trace.TraceReplayReport
+import com.sailens.guidance.model.trace.TraceSessionDescriptor
 import com.sailens.core.log.LogService
-import com.sailens.domain.usecase.trace.EvaluateTraceReplayBudgetUseCase
-import com.sailens.domain.usecase.trace.ListTraceSessionsUseCase
-import com.sailens.domain.usecase.trace.LoadLatestTraceReplayReportUseCase
-import com.sailens.domain.usecase.trace.LoadTraceReplayReportUseCase
+import com.sailens.guidance.usecase.trace.EvaluateTraceReplayBudgetUseCase
+import com.sailens.guidance.usecase.trace.ListTraceSessionsUseCase
+import com.sailens.guidance.usecase.trace.LoadLatestTraceReplayReportUseCase
+import com.sailens.guidance.usecase.trace.LoadTraceReplayReportUseCase
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow

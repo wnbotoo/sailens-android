@@ -4,10 +4,10 @@ import com.sailens.vision.detection.DetectionLayout
 import com.sailens.vision.detection.Detection
 import com.sailens.vision.detection.DetectionPostProcessor
 import com.sailens.vision.taxonomy.CocoTaxonomy
-import com.sailens.domain.model.common.ObstacleCategory
-import com.sailens.domain.model.perception.ObstacleDetection
-import com.sailens.domain.semantics.CocoNavigationSemantics
-import com.sailens.domain.semantics.NavigationSemantics
+import com.sailens.guidance.model.common.ObstacleCategory
+import com.sailens.guidance.model.perception.ObstacleDetection
+import com.sailens.guidance.semantics.CocoNavigationSemantics
+import com.sailens.guidance.semantics.NavigationSemantics
 
 import android.content.Context
 import android.os.SystemClock
@@ -29,11 +29,11 @@ import com.sailens.runtime.resolveModelInputDataType
 import com.sailens.runtime.session.AcceleratorSelection
 import com.sailens.runtime.session.LiteRtSession
 import com.sailens.runtime.session.LiteRtSessionFactory
-import com.sailens.domain.config.PerceptionConfig
+import com.sailens.guidance.config.PerceptionConfig
 import com.sailens.core.frame.ImageFrame
 import com.sailens.core.runtime.MlRuntimeInfo
-import com.sailens.domain.model.perception.ObstacleModelOutput
-import com.sailens.domain.repository.ObstacleProvider
+import com.sailens.guidance.model.perception.ObstacleModelOutput
+import com.sailens.guidance.repository.ObstacleProvider
 import com.sailens.core.log.LogService
 import com.google.ai.edge.litert.Accelerator
 import com.google.ai.edge.litert.TensorBuffer

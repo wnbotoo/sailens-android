@@ -64,10 +64,10 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.sailens.shell.camera.CameraViewWithPermission
-import com.sailens.domain.model.common.EventPriority
+import com.sailens.guidance.model.common.EventPriority
 import com.sailens.core.geometry.NormalizedRect
-import com.sailens.domain.model.common.ObstacleCategory
-import com.sailens.domain.model.perception.ObstacleDetection
+import com.sailens.guidance.model.common.ObstacleCategory
+import com.sailens.guidance.model.perception.ObstacleDetection
 import com.sailens.shell.R
 import com.sailens.shell.device.SceneEventTextResolver
 import com.sailens.shell.guidance.overlay.SceneDebugInfoView

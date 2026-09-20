@@ -10,7 +10,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import com.sailens.domain.model.scene.SceneDebugInfo
+import com.sailens.guidance.model.scene.SceneDebugInfo
 import com.sailens.shell.R
 
 /**

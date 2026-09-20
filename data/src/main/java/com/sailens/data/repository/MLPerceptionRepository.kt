@@ -2,8 +2,8 @@ package com.sailens.data.repository
 
 import com.sailens.data.source.ml.semantic.SegmentationModel
 import com.sailens.core.frame.ImageFrame
-import com.sailens.domain.model.perception.SegmentationOutput
-import com.sailens.domain.repository.PerceptionRepository
+import com.sailens.guidance.model.perception.SegmentationOutput
+import com.sailens.guidance.repository.PerceptionRepository
 
 /**
  * 感知仓库实现

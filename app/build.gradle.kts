@@ -128,7 +128,7 @@ dependencies {
     implementation(project(":sailens-core"))
     implementation(project(":sailens-runtime"))
     implementation(project(":sailens-vision"))
-    implementation(project(":domain"))
+    implementation(project(":sailens-guidance"))
     implementation(project(":data"))
     implementation(project(":sailens-camera"))
     implementation(project(":sailens-shell"))

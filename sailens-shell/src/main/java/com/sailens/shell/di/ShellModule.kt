@@ -1,5 +1,7 @@
 package com.sailens.shell.di
 
+import com.sailens.core.log.LogService
+import com.sailens.shell.FileLogService
 import com.sailens.shell.diagnostics.GuidanceDiagnosticsStore
 import com.sailens.shell.device.AccessibilityStatusProvider
 import com.sailens.shell.device.HapticManager
@@ -14,6 +16,9 @@ import org.koin.core.module.dsl.viewModel
 import org.koin.dsl.module
 
 val shellModule = module {
+    // FileLogService writes to app-internal files, so it is an application-platform implementation
+    // rather than a shared contract (architecture.md §6.7). The interface lives in sailens-core.
+    single<LogService> { FileLogService(androidContext()) }
     single { HapticManager(androidContext()) }
     single { SceneEventTextResolver(androidContext()) }
     single { SpeechManager(androidContext(), get(), get()) }

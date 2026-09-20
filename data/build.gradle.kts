@@ -11,17 +11,6 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         consumerProguardFiles("consumer-rules.pro")
-
-        // Build the native lib only for the target arm64 SoC (Snapdragon 8 Gen 2+).
-        ndk {
-            abiFilters += "arm64-v8a"
-        }
-    }
-
-    externalNativeBuild {
-        cmake {
-            path = file("src/main/cpp/CMakeLists.txt")
-        }
     }
 
     buildTypes {
@@ -49,7 +38,7 @@ dependencies {
     implementation(project(":sailens-core"))
     implementation(project(":sailens-runtime"))
     implementation(project(":sailens-vision"))
-    implementation(project(":domain"))
+    implementation(project(":sailens-guidance"))
     implementation(libs.koin.android)
     implementation(libs.google.litert)
     implementation(libs.opencv)

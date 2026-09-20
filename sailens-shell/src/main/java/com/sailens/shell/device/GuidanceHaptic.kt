@@ -1,9 +1,9 @@
 package com.sailens.shell.device
 
-import com.sailens.domain.model.common.DirectionZone
-import com.sailens.domain.model.common.EventCategory
-import com.sailens.domain.model.common.EventPriority
-import com.sailens.domain.model.scene.SceneEvent
+import com.sailens.guidance.model.common.DirectionZone
+import com.sailens.guidance.model.common.EventCategory
+import com.sailens.guidance.model.common.EventPriority
+import com.sailens.guidance.model.scene.SceneEvent
 
 // 放在文件级而不是 companion object 里：枚举常量在初始化时读不到自己的伴生对象。
 private const val SHORT = 60L

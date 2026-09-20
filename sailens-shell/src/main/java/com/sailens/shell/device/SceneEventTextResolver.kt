@@ -1,13 +1,13 @@
 package com.sailens.shell.device
 
 import android.content.Context
-import com.sailens.domain.model.common.DirectionBias
-import com.sailens.domain.model.scene.SceneEvent
+import com.sailens.guidance.model.common.DirectionBias
+import com.sailens.guidance.model.scene.SceneEvent
 import com.sailens.shell.R
 import java.util.IllegalFormatException
 
 /**
- * 把 [com.sailens.domain.model.scene.SceneEvent] 渲染成一句要播报的话。
+ * 把 [com.sailens.guidance.model.scene.SceneEvent] 渲染成一句要播报的话。
  *
  * domain 只产出 messageKey + 两个修饰（近距离、偏移建议），最终句子在这里拼。抽成单独一个类，
  * 是因为同一句话有两个消费方——自带 TTS 和屏幕阅读器播报——两边必须逐字一致，否则用户在

@@ -1,7 +1,7 @@
 package com.sailens.shell.guidance.settings
 
 import android.content.Context
-import com.sailens.domain.model.common.PerceptionProfile
+import com.sailens.guidance.model.common.PerceptionProfile
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow

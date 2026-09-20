@@ -9,7 +9,7 @@ import android.os.Looper
 import android.os.SystemClock
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
-import com.sailens.domain.model.scene.SceneEvent
+import com.sailens.guidance.model.scene.SceneEvent
 import com.sailens.core.log.LogService
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow

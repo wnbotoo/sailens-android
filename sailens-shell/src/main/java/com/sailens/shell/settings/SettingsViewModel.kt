@@ -2,8 +2,8 @@ package com.sailens.shell.settings
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.sailens.domain.model.common.PerceptionProfile
-import com.sailens.domain.processor.perception.PerceptionProfileManager
+import com.sailens.guidance.model.common.PerceptionProfile
+import com.sailens.guidance.processor.perception.PerceptionProfileManager
 import com.sailens.shell.device.GuidanceHaptic
 import com.sailens.shell.device.HapticManager
 import com.sailens.shell.device.SpeechManager

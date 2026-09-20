@@ -33,8 +33,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.sailens.domain.model.trace.TraceReplayReport
-import com.sailens.domain.model.trace.TraceSessionDescriptor
+import com.sailens.guidance.model.trace.TraceReplayReport
+import com.sailens.guidance.model.trace.TraceSessionDescriptor
 import com.sailens.shell.R
 import com.sailens.shell.design.components.SailensScaffold
 import com.sailens.shell.design.theme.SailensDimens

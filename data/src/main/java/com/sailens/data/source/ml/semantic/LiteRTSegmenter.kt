@@ -13,8 +13,10 @@ import com.sailens.runtime.InputPreprocessCache
 import com.sailens.runtime.session.LiteRtSession
 import com.sailens.core.runtime.MlRuntimeInfo
 import com.sailens.core.frame.ImageFrame
-import com.sailens.domain.model.perception.SegmentationMask
-import com.sailens.domain.model.perception.SegmentationOutput
+import com.sailens.guidance.kernel.NavigationScorePostprocessor
+import com.sailens.guidance.kernel.SemanticPostprocessResult
+import com.sailens.guidance.model.perception.SegmentationMask
+import com.sailens.guidance.model.perception.SegmentationOutput
 import com.google.ai.edge.litert.Accelerator
 
 internal class LiteRTSegmenter(
@@ -26,7 +28,7 @@ internal class LiteRTSegmenter(
     inputQuantization: ModelInputQuantization,
     preferNativeYuvPreprocessing: Boolean,
     preprocessCache: InputPreprocessCache? = null,
-    private val nativeScorePostprocessor: NativeSemanticScorePostprocessor? = null,
+    private val nativeScorePostprocessor: NavigationScorePostprocessor? = null,
 ) {
     val accelerator: Accelerator get() = session.accelerator
     private val inputBuffer = session.inputBuffers.single()

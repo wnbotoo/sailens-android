@@ -25,7 +25,7 @@ dependencyResolutionManagement {
 rootProject.name = "Sailens"
 include(":app")
 
-include(":domain")
+include(":sailens-guidance")
 include(":sailens-shell")
 include(":data")
 include(":sailens-camera")
