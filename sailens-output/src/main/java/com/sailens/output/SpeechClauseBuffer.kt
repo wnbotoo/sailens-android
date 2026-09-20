@@ -1,4 +1,4 @@
-package com.sailens.shell.device
+package com.sailens.output
 
 /**
  * 把 VLM 的 token 流切成"可以立刻念出来"的小句。
@@ -16,7 +16,7 @@ package com.sailens.shell.device
  *
  * 非线程安全：调用方（ViewModel 的单个协程）串行使用。
  */
-internal class SpeechClauseBuffer(
+class SpeechClauseBuffer(
     private val softMinChars: Int = DEFAULT_SOFT_MIN_CHARS,
     private val hardMaxChars: Int = DEFAULT_HARD_MAX_CHARS,
 ) {

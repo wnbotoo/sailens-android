@@ -131,6 +131,7 @@ dependencies {
     implementation(project(":sailens-guidance"))
     implementation(project(":data"))
     implementation(project(":sailens-camera"))
+    implementation(project(":sailens-output"))
     implementation(project(":sailens-shell"))
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

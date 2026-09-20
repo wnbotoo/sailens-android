@@ -1,4 +1,4 @@
-package com.sailens.shell.device
+package com.sailens.output
 
 import android.content.Context
 import android.view.accessibility.AccessibilityManager

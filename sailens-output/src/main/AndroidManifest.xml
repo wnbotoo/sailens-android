@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- The haptic channel lives here, so the permission it needs is declared here. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+</manifest>

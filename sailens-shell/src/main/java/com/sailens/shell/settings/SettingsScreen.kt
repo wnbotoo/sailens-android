@@ -28,7 +28,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.sailens.guidance.model.common.PerceptionProfile
 import com.sailens.shell.R
 import com.sailens.shell.device.GuidanceHaptic
-import com.sailens.shell.device.SpeechManager
+import com.sailens.output.SpeechManager
 import com.sailens.shell.ext.openUrl
 import com.sailens.shell.design.components.SailensScaffold
 import com.sailens.shell.design.components.SelectableRow

@@ -1,4 +1,4 @@
-package com.sailens.shell.device
+package com.sailens.output
 
 import android.content.Context
 import android.media.AudioAttributes
@@ -9,7 +9,6 @@ import android.os.Looper
 import android.os.SystemClock
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
-import com.sailens.guidance.model.scene.SceneEvent
 import com.sailens.core.log.LogService
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -43,7 +42,7 @@ enum class SpeechEngineState {
 class SpeechManager(
     private val context: Context,
     private val logger: LogService,
-    private val textResolver: SceneEventTextResolver = SceneEventTextResolver(context),
+
 ) {
     private var tts: TextToSpeech? = null
     @Volatile
@@ -169,20 +168,20 @@ class SpeechManager(
     }
 
     /**
-     * 播报 SceneEvent 中的文案（通过 strings.xml 的资源 ID）
+     * 播报一条已经解析好文案的 [Announcement]。文案由上层决定，这里只负责怎么说出去。
      */
-    fun speak(event: SceneEvent) {
+    fun speak(announcement: Announcement) {
         runOnMain {
-            speakOnMain(event)
+            speakOnMain(announcement)
         }
     }
 
-    private fun speakOnMain(event: SceneEvent) {
-        if (event.isExpired(System.currentTimeMillis())) {
+    private fun speakOnMain(announcement: Announcement) {
+        if (announcement.isExpired(System.currentTimeMillis())) {
             logger.debug(
                 TAG,
                 "Dropping expired scene event before speaking",
-                mapOf("messageKey" to event.messageKey)
+                mapOf("key" to announcement.key)
             )
             return
         }
@@ -191,29 +190,29 @@ class SpeechManager(
             logger.warning(
                 TAG,
                 "TTS speak queued because engine is not ready",
-                mapOf("messageKey" to event.messageKey)
+                mapOf("key" to announcement.key)
             )
-            storePendingSpeech(event)
+            storePendingSpeech(announcement)
             if (!isInitializing) {
                 initializeOnMain(forceRetry = false)
             }
             return
         }
 
-        speakReadyEvent(event)
+        speakReadyAnnouncement(announcement)
     }
 
-    private fun speakReadyEvent(event: SceneEvent) {
+    private fun speakReadyAnnouncement(announcement: Announcement) {
         if (!_isReady) return
         // 引擎就绪前排队的事件也要再验一次时效：pending 到就绪之间可能又过去了几百毫秒。
-        if (event.isExpired(System.currentTimeMillis())) return
+        if (announcement.isExpired(System.currentTimeMillis())) return
 
-        val text = textResolver.resolve(event.toSceneEventText())
+        val text = announcement.text
         // 一律 FLUSH。唯一的例外是"辅助已停止/已恢复"这类系统状态提示，它们必须说完，
         // 但那条路径走的是 speakSystemNotice()，不经过这里。
         val queueMode = TextToSpeech.QUEUE_FLUSH
 
-        val utteranceId = event.id.toString()
+        val utteranceId = announcement.id
         requestAudioFocus()
         latestUtteranceId = utteranceId
         val result = tts?.speak(text, queueMode, null, utteranceId) ?: TextToSpeech.ERROR
@@ -225,7 +224,7 @@ class SpeechManager(
                 TAG,
                 "TTS speak failed",
                 mapOf(
-                    "messageKey" to event.messageKey,
+                    "key" to announcement.key,
                     "queueMode" to queueMode,
                     "textLength" to text.length,
                 )
@@ -235,7 +234,7 @@ class SpeechManager(
                 TAG,
                 "TTS speak requested",
                 mapOf(
-                    "messageKey" to event.messageKey,
+                    "key" to announcement.key,
                     "queueMode" to queueMode,
                 )
             )
@@ -506,15 +505,15 @@ class SpeechManager(
         return minOf(MAX_INIT_RETRY_DELAY_MS, INITIAL_INIT_RETRY_DELAY_MS * (1L shl shift))
     }
 
-    private fun storePendingSpeech(event: SceneEvent) {
+    private fun storePendingSpeech(announcement: Announcement) {
         val now = SystemClock.elapsedRealtime()
         val pending = pendingSpeech
         if (
             pending == null ||
             now - pending.enqueuedAtMs > PENDING_SPEECH_MAX_AGE_MS ||
-            event.priority.value >= pending.event.priority.value
+            announcement.priority >= pending.announcement.priority
         ) {
-            pendingSpeech = PendingSpeech(event = event, enqueuedAtMs = now)
+            pendingSpeech = PendingSpeech(announcement = announcement, enqueuedAtMs = now)
         }
     }
 
@@ -528,14 +527,14 @@ class SpeechManager(
                 TAG,
                 "Dropping stale pending TTS event",
                 mapOf(
-                    "messageKey" to pending.event.messageKey,
+                    "key" to pending.announcement.key,
                     "ageMs" to ageMs,
                 )
             )
             return
         }
 
-        speakReadyEvent(pending.event)
+        speakReadyAnnouncement(pending.announcement)
     }
 
     private fun clearPendingSpeech(reason: String) {
@@ -545,7 +544,7 @@ class SpeechManager(
             TAG,
             "Dropping pending TTS event",
             mapOf(
-                "messageKey" to pending.event.messageKey,
+                "key" to pending.announcement.key,
                 "reason" to reason,
             )
         )
@@ -643,7 +642,7 @@ class SpeechManager(
     }
 
     private data class PendingSpeech(
-        val event: SceneEvent,
+        val announcement: Announcement,
         val enqueuedAtMs: Long,
     )
 

@@ -72,7 +72,7 @@ import com.sailens.shell.R
 import com.sailens.shell.device.SceneEventTextResolver
 import com.sailens.shell.guidance.overlay.SceneDebugInfoView
 import com.sailens.shell.guidance.overlay.SceneOverlayMode
-import com.sailens.shell.device.SpeechEngineState
+import com.sailens.output.SpeechEngineState
 import com.sailens.shell.device.toSceneEventText
 import com.sailens.shell.design.components.PrimaryActionButton
 import com.sailens.shell.design.theme.SailensDimens

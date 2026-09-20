@@ -3,10 +3,11 @@ package com.sailens.shell.di
 import com.sailens.core.log.LogService
 import com.sailens.shell.FileLogService
 import com.sailens.shell.diagnostics.GuidanceDiagnosticsStore
-import com.sailens.shell.device.AccessibilityStatusProvider
+import com.sailens.output.AccessibilityStatusProvider
 import com.sailens.shell.device.HapticManager
+import com.sailens.shell.device.GuidanceAnnouncements
 import com.sailens.shell.device.SceneEventTextResolver
-import com.sailens.shell.device.SpeechManager
+import com.sailens.output.SpeechManager
 import com.sailens.shell.guidance.screen.SceneAnalysisViewModel
 import com.sailens.shell.guidance.settings.GuidanceSettingsStore
 import com.sailens.shell.guidance.settings.PerceptionSettingsStore
@@ -21,7 +22,8 @@ val shellModule = module {
     single<LogService> { FileLogService(androidContext()) }
     single { HapticManager(androidContext()) }
     single { SceneEventTextResolver(androidContext()) }
-    single { SpeechManager(androidContext(), get(), get()) }
+    single { SpeechManager(androidContext(), get()) }
+    single { GuidanceAnnouncements(textResolver = get()) }
     single { AccessibilityStatusProvider(androidContext()) }
     single { GuidanceSettingsStore(androidContext()) }
     single { PerceptionSettingsStore(androidContext()) }
@@ -42,6 +44,7 @@ val shellModule = module {
             guidanceDiagnosticsStore = get(),
             accessibilityStatusProvider = get(),
             textResolver = get(),
+            announcements = get(),
         )
     }
     viewModel {

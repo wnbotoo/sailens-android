@@ -4,7 +4,7 @@ import android.graphics.Bitmap
 import com.sailens.guidance.model.perception.ObstacleDetection
 import com.sailens.guidance.model.scene.SceneEvent
 import com.sailens.guidance.model.scene.SceneDebugInfo
-import com.sailens.shell.device.SpeechEngineState
+import com.sailens.output.SpeechEngineState
 import com.sailens.shell.guidance.overlay.SceneOverlayMode
 
 data class SceneAnalysisUiState(

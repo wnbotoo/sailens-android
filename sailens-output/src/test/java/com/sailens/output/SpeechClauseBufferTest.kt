@@ -1,4 +1,4 @@
-package com.sailens.shell.device
+package com.sailens.output
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull

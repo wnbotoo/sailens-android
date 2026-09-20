@@ -6,7 +6,7 @@ import com.sailens.guidance.model.common.PerceptionProfile
 import com.sailens.guidance.processor.perception.PerceptionProfileManager
 import com.sailens.shell.device.GuidanceHaptic
 import com.sailens.shell.device.HapticManager
-import com.sailens.shell.device.SpeechManager
+import com.sailens.output.SpeechManager
 import com.sailens.shell.diagnostics.GuidanceDiagnosticsState
 import com.sailens.shell.diagnostics.GuidanceDiagnosticsStore
 import com.sailens.shell.guidance.settings.GuidanceFeedbackSettings

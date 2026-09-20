@@ -1,7 +1,7 @@
 package com.sailens.shell.guidance.settings
 
 import android.content.Context
-import com.sailens.shell.device.SpeechManager
+import com.sailens.output.SpeechManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow

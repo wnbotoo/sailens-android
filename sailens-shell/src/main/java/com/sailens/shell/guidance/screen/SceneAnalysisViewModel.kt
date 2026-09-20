@@ -15,13 +15,14 @@ import com.sailens.guidance.usecase.scene.DescribeSceneUseCase
 import com.sailens.guidance.usecase.scene.StartSceneAnalysisUseCase
 import com.sailens.guidance.usecase.scene.StopSceneAnalysisUseCase
 import com.sailens.shell.diagnostics.GuidanceDiagnosticsStore
-import com.sailens.shell.device.AccessibilityStatusProvider
+import com.sailens.output.AccessibilityStatusProvider
 import com.sailens.shell.device.GuidanceHaptic
 import com.sailens.shell.device.HapticManager
+import com.sailens.shell.device.GuidanceAnnouncements
 import com.sailens.shell.device.SceneEventTextResolver
-import com.sailens.shell.device.SpeechClauseBuffer
-import com.sailens.shell.device.SpeechEngineState
-import com.sailens.shell.device.SpeechManager
+import com.sailens.output.SpeechClauseBuffer
+import com.sailens.output.SpeechEngineState
+import com.sailens.output.SpeechManager
 import com.sailens.shell.device.toSceneEventText
 import com.sailens.shell.ext.OverlayBitmapRenderer
 import com.sailens.shell.guidance.settings.GuidanceFeedbackSettings
@@ -72,6 +73,7 @@ class SceneAnalysisViewModel(
     private val guidanceDiagnosticsStore: GuidanceDiagnosticsStore,
     private val accessibilityStatusProvider: AccessibilityStatusProvider,
     private val textResolver: SceneEventTextResolver,
+    private val announcements: GuidanceAnnouncements,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(
@@ -350,7 +352,7 @@ class SceneAnalysisViewModel(
                     _uiEffect.emit(SceneAnalysisUiEffect.Announce(text))
                 }
             } else {
-                speechManager.speak(primaryEvent)
+                speechManager.speak(announcements.announcementFor(primaryEvent))
             }
         }
 
