@@ -6,6 +6,7 @@ import com.sailens.data.source.ml.obstacle.ObstacleModelConfig
 import com.sailens.data.source.ml.semantic.SemanticModelConfig
 import com.sailens.data.source.ml.vlm.VlmModelConfig
 import com.sailens.domain.config.AnalysisConfig
+import com.sailens.runtime.hardware.DeviceHardwareProfileProvider
 import com.sailens.domain.config.PerceptionConfig
 import com.sailens.domain.config.PipelinePerformanceBudget
 import com.sailens.domain.config.TraceRuntimeConfig

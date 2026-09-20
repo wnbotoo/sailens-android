@@ -2,8 +2,8 @@ package com.sailens.data.source.ml.vlm
 
 import android.content.Context
 import android.os.SystemClock
-import com.sailens.data.source.ml.session.AcceleratorSelection
-import com.sailens.data.source.ml.session.AcceleratorSelector
+import com.sailens.runtime.session.AcceleratorSelection
+import com.sailens.runtime.session.AcceleratorSelector
 import com.sailens.core.runtime.MlRuntimeInfo
 import com.sailens.domain.repository.SceneDescriber
 import com.sailens.domain.repository.SceneDescription

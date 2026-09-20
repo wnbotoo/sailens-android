@@ -126,6 +126,7 @@ dependencies {
         implementation(project(":litert_npu_runtime_libraries_jit:runtime_strings"))
     }
     implementation(project(":sailens-core"))
+    implementation(project(":sailens-runtime"))
     implementation(project(":domain"))
     implementation(project(":data"))
     implementation(project(":sailens-camera"))

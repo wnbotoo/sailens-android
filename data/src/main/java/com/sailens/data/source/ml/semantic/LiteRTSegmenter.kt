@@ -1,15 +1,15 @@
 package com.sailens.data.source.ml.semantic
 
 import android.os.SystemClock
-import com.sailens.data.source.ml.InputPreprocessBackend
-import com.sailens.data.source.ml.ModelInputDataType
-import com.sailens.data.source.ml.ModelInputQuantization
-import com.sailens.data.source.ml.TensorQuantization
-import com.sailens.data.source.ml.TfliteTensorElementType
-import com.sailens.data.source.ml.ModelTensorConfig
-import com.sailens.data.source.ml.ModelInputPreprocessor
-import com.sailens.data.source.ml.InputPreprocessCache
-import com.sailens.data.source.ml.session.LiteRtSession
+import com.sailens.runtime.InputPreprocessBackend
+import com.sailens.runtime.ModelInputDataType
+import com.sailens.runtime.ModelInputQuantization
+import com.sailens.runtime.TensorQuantization
+import com.sailens.runtime.TfliteTensorElementType
+import com.sailens.runtime.ModelTensorConfig
+import com.sailens.runtime.ModelInputPreprocessor
+import com.sailens.runtime.InputPreprocessCache
+import com.sailens.runtime.session.LiteRtSession
 import com.sailens.core.runtime.MlRuntimeInfo
 import com.sailens.core.frame.ImageFrame
 import com.sailens.domain.model.perception.SegmentationMask

@@ -1,7 +1,7 @@
 package com.sailens.app
 
 import com.sailens.camera.CameraRuntimeConfig
-import com.sailens.data.source.ml.ModelAcceleratorBackend
+import com.sailens.runtime.ModelAcceleratorBackend
 import com.sailens.data.source.ml.obstacle.ObstacleModelConfig
 import com.sailens.data.source.ml.semantic.SemanticModelConfig
 import com.sailens.domain.config.AnalysisConfig

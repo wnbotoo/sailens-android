@@ -1,8 +1,8 @@
 package com.sailens.data.source.ml.semantic
 
-import com.sailens.data.source.ml.ImageTensorLayout
+import com.sailens.runtime.ImageTensorLayout
 import com.sailens.data.source.ml.NativeMlLibrary
-import com.sailens.data.source.ml.nativeValue
+import com.sailens.runtime.nativeValue
 import com.sailens.domain.config.AnalysisConfig
 import com.sailens.core.mask.BinaryMask
 import com.sailens.core.mask.BottomStats

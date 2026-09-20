@@ -12,9 +12,9 @@ import com.sailens.data.source.depth.ImagePositionDepthEstimator
 import com.sailens.data.source.device.DeviceMotionDataSource
 import com.sailens.data.source.device.DeviceRotationDataSource
 import com.sailens.data.source.mapper.ClassMapperProviderImpl
-import com.sailens.data.source.ml.CatalogModelSourceResolver
-import com.sailens.data.source.ml.InputPreprocessCache
-import com.sailens.data.source.ml.ModelSourceResolver
+import com.sailens.runtime.CatalogModelSourceResolver
+import com.sailens.runtime.InputPreprocessCache
+import com.sailens.runtime.ModelSourceResolver
 import com.sailens.data.source.ml.analysis.NativeConnectivityStatsExtractor
 import com.sailens.data.source.ml.obstacle.DisabledObstacleProvider
 import com.sailens.data.source.ml.obstacle.ObstacleModelConfig

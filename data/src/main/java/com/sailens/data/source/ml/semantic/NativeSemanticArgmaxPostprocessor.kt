@@ -1,8 +1,8 @@
 package com.sailens.data.source.ml.semantic
 
 import com.sailens.data.source.ml.NativeMlLibrary
-import com.sailens.data.source.ml.ModelTensorConfig
-import com.sailens.data.source.ml.nativeValue
+import com.sailens.runtime.ModelTensorConfig
+import com.sailens.runtime.nativeValue
 
 internal class NativeSemanticArgmaxPostprocessor(
     private val config: ModelTensorConfig,

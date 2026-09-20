@@ -8,6 +8,7 @@ import com.sailens.data.source.ml.obstacle.ObstacleNativePostProcessor
 import com.sailens.data.source.ml.semantic.NativeSemanticArgmaxPostprocessor
 import com.sailens.data.source.ml.semantic.NativeSemanticScorePostprocessor
 import com.sailens.domain.config.AnalysisConfig
+import com.sailens.runtime.ModelTensorConfig
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
@@ -19,6 +20,11 @@ import java.lang.reflect.Modifier
 
 /**
  * Layer A of the native verification plan (docs/architecture.md §12.2): binding coverage.
+ *
+ * The native code split three ways in gate G3, so layer A split with it: this covers the vision
+ * and Guidance kernels that stayed in :data, and NativeRuntimeBindingCoverageTest in
+ * sailens-runtime covers the preprocessing kernels that moved. Both libraries keep the same
+ * guarantee.
  *
  * `libsailens_ml.so` binds its methods in `JNI_OnLoad` with `RegisterNatives` and exports no
  * `Java_<mangled>` symbols, so name-based binding is not merely unused, it is impossible:
@@ -52,21 +58,6 @@ class NativeBindingCoverageTest {
      * [declaredNativeMethodsMatchTheRegistrationTable] or [everyDeclaredNativeMethodIsBound].
      */
     private val expectedBindings: List<NativeBinding> = listOf(
-        NativeBinding(
-            NativeYuvInputPreprocessor::class.java,
-            "nativePreprocessYuvToFloat",
-            "([B[B[BIIIIIIIIIIIFFFFFFI[F)Z",
-        ),
-        NativeBinding(
-            NativeYuvInputPreprocessor::class.java,
-            "nativePreprocessYuvToInt8",
-            "([B[B[BIIIIIIIIIIIFFFFFFIFI[B)Z",
-        ),
-        NativeBinding(
-            NativeYuvInputPreprocessor::class.java,
-            "nativeQuantizeFloatToInt8",
-            "([F[BFI)Z",
-        ),
         NativeBinding(
             NativeSemanticArgmaxPostprocessor::class.java,
             "nativeArgmaxScores",
@@ -139,8 +130,9 @@ class NativeBindingCoverageTest {
             .sortedBy { it.key }
 
         assertEquals(
-            "The 13 JNI entry points in docs/architecture.md §12.2 are the migration baseline. " +
-                "A changed declaration must be mirrored in the RegisterNatives table in " +
+            "These are the 10 of the migration baseline's 13 JNI entry points that stayed in " +
+                ":data when the preprocessing kernels moved to sailens-runtime in G3. A changed " +
+                "declaration must be mirrored in the RegisterNatives table in " +
                 "data/src/main/cpp/sailens_ml_jni.cpp and in expectedBindings here.",
             expectedBindings.sortedBy { it.key }.map { it.key },
             declared.map { it.key },
@@ -189,11 +181,6 @@ class NativeBindingCoverageTest {
         val key: String get() = "${owner.name.replace('.', '/')}#$methodName$descriptor"
 
         fun receiver(): Any = when (owner) {
-            NativeYuvInputPreprocessor::class.java -> NativeYuvInputPreprocessor(
-                config = tensorConfig,
-                inputQuantization = ModelInputQuantization(),
-            )
-
             NativeSemanticArgmaxPostprocessor::class.java ->
                 NativeSemanticArgmaxPostprocessor(config = tensorConfig)
 

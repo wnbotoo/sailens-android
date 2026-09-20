@@ -13,6 +13,9 @@ internal object NativeMlLibrary {
      * method unbound until it is first called. Every caller falls back to Kotlin when
      * [isAvailable] is false, which keeps that survivable but silent; this holds the reason so
      * diagnostics and the binding-coverage test can report it.
+     *
+     * This is the vision/Guidance half of the native code. The YUV preprocessing kernels moved to
+     * sailens-runtime and load separately through `NativeRuntimeLibrary`.
      */
     val loadError: Throwable?
 

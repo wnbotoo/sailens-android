@@ -49,20 +49,22 @@ Apache-2.0 code license. Whatever you bring, that is yours to check.
 
 ## Architecture
 
-Six Gradle modules wired with Koin. The layer-first split is being replaced by the
+Seven Gradle modules wired with Koin. The layer-first split is being replaced by the
 product/runtime boundaries in [docs/architecture.md](docs/architecture.md) §11. `:sailens-core`,
 `:sailens-camera` and `:sailens-shell` are target modules already in place; `:domain` and `:data`
 still await theirs.
 
 ```text
-:domain         perception / analysis / decision use cases — no Android APIs
-:data           LiteRT inference, depth, logging, trace
-:sailens-shell  reusable presentation and composition: SailensRoot(), navigation,
-                design system, Guidance UI, settings, TTS, haptics
-:app            Koin wiring, Application/MainActivity, runtime profile
-:sailens-camera CameraX capture, FrameSource / FrameSnapshotProvider, preview,
-                camera-permission state
-:sailens-core   shared contracts: ImageFrame, geometry, BinaryMask, MlRuntimeInfo, LogService
+:domain          perception / analysis / decision use cases — no Android APIs
+:data            LiteRT inference, depth, logging, trace
+:sailens-shell   reusable presentation and composition: SailensRoot(), navigation,
+                 design system, Guidance UI, settings, TTS, haptics
+:app             Koin wiring, Application/MainActivity, runtime profile
+:sailens-camera  CameraX capture, FrameSource / FrameSnapshotProvider, preview,
+                 camera-permission state
+:sailens-core    shared contracts: ImageFrame, geometry, BinaryMask, MlRuntimeInfo, LogService
+:sailens-runtime LiteRT sessions, accelerator selection, model sources/metadata,
+                 YUV preprocessing, shared preprocessing cache, hardware profile
 ```
 
 Outer modules depend inward on `:domain` interfaces. Frames flow

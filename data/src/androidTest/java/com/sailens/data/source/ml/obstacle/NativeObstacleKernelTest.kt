@@ -2,7 +2,7 @@ package com.sailens.data.source.ml.obstacle
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.sailens.data.source.ml.NativeMlLibrary
-import com.sailens.data.source.ml.TensorQuantization
+import com.sailens.runtime.TensorQuantization
 import com.sailens.core.frame.ImageFrame
 import com.sailens.core.frame.ImagePixelFormat
 import org.junit.Assert.assertEquals

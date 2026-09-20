@@ -9,7 +9,7 @@ import com.google.ai.edge.litert.Accelerator
  * compile WITHOUT pulling a GenAI dependency. A VLM does not use the `CompiledModel` + `run()` path
  * the CNN models use (it tokenizes, encodes the image, and decodes autoregressively), so it gets its
  * own runtime — but it reuses the same accelerator-selection policy
- * ([com.sailens.data.source.ml.session.AcceleratorSelector]).
+ * ([com.sailens.runtime.session.AcceleratorSelector]).
  *
  * To enable VLM: implement [VlmRuntimeFactory] with LiteRT-LM or MediaPipe LLM Inference
  * (`LlmInference` + vision modality), add the dependency, and inject it into [LiteRtVlmEngine]. See

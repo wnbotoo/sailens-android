@@ -2,8 +2,8 @@ package com.sailens.data.source.ml.semantic
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.sailens.data.source.mapper.CityscapesClassMapper
-import com.sailens.data.source.ml.ImageTensorLayout
-import com.sailens.data.source.ml.ModelTensorConfig
+import com.sailens.runtime.ImageTensorLayout
+import com.sailens.runtime.ModelTensorConfig
 import com.sailens.data.source.ml.NativeMlLibrary
 import com.sailens.data.source.ml.SilentLogService
 import com.sailens.domain.config.AnalysisConfig

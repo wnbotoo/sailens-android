@@ -14,11 +14,13 @@ pipeline that turns the scene ahead into speech and haptics. This file is the re
   Weights carry their own licenses and dataset terms independent of this code license.
 
 ## Big picture
-- Modules: `:app`, `:data`, `:domain`, `:sailens-core`, `:sailens-camera`, `:sailens-shell` (`settings.gradle.kts`). The migration in `docs/architecture.md` §11 is replacing the layer-first split; `:sailens-core`, `:sailens-camera` and `:sailens-shell` are target modules already in place (`:sailens-shell` absorbed the old `:presentation` and `:ux`), while `:domain` and `:data` still await theirs.
+- Modules: `:app`, `:data`, `:domain`, `:sailens-core`, `:sailens-camera`, `:sailens-runtime`, `:sailens-shell` (`settings.gradle.kts`). The migration in `docs/architecture.md` §11 is replacing the layer-first split; `:sailens-core`, `:sailens-camera`, `:sailens-runtime` and `:sailens-shell` are target modules already in place (`:sailens-shell` absorbed the old `:presentation` and `:ux`), while `:domain` and `:data` still await theirs.
 - Direction: dependencies point downward. `:sailens-core` has none; `:sailens-camera` depends only on it. `:domain` stays free of Android/platform APIs.
 - `:app` hosts Koin + root Compose (`MainApplication.kt`, `MainActivity.kt`, `app/App.kt`) and runtime wiring.
 - Runtime profile lives in `app/SailensRuntimeProfile.kt`; Koin bindings live in `app/DomainBindingsModule.kt`, `app/DiModule.kt`, and each feature module's `*Module.kt`.
+- `:sailens-runtime` owns LiteRT sessions, accelerator selection, model sources/metadata, YUV→tensor preprocessing and the shared preprocessing cache, plus the device hardware profile. Its native half is `libsailens_runtime.so`.
 - `:sailens-core` holds the small shared contracts: `ImageFrame`/YUV planes, `NormalizedRect`, `BinaryMask`, `MlRuntimeInfo`, `LogService`. Keep it small — navigation semantics stay out of it.
+- `:sailens-runtime` owns LiteRT sessions, accelerator selection, model sources/metadata, YUV→tensor preprocessing, the shared preprocessing cache and the device hardware profile. Its native half is `libsailens_runtime.so` (`sailens-runtime/src/main/cpp`); the vision/Guidance kernels stay in `libsailens_ml.so` under `:data` until steps 6 and 7 split them.
 - `:sailens-camera` owns CameraX capture and the frame contracts: `FrameSource` (continuous) and `FrameSnapshotProvider` (freshness-bounded snapshot), `CameraViewModel.kt`, `ImageFrameAnalyzer.kt`, plus `CameraPreview` and the camera-permission state primitive.
 - `:data` owns ML/depth/log/trace implementations (`data/di/DataModule.kt`).
 - `:domain` owns perception/analysis/decision/trace use cases (`domain/src/main/java/com/sailens/domain/usecase`).

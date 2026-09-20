@@ -1,10 +1,10 @@
 package com.sailens.data.source.ml.obstacle
 
-import com.sailens.data.source.ml.ModelAcceleratorSelectionMode
-import com.sailens.data.source.ml.ModelAcceleratorBackend
-import com.sailens.data.source.ml.ModelInputDataType
-import com.sailens.data.source.ml.ModelInputQuantization
-import com.sailens.data.source.ml.ResizeFilter
+import com.sailens.runtime.ModelAcceleratorSelectionMode
+import com.sailens.runtime.ModelAcceleratorBackend
+import com.sailens.runtime.ModelInputDataType
+import com.sailens.runtime.ModelInputQuantization
+import com.sailens.runtime.ResizeFilter
 
 /**
  * Obstacle detection model contract. The runtime resolves the detection head layout

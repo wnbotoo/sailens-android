@@ -1,7 +1,7 @@
 package com.sailens.data.source.ml.vlm
 
-import com.sailens.data.source.ml.ModelAcceleratorBackend
-import com.sailens.data.source.ml.ModelAcceleratorSelectionMode
+import com.sailens.runtime.ModelAcceleratorBackend
+import com.sailens.runtime.ModelAcceleratorSelectionMode
 
 /**
  * VLM (vision-language model) configuration for [LiteRtVlmEngine].
