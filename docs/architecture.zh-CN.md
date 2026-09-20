@@ -599,7 +599,12 @@ JVM 的 CI 里执行。
 - load 每一个目标 native library；
 - JNI_OnLoad/RegisterNatives 的每次注册都检查并向上传播失败；
 - registration table 覆盖全部 13 个 Kotlin native declaration；
-- class name、method name 或 JNI signature 任意错误都会让 library load 失败。
+- class name、method name 或 JNI signature 任意错误都会让 library load 失败；
+- **任何 library 都不导出 `Java_<mangled>` 符号。**entry point 保持 internal linkage，
+  按名字绑定不只是“没用上”，而是根本不可用，registration table 成为唯一的绑定来源。
+  否则一个残留的导出符号可以在 table 那一行写错或缺失的情况下让方法照常工作——而这正是本层
+  要抓的失败。第 5–7 步拆库时必须保住这条性质；用
+  `llvm-nm -D --defined-only <lib>.so` 可以检查，输出应当只有 `JNI_OnLoad`。
 
 这已经完整覆盖 RegisterNatives 最初要解决的迁移风险：漏改或改错 binding 不会再隐藏到某条
 冷路径第一次执行时才暴露。

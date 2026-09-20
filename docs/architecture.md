@@ -619,7 +619,13 @@ the 171-test baseline in §12.1 and do not run in a JVM-only CI.
 - load every target native library;
 - each JNI_OnLoad/RegisterNatives registration checks and propagates failure;
 - the registration tables cover all 13 Kotlin native declarations;
-- a wrong class name, method name or JNI signature makes library loading fail.
+- a wrong class name, method name or JNI signature makes library loading fail;
+- **no library exports a `Java_<mangled>` symbol.** The entry points keep internal linkage, so
+  name-based binding is not merely unused but unavailable, and the registration table is the only
+  thing that can bind a method. Without this, a stale export could keep a method working while its
+  table row is wrong or missing, which is the failure the layer is here to catch. Each library
+  split in steps 5–7 must preserve the property; it is checkable with
+  `llvm-nm -D --defined-only <lib>.so`, which should print `JNI_OnLoad` and nothing else.
 
 This is the complete guard against the migration risk that motivated RegisterNatives: a renamed or
 missed binding cannot hide until a rare code path is executed.

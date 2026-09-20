@@ -1,8 +1,9 @@
-# Native (JNI) methods are bound by name, e.g.
-# Java_com_sailens_data_source_ml_NativeYuvInputPreprocessor_nativePreprocessYuvToFloat.
-# The declaring classes and their native methods must keep their names under R8, otherwise the
-# runtime fails with UnsatisfiedLinkError. (proguard-android-optimize.txt already keeps native
-# methods globally; these rules are explicit, scoped insurance.)
+# Native methods are bound by JNI_OnLoad/RegisterNatives (data/src/main/cpp/sailens_ml_jni.cpp),
+# which looks the classes up with FindClass and matches each method by name and JNI signature.
+# The library exports no Java_<mangled> symbols, so an obfuscated class or method name has no
+# fallback binding: registration fails and System.loadLibrary throws. Keep the names.
+# (proguard-android-optimize.txt already keeps native methods globally; these rules are explicit,
+# scoped insurance.)
 -keepclasseswithmembernames,includedescriptorclasses class com.sailens.data.source.ml.** {
     native <methods>;
 }

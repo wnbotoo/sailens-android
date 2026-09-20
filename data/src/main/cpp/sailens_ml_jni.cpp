@@ -1,10 +1,15 @@
 #include <jni.h>
 
+#include <android/log.h>
+
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <dlfcn.h>
 #include <mutex>
 #include <vector>
+
+constexpr const char* kLogTag = "SailensMlJni";
 
 // LiteRT C API function pointers, loaded once via dlsym.
 // libLiteRt.so is already loaded by the Kotlin layer (System.loadLibrary("LiteRt")),
@@ -673,11 +678,19 @@ static bool preprocessYuv(
     return true;
 }
 
-}  // namespace
+// ---------------------------------------------------------------------------
+// JNI entry points.
+//
+// These deliberately stay inside the anonymous namespace: they have internal
+// linkage, so no Java_<mangled> symbol is exported and the runtime cannot bind
+// them by name. The only binding is the RegisterNatives table at the bottom of
+// this file, which fails the library load when a class, method name or
+// signature does not match. That is what lets Kotlin classes move packages
+// without a rename silently surviving until the method is first called.
+// ---------------------------------------------------------------------------
 
-extern "C"
-JNIEXPORT jboolean JNICALL
-Java_com_sailens_data_source_ml_NativeYuvInputPreprocessor_nativePreprocessYuvToFloat(
+jboolean JNICALL
+nativePreprocessYuvToFloat(
         JNIEnv* env,
         jobject,
         jbyteArray y,
@@ -779,9 +792,8 @@ Java_com_sailens_data_source_ml_NativeYuvInputPreprocessor_nativePreprocessYuvTo
     return success ? JNI_TRUE : JNI_FALSE;
 }
 
-extern "C"
-JNIEXPORT jboolean JNICALL
-Java_com_sailens_data_source_ml_NativeYuvInputPreprocessor_nativePreprocessYuvToInt8(
+jboolean JNICALL
+nativePreprocessYuvToInt8(
         JNIEnv* env,
         jobject,
         jbyteArray y,
@@ -888,9 +900,8 @@ Java_com_sailens_data_source_ml_NativeYuvInputPreprocessor_nativePreprocessYuvTo
     return success ? JNI_TRUE : JNI_FALSE;
 }
 
-extern "C"
-JNIEXPORT jfloatArray JNICALL
-Java_com_sailens_data_source_ml_obstacle_ObstacleNativePostProcessor_nativePostProcessRawFloat(
+jfloatArray JNICALL
+nativePostProcessRawFloat(
         JNIEnv* env,
         jobject,
         jfloatArray rawDetections,
@@ -945,9 +956,8 @@ Java_com_sailens_data_source_ml_obstacle_ObstacleNativePostProcessor_nativePostP
     return toJniArray(env, detections);
 }
 
-extern "C"
-JNIEXPORT jfloatArray JNICALL
-Java_com_sailens_data_source_ml_obstacle_ObstacleNativePostProcessor_nativePostProcessRawInt8(
+jfloatArray JNICALL
+nativePostProcessRawInt8(
         JNIEnv* env,
         jobject,
         jbyteArray rawDetections,
@@ -1003,9 +1013,8 @@ Java_com_sailens_data_source_ml_obstacle_ObstacleNativePostProcessor_nativePostP
     return toJniArray(env, detections);
 }
 
-extern "C"
-JNIEXPORT jboolean JNICALL
-Java_com_sailens_data_source_ml_semantic_NativeSemanticArgmaxPostprocessor_nativeArgmaxScores(
+jboolean JNICALL
+nativeArgmaxScores(
         JNIEnv* env,
         jobject,
         jfloatArray scores,
@@ -1063,9 +1072,8 @@ Java_com_sailens_data_source_ml_semantic_NativeSemanticArgmaxPostprocessor_nativ
     return JNI_TRUE;
 }
 
-extern "C"
-JNIEXPORT jboolean JNICALL
-Java_com_sailens_data_source_ml_semantic_NativeSemanticScorePostprocessor_nativePostprocessScores(
+jboolean JNICALL
+nativePostprocessScores(
         JNIEnv* env,
         jobject,
         jfloatArray scores,
@@ -1213,9 +1221,8 @@ Java_com_sailens_data_source_ml_semantic_NativeSemanticScorePostprocessor_native
     return JNI_TRUE;
 }
 
-extern "C"
-JNIEXPORT jboolean JNICALL
-Java_com_sailens_data_source_ml_semantic_NativeSemanticScorePostprocessor_nativePostprocessInt8Scores(
+jboolean JNICALL
+nativePostprocessInt8Scores(
         JNIEnv* env,
         jobject,
         jbyteArray scores,
@@ -1369,9 +1376,8 @@ Java_com_sailens_data_source_ml_semantic_NativeSemanticScorePostprocessor_native
 // TensorBuffer.readFloat() would trigger for a 640x640x19 semantic output.
 // Only call this when outputElementType == FLOAT32; for INT8 use
 // nativePostprocessInt8ScoresFromHandle instead.
-extern "C"
-JNIEXPORT jboolean JNICALL
-Java_com_sailens_data_source_ml_semantic_NativeSemanticScorePostprocessor_nativePostprocessScoresFromHandle(
+jboolean JNICALL
+nativePostprocessScoresFromHandle(
         JNIEnv* env,
         jobject,
         jlong tensorBufferHandle,
@@ -1509,9 +1515,8 @@ Java_com_sailens_data_source_ml_semantic_NativeSemanticScorePostprocessor_native
 // the locked buffer as int8_t* to match full-integer-quant semantic models.
 // Argmax over signed bytes is order-preserving (scale is always positive), so no
 // dequantization is needed -- the winner class is identical to the float argmax.
-extern "C"
-JNIEXPORT jboolean JNICALL
-Java_com_sailens_data_source_ml_semantic_NativeSemanticScorePostprocessor_nativePostprocessInt8ScoresFromHandle(
+jboolean JNICALL
+nativePostprocessInt8ScoresFromHandle(
         JNIEnv* env,
         jobject,
         jlong tensorBufferHandle,
@@ -1644,9 +1649,8 @@ Java_com_sailens_data_source_ml_semantic_NativeSemanticScorePostprocessor_native
     return JNI_TRUE;
 }
 
-extern "C"
-JNIEXPORT jboolean JNICALL
-Java_com_sailens_data_source_ml_analysis_NativeConnectivityStatsExtractor_nativeExtractConnectivityStats(
+jboolean JNICALL
+nativeExtractConnectivityStats(
         JNIEnv* env,
         jobject,
         jlongArray passableWords,
@@ -2016,9 +2020,8 @@ Java_com_sailens_data_source_ml_analysis_NativeConnectivityStatsExtractor_native
 // TensorBuffer.readFloat() allocates per frame for [1, 116, 8400] / [1, 84, 8400] outputs.
 // rawElementCount is the flattened tensor size (attributesPerDetection * detectionCount); it cannot
 // be derived from the handle, so the caller passes it.
-extern "C"
-JNIEXPORT jfloatArray JNICALL
-Java_com_sailens_data_source_ml_obstacle_ObstacleNativePostProcessor_nativePostProcessRawFloatFromHandle(
+jfloatArray JNICALL
+nativePostProcessRawFloatFromHandle(
         JNIEnv* env,
         jobject,
         jlong tensorBufferHandle,
@@ -2082,9 +2085,8 @@ Java_com_sailens_data_source_ml_obstacle_ObstacleNativePostProcessor_nativePostP
 // TensorBuffer.readInt8() allocates per frame for [1, 116, 8400] / [1, 84, 8400] int8 outputs.
 // rawElementCount is the flattened tensor size (attributesPerDetection * detectionCount); it cannot
 // be derived from the handle, so the caller passes it.
-extern "C"
-JNIEXPORT jfloatArray JNICALL
-Java_com_sailens_data_source_ml_obstacle_ObstacleNativePostProcessor_nativePostProcessRawInt8FromHandle(
+jfloatArray JNICALL
+nativePostProcessRawInt8FromHandle(
         JNIEnv* env,
         jobject,
         jlong tensorBufferHandle,
@@ -2148,9 +2150,8 @@ Java_com_sailens_data_source_ml_obstacle_ObstacleNativePostProcessor_nativePostP
 
 // Native float -> int8 quantization (q = round(value / scale + zeroPoint), clamped). Replaces a hot
 // Kotlin per-element loop on the shared-preprocess-cache path (cached FLOAT input reused as INT8).
-extern "C"
-JNIEXPORT jboolean JNICALL
-Java_com_sailens_data_source_ml_NativeYuvInputPreprocessor_nativeQuantizeFloatToInt8(
+jboolean JNICALL
+nativeQuantizeFloatToInt8(
         JNIEnv* env,
         jobject,
         jfloatArray input,
@@ -2182,4 +2183,148 @@ Java_com_sailens_data_source_ml_NativeYuvInputPreprocessor_nativeQuantizeFloatTo
     env->ReleaseFloatArrayElements(input, in, JNI_ABORT);
     env->ReleaseByteArrayElements(output, out, 0);
     return JNI_TRUE;
+}
+
+// ---------------------------------------------------------------------------
+// Registration tables.
+//
+// One row per Kotlin `external fun`. RegisterNatives resolves each row against
+// the class by name *and* JNI signature, so a typo here is a load failure on
+// the device, not an UnsatisfiedLinkError thrown from a rare code path months
+// later. The class names are the R8-kept names; see data/consumer-rules.pro.
+// ---------------------------------------------------------------------------
+
+const JNINativeMethod kYuvInputPreprocessorMethods[] = {
+        {"nativePreprocessYuvToFloat",
+         "([B[B[BIIIIIIIIIIIFFFFFFI[F)Z",
+         reinterpret_cast<void*>(nativePreprocessYuvToFloat)},
+        {"nativePreprocessYuvToInt8",
+         "([B[B[BIIIIIIIIIIIFFFFFFIFI[B)Z",
+         reinterpret_cast<void*>(nativePreprocessYuvToInt8)},
+        {"nativeQuantizeFloatToInt8",
+         "([F[BFI)Z",
+         reinterpret_cast<void*>(nativeQuantizeFloatToInt8)},
+};
+
+const JNINativeMethod kSemanticArgmaxPostprocessorMethods[] = {
+        {"nativeArgmaxScores",
+         "([F[IIIII)Z",
+         reinterpret_cast<void*>(nativeArgmaxScores)},
+};
+
+const JNINativeMethod kSemanticScorePostprocessorMethods[] = {
+        {"nativePostprocessScores",
+         "([F[IIIII[Z[Z[Z[Z[IFFF[J[J[I[I[I)Z",
+         reinterpret_cast<void*>(nativePostprocessScores)},
+        {"nativePostprocessInt8Scores",
+         "([B[IIIII[Z[Z[Z[Z[IFFF[J[J[I[I[I)Z",
+         reinterpret_cast<void*>(nativePostprocessInt8Scores)},
+        {"nativePostprocessScoresFromHandle",
+         "(J[IIIII[Z[Z[Z[Z[IFFF[J[J[I[I[I)Z",
+         reinterpret_cast<void*>(nativePostprocessScoresFromHandle)},
+        {"nativePostprocessInt8ScoresFromHandle",
+         "(J[IIIII[Z[Z[Z[Z[IFFF[J[J[I[I[I)Z",
+         reinterpret_cast<void*>(nativePostprocessInt8ScoresFromHandle)},
+};
+
+const JNINativeMethod kObstaclePostProcessorMethods[] = {
+        {"nativePostProcessRawFloat",
+         "([FIIIIIFI[I)[F",
+         reinterpret_cast<void*>(nativePostProcessRawFloat)},
+        {"nativePostProcessRawInt8",
+         "([BIIIIIFIFI[I)[F",
+         reinterpret_cast<void*>(nativePostProcessRawInt8)},
+        {"nativePostProcessRawFloatFromHandle",
+         "(JIIIIIIFI[I)[F",
+         reinterpret_cast<void*>(nativePostProcessRawFloatFromHandle)},
+        {"nativePostProcessRawInt8FromHandle",
+         "(JIIIIIIFIFI[I)[F",
+         reinterpret_cast<void*>(nativePostProcessRawInt8FromHandle)},
+};
+
+const JNINativeMethod kConnectivityStatsExtractorMethods[] = {
+        {"nativeExtractConnectivityStats",
+         "([JII[FFFFIFFF[I[F)Z",
+         reinterpret_cast<void*>(nativeExtractConnectivityStats)},
+};
+
+struct NativeClassBinding {
+    const char* className;
+    const JNINativeMethod* methods;
+    jint methodCount;
+};
+
+template <typename T, std::size_t N>
+constexpr jint methodCountOf(const T (&)[N]) {
+    return static_cast<jint>(N);
+}
+
+const NativeClassBinding kNativeClassBindings[] = {
+        {"com/sailens/data/source/ml/NativeYuvInputPreprocessor",
+         kYuvInputPreprocessorMethods,
+         methodCountOf(kYuvInputPreprocessorMethods)},
+        {"com/sailens/data/source/ml/semantic/NativeSemanticArgmaxPostprocessor",
+         kSemanticArgmaxPostprocessorMethods,
+         methodCountOf(kSemanticArgmaxPostprocessorMethods)},
+        {"com/sailens/data/source/ml/semantic/NativeSemanticScorePostprocessor",
+         kSemanticScorePostprocessorMethods,
+         methodCountOf(kSemanticScorePostprocessorMethods)},
+        {"com/sailens/data/source/ml/obstacle/ObstacleNativePostProcessor",
+         kObstaclePostProcessorMethods,
+         methodCountOf(kObstaclePostProcessorMethods)},
+        {"com/sailens/data/source/ml/analysis/NativeConnectivityStatsExtractor",
+         kConnectivityStatsExtractorMethods,
+         methodCountOf(kConnectivityStatsExtractorMethods)},
+};
+
+bool registerClassNatives(JNIEnv* env, const NativeClassBinding& binding) {
+    jclass clazz = env->FindClass(binding.className);
+    if (clazz == nullptr) {
+        // FindClass left a pending NoClassDefFoundError. Clear it so the caller
+        // sees the JNI_ERR from JNI_OnLoad rather than a stale exception.
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+        }
+        __android_log_print(ANDROID_LOG_ERROR, kLogTag,
+                            "JNI registration failed: class not found: %s",
+                            binding.className);
+        return false;
+    }
+
+    const jint result = env->RegisterNatives(clazz, binding.methods, binding.methodCount);
+    env->DeleteLocalRef(clazz);
+    if (result != JNI_OK) {
+        // RegisterNatives raises NoSuchMethodError for an unknown name or a
+        // mismatched signature.
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+        }
+        __android_log_print(ANDROID_LOG_ERROR, kLogTag,
+                            "JNI registration failed for %s (%d methods), result %d",
+                            binding.className, binding.methodCount, result);
+        return false;
+    }
+    return true;
+}
+
+}  // namespace
+
+extern "C"
+JNIEXPORT jint JNICALL
+JNI_OnLoad(JavaVM* vm, void* /*reserved*/) {
+    JNIEnv* env = nullptr;
+    if (vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) != JNI_OK || env == nullptr) {
+        __android_log_print(ANDROID_LOG_ERROR, kLogTag, "JNI_OnLoad: no JNIEnv for JNI 1.6");
+        return JNI_ERR;
+    }
+
+    for (const NativeClassBinding& binding : kNativeClassBindings) {
+        if (!registerClassNatives(env, binding)) {
+            // Fail the whole load. A partially bound library would leave the
+            // unbound methods to throw UnsatisfiedLinkError at their first call,
+            // which is exactly the failure mode RegisterNatives exists to avoid.
+            return JNI_ERR;
+        }
+    }
+    return JNI_VERSION_1_6;
 }
