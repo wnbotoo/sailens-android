@@ -14,14 +14,14 @@ pipeline that turns the scene ahead into speech and haptics. This file is the re
   Weights carry their own licenses and dataset terms independent of this code license.
 
 ## Big picture
-- Modules: `:app`, `:camera`, `:data`, `:domain`, `:presentation`, `:ux` (`settings.gradle.kts`).
+- Modules: `:app`, `:camera`, `:data`, `:domain`, `:sailens-shell` (`settings.gradle.kts`). The migration in `docs/architecture.md` §11 is replacing the layer-first split; `:sailens-shell` is the first target module and absorbed the old `:presentation` and `:ux`.
 - Direction: outer modules depend inward on `:domain` interfaces; keep Android/platform APIs out of `:domain`.
 - `:app` hosts Koin + root Compose (`MainApplication.kt`, `MainActivity.kt`, `app/App.kt`) and runtime wiring.
 - Runtime profile lives in `app/SailensRuntimeProfile.kt`; Koin bindings live in `app/DomainBindingsModule.kt`, `app/DiModule.kt`, and each feature module's `*Module.kt`.
 - `:camera` owns CameraX capture + frame stream (`CameraViewModel.kt`, `ImageFrameAnalyzer.kt`).
 - `:data` owns ML/depth/log/trace implementations (`data/di/DataModule.kt`).
 - `:domain` owns perception/analysis/decision/trace use cases (`domain/src/main/java/com/sailens/domain/usecase`).
-- `:presentation` owns UI state, overlay rendering, trace replay UI, TTS, and haptics (`SceneAnalysisViewModel.kt`, `device/*`).
+- `:sailens-shell` owns reusable presentation and composition: `SailensRoot()`, navigation, design system (`design/`), Guidance UI (`guidance/screen`, `guidance/overlay`, `guidance/settings`), settings, diagnostics, about, trace replay UI, TTS and haptics (`guidance/screen/SceneAnalysisViewModel.kt`, `device/*`). Camera permission *policy* UI lives here too (`camera/CameraViewWithPermission.kt`); `:camera` only exposes the preview and a permission-state primitive.
 
 ## Runtime flow to preserve
 - `ImageAnalysis` outputs `YUV_420_888` frames -> `ImageFrameAnalyzer` -> `SharedFlow<ImageFrame>` with `DROP_OLDEST`.
@@ -43,8 +43,8 @@ pipeline that turns the scene ahead into speech and haptics. This file is the re
 - Accelerator selection is explicit by default; do not hide initialization failures with backend fallback while debugging model/backend compatibility. The app trace label reports the requested/active LiteRT accelerator, not proof that every op stayed on that backend.
 - Obstacle filtering uses a perspective-aware navigation corridor (`navigationCorridorFarWidth` -> `navigationCorridorCenterWidth` from `navigationCorridorHorizonY` to the bottom of frame); obstacle speech uses typed keys for `person` / `bicycle` / `vehicle` / `static`, with slightly later center-person gates, earlier side-person gates that allow medium-urgency side persons, and forward vehicle priority preserved before multi-zone merge.
 - User-facing prompt policy defaults away from brittle lane/surface/intersection fallbacks: road warning, road exit, ground-change speech, and traffic-light/road-ratio intersection fallback are off unless explicitly enabled; daily prompts should prefer typed obstacles, high-certainty blocked, path-complex, and low-priority `event_traffic_light` from stable traffic-light evidence. Traffic-light evidence is gated by semantic pixel ratio, road context, and debounce; if intersection prompts are enabled from reliable evidence, keep broad "possible intersection" wording.
-- If you add event categories/keys, update domain event generation/merge logic and presentation string resources.
-- `SceneEvent.messageKey` must stay aligned with `presentation/src/main/res/values/strings.xml` and `values-zh/strings.xml`.
+- If you add event categories/keys, update domain event generation/merge logic and the shell string resources.
+- `SceneEvent.messageKey` must stay aligned with `sailens-shell/src/main/res/values/strings.xml` and `values-zh/strings.xml`.
 - `BinaryMask` is `BitSet`-based and used in hot loops; avoid allocation-heavy patterns in analysis code.
 
 ## Integrations and assets

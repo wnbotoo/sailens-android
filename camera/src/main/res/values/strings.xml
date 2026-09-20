@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <string name="permission_camera_title">Camera access needed</string>
-    <string name="permission_camera_rationale">Sailens uses the camera to understand the path ahead and guide you. Video stays on your device.</string>
-    <string name="permission_confirm">Allow</string>
-    <string name="permission_cancel">Not now</string>
-</resources>

@@ -10,7 +10,7 @@ import com.sailens.domain.config.PipelinePerformanceBudget
 import com.sailens.domain.config.TraceRuntimeConfig
 import com.sailens.domain.model.common.ObstacleProviderType
 import com.sailens.domain.model.common.PerceptionProfile
-import com.sailens.presentation.scene.SceneOverlayConfig
+import com.sailens.shell.guidance.overlay.SceneOverlayConfig
 
 enum class SailensPerformanceTier(val profileName: String) {
     STANDARD("standard"),

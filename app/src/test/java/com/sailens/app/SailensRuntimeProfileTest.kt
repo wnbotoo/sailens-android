@@ -3,7 +3,7 @@ package com.sailens.app
 import com.sailens.data.source.ml.ModelAcceleratorBackend
 import com.sailens.domain.model.common.ObstacleProviderType
 import com.sailens.domain.model.common.PerceptionProfile
-import com.sailens.presentation.scene.SceneOverlayMode
+import com.sailens.shell.guidance.overlay.SceneOverlayMode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue

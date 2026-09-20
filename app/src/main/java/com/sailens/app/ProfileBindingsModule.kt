@@ -9,8 +9,8 @@ import com.sailens.domain.config.AnalysisConfig
 import com.sailens.domain.config.PerceptionConfig
 import com.sailens.domain.config.PipelinePerformanceBudget
 import com.sailens.domain.config.TraceRuntimeConfig
-import com.sailens.presentation.scene.SceneOverlayConfig
-import com.sailens.presentation.settings.PerceptionSettingsStore
+import com.sailens.shell.guidance.overlay.SceneOverlayConfig
+import com.sailens.shell.guidance.settings.PerceptionSettingsStore
 import org.koin.dsl.module
 
 /**
