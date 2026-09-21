@@ -239,8 +239,8 @@ This repository is the canonical Android platform: all reusable Sailens modules 
 reference host. It remains zero-weights and supports bring-your-own-model. Its host may legitimately
 start with zero available pipelines and show a clear zero-pipeline state.
 
-The reference host is not the planned app-store product. The accepted target identity is namespace
-`com.sailens`, applicationId `com.sailens.reference`.
+The reference host is not the app-store product. Its identity is namespace `com.sailens`,
+applicationId `com.sailens.reference`.
 
 **Official Sailens Android distribution — `sailens-app`**
 
