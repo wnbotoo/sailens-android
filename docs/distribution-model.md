@@ -148,7 +148,7 @@ separately. That does not change the platform licence automatically.
 
 - keep the existing fresh-root repository history; do **not** delete and recreate it merely for the
   rename;
-- rename `sailens-yolo` to `sailens-app` in place;
+- the repository was renamed in place to `sailens-app`; the existing fresh-root history was preserved;
 - each product release pins an exact Sailens Android `main` commit;
 - release metadata should also record the bundled model versions/hashes and provenance.
 
