@@ -34,8 +34,7 @@ provide one of them is a separate application-level contract.
 
 The code is organised around those two pipelines plus shared Sailens infrastructure. The official
 first-party Android distribution is a thin application over this repository, pinned as a git
-submodule and consumed through a Gradle composite build. It is currently named `sailens-yolo`;
-the accepted target name is `sailens-app`. Product naming and repository ownership are specified
+submodule and consumed through a Gradle composite build. It is maintained as `sailens-app`. Product naming and repository ownership are specified
 in [distribution-model.md](distribution-model.md).
 
 ## 2. Goals and non-goals
@@ -243,10 +242,9 @@ start with zero available pipelines and show a clear zero-pipeline state.
 The reference host is not the planned app-store product. The accepted target identity is namespace
 `com.sailens`, applicationId `com.sailens.reference`.
 
-**Official Sailens Android distribution — current repository `sailens-yolo`, target
-`sailens-app`**
+**Official Sailens Android distribution — `sailens-app`**
 
-The first-party end-user product is a thin application over Sailens Android. It pins this repository
+The first-party end-user product, **Sailens**, is a thin application over Sailens Android. It pins this repository
 as a git submodule and consumes the `sailens-*` libraries through a composite build. It owns the
 official model bundle, product identity, capability expectations, release configuration and
 distribution-specific notices.
@@ -601,7 +599,7 @@ product capability specs, diagnostics flags and OSS metadata explicitly.
 
 ## 7. Development setup: composite build, no Maven
 
-The official distribution (currently `sailens-yolo`, target `sailens-app`) pins Sailens Android
+The official `sailens-app` distribution pins Sailens Android
 as a git submodule and includes it as a Gradle composite build.
 
 ~~~kotlin
