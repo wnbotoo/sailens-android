@@ -16,6 +16,19 @@ and what is in the way.
 Pre-release. The pipeline, UI, and runtime are implemented; on-device tuning is ongoing.
 Target devices are Snapdragon 8 Gen 1 and beyond class hardware.
 
+## Repository role
+
+This repository is **Sailens Android**: the Apache-2.0, model-neutral Android platform and
+reference host that implements reusable Sailens capabilities. It is buildable and installable for
+development and BYO-model validation, but it is **not** the app-store product.
+
+The official first-party Android distribution is maintained separately (currently
+`wnbotoo/sailens-yolo`, target repository name `sailens-app`) and is intended to ship to users
+under the product name **Sailens**. The accepted repository/product boundary, target application
+IDs, release model and decision to defer Maven publication are documented in
+[`docs/distribution-model.md`](docs/distribution-model.md). The identity changes themselves are
+intentionally left to a follow-up change.
+
 ## Bring your own model
 
 This repository ships **no model weights**. The app resolves two graphs at runtime:
@@ -31,8 +44,8 @@ dtype, and quantization are all read back from the model's metadata at load time
 model normally needs no code change**.
 
 With no weights present, nothing fails: preflight finds no model and, since this build promises
-nothing, the app opens on a zero-pipeline screen that points here. An edition that declares
-navigation required (sailens-yolo) treats a missing or mismatched model as a configuration failure
+nothing, the app opens on a zero-pipeline screen that points here. The official distribution, which declares
+navigation required, treats a missing or mismatched model as a configuration failure
 instead — a fatal screen, a haptic signal, and the reason spoken aloud. A model that passes preflight
 but cannot start on a particular device is a runtime failure and shows the retryable start-analysis
 error.
@@ -100,6 +113,7 @@ Every document below has a Chinese version alongside it (`*.zh-CN.md`), linked f
 | | | |
 |---|---|---|
 | [`docs/architecture.md`](docs/architecture.md) | [中文](docs/architecture.zh-CN.md) | Sailens modular structure: module boundaries, seams, migration plan and verification |
+| [`docs/distribution-model.md`](docs/distribution-model.md) | [中文](docs/distribution-model.zh-CN.md) | Platform vs official distribution: ownership, identity, source consumption, release/version policy |
 | [`docs/models.md`](docs/models.md) | [中文](docs/models.zh-CN.md) | Model contract, backend config, performance red lines |
 | [`docs/perception-profiles.md`](docs/perception-profiles.md) | [中文](docs/perception-profiles.zh-CN.md) | Perception tiers, scheduling, tracker TTL |
 | [`docs/npu-litert-qnn.md`](docs/npu-litert-qnn.md) | [中文](docs/npu-litert-qnn.zh-CN.md) | Qualcomm NPU wiring, delivery, diagnosis |

@@ -2,10 +2,10 @@
 
 # Sailens architecture
 
-> Status: **agreed, and implemented in A.** It replaces the layer-first module structure and the
-> fork-based A/B repository relationship. Gates G1, G3, G4 and G5 have landed, as have steps 2 and
-> 4 of G2. **Step 3 -- B as a composite-build consumer -- is the one outstanding item.** §11 tracks
-> the plan, not the progress.
+> Status: **agreed and implemented.** The nine-module platform structure and the source-consumed
+> distribution relationship are both on main. §11 is retained as migration history rather than a
+> list of outstanding work. The post-refactor repository/product positioning is defined separately
+> in [distribution-model.md](distribution-model.md).
 
 ## 1. Summary
 
@@ -32,15 +32,18 @@ The platform accepts all four product combinations:
 Zero pipelines is a legitimate shell state. Whether a particular application edition is expected to
 provide one of them is a separate application-level contract.
 
-The code is reorganised around those two pipelines plus shared Sailens infrastructure. The
-sailens-yolo repository stops being a fork and becomes a thin application that depends on this
-repository through a Gradle composite build.
+The code is organised around those two pipelines plus shared Sailens infrastructure. The official
+first-party Android distribution is a thin application over this repository, pinned as a git
+submodule and consumed through a Gradle composite build. It is currently named `sailens-yolo`;
+the accepted target name is `sailens-app`. Product naming and repository ownership are specified
+in [distribution-model.md](distribution-model.md).
 
 ## 2. Goals and non-goals
 
 ### Goals
 
-- Replace fork-and-merge between sailens-android and sailens-yolo with an ordinary dependency.
+- Replace the old fork-and-merge relationship with an ordinary source dependency between Sailens
+  Android and the official distribution.
 - Organise code around stable product and runtime boundaries instead of horizontal Clean
   Architecture layers.
 - Make Guidance and Describe independently configurable, each gated by its own static availability
@@ -56,7 +59,8 @@ repository through a Gradle composite build.
 
 - A generic pipeline graph, plugin discovery system, or configurable DAG.
 - A generic AI-lens SDK shaped for hypothetical products.
-- Publishing to Maven or introducing artifact versioning.
+- Publishing to Maven or introducing artifact versioning during this phase; publication remains
+  deferred until an external SDK surface and independent consumers justify it.
 - Voice / ASR implementation in this refactor.
 - A final GPU arbitration policy before a real VLM runtime exists.
 - Turning every logical boundary into a Gradle module. A Gradle module is justified only when an
@@ -228,28 +232,35 @@ shell exposes reusable composition such as SailensRoot(), navigation entries and
 
 ## 5. Application editions and capability model
 
-### 5.1 A, B and C
+### 5.1 Platform, official distribution and other consumers
 
-**A — sailens-android, Apache-2.0**
+**Sailens Android — `sailens-android`, Apache-2.0**
 
-All reusable Sailens modules plus the thin reference app. It remains zero-weights and supports
-bring-your-own-model. BYO weights move from data/src/main/assets to app/src/main/assets.
+This repository is the canonical Android platform: all reusable Sailens modules plus a thin
+reference host. It remains zero-weights and supports bring-your-own-model. Its host may legitimately
+start with zero available pipelines and show a clear zero-pipeline state.
 
-A may legitimately start with zero available pipelines and show a clear zero-pipeline state that
-points to model/runtime setup documentation.
+The reference host is not the planned app-store product. The accepted target identity is namespace
+`com.sailens`, applicationId `com.sailens.reference`.
 
-**B — sailens-yolo, AGPL-3.0**
+**Official Sailens Android distribution — current repository `sailens-yolo`, target
+`sailens-app`**
 
-A thin application over sailens-shell. It pins A as a git submodule and consumes it through a
-composite build. B owns its model weights, identity, product expectations and any genuinely
-YOLO-specific decoder/runtime code that becomes necessary.
+The first-party end-user product is a thin application over Sailens Android. It pins this repository
+as a git submodule and consumes the `sailens-*` libraries through a composite build. It owns the
+official model bundle, product identity, capability expectations, release configuration and
+distribution-specific notices.
 
-B is no longer required to stay code-identical to A.
+Its target product name is **Sailens**, with namespace `com.sailens` and applicationId
+`com.sailens`. "YOLO" becomes model provenance rather than long-term product branding.
 
-**C — future edition**
+**Other distributions**
 
-May provide Guidance, Describe, both, or neither. A concrete VLM runtime is supplied explicitly by
-the edition if needed.
+Future first- or third-party applications may provide Guidance, Describe, both, or neither and may
+consume Sailens Android through the same source dependency. They do not need to fork the platform.
+
+The full repository, release and Maven-publication policy is in
+[distribution-model.md](distribution-model.md).
 
 ### 5.2 Configured, expected, available and runtime state are different concepts
 
@@ -590,7 +601,8 @@ product capability specs, diagnostics flags and OSS metadata explicitly.
 
 ## 7. Development setup: composite build, no Maven
 
-sailens-yolo pins sailens-android as a git submodule and includes it as a Gradle composite build.
+The official distribution (currently `sailens-yolo`, target `sailens-app`) pins Sailens Android
+as a git submodule and includes it as a Gradle composite build.
 
 ~~~kotlin
 includeBuild("sailens")
@@ -608,26 +620,32 @@ B consumes coordinates such as:
 implementation("com.sailens:sailens-shell")
 ~~~
 
-No Maven publishing or version numbers are introduced. The submodule commit is the version boundary.
+No Maven publishing or library artifact version numbers are introduced in the current phase. The
+submodule commit is the platform version boundary for a product build; the official application has
+its own product release version/tag.
 
-B intentionally consumes A's version catalog so AGP/Kotlin/tooling stay aligned during this phase.
+The distribution intentionally consumes Sailens Android's version catalog so
+AGP/Kotlin/tooling stay aligned during this phase. Maven publication is reconsidered only after a
+stable public SDK surface and independent consumers exist; see
+[distribution-model.md](distribution-model.md).
 
-The composite build must be proven on the real Android resources, assets and CMake setup before most
-module movement depends on it.
+The composite build is part of the implemented architecture and is verified against the real Android
+resources, assets and CMake setup.
 
 ## 8. Licensing boundary
 
-- A remains Apache-2.0 and ships no model weights.
-- B remains AGPL-3.0 and owns its model weights and edition-specific notices.
-- The repository dependency graph, not shared source history, becomes the code boundary.
+- Sailens Android remains Apache-2.0 and ships no model weights.
+- The official distribution currently remains AGPL-3.0 and owns its model weights and
+  distribution-specific notices.
+- The repository dependency graph, not shared source history, is the code boundary.
 - Cityscapes dataset/model distribution terms remain a separate unresolved release question; this
   refactor does not decide them.
 
 A's published main history remains append-only. Removing the fork relationship is **not** a reason to
 rewrite sailens-android/main.
 
-B may choose fresh history when it stops being a fork, because that is a B repository migration
-decision.
+The official distribution already moved to fresh history when it stopped being a fork. Keep that
+history and rename the repository in place; do not delete/recreate it merely for the product rename.
 
 ## 9. What goes away
 
