@@ -778,13 +778,26 @@ runtime/vision/Guidance native 拆分后，在同一目标设备验证：
 - preprocessing cache 仍然命中 same-frame reuse；
 - 没有新增完整 semantic tensor 的额外读取。
 
-**G3 退出时的实测状态（SM8850，本地 BYO 权重）：**`native_score` 成立。两条 zero-copy 红线
-**不成立** —— det 报的是 `native_bbox_nms`（数组路径），outputReadTimeMs 在 sem 是 12–55ms、
-det 是 4–26ms。把重构前的 commit 在同一台机器上重新构建对跑，结果完全一致，所以这是**既有状态
-而非重构引入的回归**：handle 路径一直没在跑。`libLiteRt.so` 确实导出了 lock/unlock 符号，
-TensorBuffer 的 handle 反射在 LiteRT 2.1.5 上也合法，所以原因更靠里；dlsym 外面那层
-`std::call_once` 是嫌疑但未证实。重新启用 handle 路径会改变检测后处理和帧预算，属于产品决策，
-不在本次重构范围内。因此这两条应当视为"待恢复的目标"，而不是"已保住的性质"。
+**实测状态（SM8850，本地 BYO 权重）。**本轮返工后重新测过，与 G3 退出时的结果一致。
+
+| 红线 | 状态 |
+|---|---|
+| sem postprocessBackend = native_score | **成立** |
+| sem outputReadTimeMs ≈ 0 | **不成立** —— 15/22/64 ms（最小/中位/最大） |
+| det postprocessBackend = native_bbox_nms_float_handle | **不成立** —— 报的是 `native_bbox_nms`，数组路径 |
+| det outputReadTimeMs | 2/10/28 ms |
+| preprocessing cache same-frame reuse | **不成立** —— 两个模型都报 `native_yuv`，从没出现过 `shared_native_yuv` |
+| 没有新增完整 semantic tensor 的额外读取 | 成立 |
+
+这三项失效都是**既有状态，不是重构引入的回归**。两条 zero-copy 红线在同一台机器上用重构前的
+commit 重新构建对跑过，结果完全一致；那次构建的 trace 里两个模型同样都是 `native_yuv`，说明
+same-frame cache 也从来没命中过。handle 路径只是一直没在跑：`libLiteRt.so` 确实导出了
+lock/unlock 符号，TensorBuffer 的 handle 反射在 LiteRT 2.1.5 上也合法，所以原因更靠里；
+dlsym 外面那层 `std::call_once` 是嫌疑但未证实。cache 是另一回事：sem 和 det 是并发起跑的，
+谁也读不到对方的条目，这条红线要的复用需要把两次预处理排成先后而不是并行。
+
+无论恢复哪一条，都会改变检测后处理和帧预算，属于产品决策，不在本次重构范围内。因此这几条
+应当视为"待恢复的目标"，而不是"已保住的性质"。
 
 ### 12.4 Session 对比
 

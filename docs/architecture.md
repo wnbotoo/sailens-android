@@ -820,16 +820,30 @@ After runtime/vision/Guidance native extraction, validate on the same target dev
 - preprocessing cache still reports same-frame reuse;
 - no extra full semantic-tensor read is introduced.
 
-**Measured state, G3 exit (SM8850, local BYO weights):** `native_score` holds. The two zero-copy
-lines do **not** -- det reports `native_bbox_nms` (the array path) and outputReadTimeMs is 12-55ms
-for sem, 4-26ms for det. This was verified against a build of the pre-migration commit on the same
-device and is identical there, so it is a pre-existing condition, not a refactor regression: the
-handle path has not been running. `libLiteRt.so` does export the lock/unlock symbols and the
-TensorBuffer handle reflection is valid for LiteRT 2.1.5, so the cause is further in; the
-`std::call_once` around the dlsym is a suspect but is not confirmed. Re-enabling the handle path
-changes the detection postprocess and the frame budget, so it is a product decision rather than
-part of this refactor. These two lines are therefore a target to restore, not a property that was
-preserved.
+**Measured state (SM8850, local BYO weights).** Re-measured after the rework; unchanged from the
+G3 exit measurement.
+
+| Red line | State |
+|---|---|
+| sem postprocessBackend = native_score | **holds** |
+| sem outputReadTimeMs ≈ 0 | **does not hold** — 15/22/64 ms (min/median/max) |
+| det postprocessBackend = native_bbox_nms_float_handle | **does not hold** — reports `native_bbox_nms`, the array path |
+| det outputReadTimeMs | 2/10/28 ms |
+| preprocessing cache same-frame reuse | **does not hold** — both models report `native_yuv`, never `shared_native_yuv` |
+| no extra full semantic-tensor read | holds |
+
+All three failures are **pre-existing, not refactor regressions**. The zero-copy pair was verified
+against a build of the pre-migration commit on the same device and is identical there; the traces
+from that build also show `native_yuv` on both models, so the same-frame cache has never been
+hitting either. The handle path has simply not been running: `libLiteRt.so` does export the
+lock/unlock symbols and the TensorBuffer handle reflection is valid for LiteRT 2.1.5, so the cause
+is further in, and the `std::call_once` around the dlsym is a suspect that is not confirmed. The
+cache is a separate matter: sem and det start concurrently, so neither finds the other's entry, and
+the reuse the line asks for would need the two preprocess steps ordered rather than raced.
+
+Restoring either changes the detection postprocess and the frame budget, so both are product
+decisions rather than part of this refactor. Treat these lines as targets to restore, not as
+properties that were preserved.
 
 ### 12.4 Session comparison
 
