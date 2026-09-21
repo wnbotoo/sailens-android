@@ -2,9 +2,9 @@
 
 # Sailens 架构
 
-> 状态：**已定案，A 侧已实施。**它替代按技术层拆分的模块结构，以及 A/B 两仓库之间基于 fork
-> 的关系。G1、G3、G4、G5 以及 G2 的第 2、4 步都已落地；**只剩第 3 步 —— B 转为 composite
-> build 消费方。**§11 记录的是计划，不是进度。
+> 状态：**已定案并完成实施。**9-module 平台结构与 source-consumed distribution 关系都已经
+> 进入 main。§11 继续保留为 migration history，而不是未完成事项列表。重构完成后的仓库/产品
+> 定位单独定义在 [distribution-model.zh-CN.md](distribution-model.zh-CN.md)。
 
 ## 1. 摘要
 
@@ -28,14 +28,16 @@ Sailens 是 **Smart AI Lens**：采集（今天是相机，未来可以是语音
 零 pipeline 是合法的 shell 状态。某个具体发行版是否承诺必须提供其中一条，是另外一层
 application-level contract。
 
-代码将围绕这两条 pipeline 和它们共享的 Sailens 基础能力重组。sailens-yolo 不再作为
-本仓库的 fork，而是通过 Gradle composite build 依赖本仓库的薄应用。
+代码围绕这两条 pipeline 和它们共享的 Sailens 基础能力组织。官方维护的一方 Android
+发行版是本仓库之上的薄应用，通过 git submodule 精确 pin，并用 Gradle composite build
+消费。当前仓库名仍是 `sailens-yolo`，已确认的目标名是 `sailens-app`。产品命名与仓库职责
+见 [distribution-model.zh-CN.md](distribution-model.zh-CN.md)。
 
 ## 2. 目标与非目标
 
 ### 目标
 
-- 用普通依赖替代 sailens-android 与 sailens-yolo 之间的 fork-and-merge。
+- 用普通 source dependency 替代 Sailens Android 与官方发行版之间原来的 fork-and-merge。
 - 从横向 Clean Architecture 技术层，转为围绕稳定产品边界和 runtime 边界组织代码。
 - Guidance 与 Describe 可以独立配置，各自由自己的静态可用性和自己的 runtime state 决定是否
   呈现（§5.2）。
@@ -50,7 +52,8 @@ application-level contract。
 
 - 通用 pipeline graph、plugin discovery 或可配置 DAG。
 - 为假想产品提前设计一个通用 AI Lens SDK。
-- 发布到 Maven 或引入 artifact versioning。
+- 当前阶段发布到 Maven 或引入 library artifact versioning；只有外部 SDK surface 与独立
+  consumer 真正需要时才重新评估。
 - 在本次重构中实现 Voice / ASR。
 - 在真正 VLM runtime 出现前确定最终 GPU 仲裁策略。
 - 把每个逻辑边界都做成 Gradle module。只有独立 compile、dependency、test、native 或
@@ -212,28 +215,33 @@ lifecycle。shell 提供 SailensRoot()、navigation entries 和 Koin modules 等
 
 ## 5. Application editions 与 capability model
 
-### 5.1 A、B、C
+### 5.1 平台、官方发行版与其他 consumer
 
-**A —— sailens-android，Apache-2.0**
+**Sailens Android —— `sailens-android`，Apache-2.0**
 
-包含全部可复用 Sailens modules 与薄 reference app。继续保持零权重，支持 BYO model。
-BYO weights 从 data/src/main/assets 移到 app/src/main/assets。
+本仓库是 canonical Android platform：包含全部可复用 Sailens modules 与薄 reference host。
+继续保持零权重并支持 BYO model。reference host 可以合法地以零 available pipeline 启动，
+显示清晰的 zero-pipeline state。
 
-A 可以合法地以零 available pipeline 启动，并显示清晰的 zero-pipeline state，指向
-model/runtime 设置文档。
+reference host 不是计划上架应用商店的产品。已确认的目标 identity 是 namespace
+`com.sailens`、applicationId `com.sailens.reference`。
 
-**B —— sailens-yolo，AGPL-3.0**
+**Sailens 官方 Android 发行版 —— 当前仓库 `sailens-yolo`，目标 `sailens-app`**
 
-建在 sailens-shell 上的薄应用。它把 A 作为 git submodule pin 到具体 commit，再通过
-composite build 消费。B 自己拥有 model weights、产品身份、capability expectation，以及
-未来真正需要的 YOLO-specific decoder/runtime code。
+面向最终用户的一方官方产品是 Sailens Android 之上的薄应用。它把本仓库作为 git submodule
+精确 pin，并通过 composite build 消费 `sailens-*` libraries。它负责官方 model bundle、
+产品 identity、capability expectation、release 配置和 distribution-specific notice。
 
-B 不再要求与 A 代码完全一致。
+目标产品名是 **Sailens**，namespace `com.sailens`，applicationId `com.sailens`。
+“YOLO”降级为 model provenance，而不是长期产品 branding。
 
-**C —— 未来 edition**
+**其他 distribution**
 
-可以提供 Guidance、Describe、两者都有或两者都没有。需要 VLM 时由 edition 显式提供
-concrete runtime。
+未来官方或第三方应用都可以提供 Guidance、Describe、两者都有或两者都没有，并通过相同的
+source dependency 消费 Sailens Android，不需要 fork 平台。
+
+完整的仓库、release 与 Maven publication 决策见
+[distribution-model.zh-CN.md](distribution-model.zh-CN.md)。
 
 ### 5.2 configured、expected、available 与 runtime state 是四个不同概念
 
@@ -552,8 +560,8 @@ capability spec、diagnostics flags 和 OSS metadata。
 
 ## 7. 开发方式：composite build，不上 Maven
 
-sailens-yolo 把 sailens-android 作为 git submodule pin 到具体 commit，并通过 Gradle
-composite build 引入。
+官方发行版（当前 `sailens-yolo`，目标 `sailens-app`）把 Sailens Android 作为 git
+submodule pin 到具体 commit，并通过 Gradle composite build 引入。
 
 ~~~kotlin
 includeBuild("sailens")
@@ -571,24 +579,27 @@ B 消费例如：
 implementation("com.sailens:sailens-shell")
 ~~~
 
-不引入 Maven publishing，也不增加版本号；submodule commit 本身就是版本边界。
+当前阶段不引入 Maven publishing，也不为 library artifact 增加版本号。submodule commit
+是产品构建的平台版本边界；官方 App 自己拥有独立的产品 release version/tag。
 
-当前阶段 B 有意直接读取 A 的 version catalog，让 AGP/Kotlin/tooling 保持一致。
+当前阶段发行版有意直接读取 Sailens Android 的 version catalog，让 AGP/Kotlin/tooling
+保持一致。只有稳定 public SDK surface 和独立 consumer 出现后才重新评估 Maven publication；
+详见 [distribution-model.zh-CN.md](distribution-model.zh-CN.md)。
 
-在大量 module movement 依赖它之前，必须先用真实 Android resources、assets、CMake
-验证 composite build。
+composite build 已经是落地架构的一部分，并已用真实 Android resources、assets、CMake 验证。
 
 ## 8. 许可证与仓库边界
 
-- A 继续是 Apache-2.0，且不提交 model weights。
-- B 继续是 AGPL-3.0，自行持有 model weights 与 edition-specific notice。
-- 仓库依赖图，而不是共享 source history，成为代码边界。
+- Sailens Android 继续是 Apache-2.0，且不提交 model weights。
+- 官方发行版当前继续是 AGPL-3.0，自行持有 model weights 与 distribution-specific notice。
+- 仓库依赖图，而不是共享 source history，是代码边界。
 - Cityscapes dataset/model distribution terms 仍然是单独的 release 问题，本次重构不决定。
 
 A 已发布的 main history 继续 append-only。取消 fork 关系**不是**重写
 sailens-android/main 的理由。
 
-B 在停止作为 fork 时可以选择 fresh history，这是 B 自己的 repository migration decision。
+官方发行版在停止作为 fork 时已经切换到 fresh history。后续保留这段历史并原地 rename
+仓库；不要仅为了产品改名而删除/重建。
 
 ## 9. 会消失的东西
 
