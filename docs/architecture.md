@@ -144,6 +144,7 @@ sailens-guidance ─────────► sailens-vision ───► sail
         └─────────────────────────┴─────────────────────┘
 
 sailens-describe ─────────► sailens-vlm ─────► sailens-runtime
+        ├──────────────────► sailens-camera     (FrameSnapshotProvider, §6.1)
         └────────────────────────────────────► sailens-core
 
 sailens-camera ───────────────────────────────► sailens-core
