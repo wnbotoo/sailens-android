@@ -26,9 +26,9 @@ pipeline that turns the scene ahead into speech and haptics. This file is the re
 - `:sailens-output` — output mechanism only: TTS, audio focus, screen-reader detection, clause buffering, `HapticPlayer`, `Announcement`. It must not learn what Guidance or Describe are (§6.6); its only Sailens dependency is `:sailens-core`.
 - `:sailens-guidance` — all navigation logic: `NavigationSemantics`, the fused scoring kernel and connectivity (`kernel/`, native half `libsailens_guidance.so`), analysis, events, cooldown, tracking, depth, sensors, trace/replay. **No Compose or UI dependency** — that is what keeps it a separate module from the shell.
 - `:sailens-describe` — Describe product logic: prompt policy, snapshot freshness, request scheduling.
-- `:sailens-shell` — reusable presentation and composition: `SailensRoot()`, navigation, design system, Guidance UI, settings, diagnostics, about, trace replay UI, the Guidance haptic vocabulary (`GuidanceHaptic`), `SceneEvent`→`Announcement` mapping, camera-permission policy UI, `FileLogService`, and the capability model (`app/`).
+- `:sailens-shell` — reusable presentation and composition: `SailensRoot()`, navigation, design system, Guidance UI, the Describe screen, settings, diagnostics, about, trace replay UI, the Guidance haptic vocabulary (`GuidanceHaptic`), `SceneEvent`→`Announcement` mapping, camera-permission policy UI, `FileLogService`, and the capability model (`app/`).
 - `:app` — the thin host: `MainApplication`, `MainActivity`, Koin wiring, runtime profile, and the edition spec (`SailensEdition.kt`) that says what this build offers and promises.
-- Capability model (§5.2): *configured* (a null spec), *expected* (`CapabilityExpectations`), *available* (`PipelinePreflight`, cheap and static — it must never load a model), *runtime state*. Zero pipelines is legal; A ships no weights and lands there.
+- Capability model (§5.2): *configured* (a null spec), *expected* (`CapabilityExpectations`), *available* (`PipelinePreflight` + the edition's own check — cheap and static: it reads the model's TFLite metadata tables but never compiles a model or opens a delegate), *runtime state*. Zero pipelines is legal; A ships no weights and lands there. The four combinations route to four different start destinations; Describe-only never lands on the guidance screen.
 
 ## Runtime flow to preserve
 - `ImageAnalysis` outputs `YUV_420_888` frames -> `ImageFrameAnalyzer` -> `FrameSource.frames` (`SharedFlow<ImageFrame>`, `DROP_OLDEST`). The analyzer converts a frame only on demand, and demand is either a stream subscriber or an open `FrameLease`, so `FrameSnapshotProvider` works with Guidance stopped.
@@ -41,7 +41,7 @@ pipeline that turns the scene ahead into speech and haptics. This file is the re
 - `SceneAnalysisViewModel` consumes with `collectLatest`, updates masks/overlays/debug state, and triggers speech/haptics only when UI state enables them.
 
 ## Project-specific conventions
-- Check `app/SailensRuntimeProfile.kt`, `app/DomainBindingsModule.kt`, `app/SailensEdition.kt`, `sailens-shell/di/ShellModule.kt` and `data/di/DataModule.kt` first; DI is explicit constructor injection via Koin.
+- Check `app/SailensRuntimeProfile.kt`, `app/DomainBindingsModule.kt`, `app/SailensEdition.kt`, `sailens-shell/di/ShellModule.kt` and `sailens-guidance/di/GuidanceModule.kt` first; DI is explicit constructor injection via Koin.
 - Constructor defaults in `PerceptionConfig` are conservative (`BASIC`, obstacle provider type `NONE`), but the app's runtime tiers override them to sem + realtime det mode.
 - Runtime tiers are `standard` (sem/det on GPU) and `ultra` (future VLM on NPU, realtime vision models stay on GPU).
 - Treat `SailensRuntimeProfile.kt` as the source of truth for runtime backend targets and cadence; physical model files are resolved by `ModelCatalog` / `ModelSourceResolver` from `(ModelType, actual accelerator)`.

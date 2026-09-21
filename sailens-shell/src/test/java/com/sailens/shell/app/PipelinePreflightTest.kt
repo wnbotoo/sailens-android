@@ -105,7 +105,7 @@ class PipelinePreflightTest {
         val capabilities = PipelinePreflight.evaluate(
             SailensAppSpec(
                 guidance = null,
-                describe = DescribeSpec(engineAvailable = { called = true; true }),
+                describe = DescribeSpec(verifyEngine = { called = true; null }),
             )
         )
 
@@ -114,11 +114,16 @@ class PipelinePreflightTest {
     }
 
     private fun guidanceSpec(present: Boolean, taxonomyOk: Boolean = true) = GuidanceSpec(
-        semanticModelPresent = { present },
-        taxonomyCompatible = { taxonomyOk },
+        verifySemanticModel = {
+            when {
+                !present -> StaticUnavailableReason.ModelSourceMissing
+                !taxonomyOk -> StaticUnavailableReason.TaxonomyIncompatible
+                else -> null
+            }
+        },
     )
 
     private fun describeSpec(available: Boolean) = DescribeSpec(
-        engineAvailable = { available },
+        verifyEngine = { if (available) null else StaticUnavailableReason.EngineUnavailable },
     )
 }

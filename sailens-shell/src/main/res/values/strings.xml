@@ -297,4 +297,13 @@
     <string name="config_reason_not_configured">it is not configured in this build</string>
     <string name="zero_pipeline_title">No model installed</string>
     <string name="zero_pipeline_body">Sailens ships without model weights. Add a semantic model to enable navigation assistance; see docs/models.md.</string>
+    <string name="btn_back">Back</string>
+    <string name="btn_describe">What is in front of me?</string>
+    <string name="btn_describe_cancel">Stop</string>
+    <string name="describe_idle">Press the button to hear what the camera sees.</string>
+    <string name="describe_in_progress">Looking…</string>
+    <string name="describe_failed">Could not describe the scene. Try again.</string>
+    <string name="btn_open_describe">Describe scene</string>
+    <string name="config_reason_model_output">the model output cannot be read</string>
+    <string name="config_reason_class_count">the model has a different number of classes than this build expects</string>
 </resources>

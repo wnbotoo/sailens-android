@@ -42,6 +42,12 @@ android {
     buildFeatures {
         buildConfig = true
     }
+    testOptions {
+        // SemanticModelPreflight takes a Context it only uses to reach assets; a ModelSource.File
+        // never touches it. Letting the stub return defaults is what makes the preflight path
+        // testable on the JVM -- which is itself the proof that it loads no native runtime.
+        unitTests.isReturnDefaultValues = true
+    }
 }
 
 dependencies {

@@ -14,6 +14,9 @@ import kotlinx.serialization.Serializable
 data object LiveKey : NavKey
 
 @Serializable
+data object DescribeKey : NavKey
+
+@Serializable
 data object SettingsKey : NavKey
 
 @Serializable

@@ -266,6 +266,14 @@ NavigationSemantics 等静态 binding 是否一致。它不能为了决定一个
 compiled model、初始化 GPU/NPU delegate、分配 inference buffer 或跑一次 probe inference。
 真正的模型/加速器初始化继续保持 lazy，在 session 启动时发生，和今天一样。
 
+**"低成本"不等于"只看表面"。**从 mmap 的模型里读 TFLite flatbuffer table，代价是那几页内存，
+不加载任何 native runtime——而这正是让 preflight 成为一次真检查的关键："资产存在"这种检查，
+形状不对的模型照样能过，然后在 session 启动时才炸——那时用户已经按下开始、已经往前走了。
+所以 SemanticModelPreflight 会验证 output tensor 能否解析、它的类别数是否等于声明的
+Taxonomy.classCount，并分别报 ModelOutputUnreadable 或 ModelClassCountMismatch，而不是笼统的
+"没有"。它止步于证据的边界：没有 labels 就无法机器校验 channel **顺序**，那仍然是人工 release
+gate（§6.2）。
+
 expectation 是 edition-level validation，不是 framework 限制。例如 sailens-yolo 可以声明
 Guidance required。如果它打包的 sem model 缺失、声明的 taxonomy 不兼容，或其他**静态配置**
 contract 失败，这是 edition configuration failure，即使 Sailens framework 本身允许
@@ -275,8 +283,14 @@ zero-pipeline。
 
 - **debug/development：**fail fast，让 packaging/wiring 错误尽早暴露；
 - **release：**进入明确的 fatal configuration state，不 crash、不进入 restart loop。这个状态必须
-  对 accessibility 可达，并且至少主动通过当前可用的非视觉通道通知一次；speech 不可用时由
-  haptic 兜底。
+  对 accessibility 可达，并且至少主动通过当前可用的非视觉通道通知一次。
+
+这次通知是**先震动，再说话**，而不是"能说就说、说不了才震"。走到 fatal configuration state 的
+那一刻，根本没有任何地方启动过 TTS 引擎——应用压根没走到那个屏幕。把这当成"speech 不可用"，
+结果就是用户只收到一下震动，永远不知道出了什么问题。所以震动先发（它不需要引擎），然后再把
+引擎起起来，等就绪后把原因说一遍；如果引擎始终起不来，那一下震动已经发生了。整个进程只通知
+一次：LaunchedEffect 会在配置变更和进程重建时重跑，而一个每次转屏都震一下的 fatal state，
+只会教会用户忽略它。
 
 pipeline 也可能通过 preflight，却在某台设备上真正初始化 session 时失败，例如 GPU delegate
 或 output buffer allocation 失败。这是 **runtime failure**，并不与 Available 矛盾。
@@ -285,6 +299,16 @@ request/runtime error 路径。
 
 optional 但静态 unavailable 的 pipeline 不应作为死控件暴露。shell 可以隐藏它，或者在普通
 action path 之外提供明确的 edition-level explanation。
+
+因此四种组合会落到四个不同的地方，而**只有 Describe 的 edition 不会落到导航屏**——那块屏幕
+整体就是一个导航会话的开始/停止控件，而它根本没有那个会话，它唯一能做的事也不在上面：
+
+| Guidance | Describe | 起始目的地 |
+|---|---|---|
+| available | available | 导航屏，并提供 Describe 入口 |
+| available | — | 导航屏，没有 Describe 控件 |
+| — | available | Describe 屏 |
+| — | — | zero-pipeline 屏 |
 
 ## 6. 设计决策
 

@@ -9,6 +9,7 @@ import com.sailens.shell.app.ConfigurationFailureSignal
 import com.sailens.shell.device.GuidanceAnnouncements
 import com.sailens.shell.device.SceneEventTextResolver
 import com.sailens.output.SpeechManager
+import com.sailens.shell.describe.DescribeViewModel
 import com.sailens.shell.guidance.screen.SceneAnalysisViewModel
 import com.sailens.shell.guidance.settings.GuidanceSettingsStore
 import com.sailens.shell.guidance.settings.PerceptionSettingsStore
@@ -53,6 +54,16 @@ val shellModule = module {
             accessibilityStatusProvider = get(),
             textResolver = get(),
             announcements = get(),
+        )
+    }
+    viewModel {
+        DescribeViewModel(
+            describeSceneUseCase = get(),
+            speechManager = get(),
+            hapticManager = get(),
+            accessibilityStatusProvider = get(),
+            guidanceSettingsStore = get(),
+            logger = get(),
         )
     }
     viewModel {

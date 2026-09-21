@@ -281,6 +281,15 @@ static bindings such as TaxonomyId ↔ NavigationSemantics agree. It must not cr
 initialize GPU/NPU delegates, allocate inference buffers or run a probe inference merely to decide
 whether a control should exist. That work stays lazy at session start, as it does today.
 
+"Cheap" is not "shallow". Reading the TFLite flatbuffer tables from a memory-mapped model costs the
+pages the tables sit on and no native runtime, and it is what turns preflight into an actual check:
+*the asset exists* is passed by a model of the wrong shape, which then fails at session start —
+after the person has pressed start and begun walking. SemanticModelPreflight therefore verifies that
+the output tensor parses and that its class count matches the declared Taxonomy.classCount, and
+reports ModelOutputUnreadable or ModelClassCountMismatch rather than a generic absence. It stops
+where the evidence stops: channel *order* is not machine-verifiable without labels and stays a
+manual release gate (§6.2).
+
 Application expectations are edition-level validation, not a framework restriction. For example,
 sailens-yolo may declare Guidance required. If its packaged semantic model is missing, its declared
 taxonomy is incompatible, or another **static configuration** contract fails, that is an edition
@@ -291,7 +300,16 @@ Static configuration failure has build-type-specific handling:
 - **debug/development:** fail fast so packaging/wiring mistakes are discovered immediately;
 - **release:** enter an explicit fatal configuration state instead of crashing/restarting. The state
   must be accessible and must actively signal the failure through an available non-visual channel
-  at least once; if speech is unavailable, haptics are the fallback.
+  at least once.
+
+The signal is **haptic first, then speech** — not "speech, or haptics if speech is broken". At the
+moment a fatal configuration state is reached, nothing has started a TTS engine, because the app
+never got to the screen that does. Treating that as "speech is unavailable" means the user gets one
+buzz and is never told what is wrong. So the haptic fires immediately, because it needs no engine,
+and the engine is then started so the reason can be spoken once it is ready. If it never becomes
+ready, the haptic has already happened. Signalling is once per process: a LaunchedEffect restarts on
+configuration change and process-death restore, and a fatal state that buzzes on every rotation
+teaches the user to ignore it.
 
 A pipeline may still pass preflight and fail when the real session initializes on a particular
 device (for example a GPU delegate or output-buffer allocation fails). That is a **runtime failure**,
@@ -300,6 +318,17 @@ analysis-start-failed path; Describe follows the equivalent request/runtime erro
 
 An optional but statically unavailable pipeline is not presented as a dead control. The shell either
 hides it or presents an explicit edition-level explanation outside the normal action path.
+
+The four combinations therefore route to four different places, and a Describe-only edition does not
+land on the guidance screen — that screen is a start/stop control for a navigation session it does
+not have, and the one thing it *can* do would not be on it:
+
+| Guidance | Describe | Start destination |
+|---|---|---|
+| available | available | guidance, with a Describe action |
+| available | — | guidance, no Describe control |
+| — | available | the Describe screen |
+| — | — | the zero-pipeline screen |
 
 ## 6. Design decisions
 

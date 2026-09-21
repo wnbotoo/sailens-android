@@ -134,8 +134,16 @@ object TfliteModelMetadataReader {
         }
     }
 
-    fun read(bytes: ByteArray): TfliteModelMetadata {
-        val buffer = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
+    fun read(bytes: ByteArray): TfliteModelMetadata = read(ByteBuffer.wrap(bytes))
+
+    /**
+     * Parses the flatbuffer tables out of [source].
+     *
+     * Reads only the tables, so a memory-mapped model costs the pages they sit on rather than the
+     * whole file. Nothing here touches LiteRT: no compiled model, no accelerator, no inference.
+     */
+    fun read(source: ByteBuffer): TfliteModelMetadata {
+        val buffer = source.duplicate().order(ByteOrder.LITTLE_ENDIAN)
         val model = buffer.u32(0)
         val subgraph = buffer.readTableVector(buffer.field(model, MODEL_SUBGRAPHS_FIELD)).first()
         val tensors = buffer.readTableVector(buffer.field(subgraph, SUBGRAPH_TENSORS_FIELD))

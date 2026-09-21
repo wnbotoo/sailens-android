@@ -17,6 +17,8 @@ import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
 import androidx.navigation3.ui.NavDisplay
 import com.sailens.shell.about.OssLicensesScreen
+import com.sailens.shell.describe.DescribeScreen
+import com.sailens.shell.navigation.DescribeKey
 import com.sailens.shell.navigation.LiveKey
 import com.sailens.shell.navigation.OssLicensesKey
 import com.sailens.shell.navigation.SettingsKey
@@ -31,6 +33,19 @@ import com.sailens.shell.design.theme.SailensTheme
  * The back stack is the single source of navigation truth (the old enum-in-UiState scheme is gone).
  * Trace/diagnostics destinations are contributed by [sailensDebugEntries], which is a no-op in the
  * release variant — those screens are not even compiled into release.
+ *
+ * All four pipeline combinations are routed here, and they route to different places (§5.1):
+ *
+ * | Guidance | Describe | Start destination |
+ * |---|---|---|
+ * | available | available | guidance, with a Describe action |
+ * | available | — | guidance, no Describe control |
+ * | — | available | Describe |
+ * | — | — | the zero-pipeline screen |
+ *
+ * A Describe-only edition must not land on the guidance screen: that screen's whole shape is a
+ * start/stop control for a navigation session it does not have, and the one thing it *can* do
+ * would not be on it.
  */
 @Composable
 fun SailensRoot(
@@ -58,7 +73,9 @@ fun SailensRoot(
                 check(!failFastOnConfigurationError) {
                     "Sailens configuration error: $message"
                 }
-                LaunchedEffect(message) { configurationFailureSignal?.signalOnce(message) }
+                LaunchedEffect(message) {
+                    configurationFailureSignal?.signalOnce(message, diagnostic = failure.toString())
+                }
                 FatalConfigurationScreen(message = message, modifier = modifier)
                 return@Surface
             }
@@ -68,7 +85,17 @@ fun SailensRoot(
                 return@Surface
             }
 
-            val backStack: NavBackStack<NavKey> = rememberNavBackStack(LiveKey)
+            val guidanceAvailable =
+                capabilities.startDestination == SailensStartDestination.GUIDANCE
+            val describeAvailable = capabilities.offersDescribeAction
+            val startKey: NavKey = when (capabilities.startDestination) {
+                SailensStartDestination.GUIDANCE -> LiveKey
+                SailensStartDestination.DESCRIBE -> DescribeKey
+                // Unreachable: hasNoAvailablePipeline returned above. Named rather than elided so
+                // a new destination cannot be added without deciding what happens here.
+                SailensStartDestination.NONE -> LiveKey
+            }
+            val backStack: NavBackStack<NavKey> = rememberNavBackStack(startKey)
             NavDisplay(
                 backStack = backStack,
                 modifier = modifier,
@@ -82,6 +109,25 @@ fun SailensRoot(
                         LiveAnalysisScreen(
                             windowSizeClass = windowSizeClass,
                             onOpenSettings = { backStack.add(SettingsKey) },
+                            // Null when Describe is not available in this edition: a control that
+                            // cannot answer is worse than no control for someone who has to reach
+                            // it by touch exploration.
+                            onOpenDescribe = if (describeAvailable) {
+                                { backStack.add(DescribeKey) }
+                            } else {
+                                null
+                            },
+                        )
+                    }
+                    entry<DescribeKey> {
+                        DescribeScreen(
+                            onOpenSettings = { backStack.add(SettingsKey) },
+                            // Describe-only editions start here, so there is nothing to go back to.
+                            onNavigateBack = if (guidanceAvailable) {
+                                { backStack.removeLastOrNull() }
+                            } else {
+                                null
+                            },
                         )
                     }
                     entry<SettingsKey> {
@@ -106,7 +152,8 @@ fun SailensRoot(
  *
  * Deliberately says which pipeline and why, in the user's language: this text is spoken aloud by
  * [ConfigurationFailureSignal], and "something went wrong" is not something a person standing on
- * a pavement can act on.
+ * a pavement can act on. The developer-facing detail (which tensor, how many classes) is logged
+ * separately rather than spoken.
  */
 @Composable
 private fun configurationFailureMessage(
@@ -123,6 +170,8 @@ private fun configurationFailureMessage(
             when (availability.reason) {
                 StaticUnavailableReason.ModelSourceMissing -> R.string.config_reason_model_missing
                 StaticUnavailableReason.TaxonomyIncompatible -> R.string.config_reason_taxonomy
+                is StaticUnavailableReason.ModelOutputUnreadable -> R.string.config_reason_model_output
+                is StaticUnavailableReason.ModelClassCountMismatch -> R.string.config_reason_class_count
                 StaticUnavailableReason.EngineUnavailable -> R.string.config_reason_engine
             }
         )

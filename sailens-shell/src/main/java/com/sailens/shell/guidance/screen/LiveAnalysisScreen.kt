@@ -86,6 +86,12 @@ import org.koin.androidx.compose.koinViewModel
 fun LiveAnalysisScreen(
     windowSizeClass: WindowSizeClass,
     onOpenSettings: () -> Unit,
+    /**
+     * Null when this edition has no Describe pipeline available. A control that cannot answer is
+     * worse than no control for someone reaching it by touch exploration, so it is absent rather
+     * than disabled (architecture.md §5.2).
+     */
+    onOpenDescribe: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     viewModel: SceneAnalysisViewModel = koinViewModel(),
 ) {
@@ -148,6 +154,7 @@ fun LiveAnalysisScreen(
             state = state,
             onToggleClick = onToggleClick,
             onOpenSettings = onOpenSettings,
+            onOpenDescribe = onOpenDescribe,
             onReplay = onReplay,
             onOverlayModeChange = onOverlayModeChange,
             modifier = modifier,
@@ -157,6 +164,7 @@ fun LiveAnalysisScreen(
             state = state,
             onToggleClick = onToggleClick,
             onOpenSettings = onOpenSettings,
+            onOpenDescribe = onOpenDescribe,
             onReplay = onReplay,
             onOverlayModeChange = onOverlayModeChange,
             modifier = modifier,
@@ -169,6 +177,7 @@ private fun ContentForLandscape(
     state: SceneAnalysisUiState,
     onToggleClick: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenDescribe: (() -> Unit)?,
     onReplay: () -> Unit,
     onOverlayModeChange: (SceneOverlayMode) -> Unit,
     modifier: Modifier = Modifier,
@@ -210,6 +219,7 @@ private fun ContentForLandscape(
                 speechEngineState = state.speechEngineState,
                 isScreenReaderActive = state.isScreenReaderActive,
                 onOpenSettings = onOpenSettings,
+                onOpenDescribe = onOpenDescribe,
             )
             ControlView(
                 state = state,
@@ -225,6 +235,7 @@ private fun ContentForPortrait(
     state: SceneAnalysisUiState,
     onToggleClick: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenDescribe: (() -> Unit)?,
     onReplay: () -> Unit,
     onOverlayModeChange: (SceneOverlayMode) -> Unit,
     modifier: Modifier = Modifier,
@@ -242,6 +253,7 @@ private fun ContentForPortrait(
             speechEngineState = state.speechEngineState,
             isScreenReaderActive = state.isScreenReaderActive,
             onOpenSettings = onOpenSettings,
+            onOpenDescribe = onOpenDescribe,
         )
         PreviewPanel(
             state = state,
@@ -304,6 +316,7 @@ private fun HomeTopBar(
     speechEngineState: SpeechEngineState,
     isScreenReaderActive: Boolean,
     onOpenSettings: () -> Unit,
+    onOpenDescribe: (() -> Unit)? = null,
 ) {
     val runningLabel = stringResource(
         if (isRunning) R.string.status_preview_live else R.string.status_preview_idle
@@ -338,6 +351,17 @@ private fun HomeTopBar(
                     .weight(1f)
                     .semantics { heading() },
             )
+            if (onOpenDescribe != null) {
+                TextButton(
+                    onClick = onOpenDescribe,
+                    modifier = Modifier.heightIn(min = SailensDimens.minTouchTargetCompact),
+                ) {
+                    Text(
+                        text = stringResource(R.string.btn_open_describe),
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                }
+            }
             TextButton(
                 onClick = onOpenSettings,
                 modifier = Modifier.heightIn(min = SailensDimens.minTouchTargetCompact),

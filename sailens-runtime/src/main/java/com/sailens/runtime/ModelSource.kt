@@ -1,7 +1,10 @@
 package com.sailens.runtime
 
 import android.content.Context
+import java.io.FileInputStream
 import java.io.InputStream
+import java.nio.ByteBuffer
+import java.nio.channels.FileChannel
 
 /**
  * Where a model's bytes come from.
@@ -44,6 +47,38 @@ sealed interface ModelSource {
     fun exists(context: Context): Boolean = runCatching {
         openStream(context).close()
     }.isSuccess
+
+    /**
+     * Maps the model bytes read-only, without copying them into the heap.
+     *
+     * Metadata lives in the flatbuffer tables near the front of the file, but the file itself is
+     * tens of megabytes of weights. Preflight runs at startup on the main thread, so pulling the
+     * whole model into a ByteArray to read four numbers out of it is exactly the kind of cold-start
+     * cost §5.2 says preflight must not have. A mapping touches only the pages actually read.
+     *
+     * Falls back to a heap copy when the asset turns out to be compressed in the APK (`.tflite` is
+     * in AGP's default noCompress list, so this should not happen) or the platform refuses the
+     * mapping. Correct either way, just no longer free.
+     */
+    fun mapBytes(context: Context): ByteBuffer = when (this) {
+        is Asset -> runCatching {
+            context.assets.openFd(assetPath).use { descriptor ->
+                FileInputStream(descriptor.fileDescriptor).use { input ->
+                    input.channel.map(
+                        FileChannel.MapMode.READ_ONLY,
+                        descriptor.startOffset,
+                        descriptor.declaredLength,
+                    )
+                }
+            }
+        }.getOrElse { ByteBuffer.wrap(openStream(context).use { it.readBytes() }) }
+
+        is File -> runCatching {
+            FileInputStream(file).use { input ->
+                input.channel.map(FileChannel.MapMode.READ_ONLY, 0, file.length())
+            }
+        }.getOrElse { ByteBuffer.wrap(openStream(context).use { it.readBytes() }) }
+    }
 
     /** Opens the model bytes (e.g. for metadata reading). The caller owns the stream and must close it. */
     fun openStream(context: Context): InputStream = when (this) {

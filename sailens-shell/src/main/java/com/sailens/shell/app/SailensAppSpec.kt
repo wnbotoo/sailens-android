@@ -24,21 +24,25 @@ data class SailensAppSpec(
 /**
  * Guidance's static configuration.
  *
- * Both checks must be cheap. Preflight decides whether a control should exist at all, and it runs
- * before the user has asked for anything -- it must not create a compiled model, initialise a
- * GPU/NPU delegate or run a probe inference to answer (§5.2). That work stays at session start,
- * where its cost is something the user asked for.
+ * The shell owns the *vocabulary* of reasons; the host supplies the check, because what counts as a
+ * usable model is an edition decision (§6.11). The shell does not reach into the Guidance pipeline
+ * to find out.
+ *
+ * The check must be cheap. Preflight decides whether a control should exist at all, and it runs
+ * before the user has asked for anything — it must not create a compiled model, initialise a
+ * GPU/NPU delegate or run a probe inference to answer (§5.2). Reading the model file's metadata
+ * tables is fine and is what the check is expected to do: "the asset exists" is not a check, since
+ * an asset of the wrong shape passes it and then fails after the person has pressed start.
  */
 data class GuidanceSpec(
-    /** Does the configured semantic model source resolve? Resolving is not loading. */
-    val semanticModelPresent: () -> Boolean,
-    /** Do the declared taxonomy id and class count agree with the navigation semantics? */
-    val taxonomyCompatible: () -> Boolean,
+    /** Returns null when the configured semantic model is usable, or why it is not. */
+    val verifySemanticModel: () -> StaticUnavailableReason?,
 )
 
 /** Describe's static configuration: is an engine wired and does it have a model bundle? */
 data class DescribeSpec(
-    val engineAvailable: () -> Boolean,
+    /** Returns null when the configured engine is usable, or why it is not. */
+    val verifyEngine: () -> StaticUnavailableReason?,
 )
 
 /**

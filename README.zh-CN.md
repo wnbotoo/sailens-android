@@ -57,7 +57,7 @@ metadata 自动读取**，所以**换模型通常不需要改代码**。
 :sailens-output   TTS、音频焦点、读屏检测、触觉原语
 :sailens-guidance 导航逻辑：语义、连通性、安全分析、事件、深度、trace
 :sailens-describe Describe 产品逻辑：prompt、快照新鲜度、请求调度
-:sailens-shell    可复用表现层：SailensRoot()、导航、设计系统、Guidance UI
+:sailens-shell    可复用表现层：SailensRoot()、导航、设计系统、Guidance 与 Describe UI
 :app              Koin 装配、Application/MainActivity、运行时 profile、edition spec
 ```
 

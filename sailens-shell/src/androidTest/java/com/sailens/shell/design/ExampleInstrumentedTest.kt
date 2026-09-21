@@ -19,6 +19,8 @@ class ExampleInstrumentedTest {
     fun useAppContext() {
         // Context of the app under test.
         val appContext = InstrumentationRegistry.getInstrumentation().targetContext
-        assertEquals("com.sailens.shell.design.test", appContext.packageName)
+        // The design system stopped being its own module when :ux folded into sailens-shell;
+        // the test package followed the namespace and this assertion did not.
+        assertEquals("com.sailens.shell.test", appContext.packageName)
     }
 }

@@ -61,7 +61,7 @@ pipelines rather than technical layers -- see [docs/architecture.md](docs/archit
 :sailens-output   TTS, audio focus, screen-reader detection, haptic primitive
 :sailens-guidance navigation logic: semantics, connectivity, safety, events, depth, trace
 :sailens-describe Describe product logic: prompts, snapshot freshness, scheduling
-:sailens-shell    reusable presentation: SailensRoot(), navigation, design system, Guidance UI
+:sailens-shell    reusable presentation: SailensRoot(), navigation, design system, Guidance + Describe UI
 :app              Koin wiring, Application/MainActivity, runtime profile, edition spec
 ```
 

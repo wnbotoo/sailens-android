@@ -36,6 +36,28 @@ sealed interface StaticUnavailableReason {
      */
     data object TaxonomyIncompatible : StaticUnavailableReason
 
+    /**
+     * The model is there but its output tensor is not a shape this pipeline knows how to read.
+     *
+     * @param detail developer-facing; logged, never spoken.
+     */
+    data class ModelOutputUnreadable(val detail: String) : StaticUnavailableReason
+
+    /**
+     * The model's output has a different number of classes than the declared taxonomy.
+     *
+     * This is the check that "does the asset exist" never made. A 21-class model in a 19-class
+     * build passes an existence test and then either fails at session start or, worse, runs and
+     * reads the scene through shifted class ids.
+     *
+     * It still says nothing about channel *order* — the models carry no labels, so which channel
+     * is `person` remains a manual release gate (§6.2).
+     */
+    data class ModelClassCountMismatch(
+        val declared: Int,
+        val found: List<Int>,
+    ) : StaticUnavailableReason
+
     /** No engine implementation is wired, or it has no model bundle. */
     data object EngineUnavailable : StaticUnavailableReason
 }
