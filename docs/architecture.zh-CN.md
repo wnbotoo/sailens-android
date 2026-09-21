@@ -292,7 +292,7 @@ Taxonomy.classCount，并分别报 ModelOutputUnreadable 或 ModelClassCountMism
 "没有"。它止步于证据的边界：没有 labels 就无法机器校验 channel **顺序**，那仍然是人工 release
 gate（§6.2）。
 
-expectation 是 edition-level validation，不是 framework 限制。例如 sailens-yolo 可以声明
+expectation 是 edition-level validation，不是 framework 限制。例如官方 Sailens 发行版可以声明
 Guidance required。如果它打包的 sem model 缺失、声明的 taxonomy 不兼容，或其他**静态配置**
 contract 失败，这是 edition configuration failure，即使 Sailens framework 本身允许
 zero-pipeline。
