@@ -89,7 +89,7 @@ fun LiveAnalysisScreen(
     /**
      * Null when this edition has no Describe pipeline available. A control that cannot answer is
      * worse than no control for someone reaching it by touch exploration, so it is absent rather
-     * than disabled (architecture.md ง5.2).
+     * than disabled (architecture.md ยง5.2).
      */
     onOpenDescribe: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
