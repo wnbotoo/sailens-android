@@ -164,11 +164,43 @@ class SceneDescriptionCoordinatorTest {
     @Test
     fun `a second request while one is running is ignored rather than stacked`() = runBlocking<Unit> {
         onMain { assertTrue(coordinator.describe(FAILURE)) }
+        chunks.send(delta("A shop entrance. "))
         settle()
 
         onMain { assertFalse(coordinator.describe(FAILURE)) }
         assertEquals(1, describer.requests)
+        assertEquals(
+            "an ignored request must not take the running answer off the air",
+            listOf("A shop entrance."),
+            voice.queued,
+        )
     }
+
+    @Test
+    fun `a new request takes the rest of the previous answer off the air before it starts`() =
+        runBlocking<Unit> {
+            onMain { coordinator.describe(FAILURE) }
+            chunks.send(completed("A bus stop, two metres ahead."))
+            settle()
+            assertFalse("decoding has finished", coordinator.state.value.isDescribing)
+            assertEquals(
+                "but the answer is still being read out",
+                listOf("A bus stop, two metres ahead."),
+                voice.queued,
+            )
+
+            onMain { assertTrue(coordinator.describe(FAILURE)) }
+            assertTrue(
+                "the old answer describes where the person was, not where they are: ${voice.queued}",
+                voice.queued.isEmpty(),
+            )
+
+            chunks.send(delta("The bus has pulled in. "))
+            chunks.send(completed("The bus has pulled in."))
+            settle()
+
+            assertEquals("only the new answer may be queued", listOf("The bus has pulled in."), voice.queued)
+        }
 
     // ---- One answer, one channel --------------------------------------------------------------
 
@@ -260,23 +292,27 @@ class SceneDescriptionCoordinatorTest {
         SceneDescription(text = text, backend = "test", latencyMs = 0, timeToFirstTokenMs = 0),
     )
 
-    /** Records what Describe asked to say, and what it has queued that is still unsaid. */
+    /**
+     * Records what Describe asked to say, and what of it is still queued, unsaid. Nothing is ever
+     * "read out" here, so an utterance stays queued until Describe withdraws it.
+     */
     private class RecordingVoice : DescribeVoice {
         val spoken: MutableList<String> = Collections.synchronizedList(mutableListOf())
+        val queued: MutableList<String> = Collections.synchronizedList(mutableListOf())
         var withdrawals = 0
         var ready = true
-        var hasQueued = false
+        val hasQueued: Boolean get() = queued.isNotEmpty()
 
         override suspend fun awaitReady(): Boolean = ready
 
         override fun speak(text: String) {
             spoken += text
-            hasQueued = true
+            queued += text
         }
 
         override fun withdraw() {
             withdrawals++
-            hasQueued = false
+            queued.clear()
         }
     }
 

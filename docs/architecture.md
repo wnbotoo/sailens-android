@@ -512,6 +512,12 @@ A description speaks through the channel that was current when it started. If th
 mid-way — speech turned off, a screen reader turned on — the description is cancelled rather than
 finished half in one voice and half in another. The next request uses the new channel.
 
+Only one answer owns the output at a time. An answer can finish decoding while it is still being
+read out, and the Describe action comes back as soon as decoding ends, so a new request first
+withdraws whatever is left of the previous answer. Otherwise the rest of a description of where the
+person was would play ahead of the description of where they are now, with nothing to tell the two
+apart.
+
 Screen-reader announcements have exactly one collector, at the shell root, because the Android View
 belongs to presentation and the root is the only composable that exists for as long as the app
 does. Every screen publishes to the shared ScreenReaderAnnouncer. A per-screen collector drops every

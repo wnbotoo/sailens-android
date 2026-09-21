@@ -34,13 +34,18 @@ data class SceneDescriptionState(
  * screen, kept decoding and kept talking after the warning. "Do not walk into that" outranks "what
  * is that" only if the thing Guidance cancels is the thing that is running.
  *
- * Three rules, all enforced here rather than by callers:
+ * Four rules, all enforced here rather than by callers:
  *
  * - **Guidance preempts.** [preemptForGuidance] cancels the run, invalidates its token so a chunk
  *   already decoded cannot speak, and withdraws every clause Describe has queued — including the
  *   tail of an answer that finished decoding but is still being read out.
  * - **Describe only takes back its own speech.** [cancel] withdraws Describe's utterances and
  *   nothing else, so closing or cancelling a description can never cut off a warning.
+ * - **A new answer replaces the old one.** [describe] withdraws what is left of the previous answer
+ *   before it starts. Decoding can finish while an answer is still being read out, and the Describe
+ *   action comes back as soon as decoding does, so "not describing" does not mean "not speaking".
+ *   Without this, the rest of a description of where the person was would play ahead of the
+ *   description of where they are now, with nothing to tell the two apart.
  * - **One answer, one channel.** A request speaks through the channel that was current when it
  *   started. If the channel changes mid-way — speech turned off, a screen reader turned on — the
  *   request is cancelled rather than finished half in one voice and half in another, or into a
@@ -76,7 +81,8 @@ class SceneDescriptionCoordinator(
     }
 
     /**
-     * Starts describing what the camera sees, unless a description is already running.
+     * Starts describing what the camera sees, unless a description is already running. Whatever is
+     * left of the previous answer is withdrawn first.
      *
      * @param failureNotice already-localised text for a failed request. The shell owns resources,
      *   this class does not (§6.11).
@@ -84,6 +90,8 @@ class SceneDescriptionCoordinator(
      */
     fun describe(failureNotice: String): Boolean {
         if (session.isDescribing) return false
+        // Decoding is over, but the previous answer may still be being read out.
+        voice.withdraw()
         val requestChannel = channel.value
         session.start(scope) { token -> run(token, requestChannel, failureNotice) }
         return true
