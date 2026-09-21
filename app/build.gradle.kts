@@ -40,7 +40,7 @@ android {
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "com.sailens"
+        applicationId = "com.sailens.reference"
         // Android 12 (API 31). 31 is the floor for Build.SOC_MANUFACTURER/SOC_MODEL used by
         // DeviceHardwareProfileProvider, and keeps device reach broad for the GPU-only release.
         minSdk = 31
@@ -48,7 +48,9 @@ android {
         versionCode = 1
         versionName = "1.0"
 
-        // Distribution identity, surfaced on the Settings screen. Apache-2.0 requires recipients to
+        // Reference-host identity, surfaced on the Settings screen. This app exists to assemble and
+        // validate Sailens Android; the store product lives in the separate official distribution.
+        // Apache-2.0 requires recipients to
         // get the license; an app is the one place users actually look, so it is shown in-product
         // rather than only in the repo. A redistribution under different terms overrides these two
         // and nothing else.
