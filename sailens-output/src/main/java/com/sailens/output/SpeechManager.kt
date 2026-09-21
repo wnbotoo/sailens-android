@@ -21,7 +21,7 @@ import java.util.Locale
  * [UNAVAILABLE] 必须能传到 UI：TTS 起不来时，用户听不到任何提示，而"听不到提示"和
  * "前方没有危险"在盲人那里是同一种体验。以前这个失败只写进日志，用户完全无从察觉。
  */
-enum class SpeechEngineState {
+public enum class SpeechEngineState {
     IDLE,
     INITIALIZING,
     READY,
@@ -39,7 +39,7 @@ enum class SpeechEngineState {
  * 3. **USAGE_ASSISTANCE_ACCESSIBILITY + 瞬时降低音量的音频焦点**。目标用户几乎总在同时听
  *    TalkBack、导航或播客；不申请焦点的话两路声音会直接叠在一起，谁也听不清。
  */
-class SpeechManager(
+public class SpeechManager(
     private val context: Context,
     private val logger: LogService,
 
@@ -72,9 +72,9 @@ class SpeechManager(
     private var speechRate = DEFAULT_SPEECH_RATE
 
     private val _state = MutableStateFlow(SpeechEngineState.IDLE)
-    val state: StateFlow<SpeechEngineState> = _state.asStateFlow()
+    public val state: StateFlow<SpeechEngineState> = _state.asStateFlow()
 
-    val isReady: Boolean get() = _isReady
+    public val isReady: Boolean get() = _isReady
 
     /**
      * 设置语速（相对正常语速的倍率）。
@@ -82,14 +82,14 @@ class SpeechManager(
      * 盲人 TalkBack 重度用户的常用语速在 1.5–3x；固定 1.0 对他们不只是慢，更直接等于每条提示
      * 多占 0.5–1 秒的响应延迟。引擎已就绪时立即生效，否则等初始化完成时一并应用。
      */
-    fun setSpeechRate(rate: Float) {
+    public fun setSpeechRate(rate: Float) {
         runOnMain {
             speechRate = rate.coerceIn(MIN_SPEECH_RATE, MAX_SPEECH_RATE)
             tts?.takeIf { _isReady }?.setSpeechRate(speechRate)
         }
     }
 
-    fun initialize(onReady: (() -> Unit)? = null) {
+    public fun initialize(onReady: (() -> Unit)? = null) {
         runOnMain {
             initializeOnMain(onReady = onReady, forceRetry = true)
         }
@@ -170,7 +170,7 @@ class SpeechManager(
     /**
      * 播报一条已经解析好文案的 [Announcement]。文案由上层决定，这里只负责怎么说出去。
      */
-    fun speak(announcement: Announcement) {
+    public fun speak(announcement: Announcement) {
         runOnMain {
             speakOnMain(announcement)
         }
@@ -247,7 +247,7 @@ class SpeechManager(
      * 与场景事件的区别：它没有时效，也不该被下一条场景提示打断——用户必须完整听到
      * "辅助已停止"，否则就会继续举着一个不工作的手机往前走。所以这里用 QUEUE_ADD。
      */
-    fun speakSystemNotice(text: String) {
+    public fun speakSystemNotice(text: String) {
         runOnMain {
             if (!_isReady) {
                 logger.warning(TAG, "Dropping system notice because TTS is not ready")
@@ -301,7 +301,7 @@ class SpeechManager(
             .build()
     }
 
-    fun stop() {
+    public fun stop() {
         runOnMain {
             stopOnMain()
         }
@@ -317,7 +317,7 @@ class SpeechManager(
         releaseAudioFocus()
     }
 
-    fun release() {
+    public fun release() {
         runOnMain {
             releaseOnMain()
         }
@@ -646,10 +646,10 @@ class SpeechManager(
         val enqueuedAtMs: Long,
     )
 
-    companion object {
-        const val DEFAULT_SPEECH_RATE = 1.3f
-        const val MIN_SPEECH_RATE = 0.7f
-        const val MAX_SPEECH_RATE = 3.0f
+    public companion object {
+        public const val DEFAULT_SPEECH_RATE: Float = 1.3f
+        public const val MIN_SPEECH_RATE: Float = 0.7f
+        public const val MAX_SPEECH_RATE: Float = 3.0f
 
         private const val TAG = "SpeechManager"
         private const val SYSTEM_NOTICE_UTTERANCE_ID_PREFIX = "system_notice_"

@@ -5,6 +5,10 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
+kotlin {
+    explicitApi()
+}
+
 android {
     namespace = "com.sailens.camera"
     compileSdk = 37

@@ -19,12 +19,12 @@ import kotlinx.coroutines.flow.asStateFlow
  * 判据用 `isEnabled && isTouchExplorationEnabled`：触摸浏览是屏幕阅读器的特征功能，
  * 而单看 `isEnabled` 会把开关控制、放大手势等非朗读类无障碍服务也算进来。
  */
-class AccessibilityStatusProvider(context: Context) {
+public class AccessibilityStatusProvider(context: Context) {
     private val manager = context.applicationContext
         .getSystemService(Context.ACCESSIBILITY_SERVICE) as? AccessibilityManager
 
     private val _isScreenReaderActive = MutableStateFlow(computeActive())
-    val isScreenReaderActive: StateFlow<Boolean> = _isScreenReaderActive.asStateFlow()
+    public val isScreenReaderActive: StateFlow<Boolean> = _isScreenReaderActive.asStateFlow()
 
     init {
         // 应用级单例，生命周期与进程一致，因此不需要反注册。

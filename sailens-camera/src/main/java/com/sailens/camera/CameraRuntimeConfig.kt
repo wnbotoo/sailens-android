@@ -6,7 +6,7 @@ package com.sailens.camera
  * The ML model still reads its own input shape from the selected TFLite asset.
  * These values control the CameraX source frame size before preprocessing.
  */
-data class CameraRuntimeConfig(
+public data class CameraRuntimeConfig(
     val previewWidth: Int = 1280,
     val previewHeight: Int = 720,
     val analysisWidth: Int = 960,

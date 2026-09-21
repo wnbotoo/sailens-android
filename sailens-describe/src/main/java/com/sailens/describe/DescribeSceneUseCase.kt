@@ -19,7 +19,7 @@ import kotlinx.coroutines.flow.flow
  * 取帧而不是接收帧：调用方给出帧流，这里只取**当前最新一帧**。VLM 一次推理要数秒，期间画面
  * 早就变了，喂多帧毫无意义；而"用户按下按钮那一刻看到的东西"恰好就是他想问的东西。
  */
-class DescribeSceneUseCase(
+public class DescribeSceneUseCase(
     private val sceneDescriber: SceneDescriber,
     private val frameSnapshots: FrameSnapshotProvider,
     private val logService: LogService,
@@ -33,7 +33,7 @@ class DescribeSceneUseCase(
      *   用户——**这条链路上的失败必须被说出来或震出来，不能只写日志**：用户已经主动发问，
      *   没有回答和"前方什么都没有"在他那里是同一种体验。
      */
-    operator fun invoke(
+    public operator fun invoke(
         userPrompt: String? = null,
         maxFrameAgeMs: Long = DEFAULT_MAX_FRAME_AGE_MS,
         snapshotTimeoutMs: Long = FrameSnapshotProvider.DEFAULT_SNAPSHOT_TIMEOUT_MS,

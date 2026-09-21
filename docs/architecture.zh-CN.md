@@ -171,8 +171,17 @@ Kotlin/Java package 不重复产品名：
 
 Composite build 坐标跟 module 名一致，例如 com.sailens:sailens-shell。
 
-所有可复用 library module 开启 Kotlin explicit API mode。除非确实需要跨模块使用，内部
-实现符号保持 internal。
+Kotlin explicit API mode 已经在 public surface 本来就小而克制的模块上开启：**sailens-core、
+sailens-camera、sailens-vlm、sailens-output、sailens-describe**。在这些模块里，任何没有写
+visibility 修饰符的声明都编译不过，API 就不会被无意扩大。
+
+sailens-runtime、sailens-vision、sailens-guidance、sailens-shell **没有开**。现在开的代价是往
+大约九百个声明上加 `public`——它们之所以是 public，只是因为没人说过不是，这等于把一个意外
+形成的 surface 固化下来，而不是给它上闸。前置条件是先收窄这几个模块（sailens-shell 的大部分
+composable、sailens-guidance 的大部分 processor 应该是 `internal`），那是另一件独立的、需要
+单独评审的工作。在此之前，§12.5 的这条 gate 只对上面五个模块成立，别的模块不成立。
+
+除非确实需要跨模块使用，内部实现符号保持 internal。
 
 ### 4.4 sailens-shell 内部 package
 
@@ -797,7 +806,8 @@ trace compare 仍然只是 coarse integration check，不是 golden frame replay
 - sailens-core 没有逐渐吸收 Android application service；
 - 低层 shared module 不依赖 sailens-shell；
 - Guidance-only edition 不会被拖入 concrete VLM runtime dependency；
-- explicit API compile 能阻止 public surface 无意扩大。
+- explicit API compile 能阻止 public surface 无意扩大——**只在已开启的那五个模块上成立**
+  （§4.3）；另外四个模块没有这道闸，surface 靠人工 review。
 
 ## 13. 本轮 review 已确定的决策
 

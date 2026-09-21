@@ -17,7 +17,7 @@ import android.os.VibratorManager
  * with motors that have no amplitude control, and asking for the accessibility usage so the
  * pattern still fires when the phone is silenced.
  */
-class HapticPlayer(context: Context) {
+public class HapticPlayer(context: Context) {
 
     private val vibrator: Vibrator? =
         (context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager)?.defaultVibrator
@@ -27,7 +27,7 @@ class HapticPlayer(context: Context) {
      *   do not vibrate.
      * @param amplitude 1..255, applied to the on segments when the motor supports it.
      */
-    fun play(timings: LongArray, amplitude: Int) {
+    public fun play(timings: LongArray, amplitude: Int) {
         val device = vibrator ?: return
         if (!device.hasVibrator()) return
 
@@ -45,7 +45,7 @@ class HapticPlayer(context: Context) {
         vibrate(device, effect)
     }
 
-    fun cancel() {
+    public fun cancel() {
         vibrator?.cancel()
     }
 

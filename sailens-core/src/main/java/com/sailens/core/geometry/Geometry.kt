@@ -3,7 +3,7 @@ package com.sailens.core.geometry
 /**
  * 归一化矩形
  */
-data class NormalizedRect(
+public data class NormalizedRect(
     val x: Float,
     val y: Float,
     val width: Float,
@@ -15,7 +15,7 @@ data class NormalizedRect(
     val maxY: Float get() = y + height
     val area: Float get() = width * height
 
-    fun iou(other: NormalizedRect): Float {
+    public fun iou(other: NormalizedRect): Float {
         val intersectX = maxOf(x, other.x)
         val intersectY = maxOf(y, other.y)
         val intersectMaxX = minOf(maxX, other.maxX)
@@ -31,8 +31,8 @@ data class NormalizedRect(
         return if (unionArea > 0) intersectArea / unionArea else 0f
     }
 
-    companion object {
-        fun fromPixels(
+    public companion object {
+        public fun fromPixels(
             px: Int, py: Int, pw: Int, ph: Int,
             imageWidth: Int, imageHeight: Int,
         ): NormalizedRect {

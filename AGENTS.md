@@ -17,6 +17,7 @@ pipeline that turns the scene ahead into speech and haptics. This file is the re
 - Modules (`settings.gradle.kts`): nine `sailens-*` libraries plus `:app`. Nothing else.
   The migration in `docs/architecture.md` §11 replaced the old layer-first split (`:domain`, `:presentation`, `:ux`, `:camera`).
 - Direction: dependencies point downward and never come back up. `:sailens-core` has none.
+- Kotlin explicit API mode is on in `:sailens-core`, `:sailens-camera`, `:sailens-vlm`, `:sailens-output` and `:sailens-describe`: a declaration without a visibility modifier does not compile there. The other four library modules are not gated yet (`docs/architecture.md` §4.3) — narrowing their surface comes first.
   `sailens-guidance` and `sailens-describe` never depend on each other, and nothing shared depends on either.
 - `:sailens-core` — the smallest shared contracts: `ImageFrame`/YUV planes, `NormalizedRect`, `BinaryMask`, `MlRuntimeInfo`, `LogService`. Keep it small; navigation meaning stays out.
 - `:sailens-camera` — CameraX capture, `FrameSource` (continuous) and `FrameSnapshotProvider` (freshness-bounded snapshot), `CameraPreview`, and a camera-permission state primitive. The rationale dialog is *not* here; it is presentation policy in the shell.

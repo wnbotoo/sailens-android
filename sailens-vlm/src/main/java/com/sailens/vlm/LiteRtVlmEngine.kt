@@ -29,7 +29,7 @@ import kotlinx.coroutines.withContext
  * the app simply hides the "describe scene" action until a model is wired. See
  * docs/vlm-asr-assistant-plan.md for the LiteRT-LM / MediaPipe runtime wiring.
  */
-class LiteRtVlmEngine(
+public class LiteRtVlmEngine(
     private val context: Context,
     private val config: VlmModelConfig,
     private val runtimeFactory: VlmRuntimeFactory = UnavailableVlmRuntimeFactory,

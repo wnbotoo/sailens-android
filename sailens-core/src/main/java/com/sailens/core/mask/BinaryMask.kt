@@ -5,32 +5,32 @@ import java.util.BitSet
 /**
  * 二值掩码
  */
-class BinaryMask private constructor(
-    val width: Int,
-    val height: Int,
+public class BinaryMask private constructor(
+    public val width: Int,
+    public val height: Int,
     private val bits: BitSet,
 ) {
-    constructor(width: Int, height: Int) : this(width, height, BitSet(width * height))
+    public constructor(width: Int, height: Int) : this(width, height, BitSet(width * height))
 
-    fun get(x: Int, y: Int): Boolean {
+    public fun get(x: Int, y: Int): Boolean {
         if (x !in 0..<width || y < 0 || y >= height) return false
         return bits.get(y * width + x)
     }
 
-    fun set(x: Int, y: Int, value: Boolean) {
+    public fun set(x: Int, y: Int, value: Boolean) {
         if (x !in 0..<width || y < 0 || y >= height) return
         bits.set(y * width + x, value)
     }
 
-    fun clear() {
+    public fun clear() {
         bits.clear()
     }
 
-    fun countTrue(): Int = bits.cardinality()
+    public fun countTrue(): Int = bits.cardinality()
 
-    fun coverage(): Float = countTrue().toFloat() / (width * height)
+    public fun coverage(): Float = countTrue().toFloat() / (width * height)
 
-    fun copyPackedBits(): LongArray = bits.toLongArray()
+    public fun copyPackedBits(): LongArray = bits.toLongArray()
 
     /**
      * 将位图打包写入调用方提供的 [reusable] 以复用缓冲、避免每帧分配。
@@ -38,7 +38,7 @@ class BinaryMask private constructor(
      * 语义与 [copyPackedBits] 一致：bit i 落在第 i/64 个 word 的第 i%64 位；
      * 所需字长内没有对应 true 像素的位会被清零，调用方按帧尺寸解释返回值。
      */
-    fun copyPackedBitsInto(reusable: LongArray): LongArray {
+    public fun copyPackedBitsInto(reusable: LongArray): LongArray {
         val wordCount = (width * height + Long.SIZE_BITS - 1) / Long.SIZE_BITS
         val target = if (reusable.size >= wordCount) reusable else LongArray(wordCount)
         target.fill(0L, 0, wordCount)
@@ -58,7 +58,7 @@ class BinaryMask private constructor(
      * 路径不经过这里。所以 AGENTS.md "BinaryMask 用于热循环、避免分配" 的约束主要针对 native
      * 主路径,本方法的分配局限在降级路径,故保留其可读实现。
      */
-    fun getRowRuns(row: Int): List<IntRange> {
+    public fun getRowRuns(row: Int): List<IntRange> {
         if (row !in 0..<height) return emptyList()
 
         val runs = mutableListOf<IntRange>()
@@ -84,7 +84,7 @@ class BinaryMask private constructor(
     /**
      * 获取底部区域统计
      */
-    fun getBottomStats(bottomRatio: Float = 0.2f): BottomStats {
+    public fun getBottomStats(bottomRatio: Float = 0.2f): BottomStats {
         val startRow = ((1 - bottomRatio) * height).toInt()
 
         var maxRunWidth = 0
@@ -123,7 +123,7 @@ class BinaryMask private constructor(
     /**
      * 降采样
      */
-    fun downsample(factor: Int): BinaryMask {
+    public fun downsample(factor: Int): BinaryMask {
         val newWidth = width / factor
         val newHeight = height / factor
         val result = BinaryMask(newWidth, newHeight)
@@ -145,8 +145,8 @@ class BinaryMask private constructor(
         return result
     }
 
-    companion object {
-        fun fromPackedBits(
+    public companion object {
+        public fun fromPackedBits(
             width: Int,
             height: Int,
             packedBits: LongArray,
@@ -175,7 +175,7 @@ class BinaryMask private constructor(
 /**
  * 底部区域统计
  */
-data class BottomStats(
+public data class BottomStats(
     val coverage: Float,
     val maxRunWidth: Int,
     val maxRunWidthRatio: Float,

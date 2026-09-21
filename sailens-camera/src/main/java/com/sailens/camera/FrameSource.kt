@@ -10,8 +10,8 @@ import kotlinx.coroutines.flow.Flow
  * caller that only wants to look at the current view should use [FrameSnapshotProvider] instead of
  * subscribing to every frame it will throw away (architecture.md §6.1).
  */
-interface FrameSource {
-    val frames: Flow<ImageFrame>
+public interface FrameSource {
+    public val frames: Flow<ImageFrame>
 }
 
 /**
@@ -21,7 +21,7 @@ interface FrameSource {
  * a full copy of the planes. A lease is how a caller says "I am about to ask for a snapshot, keep
  * converting" without pretending to be a per-frame consumer.
  */
-interface FrameLease : AutoCloseable {
+public interface FrameLease : AutoCloseable {
     /** Idempotent: closing twice releases the demand once. */
     override fun close()
 }
@@ -39,14 +39,14 @@ interface FrameLease : AutoCloseable {
  * on their own, so Describe works while Guidance is stopped and neither has to know about the
  * other.
  */
-interface FrameSnapshotProvider {
+public interface FrameSnapshotProvider {
     /**
      * The frame already converted, if it is fresh enough. Does not wait and does not open demand,
      * so it answers null whenever nothing has been converting.
      *
      * @param maxAgeMs how old the frame may be, in milliseconds.
      */
-    fun currentFrame(maxAgeMs: Long): ImageFrame?
+    public fun currentFrame(maxAgeMs: Long): ImageFrame?
 
     /**
      * Opens demand, waits for a frame that satisfies [maxAgeMs], and closes demand again.
@@ -55,7 +55,7 @@ interface FrameSnapshotProvider {
      *   indefinitely: a person who pressed a button is owed an answer, and "I could not see" is a
      *   better answer than silence.
      */
-    suspend fun awaitCurrentFrame(
+    public suspend fun awaitCurrentFrame(
         maxAgeMs: Long,
         timeoutMs: Long = DEFAULT_SNAPSHOT_TIMEOUT_MS,
     ): ImageFrame?
@@ -64,14 +64,14 @@ interface FrameSnapshotProvider {
      * Keeps conversion running until the returned lease is closed, for a caller that will ask for
      * several snapshots and does not want to pay the camera's spin-up on each one.
      */
-    fun openSnapshotLease(): FrameLease
+    public fun openSnapshotLease(): FrameLease
 
-    companion object {
+    public companion object {
         /**
          * Long enough for a bound camera to deliver a frame (~33 ms at 30 fps) plus configuration
          * slack, short enough that a blind user is not left in silence wondering whether the press
          * registered.
          */
-        const val DEFAULT_SNAPSHOT_TIMEOUT_MS: Long = 1_000L
+        public const val DEFAULT_SNAPSHOT_TIMEOUT_MS: Long = 1_000L
     }
 }

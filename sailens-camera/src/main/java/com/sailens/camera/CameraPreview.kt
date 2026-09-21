@@ -19,7 +19,7 @@ import org.koin.androidx.compose.koinViewModel
  * see [rememberCameraPermissionState].
  */
 @Composable
-fun CameraPreview(
+public fun CameraPreview(
     modifier: Modifier = Modifier,
     contentScale: ContentScale = ContentScale.Crop,
     viewModel: CameraViewModel = koinViewModel(),

@@ -9,7 +9,7 @@ package com.sailens.output
  * product policy and belongs above this module (architecture.md §6.6). What stays here is the
  * mechanism: expiry, priority preemption, audio focus, the engine's readiness.
  */
-data class Announcement(
+public data class Announcement(
     /** Stable id for this utterance, used to correlate TTS callbacks. */
     val id: String,
     /** Diagnostic label. Appears in logs only, never spoken. */
@@ -26,5 +26,5 @@ data class Announcement(
      */
     val expiresAtMs: Long,
 ) {
-    fun isExpired(nowMs: Long): Boolean = nowMs > expiresAtMs
+    public fun isExpired(nowMs: Long): Boolean = nowMs > expiresAtMs
 }

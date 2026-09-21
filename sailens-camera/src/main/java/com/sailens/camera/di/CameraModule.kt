@@ -9,9 +9,10 @@ import com.sailens.camera.FrameSource
 import org.koin.core.module.dsl.viewModel
 import org.koin.dsl.bind
 import org.koin.dsl.binds
+import org.koin.core.module.Module
 import org.koin.dsl.module
 
-val cameraModule = module {
+public val cameraModule: Module = module {
     single { Camera() }
     single { ImageFrameAnalyzer() }
         .binds(arrayOf(

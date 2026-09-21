@@ -15,7 +15,7 @@ import com.google.ai.edge.litert.Accelerator
  * (`LlmInference` + vision modality), add the dependency, and inject it into [LiteRtVlmEngine]. See
  * docs/vlm-asr-assistant-plan.md.
  */
-interface VlmRuntime : AutoCloseable {
+public interface VlmRuntime : AutoCloseable {
 
     /**
      * Generates text for [prompt] grounded on [image] (null = text-only), reporting each decoded
@@ -33,7 +33,7 @@ interface VlmRuntime : AutoCloseable {
      *   partial text is returned. An autoregressive decode can run for seconds, so a cancelled
      *   request that cannot stop mid-decode keeps the accelerator busy and delays the next one.
      */
-    fun generate(
+    public fun generate(
         prompt: String,
         image: ImageFrame?,
         shouldStop: () -> Boolean = { false },
@@ -41,20 +41,20 @@ interface VlmRuntime : AutoCloseable {
     ): String
 }
 
-interface VlmRuntimeFactory {
+public interface VlmRuntimeFactory {
     /** Whether a real runtime + model are wired (lib present, model bundle resolvable). */
-    fun isAvailable(context: Context): Boolean
+    public fun isAvailable(context: Context): Boolean
 
     /** Loads the model for [accelerator]; MUST throw if it cannot run on that backend so the
      * accelerator selector can fall back to the next one. */
-    fun create(context: Context, config: VlmModelConfig, accelerator: Accelerator): VlmRuntime
+    public fun create(context: Context, config: VlmModelConfig, accelerator: Accelerator): VlmRuntime
 }
 
 /**
  * Default factory: no GenAI runtime wired. Keeps [LiteRtVlmEngine] gracefully unavailable (the app
  * hides the "describe scene" action) until a real [VlmRuntimeFactory] is provided.
  */
-object UnavailableVlmRuntimeFactory : VlmRuntimeFactory {
+public object UnavailableVlmRuntimeFactory : VlmRuntimeFactory {
     override fun isAvailable(context: Context): Boolean = false
 
     override fun create(context: Context, config: VlmModelConfig, accelerator: Accelerator): VlmRuntime =

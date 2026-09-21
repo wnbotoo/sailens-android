@@ -18,7 +18,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 
-class ImageFrameAnalyzer(
+public class ImageFrameAnalyzer(
     private val frameConverter: ImageFrameConverter = ImageProxyToFrameConverter(),
     private val elapsedRealtimeMs: () -> Long = SystemClock::elapsedRealtime,
 ) : ImageAnalysis.Analyzer, FrameSource, FrameSnapshotProvider {
@@ -34,7 +34,7 @@ class ImageFrameAnalyzer(
         onBufferOverflow = BufferOverflow.DROP_OLDEST
     )
     override val frames: SharedFlow<ImageFrame> = _frames.asSharedFlow()
-    val stats: ImageFrameAnalyzerStats
+    public val stats: ImageFrameAnalyzerStats
         get() = ImageFrameAnalyzerStats(
             emittedFrames = emittedFrames.get(),
             droppedFrames = droppedFrames.get(),
@@ -102,7 +102,7 @@ class ImageFrameAnalyzer(
     }
 }
 
-data class ImageFrameAnalyzerStats(
+public data class ImageFrameAnalyzerStats(
     val emittedFrames: Long,
     val droppedFrames: Long,
     /** Frames the camera delivered while nothing wanted one, so they were never converted. */
@@ -110,14 +110,14 @@ data class ImageFrameAnalyzerStats(
     val openSnapshotLeases: Int,
 )
 
-interface ImageFrameConverter {
-    fun convert(
+public interface ImageFrameConverter {
+    public fun convert(
         image: ImageProxy,
         sequenceNumber: Long,
     ): ImageFrame
 }
 
-class ImageProxyToFrameConverter : ImageFrameConverter {
+public class ImageProxyToFrameConverter : ImageFrameConverter {
     override fun convert(
         image: ImageProxy,
         sequenceNumber: Long,

@@ -1,27 +1,27 @@
 package com.sailens.core.runtime
 
-data class MlRuntimeInfo(
+public data class MlRuntimeInfo(
     val accelerator: String = UNKNOWN,
     val acceleratorSelection: String = UNKNOWN,
     val preprocessBackend: String = UNKNOWN,
     val postprocessBackend: String = UNKNOWN,
 ) {
-    companion object {
-        const val UNKNOWN = "unknown"
+    public companion object {
+        public const val UNKNOWN: String = "unknown"
 
-        fun unavailable(reason: String): MlRuntimeInfo = MlRuntimeInfo(
+        public fun unavailable(reason: String): MlRuntimeInfo = MlRuntimeInfo(
             accelerator = reason,
             acceleratorSelection = reason,
             preprocessBackend = reason,
             postprocessBackend = reason,
         )
 
-        fun cached(previous: MlRuntimeInfo): MlRuntimeInfo = previous.copy(
+        public fun cached(previous: MlRuntimeInfo): MlRuntimeInfo = previous.copy(
             preprocessBackend = "cached",
             postprocessBackend = "cached",
         )
 
-        fun skipped(reason: String): MlRuntimeInfo = MlRuntimeInfo(
+        public fun skipped(reason: String): MlRuntimeInfo = MlRuntimeInfo(
             accelerator = reason,
             acceleratorSelection = reason,
             preprocessBackend = reason,

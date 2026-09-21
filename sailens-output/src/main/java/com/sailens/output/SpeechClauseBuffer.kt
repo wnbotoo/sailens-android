@@ -16,7 +16,7 @@ package com.sailens.output
  *
  * 非线程安全：调用方（ViewModel 的单个协程）串行使用。
  */
-class SpeechClauseBuffer(
+public class SpeechClauseBuffer(
     private val softMinChars: Int = DEFAULT_SOFT_MIN_CHARS,
     private val hardMaxChars: Int = DEFAULT_HARD_MAX_CHARS,
 ) {
@@ -28,7 +28,7 @@ class SpeechClauseBuffer(
      * 一片增量里可能同时含多个句末标点（模型一次吐一整句的情况），此时切到**最后**一个
      * 标点为止，一次交出去当一条语句念——比拆成多条更连贯。
      */
-    fun append(delta: String): String? {
+    public fun append(delta: String): String? {
         if (delta.isEmpty()) return null
         pending.append(delta)
 
@@ -42,7 +42,7 @@ class SpeechClauseBuffer(
      * 交出剩下的尾巴。生成结束时必须调用，否则最后一个没有标点收尾的子句会被吞掉——
      * 而那往往正是句子的结论部分。
      */
-    fun drain(): String? {
+    public fun drain(): String? {
         if (pending.isBlank()) {
             pending.clear()
             return null

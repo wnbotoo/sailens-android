@@ -2,6 +2,10 @@ plugins {
     alias(libs.plugins.android.library)
 }
 
+kotlin {
+    explicitApi()
+}
+
 android {
     namespace = "com.sailens.describe"
     compileSdk = 37

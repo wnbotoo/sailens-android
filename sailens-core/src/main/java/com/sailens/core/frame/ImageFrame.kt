@@ -6,14 +6,14 @@ package com.sailens.core.frame
  * 图像帧在 domain 层保持平台无关；CameraX 的 ImageProxy 会在 camera 模块
  * 转换成这里的紧凑数据结构。
  */
-enum class ImagePixelFormat(
-    val bytesPerPixel: Int,
+public enum class ImagePixelFormat(
+    public val bytesPerPixel: Int,
 ) {
     RGBA_8888(bytesPerPixel = 4),
     YUV_420_888(bytesPerPixel = 0),
 }
 
-data class YuvPlaneData(
+public data class YuvPlaneData(
     val bytes: ByteArray,
     val rowStride: Int,
     val pixelStride: Int,
@@ -34,13 +34,13 @@ data class YuvPlaneData(
     }
 }
 
-data class Yuv420FrameData(
+public data class Yuv420FrameData(
     val y: YuvPlaneData,
     val u: YuvPlaneData,
     val v: YuvPlaneData,
 )
 
-data class ImageFrame(
+public data class ImageFrame(
     val width: Int,
     val height: Int,
     val pixelBytes: ByteArray,

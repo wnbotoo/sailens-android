@@ -185,8 +185,19 @@ Packages do not repeat the product name:
 Composite-build coordinates follow the module names, for example
 com.sailens:sailens-shell.
 
-Reusable library modules enable Kotlin explicit API mode. Internal implementation symbols stay
-internal unless another module genuinely needs them.
+Kotlin explicit API mode is enabled where the public surface is already small and deliberate:
+**sailens-core, sailens-camera, sailens-vlm, sailens-output and sailens-describe**. In those
+modules the compiler refuses a declaration without a visibility modifier, so the API cannot grow
+by accident.
+
+It is **not** enabled on sailens-runtime, sailens-vision, sailens-guidance or sailens-shell. Turning
+it on there today would mean writing `public` on roughly nine hundred declarations that are public
+only because nobody has said otherwise — which enshrines an accidental surface rather than gating
+it. The prerequisite is narrowing those modules first (most of sailens-shell's composables and
+sailens-guidance's processors want `internal`), and that is a separate piece of work with its own
+review. Until then, the gate in §12.5 applies to the five modules listed above and to nothing else.
+
+Internal implementation symbols stay internal unless another module genuinely needs them.
 
 ### 4.4 sailens-shell package structure
 
@@ -840,7 +851,8 @@ During migration, verify:
 - sailens-core does not accumulate Android application services;
 - no shared lower module depends on sailens-shell;
 - concrete VLM runtime dependencies are not pulled into Guidance-only editions;
-- explicit API compilation prevents accidental library-surface growth.
+- explicit API compilation prevents accidental library-surface growth **in the five modules where
+  it is enabled** (§4.3); the other four are not gated and their surface is reviewed by hand.
 
 ## 13. Decisions resolved by this review
 

@@ -13,13 +13,13 @@ import kotlinx.coroutines.awaitCancellation
 
 private const val TAG = "Camera"
 
-class Camera {
+public class Camera {
     private var cameraControl: CameraControl? = null
     private var cameraInfo: CameraInfo? = null
 
     // ProcessCameraProvider 有很多设置项目，比如是否支持某个 CameraSelector，查询 CameraSelector 的信息等。
     // 如果要切换摄像头，需要重新调用 provider.bindToLifecycle
-    suspend fun bind(
+    public suspend fun bind(
         appContext: Context,
         lifecycleOwner: LifecycleOwner,
         useCases: List<UseCase>,

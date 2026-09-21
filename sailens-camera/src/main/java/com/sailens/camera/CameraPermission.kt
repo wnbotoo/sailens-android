@@ -9,8 +9,8 @@ import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
 import com.google.accompanist.permissions.shouldShowRationale
 
-object Permission {
-    const val CAMERA = Manifest.permission.CAMERA
+public object Permission {
+    public const val CAMERA: String = Manifest.permission.CAMERA
 }
 
 /**
@@ -21,18 +21,18 @@ object Permission {
  * would depend back on the design system and no application could reuse it without that UI.
  */
 @Stable
-interface CameraPermissionState {
-    val isGranted: Boolean
+public interface CameraPermissionState {
+    public val isGranted: Boolean
 
     /** True when the system says an explanation should precede the next request. */
-    val shouldShowRationale: Boolean
+    public val shouldShowRationale: Boolean
 
-    fun request()
+    public fun request()
 }
 
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
-fun rememberCameraPermissionState(): CameraPermissionState {
+public fun rememberCameraPermissionState(): CameraPermissionState {
     val permissionState = rememberPermissionState(permission = Permission.CAMERA)
     return remember(permissionState) {
         object : CameraPermissionState {

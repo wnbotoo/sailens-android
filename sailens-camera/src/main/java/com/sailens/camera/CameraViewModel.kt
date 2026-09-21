@@ -12,11 +12,12 @@ import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import java.util.concurrent.Executors
 
-class CameraViewModel(
+public class CameraViewModel(
     private val camera: Camera,
     private val imageFrameAnalyzer: ImageAnalysis.Analyzer,
     private val runtimeConfig: CameraRuntimeConfig = CameraRuntimeConfig(),
@@ -24,9 +25,9 @@ class CameraViewModel(
     private val executor = Executors.newSingleThreadExecutor()
 
     private val _surfaceRequest = MutableStateFlow<SurfaceRequest?>(null)
-    val surfaceRequest = _surfaceRequest.asStateFlow()
+    public val surfaceRequest: StateFlow<SurfaceRequest?> = _surfaceRequest.asStateFlow()
 
-    suspend fun bindToCamera(
+    public suspend fun bindToCamera(
         appContext: Context,
         lifecycleOwner: LifecycleOwner,
     ) {

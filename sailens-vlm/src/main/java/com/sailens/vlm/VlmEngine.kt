@@ -13,7 +13,7 @@ import kotlinx.coroutines.flow.Flow
  * The domain stays runtime-agnostic: the concrete engine (LiteRT-LM / MediaPipe LLM Inference) and
  * its accelerator (NPU/GPU/CPU) live in the data layer.
  */
-interface SceneDescriber {
+public interface SceneDescriber {
 
     /**
      * True when a runtime and a model bundle exist, so [initialize] has a chance of succeeding.
@@ -23,13 +23,13 @@ interface SceneDescriber {
      * megabytes. Asking [isReady] instead would mean either loading the VLM on every cold start or
      * offering an action that turns out to be dead.
      */
-    val isAvailable: Boolean
+    public val isAvailable: Boolean
 
     /** True once a model is loaded and [describe] can run. */
-    val isReady: Boolean
+    public val isReady: Boolean
 
     /** Loads the VLM. Throws if no model/runtime is available (caller decides if that is fatal). */
-    suspend fun initialize()
+    public suspend fun initialize()
 
     /**
      * Describes [request]'s frame, **streaming** the text as it is decoded.
@@ -45,32 +45,32 @@ interface SceneDescriber {
      * emits zero or more [SceneDescriptionChunk.Delta] followed by exactly one
      * [SceneDescriptionChunk.Completed], or fails.
      */
-    fun describe(request: SceneDescriptionRequest): Flow<SceneDescriptionChunk>
+    public fun describe(request: SceneDescriptionRequest): Flow<SceneDescriptionChunk>
 
     /** Releases the model and frees native resources. */
-    suspend fun release()
+    public suspend fun release()
 }
 
 /**
  * @param frame the image to describe.
  * @param userPrompt optional question ("是不是有台阶?"); when null the engine uses its system prompt.
  */
-data class SceneDescriptionRequest(
+public data class SceneDescriptionRequest(
     val frame: ImageFrame,
     val userPrompt: String? = null,
 )
 
 /** One step of a streaming description. */
-sealed interface SceneDescriptionChunk {
+public sealed interface SceneDescriptionChunk {
 
     /**
      * Text decoded since the previous chunk. Deltas are token-shaped, not sentence-shaped — a
      * consumer that speaks them must buffer to a clause boundary itself.
      */
-    data class Delta(val text: String) : SceneDescriptionChunk
+    public data class Delta(val text: String) : SceneDescriptionChunk
 
     /** Terminal chunk: the whole description plus timings. */
-    data class Completed(val description: SceneDescription) : SceneDescriptionChunk
+    public data class Completed(val description: SceneDescription) : SceneDescriptionChunk
 }
 
 /**
@@ -81,7 +81,7 @@ sealed interface SceneDescriptionChunk {
  *   This, not [latencyMs], is the number the product gate is about: it is how long the user stood
  *   there hearing nothing after asking. Tracked separately so it can be measured on device.
  */
-data class SceneDescription(
+public data class SceneDescription(
     val text: String,
     val backend: String,
     val latencyMs: Long,
