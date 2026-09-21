@@ -223,8 +223,8 @@ lifecycle。shell 提供 SailensRoot()、navigation entries 和 Koin modules 等
 继续保持零权重并支持 BYO model。reference host 可以合法地以零 available pipeline 启动，
 显示清晰的 zero-pipeline state。
 
-reference host 不是计划上架应用商店的产品。已确认的目标 identity 是 namespace
-`com.sailens`、applicationId `com.sailens.reference`。
+reference host 不是应用商店产品。它使用 namespace `com.sailens`、
+applicationId `com.sailens.reference`。
 
 **Sailens 官方 Android 发行版 —— `sailens-app`**
 
