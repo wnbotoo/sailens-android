@@ -7,11 +7,8 @@ import android.os.SystemClock
 import com.sailens.camera.FrameSource
 import com.sailens.guidance.model.scene.SceneEvent
 import com.sailens.guidance.model.scene.SceneResult
-import com.sailens.vlm.SceneDescriber
-import com.sailens.vlm.SceneDescriptionChunk
 import com.sailens.core.log.LogService
 import com.sailens.guidance.service.TraceService
-import com.sailens.describe.DescribeSceneUseCase
 import com.sailens.guidance.usecase.scene.StartSceneAnalysisUseCase
 import com.sailens.guidance.usecase.scene.StopSceneAnalysisUseCase
 import com.sailens.shell.diagnostics.GuidanceDiagnosticsStore
@@ -20,7 +17,9 @@ import com.sailens.shell.device.GuidanceHaptic
 import com.sailens.shell.device.HapticManager
 import com.sailens.shell.device.GuidanceAnnouncements
 import com.sailens.shell.device.SceneEventTextResolver
-import com.sailens.output.SpeechClauseBuffer
+import com.sailens.shell.device.ScreenReaderAnnouncer
+import com.sailens.shell.device.SharedEngineOwner
+import com.sailens.shell.describe.SceneDescriptionCoordinator
 import com.sailens.output.SpeechEngineState
 import com.sailens.output.SpeechManager
 import com.sailens.shell.device.toSceneEventText
@@ -62,8 +61,14 @@ class SceneAnalysisViewModel(
     private val frameSource: FrameSource,
     private val startSceneAnalysisUseCase: StartSceneAnalysisUseCase,
     private val stopSceneAnalysisUseCase: StopSceneAnalysisUseCase,
-    private val describeSceneUseCase: DescribeSceneUseCase,
-    private val sceneDescriber: SceneDescriber,
+    /**
+     * The shell-wide owner of scene description. Guidance preempts through it so the description
+     * it cancels is the one actually running, on whichever screen that is.
+     */
+    private val sceneDescriptionCoordinator: SceneDescriptionCoordinator,
+    /** The one route to the screen reader, delivered by the root collector whatever screen is on top. */
+    private val screenReaderAnnouncer: ScreenReaderAnnouncer,
+    sharedEngineOwner: SharedEngineOwner,
     private val hapticManager: HapticManager,
     private val speechManager: SpeechManager,
     private val logger: LogService,
@@ -94,7 +99,11 @@ class SceneAnalysisViewModel(
     private var analysisJob: Job? = null
     private var releaseJob: Job? = null
     private var overlayRenderJob: Job? = null
-    private val describeSession = SceneDescriptionSession()
+    /**
+     * This screen's claim on the shared speech engine. Released by closing it, never by releasing the
+     * engine directly: another screen may still be speaking through it.
+     */
+    private val engineLease = sharedEngineOwner.acquire()
     private val releaseScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var frameCount: Long = 0
     private var latestSceneResult: SceneResult? = null
@@ -107,9 +116,6 @@ class SceneAnalysisViewModel(
     private var isReleasingResources = false
 
     init {
-        // 只问"有没有模型"，不加载。VLM 权重比 sem/det 大一个量级，冷启动时加载会明显拖慢
-        // 进入引导的时间，而多数会话根本不会用到它——真正的加载推迟到用户第一次发问。
-        _uiState.update { it.copy(isSceneDescriptionAvailable = sceneDescriber.isAvailable) }
         speechManager.setSpeechRate(guidanceSettingsStore.settings.value.speechRate)
         if (guidanceSettingsStore.settings.value.speechEnabled) {
             initializeSpeech()
@@ -336,9 +342,9 @@ class SceneAnalysisViewModel(
         if (events.isEmpty()) return
         val primaryEvent = events.first()
 
-        // 导航要出声了，正在解码的场景描述必须先让路。必须在读 state 之前做：抢占会把
-        // isDescribingScene 清掉。
-        preemptSceneDescriptionForGuidance(primaryEvent.messageKey)
+        // 导航要出声了，正在解码的场景描述必须先让路——不管它在哪个屏幕上跑。协调器是整个
+        // shell 共用的那一个，所以这里取消的就是用户正在听的那一段描述。
+        sceneDescriptionCoordinator.preemptForGuidance(primaryEvent.messageKey)
 
         val state = _uiState.value
 
@@ -350,12 +356,10 @@ class SceneAnalysisViewModel(
 
         if (state.isSpeechEnabled) {
             // 两条播报通道互斥。屏幕阅读器在工作时由它来念——这样语速/音量/语言跟随用户
-            // 在 TalkBack 里的既有设置，也避免同一句被念两遍。
+            // 在 TalkBack 里的既有设置，也避免同一句被念两遍。走 shell 唯一的播报出口：
+            // 描述屏在最上面时，这个屏幕的界面根本没有被组合，自己收的话这句会被静默丢掉。
             if (state.isScreenReaderActive) {
-                val text = textResolver.resolve(primaryEvent.toSceneEventText())
-                viewModelScope.launch {
-                    _uiEffect.emit(SceneAnalysisUiEffect.Announce(text))
-                }
+                screenReaderAnnouncer.announce(textResolver.resolve(primaryEvent.toSceneEventText()))
             } else {
                 speechManager.speak(announcements.announcementFor(primaryEvent))
             }
@@ -379,7 +383,7 @@ class SceneAnalysisViewModel(
         _uiState.update { it.copy(wasInterrupted = true) }
 
         // 中断告知是这条链路上最该听见的一句，不能被半句场景描述盖住或接在后面。
-        preemptSceneDescriptionForGuidance("guidance interrupted")
+        sceneDescriptionCoordinator.preemptForGuidance("guidance interrupted")
 
         // 震动先行：它不依赖 TTS 引擎，是最后一道能穿透的通知手段。
         hapticManager.play(GuidanceHaptic.INTERRUPTED)
@@ -387,9 +391,7 @@ class SceneAnalysisViewModel(
         val state = _uiState.value
         if (!state.isSpeechEnabled) return
         if (state.isScreenReaderActive) {
-            viewModelScope.launch {
-                _uiEffect.emit(SceneAnalysisUiEffect.Announce(noticeText))
-            }
+            screenReaderAnnouncer.announce(noticeText)
         } else {
             speechManager.speakSystemNotice(noticeText)
         }
@@ -440,148 +442,7 @@ class SceneAnalysisViewModel(
 
         val text = textResolver.resolve(event.toSceneEventText())
         if (state.isScreenReaderActive) {
-            viewModelScope.launch {
-                _uiEffect.emit(SceneAnalysisUiEffect.Announce(text))
-            }
-        } else {
-            speechManager.speakSystemNotice(text)
-        }
-    }
-
-    /**
-     * 用户主动发问一次"我面前是什么"，由 VLM 回答。
-     *
-     * **目前没有任何调用方，这是刻意的。**没有可用的 VLM 之前不往屏幕上加入口：一个按下去
-     * 不会回答的按钮，对盲人用户就是一次徒劳的焦点停留，而"按了没反应"和"前方没东西"在他
-     * 那里是同一种体验。这条链路做到 ViewModel 为止，接 UI 等模型到位（届时入口应当由
-     * [SceneAnalysisUiState.isSceneDescriptionAvailable] 把关，见 [canDescribeScene]）。
-     *
-     * 与自动播报是两回事，几个刻意的区别：
-     * - **不过冷却。**冷却是为了防止自动播报刷屏；这一句是用户要来的。
-     * - **可以被导航提示打断。**子句走 [SpeechManager.speakSystemNotice]（QUEUE_ADD）排队，
-     *   而场景事件走 `speak()`（QUEUE_FLUSH）。所以描述念到一半撞上障碍告警时，告警会把剩下的
-     *   描述冲掉——这个优先级正是我们要的："别撞上"永远压过"那是什么"。
-     * - **边解码边念。**VLM 一次推理数秒，等整段出齐再开口就是数秒静默，而用户看不到进度。
-     *   [SpeechClauseBuffer] 把 token 流攒成子句，出一句念一句。
-     *
-     * @param failureNotice 失败时说出来的话，由调用方给出本地化文本（同
-     *   [onGuidanceInterrupted] 的约定：ViewModel 不碰资源）。用户已经主动发问，静默失败在他
-     *   那里和"前方什么都没有"是同一种体验，所以这条链路上的失败必须出声，不能只写日志。
-     */
-    fun describeScene(failureNotice: String) {
-        val state = _uiState.value
-        if (!state.canDescribeScene()) {
-            logger.debug(
-                TAG,
-                "Scene description request ignored",
-                mapOf(
-                    "available" to state.isSceneDescriptionAvailable,
-                    "inFlight" to state.isDescribingScene,
-                    "speechChannel" to state.hasSpeechOutputChannel(),
-                ),
-            )
-            return
-        }
-
-        describeSession.start(viewModelScope) { describeToken ->
-            _uiState.update { it.copy(isDescribingScene = true) }
-            // 读屏在工作时不逐句播：announceForAccessibility 会打断上一条未念完的公告，
-            // 流式喂给它只会得到一串互相截断的碎句。那条通道整段说完再交出去。
-            //
-            // 这里**刻意只读一次**，而不是每片都重新取：一次描述必须整段走同一条通道。生成中途
-            // 用户开关了 TalkBack 的话，半句走自带 TTS、半句走读屏，得到的是两个引擎念出来的
-            // 一句被劈开的话。下一次发问自然会用新通道。
-            val screenReaderActive = state.isScreenReaderActive
-            val clauseBuffer = SpeechClauseBuffer()
-            var spokeAnyClause = false
-            try {
-                describeSceneUseCase().collect { chunk ->
-                    // 被导航提示抢占后就闭嘴。取消是异步的：这一片可能已经解码出来、已经派发到
-                    // 主线程了，光靠 cancel() 拦不住它。见 [SceneDescriptionSession]。
-                    if (!describeSession.isCurrent(describeToken)) return@collect
-                    when (chunk) {
-                        is SceneDescriptionChunk.Delta -> {
-                            if (screenReaderActive) return@collect
-                            clauseBuffer.append(chunk.text)?.let { clause ->
-                                speechManager.speakSystemNotice(clause)
-                                spokeAnyClause = true
-                            }
-                        }
-
-                        is SceneDescriptionChunk.Completed -> {
-                            val description = chunk.description
-                            _uiState.update { it.copy(lastSceneDescription = description.text) }
-                            logger.info(
-                                TAG,
-                                "Scene description completed",
-                                mapOf(
-                                    "timeToFirstTokenMs" to description.timeToFirstTokenMs,
-                                    "latencyMs" to description.latencyMs,
-                                    "backend" to description.backend,
-                                    "streamed" to spokeAnyClause,
-                                ),
-                            )
-                            if (description.text.isBlank()) return@collect
-
-                            if (screenReaderActive) {
-                                _uiEffect.emit(SceneAnalysisUiEffect.Announce(description.text))
-                                return@collect
-                            }
-                            clauseBuffer.drain()?.let { tail ->
-                                speechManager.speakSystemNotice(tail)
-                                spokeAnyClause = true
-                            }
-                            // 一个 Delta 都没来过：runtime 不支持流式，整段文本只在这里出现一次。
-                            if (!spokeAnyClause) {
-                                speechManager.speakSystemNotice(description.text)
-                            }
-                        }
-                    }
-                }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                // 被抢占的那次不报失败：用户正在听避障告警，再压一句"描述失败"只是把最该听见的
-                // 那句盖掉，而这次描述本来就是我们主动放弃的。
-                if (describeSession.isCurrent(describeToken)) {
-                    logger.error(TAG, "Scene description failed", e)
-                    announceThroughSpeechChannel(failureNotice)
-                }
-            } finally {
-                // 已经被新的一次描述或抢占接管时不要回写状态，否则会把别人的 in-flight 标志清掉。
-                if (describeSession.isCurrent(describeToken)) {
-                    _uiState.update { it.copy(isDescribingScene = false) }
-                }
-            }
-        }
-    }
-
-    /**
-     * 导航要说话了，把正在解码的场景描述让出去。
-     *
-     * 优先级是这条链路上最硬的规则："别撞上"永远压过"那是什么"。单靠 TTS 的 QUEUE_FLUSH 不够：
-     * 它只冲掉已经排队的子句，VLM 还在往下解码，告警念完之后描述会从半句接着念，用户听到的是
-     * 一句没头没尾的景物描述跟在避障提示后面——而他看不到屏幕，分不清哪句是当前的。
-     *
-     * 顺序是刻意的：先取消（连带让后续子句失效），再清空已经排进 TTS 的队列，最后才由调用方
-     * 把告警说出去。
-     */
-    private fun preemptSceneDescriptionForGuidance(reason: String) {
-        if (!describeSession.cancel("preempted by guidance: $reason")) return
-
-        logger.info(TAG, "Scene description preempted by guidance", mapOf("reason" to reason))
-        // 描述已经排进 TTS 队列的子句要就地清掉。告警自己走 QUEUE_FLUSH 也会冲队列，但纯震动
-        // 模式下没有那一步，而队列里的旧子句照样会念出来。
-        speechManager.stop()
-        _uiState.update { it.copy(isDescribingScene = false) }
-    }
-
-    /**
-     * 把一句话送上当前生效的那条语音通道。两条通道互斥，见 [applyScreenReaderMode]。
-     */
-    private suspend fun announceThroughSpeechChannel(text: String) {
-        if (_uiState.value.isScreenReaderActive) {
-            _uiEffect.emit(SceneAnalysisUiEffect.Announce(text))
+            screenReaderAnnouncer.announce(text)
         } else {
             speechManager.speakSystemNotice(text)
         }
@@ -593,9 +454,6 @@ class SceneAnalysisViewModel(
         overlayRenderRequestId++
         overlayRenderJob?.cancel()
         overlayRenderJob = null
-        // 正在解码的描述跟着会话一起结束：用户已经停了引导，几秒后再冒出一句场景描述
-        // 只会让他以为辅助还在跑。
-        describeSession.cancel("guidance session stopped")
         latestSceneResult = null
         stopSceneAnalysisUseCase()
         speechManager.stop()
@@ -616,8 +474,6 @@ class SceneAnalysisViewModel(
                 frameDisplayHeight = null,
                 obstacleDetections = emptyList(),
                 latestSceneDebugInfo = null,
-                isDescribingScene = false,
-                lastSceneDescription = null,
             )
         }
     }
@@ -627,12 +483,12 @@ class SceneAnalysisViewModel(
         analysisJob = null
         overlayRenderJob?.cancel()
         overlayRenderJob = null
-        describeSession.cancel("view model cleared")
         stopSceneAnalysisUseCase()
-        speechManager.stop()
         hapticManager.cancel()
         releaseSceneAnalysisResources()
-        speechManager.release()
+        // The engine is shared with the Describe screen. Give back this screen's claim; the owner
+        // stops and releases it once nobody holds one, and not while another screen still speaks.
+        engineLease.close()
         super.onCleared()
     }
 
@@ -705,13 +561,9 @@ class SceneAnalysisViewModel(
                     }.onFailure { error ->
                         logger.error(TAG, "Error releasing scene analysis resources", error)
                     }
-                    // VLM 是懒加载的，多数会话根本没加载过——release() 那时是个空操作。
-                    // 但一旦加载过，它占的显存比 sem/det 都大，不能跟着进程一起漏到下一次。
-                    runCatching {
-                        sceneDescriber.release()
-                    }.onFailure { error ->
-                        logger.error(TAG, "Error releasing VLM", error)
-                    }
+                    // The scene-description model is not released here any more: it is shared with
+                    // the Describe screen, and SharedEngineOwner releases it when the last screen
+                    // that could use it is gone.
                 }
             } finally {
                 isReleasingResources = false

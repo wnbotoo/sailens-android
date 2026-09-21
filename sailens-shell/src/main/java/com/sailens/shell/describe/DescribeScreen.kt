@@ -14,12 +14,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -45,7 +43,7 @@ import org.koin.androidx.compose.koinViewModel
  * Accessibility notes that are requirements rather than polish:
  *
  * - the answer is a polite live region, so a screen-reader user hears it without hunting for it,
- *   **unless** the view model is already handing the text to the screen reader itself — announcing
+ *   **unless** the answer is already being handed to the screen reader directly — announcing
  *   the same sentence twice, overlapping, is worse than not announcing it;
  * - the camera view carries no semantics at all: a preview of a scene the user cannot see is not
  *   information, it is a focus stop that wastes their time;
@@ -59,17 +57,12 @@ fun DescribeScreen(
     onNavigateBack: (() -> Unit)? = null,
     viewModel: DescribeViewModel = koinViewModel(),
 ) {
-    val view = LocalView.current
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val failureNotice = stringResource(R.string.describe_failed)
 
-    LaunchedEffect(Unit) {
-        viewModel.uiEffect.collect { effect ->
-            when (effect) {
-                is DescribeUiEffect.Announce -> view.announceForAccessibility(effect.text)
-            }
-        }
-    }
+    // Screen-reader announcements are not collected here. They go through the shell's single
+    // ScreenReaderAnnouncer, whose collector lives at the root, so a navigation warning raised while
+    // this screen is on top still reaches TalkBack.
 
     // Leaving the screen must stop the decode. An answer that arrives after the user has walked
     // away describes somewhere they are no longer standing.
@@ -184,8 +177,8 @@ private fun DescribeAnswer(
             text = text,
             style = MaterialTheme.typography.headlineSmall,
             modifier = Modifier.semantics {
-                // The view model announces through the screen reader itself while one is running;
-                // a live region as well would speak every answer twice, overlapping.
+                // While a screen reader runs, the answer is announced to it directly (through the
+                // shell's ScreenReaderAnnouncer); a live region too would read it twice, overlapping.
                 if (!state.isScreenReaderActive) liveRegion = LiveRegionMode.Polite
             },
         )

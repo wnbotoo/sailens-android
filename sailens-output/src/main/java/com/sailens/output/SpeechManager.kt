@@ -69,6 +69,14 @@ public class SpeechManager(
     private var latestUtteranceId: String? = null
     private var nextSystemNoticeId = 0L
 
+    /**
+     * Everything handed to the engine and not finished yet, with who asked for it. The engine can
+     * only flush its whole queue, so this is what lets [withdraw] take back one owner's speech and
+     * hand everyone else's back.
+     */
+    private val ledger = UtteranceLedger()
+    private var nextResubmitId = 0L
+
     private var speechRate = DEFAULT_SPEECH_RATE
 
     private val _state = MutableStateFlow(SpeechEngineState.IDLE)
@@ -217,6 +225,9 @@ public class SpeechManager(
         latestUtteranceId = utteranceId
         val result = tts?.speak(text, queueMode, null, utteranceId) ?: TextToSpeech.ERROR
         if (result == TextToSpeech.ERROR) {
+            // A flush-mode request that failed may or may not have emptied the engine. Forget the
+            // queue rather than risk handing already-dropped speech back to it later.
+            ledger.clear()
             // speak() 直接失败时不会有任何 utterance 回调，必须就地归还焦点，
             // 否则别人的音频会一直被压着。
             releaseAudioFocus()
@@ -230,6 +241,14 @@ public class SpeechManager(
                 )
             )
         } else {
+            ledger.flushAndAdd(
+                UtteranceLedger.Entry(
+                    id = utteranceId,
+                    text = text,
+                    owner = null,
+                    expiresAtMs = announcement.expiresAtMs,
+                )
+            )
             logger.debug(
                 TAG,
                 "TTS speak requested",
@@ -246,8 +265,11 @@ public class SpeechManager(
      *
      * 与场景事件的区别：它没有时效，也不该被下一条场景提示打断——用户必须完整听到
      * "辅助已停止"，否则就会继续举着一个不工作的手机往前走。所以这里用 QUEUE_ADD。
+     *
+     * @param owner who is queueing this, so they can later [withdraw] it — and only it. Null
+     *   for speech that no caller may take back.
      */
-    public fun speakSystemNotice(text: String) {
+    public fun speakSystemNotice(text: String, owner: SpeechOwner? = null) {
         runOnMain {
             if (!_isReady) {
                 logger.warning(TAG, "Dropping system notice because TTS is not ready")
@@ -261,8 +283,68 @@ public class SpeechManager(
             if (result == TextToSpeech.ERROR) {
                 releaseAudioFocus()
                 logger.warning(TAG, "TTS system notice failed")
+            } else {
+                ledger.add(
+                    UtteranceLedger.Entry(id = utteranceId, text = text, owner = owner, expiresAtMs = null)
+                )
             }
         }
+    }
+
+    /**
+     * Takes back everything [owner] has queued or is speaking, and nothing anyone else queued.
+     *
+     * The engine can only flush its whole queue, so this flushes and then hands back, in their
+     * original order, the utterances that belonged to others — dropping any whose deadline has
+     * passed in the meantime, as [speak] would have. One consequence is deliberate: another
+     * owner's sentence that was mid-way through is restarted from its beginning rather than lost.
+     * Restarting a sentence costs a second; losing one the person needed to hear is the failure
+     * this module exists to prevent.
+     *
+     * A no-op when [owner] has nothing queued, so an owner that stops "just in case" cannot
+     * interrupt anyone.
+     */
+    public fun withdraw(owner: SpeechOwner) {
+        runOnMain {
+            if (!ledger.has(owner)) return@runOnMain
+
+            val survivors = ledger.withdraw(owner, System.currentTimeMillis())
+            if (_isReady) tts?.stop()
+            if (survivors.isEmpty()) {
+                // stop() does not promise a callback for every dropped utterance.
+                releaseAudioFocus()
+                return@runOnMain
+            }
+
+            logger.debug(
+                TAG,
+                "Re-queueing speech after withdrawing one owner",
+                mapOf("owner" to owner.name, "requeued" to survivors.size),
+            )
+            // Keep the audio focus we already hold: releasing it here would let other apps' audio
+            // swell for a moment between the flush and the hand-back.
+            survivors.forEach(::requeue)
+        }
+    }
+
+    /** Whether [owner] has anything queued or speaking right now. Safe from any thread. */
+    public fun hasQueued(owner: SpeechOwner): Boolean = ledger.has(owner)
+
+    /**
+     * Hands one utterance back to the engine under a fresh id. Reusing the old id would let the
+     * late stop callback of the flushed original release audio focus under the replacement.
+     */
+    private fun requeue(entry: UtteranceLedger.Entry) {
+        val utteranceId = "${entry.id}$REQUEUE_UTTERANCE_ID_SUFFIX${nextResubmitId++}"
+        requestAudioFocus()
+        latestUtteranceId = utteranceId
+        val result = tts?.speak(entry.text, TextToSpeech.QUEUE_ADD, null, utteranceId)
+            ?: TextToSpeech.ERROR
+        if (result == TextToSpeech.ERROR) {
+            logger.warning(TAG, "TTS re-queue failed", mapOf("utteranceId" to entry.id))
+            return
+        }
+        ledger.add(entry.copy(id = utteranceId))
     }
 
     private fun requestAudioFocus() {
@@ -308,6 +390,7 @@ public class SpeechManager(
     }
 
     private fun stopOnMain() {
+        ledger.clear()
         if (_isReady) {
             tts?.stop()
         } else {
@@ -628,6 +711,7 @@ public class SpeechManager(
      */
     private fun onUtteranceFinished(utteranceId: String?) {
         runOnMain {
+            ledger.finished(utteranceId)
             if (utteranceId != null && utteranceId != latestUtteranceId) return@runOnMain
             releaseAudioFocus()
         }
@@ -653,6 +737,7 @@ public class SpeechManager(
 
         private const val TAG = "SpeechManager"
         private const val SYSTEM_NOTICE_UTTERANCE_ID_PREFIX = "system_notice_"
+        private const val REQUEUE_UTTERANCE_ID_SUFFIX = "~requeued_"
         private const val INIT_TIMEOUT_MS = 5_000L
         private const val INITIAL_INIT_RETRY_DELAY_MS = 1_000L
         private const val MAX_INIT_RETRY_DELAY_MS = 30_000L

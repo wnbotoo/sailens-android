@@ -1,4 +1,4 @@
-package com.sailens.shell.guidance.screen
+package com.sailens.shell.describe
 
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CancellationException

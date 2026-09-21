@@ -6,6 +6,7 @@ import androidx.compose.material3.windowsizeclass.WindowSizeClass
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import com.sailens.shell.R
 import androidx.compose.ui.Modifier
@@ -18,6 +19,7 @@ import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
 import androidx.navigation3.ui.NavDisplay
 import com.sailens.shell.about.OssLicensesScreen
 import com.sailens.shell.describe.DescribeScreen
+import com.sailens.shell.device.ScreenReaderAnnouncer
 import com.sailens.shell.navigation.DescribeKey
 import com.sailens.shell.navigation.LiveKey
 import com.sailens.shell.navigation.OssLicensesKey
@@ -59,11 +61,24 @@ fun SailensRoot(
      */
     failFastOnConfigurationError: Boolean = false,
     configurationFailureSignal: ConfigurationFailureSignal? = null,
+    /**
+     * The one route to the screen reader. Its collector lives here, at the root, because this is
+     * the only composable that exists for as long as the app does: a per-screen collector drops
+     * every announcement raised while another screen is on top (architecture.md §6.6).
+     */
+    screenReaderAnnouncer: ScreenReaderAnnouncer? = null,
     modifier: Modifier = Modifier,
 ) {
     val capabilities = remember(spec) { PipelinePreflight.evaluate(spec) }
     val failure = remember(capabilities, spec) {
         capabilities.configurationFailure(spec.expectations)
+    }
+
+    val view = LocalView.current
+    if (screenReaderAnnouncer != null) {
+        LaunchedEffect(screenReaderAnnouncer, view) {
+            screenReaderAnnouncer.announcements.collect { text -> view.announceForAccessibility(text) }
+        }
     }
 
     SailensTheme {

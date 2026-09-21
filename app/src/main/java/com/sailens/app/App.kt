@@ -7,6 +7,7 @@ import androidx.compose.ui.platform.LocalContext
 import com.sailens.BuildConfig
 import com.sailens.shell.app.ConfigurationFailureSignal
 import com.sailens.shell.app.SailensRoot
+import com.sailens.shell.device.ScreenReaderAnnouncer
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
 
@@ -20,6 +21,7 @@ fun App(
     val context = LocalContext.current
     val sceneDescriber = koinInject<com.sailens.vlm.SceneDescriber>()
     val failureSignal = koinInject<ConfigurationFailureSignal>()
+    val screenReaderAnnouncer = koinInject<ScreenReaderAnnouncer>()
     val spec = remember(context, sceneDescriber) {
         sailensEditionSpec(context = context, sceneDescriber = sceneDescriber)
     }
@@ -31,5 +33,6 @@ fun App(
         // fatal state instead of crash-looping (architecture.md §5.2).
         failFastOnConfigurationError = BuildConfig.DEBUG,
         configurationFailureSignal = failureSignal,
+        screenReaderAnnouncer = screenReaderAnnouncer,
     )
 }

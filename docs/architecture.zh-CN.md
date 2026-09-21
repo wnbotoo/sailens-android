@@ -460,12 +460,29 @@ sailens-output 提供共享 output mechanism：
 
 抢占不等于冲一次语音队列。冲队列只清掉已经排进去的子句，VLM 还在往下解码，描述会接在告警
 后面继续念——用户听到的是一句没头没尾的景物描述跟在“前方有台阶”之后，而他看不到屏幕，
-分不清哪句是当前的。所以 shell 的 SceneDescriptionSession 在取消生成的同时**让它的 token
-失效**：已经解码并派发出去的那一片仍然会跑完，但它不能出声，也不能走读屏公告。取消经由
-VlmRuntime.shouldStop 传到 decode，让被放弃的那次生成及时把加速器交出来。
+分不清哪句是当前的。要停住“对的那一段”描述需要三件事，每件都由一个 shell 级的对象持有，
+而不是由某个屏幕持有：
 
-Screen-reader announcement 在 sailens-shell 里只有一个 collector，因为真实 Android View
-属于 presentation。
+- **整个 shell 只有一个 SceneDescriptionCoordinator。**它持有正在进行的那次描述：job、表示它
+  还能不能出声的 token、以及它排进去的语音。导航屏通过它抢占，描述屏通过它发起和取消，所以
+  Guidance 停掉的一定是真正在跑的那一段——不管它在哪个屏幕上。（上一版给每个屏幕各一个
+  session，告警取消的是导航屏那个空闲的 session，描述屏上的描述照样往下念。）抢占会取消生成、
+  让 token 失效（已经解码出来的片段不能再出声），并撤回 Describe 排进去的语音——包括已经解码
+  完、但还在念的那段尾巴。取消经由 VlmRuntime.shouldStop 传到 decode，及时把加速器交出来。
+- **语音归属是 sailens-output 里的机制。**每条语音可以带一个不透明的 SpeechOwner，
+  `withdraw(owner)` 只收回这个 owner 的语音、不动别人的：引擎只能整队清空，所以输出层清空后
+  按原顺序把其他人的语音交还回去。于是 Describe 只能取消 Describe 自己——关闭或取消一次描述，
+  不可能把恰好正在播的告警掐掉。优先级最高的 Guidance 仍然用 flush 说话。
+- **共享引擎比任何屏幕活得久。**语音引擎和描述模型由 SharedEngineOwner 在最后一个持有 lease
+  的屏幕放手时释放，而不是由某个屏幕在离开时释放；以前关掉描述屏会把 Guidance 还在用的语音
+  引擎释放掉。
+
+一次描述用它开始时的那条通道说话。如果中途通道变了——关掉了语音、打开了读屏——这次描述会被
+取消，而不是半句一个声音、半句另一个声音地念完。下一次请求使用新通道。
+
+读屏播报**只有一个收集者，在 shell 根部**：Android View 属于表现层，而根部是唯一一个与应用
+同寿命的 composable。所有屏幕都发布到共享的 ScreenReaderAnnouncer。按屏幕各自收集的话，另一个
+屏幕盖在上面时发出的播报会全部丢掉——以前在描述屏上发生的导航告警就是这样谁也收不到的。
 
 Guidance-specific haptic vocabulary 留在 shell 的 Guidance presentation package。
 SPEECH_UNAVAILABLE 可以继续作为共享 output-level signal，因为它描述的是输出通道本身，

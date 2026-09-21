@@ -1,4 +1,4 @@
-package com.sailens.shell.guidance.screen
+package com.sailens.shell.describe
 
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -7,7 +7,10 @@ import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicLong
 
 /**
- * The one in-flight scene description, and the rule that Guidance outranks it.
+ * The job and token of one scene description — the mechanism [SceneDescriptionCoordinator] uses to
+ * make "Guidance outranks Describe" hold. It is not shared on its own: there is exactly one
+ * coordinator, and this is private to it. Giving each screen its own session is the bug the
+ * coordinator exists to prevent.
  *
  * Cancelling a coroutine is not instant: a chunk already decoded and dispatched can still reach the
  * collector after `cancel()` returns, and a `flow { }` gives no guarantee that the body will be

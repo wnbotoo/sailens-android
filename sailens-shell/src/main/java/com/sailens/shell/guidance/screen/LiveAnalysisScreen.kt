@@ -100,17 +100,15 @@ fun LiveAnalysisScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val isLandscape = windowSizeClass.heightSizeClass == WindowHeightSizeClass.Compact
 
+    // 屏幕阅读器播报不在这里收：它走 ScreenReaderAnnouncer，由根部唯一的收集者念出来——描述屏
+    // 盖在上面时这个屏幕没有被组合，在这里收的话导航提示会被静默丢掉。用显式 announce 而不是给
+    // 状态卡片挂 liveRegion，是为了播报**简短的提示原文**，而不是卡片上那串带标签和补充说明的
+    // 完整描述——后者在行走时太长了。
     LaunchedEffect(Unit) {
         viewModel.uiEffect.collect { effect ->
             when (effect) {
                 is SceneAnalysisUiEffect.ShowToast ->
                     Toast.makeText(context, effect.message, Toast.LENGTH_SHORT).show()
-
-                // 屏幕阅读器模式下的唯一播报出口。用显式 announce 而不是给状态卡片挂
-                // liveRegion，是为了播报**简短的提示原文**，而不是卡片上那串带标签和补充说明的
-                // 完整描述——后者在行走时太长了。
-                is SceneAnalysisUiEffect.Announce ->
-                    view.announceForAccessibility(effect.text)
             }
         }
     }
@@ -479,7 +477,7 @@ private fun PrimaryStatusView(
 
     // 这里刻意**不挂 liveRegion**。挂上会让每条提示被念两遍：一遍走播报通道，一遍由
     // TalkBack 朗读变化的 live region，两者还不同步。自动播报统一由 ViewModel 决定走哪条通道
-    // （见 SceneAnalysisUiEffect.Announce）；contentDescription 保留，供用户手动浏览到这张卡片时朗读。
+    // （见 ScreenReaderAnnouncer）；contentDescription 保留，供用户手动浏览到这张卡片时朗读。
     //
     // 整张卡片可点击 = 重播上一条提示。选它当重播入口是因为它是屏幕上最大的一块区域
     // （portrait 下占满剩余空间），走路时不需要任何视觉定位就能戳中；同时挂了自定义无障碍

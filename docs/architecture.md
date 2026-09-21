@@ -486,14 +486,37 @@ results; the shell maps them onto output priorities.
 
 Preemption is more than flushing the speech queue. Flushing removes what is already queued, but the
 VLM keeps decoding, so the description resumes behind the alert and the person hears half a sentence
-about scenery arriving right after "step down ahead" with no way to tell which is current. The
-shell's SceneDescriptionSession therefore cancels the generation *and* invalidates its token, so a
-chunk already decoded and dispatched can still run but cannot speak or announce. Cancellation
-reaches the decode through VlmRuntime.shouldStop, which frees the accelerator instead of letting an
-abandoned generation hold it.
+about scenery arriving right after "step down ahead" with no way to tell which is current. Stopping
+the right description takes three things, and each is owned by one shell-wide object rather than by
+a screen:
 
-Screen-reader announcements have one collector in sailens-shell because the actual Android View
-belongs to presentation.
+- **One SceneDescriptionCoordinator for the whole shell.** It owns the description in flight: the
+  job, the token that says whether it may still speak, and the speech it has queued. The guidance
+  screen preempts through it, and the Describe screen starts and cancels through it, so the
+  description Guidance stops is the one actually running — whichever screen it is on. (An earlier
+  iteration gave each screen its own session; a warning then cancelled the guidance screen's idle
+  session while the Describe screen's description kept talking.) Preempting cancels the generation,
+  invalidates the token so a chunk already decoded cannot speak, and withdraws Describe's queued
+  speech, including the tail of an answer that finished decoding but is still being read out.
+  Cancellation reaches the decode through VlmRuntime.shouldStop, which frees the accelerator.
+- **Speech ownership is a mechanism in sailens-output.** Utterances can carry an opaque SpeechOwner,
+  and `withdraw(owner)` takes back that owner's speech and nothing else: the engine can only flush
+  its whole queue, so the output layer flushes and hands everyone else's utterances back in order.
+  Describe can therefore cancel only Describe — closing or cancelling a description cannot cut off a
+  warning that happens to be playing. Guidance, which outranks everything, still speaks with a flush.
+- **The shared engines outlive every screen.** The speech engine and the description model are
+  released by a SharedEngineOwner when the last screen holding a lease lets go, never by a screen on
+  its way out; closing Describe used to release the engine Guidance was still speaking through.
+
+A description speaks through the channel that was current when it started. If the channel changes
+mid-way — speech turned off, a screen reader turned on — the description is cancelled rather than
+finished half in one voice and half in another. The next request uses the new channel.
+
+Screen-reader announcements have exactly one collector, at the shell root, because the Android View
+belongs to presentation and the root is the only composable that exists for as long as the app
+does. Every screen publishes to the shared ScreenReaderAnnouncer. A per-screen collector drops every
+announcement raised while another screen is on top — which is how a navigation warning raised under
+the Describe screen used to reach no one.
 
 Guidance-specific haptic vocabulary stays in the shell's Guidance presentation package.
 SPEECH_UNAVAILABLE may remain a shared output-level signal because it describes the output channel,
