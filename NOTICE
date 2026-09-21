@@ -11,4 +11,4 @@ license. See docs/models.md.
 
 Third-party components distributed with builds of this software are listed in
 the app's open-source licenses screen (see
-presentation/src/main/java/com/sailens/presentation/about/OssLibrary.kt).
+sailens-shell/src/main/java/com/sailens/shell/about/OssLibrary.kt).

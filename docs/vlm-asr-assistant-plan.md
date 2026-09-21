@@ -234,7 +234,7 @@ Recommended for v1:
   current language and offline models.
 - Short utterances only, with a bounded recognition window — no always-on recording, no battery
   drain.
-- Keep every Android API detail in `:presentation/device/asr`; domain only ever sees text.
+- Keep every Android API detail in `sailens-shell` (a `device/asr` package); the pipeline modules only ever see text.
 
 Interface draft:
 
@@ -344,7 +344,7 @@ Acceptance:
 - Do not put VLM calls into the per-frame flow of `ProcessFrameUseCase` or
   `StartSceneAnalysisUseCase`.
 - Do not restructure the existing obstacle/semantic model config for the VLM's sake.
-- Do not make `:domain` depend on Android `SpeechRecognizer`, `MediaSession`, or `KeyEvent`.
+- Do not make `sailens-guidance` or `sailens-describe` depend on Android `SpeechRecognizer`, `MediaSession`, or `KeyEvent`.
 - Do not carry generated answer text on `SceneEvent`.
 - Do not stuff ASR, VLM, and TTS back into `SceneAnalysisViewModel`; it already owns realtime
   analysis UI, and the assistant should be its own controller/viewmodel.

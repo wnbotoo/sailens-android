@@ -10,7 +10,9 @@ package com.sailens.runtime
  * — nothing else needs to change, because shape, layout, dtype and quantization are all read back
  * from the TFLite metadata at load time. Every `.tflite` under `app/src/main/assets` is git-ignored,
  * so a local working copy can carry weights without them ever entering a commit. With no weights
- * present, loading fails at init and surfaces as a start-analysis error.
+ * present nothing is loaded at all: static preflight finds no model, and the edition decides what
+ * that means — a zero-pipeline screen when it promises nothing, a fatal configuration state when it
+ * declared the pipeline required (architecture.md §5.2).
  *
  * Vision models are expected to run on the GPU. Requesting NPU for any vision type is unsupported
  * here (throws) — the NPU is reserved for the future VLM path (see VlmModelConfig /

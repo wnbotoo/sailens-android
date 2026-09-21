@@ -59,7 +59,8 @@ android {
 
         // arm64-v8a covers every modern 64-bit Android SoC (Qualcomm, MediaTek Dimensity, Google
         // Tensor) — this is NOT a vendor restriction. It drops 32-bit-only and x86 (emulator/ChromeOS)
-        // to shrink the APK and native build time for the packaged native libs (OpenCV + sailens_ml).
+        // to shrink the APK and native build time for the packaged native libs (OpenCV plus
+        // libsailens_runtime / libsailens_vision / libsailens_guidance).
         ndk {
             abiFilters += "arm64-v8a"
         }

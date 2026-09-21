@@ -18,8 +18,8 @@
 本仓库**不带模型权重**。App 在运行时解析两个图：
 
 ```text
-data/src/main/assets/sem.tflite     # 语义可行走区域分割
-data/src/main/assets/det.tflite     # 障碍物检测
+app/src/main/assets/sem.tflite      # 语义可行走区域分割
+app/src/main/assets/det.tflite      # 障碍物检测
 ```
 
 两个路径都已被 gitignore，所以本地工作区可以放权重而不会进任何提交。
@@ -27,7 +27,10 @@ data/src/main/assets/det.tflite     # 障碍物检测
 丢进任何满足契约的 TFLite 图，管线就会用它——shape、layout、dtype、量化参数**都在加载时从模型
 metadata 自动读取**，所以**换模型通常不需要改代码**。
 
-没有权重时，模型加载在 init 阶段失败，并作为「开始分析失败」呈现给用户。
+没有权重时不会报错：preflight 发现没有模型，而这个版本没有承诺任何能力，所以应用会停在
+zero-pipeline 屏，并指向这里。声明了导航为必需的 edition（sailens-yolo）则把缺失或不匹配的模型
+当作配置失败——进入 fatal 屏，先震动，再把原因说出来。模型通过了 preflight、却在某台设备上起不来，
+属于运行时失败，显示可重试的「开始分析失败」。
 
 > **接模型前先读 [`docs/models.zh-CN.md`](docs/models.zh-CN.md)。** 契约不只是 shape：
 > **类别通道顺序只按_数量_校验，从不校验语义。** shape 正确但类别顺序不同的模型会毫无报错地运行，

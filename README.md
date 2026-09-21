@@ -30,7 +30,12 @@ Drop in any TFLite graph that satisfies the contract and the pipeline picks it u
 dtype, and quantization are all read back from the model's metadata at load time, so **swapping a
 model normally needs no code change**.
 
-With no weights present, model loading fails at init and surfaces as a start-analysis error.
+With no weights present, nothing fails: preflight finds no model and, since this build promises
+nothing, the app opens on a zero-pipeline screen that points here. An edition that declares
+navigation required (sailens-yolo) treats a missing or mismatched model as a configuration failure
+instead — a fatal screen, a haptic signal, and the reason spoken aloud. A model that passes preflight
+but cannot start on a particular device is a runtime failure and shows the retryable start-analysis
+error.
 
 > **Read [`docs/models.md`](docs/models.md) before bringing a model.** The contract is not just
 > shapes: class channel order is validated only by *count*, never by meaning. A model with the right

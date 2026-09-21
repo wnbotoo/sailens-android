@@ -6,7 +6,12 @@
 > that satisfies the contract below, put it at the agreed path, and it runs.
 > `app/src/main/assets/*.tflite` is git-ignored, so a working copy can carry weights without them
 > entering any commit.
-> With no weights present, model loading fails at init and surfaces as a start-analysis error.
+> With no weights present, nothing fails: preflight finds no model and, since this build promises
+> nothing, the app opens on a zero-pipeline screen that points here. An edition that declares
+> navigation required treats a missing or mismatched model as a configuration failure instead — a
+> fatal screen, a haptic signal and the reason spoken aloud (architecture.md §5.2). A model that
+> passes preflight but cannot start on a particular device is a runtime failure and shows the
+> retryable start-analysis error.
 
 Sailens splits the blind-navigation problem into two models:
 
