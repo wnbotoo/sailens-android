@@ -13,6 +13,18 @@
 
 发布前。管线、UI、运行时均已实现，端侧调优仍在进行。目标设备为骁龙 8 Gen 1 或更高级别的硬件。
 
+## 仓库定位
+
+本仓库是 **Sailens Android**：Apache-2.0、model-neutral 的 Android 平台与 reference host，
+负责实现可复用的 Sailens capability。它可以 build/install，用于开发和 BYO-model 验证，但
+**不是**计划提交应用商店的最终产品。
+
+官方维护的一方 Android 发行版位于独立仓库（当前为 `wnbotoo/sailens-yolo`，目标仓库名
+`sailens-app`），未来以产品名 **Sailens** 面向最终用户发布。已经确认的仓库/产品边界、
+目标 applicationId、release 模型以及暂不发布 Maven 的决策，见
+[`docs/distribution-model.zh-CN.md`](docs/distribution-model.zh-CN.md)。真正的 identity
+改动有意留到后续独立变更。
+
 ## 自备模型
 
 本仓库**不带模型权重**。App 在运行时解析两个图：
@@ -28,7 +40,7 @@ app/src/main/assets/det.tflite      # 障碍物检测
 metadata 自动读取**，所以**换模型通常不需要改代码**。
 
 没有权重时不会报错：preflight 发现没有模型，而这个版本没有承诺任何能力，所以应用会停在
-zero-pipeline 屏，并指向这里。声明了导航为必需的 edition（sailens-yolo）则把缺失或不匹配的模型
+zero-pipeline 屏，并指向这里。官方发行版声明导航为必需，因此会把缺失或不匹配的模型
 当作配置失败——进入 fatal 屏，先震动，再把原因说出来。模型通过了 preflight、却在某台设备上起不来，
 属于运行时失败，显示可重试的「开始分析失败」。
 
@@ -93,6 +105,7 @@ zero-pipeline 屏，并指向这里。声明了导航为必需的 edition（sail
 | | | |
 |---|---|---|
 | [`docs/architecture.zh-CN.md`](docs/architecture.zh-CN.md) | [English](docs/architecture.md) | Sailens 模块结构：模块边界、seam、迁移计划与验收 |
+| [`docs/distribution-model.zh-CN.md`](docs/distribution-model.zh-CN.md) | [English](docs/distribution-model.md) | 平台与官方发行版：职责、identity、源码消费方式、release/version 策略 |
 | [`docs/models.zh-CN.md`](docs/models.zh-CN.md) | [English](docs/models.md) | 模型契约、backend 配置、性能红线 |
 | [`docs/perception-profiles.zh-CN.md`](docs/perception-profiles.zh-CN.md) | [English](docs/perception-profiles.md) | 感知挡位、调度、tracker TTL |
 | [`docs/npu-litert-qnn.zh-CN.md`](docs/npu-litert-qnn.zh-CN.md) | [English](docs/npu-litert-qnn.md) | 高通 NPU 接线、交付、诊断 |
