@@ -312,7 +312,7 @@ where the evidence stops: channel *order* is not machine-verifiable without labe
 manual release gate (§6.2).
 
 Application expectations are edition-level validation, not a framework restriction. For example,
-sailens-yolo may declare Guidance required. If its packaged semantic model is missing, its declared
+the official Sailens distribution may declare Guidance required. If its packaged semantic model is missing, its declared
 taxonomy is incompatible, or another **static configuration** contract fails, that is an edition
 configuration failure even though Sailens itself supports a zero-pipeline state.
 
