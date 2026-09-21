@@ -2,6 +2,11 @@ package com.sailens.camera
 
 import com.sailens.core.frame.ImageFrame
 import com.sailens.core.frame.ImagePixelFormat
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -14,6 +19,8 @@ import org.junit.Test
  */
 class LatestFrameHolderTest {
 
+    // Read from the waiter's thread as well as the test thread.
+    @Volatile
     private var now = 1_000L
     private val holder = LatestFrameHolder { now }
 
@@ -75,6 +82,31 @@ class LatestFrameHolderTest {
         holder.record(frame(sequenceNumber = 1))
 
         assertNull(holder.currentFrame(maxAgeMs = -1))
+    }
+
+    @Test
+    fun `awaiting returns immediately when the held frame already satisfies the bound`() = runBlocking {
+        holder.record(frame(sequenceNumber = 4))
+        now += 100
+
+        assertEquals(4L, holder.awaitFrame(maxAgeMs = 500).sequenceNumber)
+    }
+
+    @Test
+    fun `awaiting a frame that does not exist yet waits for the next one`() = runBlocking {
+        val awaited = async(Dispatchers.Default) { holder.awaitFrame(maxAgeMs = 500) }
+
+        holder.record(frame(sequenceNumber = 2))
+
+        assertEquals(2L, withTimeout(2_000) { awaited.await() }.sequenceNumber)
+    }
+
+    @Test
+    fun `awaiting keeps waiting while every frame is already too old`() = runBlocking {
+        holder.record(frame(sequenceNumber = 1))
+        now += 5_000
+
+        assertNull(withTimeoutOrNull(100) { holder.awaitFrame(maxAgeMs = 500) })
     }
 
     private fun frame(sequenceNumber: Long) = ImageFrame(

@@ -31,7 +31,7 @@ pipeline that turns the scene ahead into speech and haptics. This file is the re
 - Capability model (§5.2): *configured* (a null spec), *expected* (`CapabilityExpectations`), *available* (`PipelinePreflight`, cheap and static — it must never load a model), *runtime state*. Zero pipelines is legal; A ships no weights and lands there.
 
 ## Runtime flow to preserve
-- `ImageAnalysis` outputs `YUV_420_888` frames -> `ImageFrameAnalyzer` -> `FrameSource.frames` (`SharedFlow<ImageFrame>`, `DROP_OLDEST`). The analyzer also records the latest frame for `FrameSnapshotProvider`, but only while something collects the stream.
+- `ImageAnalysis` outputs `YUV_420_888` frames -> `ImageFrameAnalyzer` -> `FrameSource.frames` (`SharedFlow<ImageFrame>`, `DROP_OLDEST`). The analyzer converts a frame only on demand, and demand is either a stream subscriber or an open `FrameLease`, so `FrameSnapshotProvider` works with Guidance stopped.
 - `StartSceneAnalysisUseCase` initializes `PerceptionRepository`; in `DEFAULT` profile it also initializes the realtime obstacle (detection) provider.
 - `StartSceneAnalysisUseCase` starts a trace session, maps each frame to `PerceptionResult`, `SceneResult`, and `FrameTrace`, then records runtime backend fields.
 - `ProcessFrameUseCase` runs semantic segmentation, can reuse cached semantic analysis between scheduled runs, then runs obstacle detection extraction/tracking (det only; no instance-segmentation refinement).

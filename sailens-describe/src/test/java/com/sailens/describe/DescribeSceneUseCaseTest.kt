@@ -1,5 +1,6 @@
 package com.sailens.describe
 
+import com.sailens.camera.FrameLease
 import com.sailens.camera.FrameSnapshotProvider
 import com.sailens.core.frame.ImageFrame
 import com.sailens.core.frame.ImagePixelFormat
@@ -86,6 +87,40 @@ class DescribeSceneUseCaseTest {
         assertEquals(1, describer.initializeCount)
     }
 
+    @Test
+    fun `asks for demand instead of assuming Guidance already converted a frame`() = runBlocking {
+        // availableOnlyWithDemand: currentFrame() answers null, exactly as the analyzer does when
+        // nothing is collecting the stream. Describe must still get its frame.
+        val snapshots = FrameSnapshots(frame(sequenceNumber = 3), availableOnlyWithDemand = true)
+        val describer = FakeSceneDescriber(ready = true)
+        val useCase = DescribeSceneUseCase(
+            sceneDescriber = describer,
+            frameSnapshots = snapshots,
+            logService = SilentLog,
+        )
+
+        useCase().toList()
+
+        assertEquals(3L, describer.requestedFrame?.sequenceNumber)
+        assertEquals("the request must open demand", 1, snapshots.openedLeases)
+        assertEquals("and release it again", 1, snapshots.closedLeases)
+    }
+
+    @Test
+    fun `bounds how long it waits for the camera`() = runBlocking {
+        val snapshots = FrameSnapshots(frame(sequenceNumber = 1))
+        val useCase = DescribeSceneUseCase(
+            sceneDescriber = FakeSceneDescriber(ready = true),
+            frameSnapshots = snapshots,
+            logService = SilentLog,
+        )
+
+        useCase(maxFrameAgeMs = 250, snapshotTimeoutMs = 400).toList()
+
+        assertEquals(250L, snapshots.requestedMaxAgeMs)
+        assertEquals(400L, snapshots.requestedTimeoutMs)
+    }
+
     private fun frame(sequenceNumber: Long) = ImageFrame(
         width = 4,
         height = 4,
@@ -96,12 +131,38 @@ class DescribeSceneUseCaseTest {
         sequenceNumber = sequenceNumber,
     )
 
-    private class FrameSnapshots(private val frame: ImageFrame?) : FrameSnapshotProvider {
+    /**
+     * Mirrors the real analyzer's two-part contract: [currentFrame] answers from what has already
+     * been converted, and [awaitCurrentFrame] is the one that opens demand so a frame exists at
+     * all. A Describe that called the first would work only while Guidance happened to be running.
+     */
+    private class FrameSnapshots(
+        private val frame: ImageFrame?,
+        private val availableOnlyWithDemand: Boolean = true,
+    ) : FrameSnapshotProvider {
         var requestedMaxAgeMs: Long? = null
+        var requestedTimeoutMs: Long? = null
+        var openedLeases = 0
+        var closedLeases = 0
 
         override fun currentFrame(maxAgeMs: Long): ImageFrame? {
             requestedMaxAgeMs = maxAgeMs
-            return frame
+            return if (availableOnlyWithDemand) null else frame
+        }
+
+        override suspend fun awaitCurrentFrame(maxAgeMs: Long, timeoutMs: Long): ImageFrame? {
+            requestedMaxAgeMs = maxAgeMs
+            requestedTimeoutMs = timeoutMs
+            return openSnapshotLease().use { frame }
+        }
+
+        override fun openSnapshotLease(): FrameLease {
+            openedLeases++
+            return object : FrameLease {
+                override fun close() {
+                    closedLeases++
+                }
+            }
         }
     }
 

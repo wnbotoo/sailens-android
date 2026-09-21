@@ -27,6 +27,7 @@ class DescribeSceneUseCase(
 
     /**
      * @param maxFrameAgeMs 快照的新鲜度上限；超过就当作没有画面。
+     * @param snapshotTimeoutMs 等相机出一张够新的帧最多等多久；等不到就报错而不是继续等。
      * @param userPrompt 用户的具体问题；为 null 时用引擎的系统提示词（"描述正前方最重要的东西"）。
      * @return 流式的描述分片；集合被取消即中止生成。失败以异常形式抛给调用方，由它决定怎么告知
      *   用户——**这条链路上的失败必须被说出来或震出来，不能只写日志**：用户已经主动发问，
@@ -35,6 +36,7 @@ class DescribeSceneUseCase(
     operator fun invoke(
         userPrompt: String? = null,
         maxFrameAgeMs: Long = DEFAULT_MAX_FRAME_AGE_MS,
+        snapshotTimeoutMs: Long = FrameSnapshotProvider.DEFAULT_SNAPSHOT_TIMEOUT_MS,
     ): Flow<SceneDescriptionChunk> = flow {
         if (!sceneDescriber.isReady) {
             // 首次调用才加载模型：VLM 权重比 sem/det 大得多，进程启动时就加载会拖慢冷启动，
@@ -45,9 +47,16 @@ class DescribeSceneUseCase(
 
         // 只取当前这一帧，并且只接受足够新的那一张（architecture.md §6.1）。描述一张几秒前的
         // 画面比不回答更糟：用户看不见画面已经过期，会拿旧信息当成眼前的现实。
-        // 拿不到就立刻失败，而不是挂在那里等下一帧——用户按了按钮，沉默是最坏的回答。
-        val frame = frameSnapshots.currentFrame(maxFrameAgeMs)
-            ?: error("No camera frame newer than ${maxFrameAgeMs}ms is available")
+        //
+        // awaitCurrentFrame 会自己开一张 frame lease：相机一直在出帧，但只有有人要的时候才做
+        // 转换，所以导航停着的时候这里必须先把需求声明出来，否则永远拿不到帧。等不到就立刻
+        // 失败，而不是挂在那里——用户按了按钮，沉默是最坏的回答。
+        val frame = frameSnapshots.awaitCurrentFrame(
+            maxAgeMs = maxFrameAgeMs,
+            timeoutMs = snapshotTimeoutMs,
+        ) ?: error(
+            "No camera frame newer than ${maxFrameAgeMs}ms arrived within ${snapshotTimeoutMs}ms"
+        )
 
         emitAll(sceneDescriber.describe(SceneDescriptionRequest(frame, userPrompt)))
     }

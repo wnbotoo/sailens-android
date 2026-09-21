@@ -317,13 +317,23 @@ interface FrameSource {
 
 interface FrameSnapshotProvider {
     fun currentFrame(maxAgeMs: Long): ImageFrame?
+    suspend fun awaitCurrentFrame(maxAgeMs: Long, timeoutMs: Long): ImageFrame?
+    fun openSnapshotLease(): FrameLease
 }
 ~~~
 
-Both can be backed by the same camera session.
+Both are backed by the same camera session, and **demand is explicit**. Turning a camera image into
+an ImageFrame copies every plane, so it happens only when something has asked for one — but asking
+is not the same as running Guidance. A stream subscription and a snapshot lease are each sufficient
+on their own. That is what lets Describe answer while Guidance is stopped, without capture
+converting frames nobody reads.
 
 Describe rejects a stale snapshot. It must never silently describe a frame from several seconds ago.
 This preserves the intent already documented in the VLM/ASR assistant plan.
+
+A snapshot request is also bounded in time. It opens demand, waits for a frame that satisfies the
+freshness bound, and gives up rather than waiting indefinitely: a person who pressed a button is
+owed an answer, and "I could not see" is a better answer than silence.
 
 Describe remains independent of CameraX: another source can implement FrameSnapshotProvider later.
 

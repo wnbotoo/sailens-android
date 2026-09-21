@@ -13,6 +13,9 @@ import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.withTimeoutOrNull
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 
 class ImageFrameAnalyzer(
@@ -22,7 +25,8 @@ class ImageFrameAnalyzer(
     private var nextSequenceNumber = 0L
     private val emittedFrames = AtomicLong(0L)
     private val droppedFrames = AtomicLong(0L)
-    private val skippedFramesWithoutSubscribers = AtomicLong(0L)
+    private val skippedFramesWithoutDemand = AtomicLong(0L)
+    private val snapshotLeases = AtomicInteger(0)
     private val latestFrame = LatestFrameHolder(elapsedRealtimeMs)
 
     private val _frames = MutableSharedFlow<ImageFrame>(
@@ -34,13 +38,21 @@ class ImageFrameAnalyzer(
         get() = ImageFrameAnalyzerStats(
             emittedFrames = emittedFrames.get(),
             droppedFrames = droppedFrames.get(),
-            skippedFramesWithoutSubscribers = skippedFramesWithoutSubscribers.get(),
+            skippedFramesWithoutDemand = skippedFramesWithoutDemand.get(),
+            openSnapshotLeases = snapshotLeases.get(),
         )
 
+    /**
+     * Converting a frame copies every plane, so it only happens when somebody has said they want
+     * one. The two kinds of demand are independent on purpose (architecture.md §6.1): Guidance
+     * collecting [frames], and a snapshot lease. Either alone keeps conversion running, which is
+     * what lets Describe work while Guidance is stopped.
+     */
     override fun analyze(image: ImageProxy) {
         image.use { proxy ->
-            if (_frames.subscriptionCount.value == 0) {
-                skippedFramesWithoutSubscribers.incrementAndGet()
+            val streamSubscribers = _frames.subscriptionCount.value
+            if (streamSubscribers == 0 && snapshotLeases.get() == 0) {
+                skippedFramesWithoutDemand.incrementAndGet()
                 return
             }
             val frame = frameConverter.convert(
@@ -48,6 +60,11 @@ class ImageFrameAnalyzer(
                 sequenceNumber = nextSequenceNumber++,
             )
             latestFrame.record(frame)
+            if (streamSubscribers == 0) {
+                // Converted for a snapshot lease only. Nothing is collecting, so there is no
+                // emission to count either way.
+                return
+            }
             if (_frames.tryEmit(frame)) {
                 emittedFrames.incrementAndGet()
             } else {
@@ -57,17 +74,40 @@ class ImageFrameAnalyzer(
     }
 
     /**
-     * The snapshot is the last frame this analyzer converted, which only happens while something
-     * collects [frames] -- see the gap noted on [FrameSnapshotProvider]. A dropped frame still
-     * counts: it was current, it just lost the race into the buffer.
+     * The snapshot is the last frame this analyzer converted. A dropped frame still counts: it was
+     * current, it just lost the race into the stream buffer.
      */
     override fun currentFrame(maxAgeMs: Long): ImageFrame? = latestFrame.currentFrame(maxAgeMs)
+
+    override suspend fun awaitCurrentFrame(maxAgeMs: Long, timeoutMs: Long): ImageFrame? {
+        if (timeoutMs < 0) return null
+        return openSnapshotLease().use {
+            withTimeoutOrNull(timeoutMs) { latestFrame.awaitFrame(maxAgeMs) }
+        }
+    }
+
+    override fun openSnapshotLease(): FrameLease {
+        snapshotLeases.incrementAndGet()
+        return SnapshotLease()
+    }
+
+    private inner class SnapshotLease : FrameLease {
+        private val closed = AtomicBoolean(false)
+
+        override fun close() {
+            if (closed.compareAndSet(false, true)) {
+                snapshotLeases.decrementAndGet()
+            }
+        }
+    }
 }
 
 data class ImageFrameAnalyzerStats(
     val emittedFrames: Long,
     val droppedFrames: Long,
-    val skippedFramesWithoutSubscribers: Long,
+    /** Frames the camera delivered while nothing wanted one, so they were never converted. */
+    val skippedFramesWithoutDemand: Long,
+    val openSnapshotLeases: Int,
 )
 
 interface ImageFrameConverter {

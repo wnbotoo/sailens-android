@@ -302,13 +302,21 @@ interface FrameSource {
 
 interface FrameSnapshotProvider {
     fun currentFrame(maxAgeMs: Long): ImageFrame?
+    suspend fun awaitCurrentFrame(maxAgeMs: Long, timeoutMs: Long): ImageFrame?
+    fun openSnapshotLease(): FrameLease
 }
 ~~~
 
-二者可以由同一个 camera session 实现。
+二者由同一个 camera session 实现，而且 **demand 是显式的**。把相机图像转成 ImageFrame 要复制
+每个 plane，所以只有有人要的时候才转——但“有人要”不等于“Guidance 在跑”。stream 订阅和
+snapshot lease 各自都足以构成需求。这正是 Describe 能在导航停着时回答问题、同时又不会
+让相机白转没人读的帧的原因。
 
 Describe 必须拒绝过旧 snapshot，绝不能静默描述几秒前的旧画面。这与已有 VLM/ASR
 assistant plan 的安全意图保持一致。
+
+snapshot 请求同样有时间上限：它开出需求、等一张满足新鲜度的帧，等不到就放弃而不是一直挂着
+——用户已经按下按钮，"我看不到"也比沉默好。
 
 Describe 仍然不依赖 CameraX；未来其他 source 只需要实现 FrameSnapshotProvider。
 
