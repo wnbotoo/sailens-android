@@ -2,8 +2,10 @@
 
 # Sailens repository and distribution model
 
-> Status: **implemented positioning.** Sailens Android uses the reference-host identity described
-> here, and the first-party distribution uses the Sailens product identity.
+> Status: **Android product identity implemented; GitHub repository rename pending.** Sailens
+> Android uses the reference-host identity described here, and the first-party distribution uses
+> the Sailens product identity in code. The distribution repository is renamed in place only after
+> final validation.
 
 ## 1. Decision
 
@@ -148,7 +150,8 @@ separately. That does not change the platform licence automatically.
 
 - keep the existing fresh-root repository history; do **not** delete and recreate it merely for the
   rename;
-- the repository was renamed in place to `sailens-app`; the existing fresh-root history was preserved;
+- rename the current distribution repository in place to `sailens-app` after final validation;
+  preserve the existing fresh-root history and do not recreate the repository;
 - each product release pins an exact Sailens Android `main` commit;
 - release metadata should also record the bundled model versions/hashes and provenance.
 
