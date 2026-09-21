@@ -2,9 +2,8 @@
 
 # Sailens 仓库与发行模型
 
-> 状态：**目标定位已确认。**本文先记录产品与仓库决策，真正的 identity 改动放到后续独立变更中。
-> 因此当前代码仍可能使用旧的 applicationId，下游仓库也仍可能叫 `sailens-yolo`；这不是本文档
-> 未生效，而是有意把“决策”与“实施”拆开。
+> 状态：**定位已实施。**Sailens Android 使用本文定义的 reference-host identity；一方官方
+> 发行版使用 Sailens 产品 identity。
 
 ## 1. 决策
 
@@ -19,8 +18,7 @@ Sailens 有一个 Android 平台，以及一个官方维护的 Android 发行版
 - 所有可复用 capability、安全行为、runtime abstraction、共享 UI 的归属地；
 - 可以 build/install，用于开发和 BYO-model 验证，但**不是 Sailens 计划提交应用商店的最终产品**。
 
-**Sailens 官方 Android 发行版 —— 当前 `wnbotoo/sailens-yolo`，目标
-`wnbotoo/sailens-app`**
+**Sailens 官方 Android 发行版 —— `wnbotoo/sailens-app`**
 
 - Sailens 官方维护、面向最终用户的一方应用；
 - 未来以产品名 **Sailens** 上架；
@@ -44,7 +42,7 @@ Sailens 有一个 Android 平台，以及一个官方维护的 Android 发行版
 | 角色 | 仓库 | 产品/仓库名称 | Android namespace | applicationId | 商店产品 |
 |---|---|---|---|---|---|
 | 平台 + reference host | `sailens-android` | Sailens Android | `com.sailens` | `com.sailens.reference` | 否 |
-| 官方发行版 | `sailens-app`（当前 `sailens-yolo`） | Sailens | `com.sailens` | `com.sailens` | 是 |
+| 官方发行版 | `sailens-app` | Sailens | `com.sailens` | `com.sailens` | 是 |
 
 两个仓库的 Kotlin/Android namespace 都继续使用 `com.sailens`。namespace 与
 `applicationId` 解决的是不同问题；产品 identity 调整**不需要**做 package move。
@@ -156,28 +154,24 @@ Sailens v1.x.y
 └── official product configuration
 ```
 
-## 7. 后续 identity migration
-
-先合入本文档，之后用独立变更真正实施。
+## 7. 已实施 identity
 
 ### `sailens-android`
 
-- 仓库名继续是 `sailens-android`；
-- namespace 继续是 `com.sailens`；
-- reference host 的 `applicationId` 从 `com.sailens` 改为
-  `com.sailens.reference`；
-- 必要时同步 reference-host identity/about 文案。
+- 仓库：`sailens-android`；
+- namespace：`com.sailens`；
+- reference-host applicationId：`com.sailens.reference`；
+- launcher identity：**Sailens Reference**。
 
 ### 官方发行版
 
-- 仓库 `sailens-yolo` rename 为 `sailens-app`；
-- namespace 继续是 `com.sailens`；
-- `applicationId` 从 `com.sailens.yolo` 改为 `com.sailens`；
-- 对最终用户的产品名改为 **Sailens**；
-- 更新 source URL、identity test、release/store metadata；
-- 把 “YOLO Edition” 从产品 branding 中移走，只保留在 model provenance/licence 文档。
+- 仓库：`sailens-app`；
+- namespace：`com.sailens`；
+- applicationId：`com.sailens`；
+- 产品名：**Sailens**；
+- “YOLO” 只存在于 model provenance/licence 文档，不再属于产品 branding。
 
-这次 migration **不需要**改变 9-module architecture、package 名、composite build 机制或 capability
+这套 identity **不改变** 9-module architecture、package 名、composite build 机制或 capability
 model。
 
 ## 8. 本次定位调整的非目标
