@@ -30,7 +30,7 @@ application-level contract。
 
 代码围绕这两条 pipeline 和它们共享的 Sailens 基础能力组织。官方维护的一方 Android
 发行版是本仓库之上的薄应用，通过 git submodule 精确 pin，并用 Gradle composite build
-消费。当前仓库名仍是 `sailens-yolo`，已确认的目标名是 `sailens-app`。产品命名与仓库职责
+消费。官方发行仓库为 `sailens-app`。产品命名与仓库职责
 见 [distribution-model.zh-CN.md](distribution-model.zh-CN.md)。
 
 ## 2. 目标与非目标
@@ -226,9 +226,9 @@ lifecycle。shell 提供 SailensRoot()、navigation entries 和 Koin modules 等
 reference host 不是计划上架应用商店的产品。已确认的目标 identity 是 namespace
 `com.sailens`、applicationId `com.sailens.reference`。
 
-**Sailens 官方 Android 发行版 —— 当前仓库 `sailens-yolo`，目标 `sailens-app`**
+**Sailens 官方 Android 发行版 —— `sailens-app`**
 
-面向最终用户的一方官方产品是 Sailens Android 之上的薄应用。它把本仓库作为 git submodule
+面向最终用户的一方官方产品 **Sailens** 是 Sailens Android 之上的薄应用。它把本仓库作为 git submodule
 精确 pin，并通过 composite build 消费 `sailens-*` libraries。它负责官方 model bundle、
 产品 identity、capability expectation、release 配置和 distribution-specific notice。
 
@@ -560,7 +560,7 @@ capability spec、diagnostics flags 和 OSS metadata。
 
 ## 7. 开发方式：composite build，不上 Maven
 
-官方发行版（当前 `sailens-yolo`，目标 `sailens-app`）把 Sailens Android 作为 git
+官方 `sailens-app` 发行版把 Sailens Android 作为 git
 submodule pin 到具体 commit，并通过 Gradle composite build 引入。
 
 ~~~kotlin
