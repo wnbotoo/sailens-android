@@ -94,7 +94,7 @@ class SceneAnalysisViewModel(
     private var analysisJob: Job? = null
     private var releaseJob: Job? = null
     private var overlayRenderJob: Job? = null
-    private var describeJob: Job? = null
+    private val describeSession = SceneDescriptionSession()
     private val releaseScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var frameCount: Long = 0
     private var latestSceneResult: SceneResult? = null
@@ -335,6 +335,11 @@ class SceneAnalysisViewModel(
     private fun onSceneEvents(events: List<SceneEvent>) {
         if (events.isEmpty()) return
         val primaryEvent = events.first()
+
+        // 导航要出声了，正在解码的场景描述必须先让路。必须在读 state 之前做：抢占会把
+        // isDescribingScene 清掉。
+        preemptSceneDescriptionForGuidance(primaryEvent.messageKey)
+
         val state = _uiState.value
 
         logger.debug(TAG, "Scene events generated, ${primaryEvent.messageKey}", mapOf("count" to events.size))
@@ -372,6 +377,9 @@ class SceneAnalysisViewModel(
 
         logger.warning(TAG, "Guidance interrupted while running")
         _uiState.update { it.copy(wasInterrupted = true) }
+
+        // 中断告知是这条链路上最该听见的一句，不能被半句场景描述盖住或接在后面。
+        preemptSceneDescriptionForGuidance("guidance interrupted")
 
         // 震动先行：它不依赖 TTS 引擎，是最后一道能穿透的通知手段。
         hapticManager.play(GuidanceHaptic.INTERRUPTED)
@@ -475,8 +483,7 @@ class SceneAnalysisViewModel(
             return
         }
 
-        describeJob?.cancel()
-        describeJob = viewModelScope.launch {
+        describeSession.start(viewModelScope) { describeToken ->
             _uiState.update { it.copy(isDescribingScene = true) }
             // 读屏在工作时不逐句播：announceForAccessibility 会打断上一条未念完的公告，
             // 流式喂给它只会得到一串互相截断的碎句。那条通道整段说完再交出去。
@@ -489,6 +496,9 @@ class SceneAnalysisViewModel(
             var spokeAnyClause = false
             try {
                 describeSceneUseCase().collect { chunk ->
+                    // 被导航提示抢占后就闭嘴。取消是异步的：这一片可能已经解码出来、已经派发到
+                    // 主线程了，光靠 cancel() 拦不住它。见 [SceneDescriptionSession]。
+                    if (!describeSession.isCurrent(describeToken)) return@collect
                     when (chunk) {
                         is SceneDescriptionChunk.Delta -> {
                             if (screenReaderActive) return@collect
@@ -531,12 +541,39 @@ class SceneAnalysisViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                logger.error(TAG, "Scene description failed", e)
-                announceThroughSpeechChannel(failureNotice)
+                // 被抢占的那次不报失败：用户正在听避障告警，再压一句"描述失败"只是把最该听见的
+                // 那句盖掉，而这次描述本来就是我们主动放弃的。
+                if (describeSession.isCurrent(describeToken)) {
+                    logger.error(TAG, "Scene description failed", e)
+                    announceThroughSpeechChannel(failureNotice)
+                }
             } finally {
-                _uiState.update { it.copy(isDescribingScene = false) }
+                // 已经被新的一次描述或抢占接管时不要回写状态，否则会把别人的 in-flight 标志清掉。
+                if (describeSession.isCurrent(describeToken)) {
+                    _uiState.update { it.copy(isDescribingScene = false) }
+                }
             }
         }
+    }
+
+    /**
+     * 导航要说话了，把正在解码的场景描述让出去。
+     *
+     * 优先级是这条链路上最硬的规则："别撞上"永远压过"那是什么"。单靠 TTS 的 QUEUE_FLUSH 不够：
+     * 它只冲掉已经排队的子句，VLM 还在往下解码，告警念完之后描述会从半句接着念，用户听到的是
+     * 一句没头没尾的景物描述跟在避障提示后面——而他看不到屏幕，分不清哪句是当前的。
+     *
+     * 顺序是刻意的：先取消（连带让后续子句失效），再清空已经排进 TTS 的队列，最后才由调用方
+     * 把告警说出去。
+     */
+    private fun preemptSceneDescriptionForGuidance(reason: String) {
+        if (!describeSession.cancel("preempted by guidance: $reason")) return
+
+        logger.info(TAG, "Scene description preempted by guidance", mapOf("reason" to reason))
+        // 描述已经排进 TTS 队列的子句要就地清掉。告警自己走 QUEUE_FLUSH 也会冲队列，但纯震动
+        // 模式下没有那一步，而队列里的旧子句照样会念出来。
+        speechManager.stop()
+        _uiState.update { it.copy(isDescribingScene = false) }
     }
 
     /**
@@ -558,8 +595,7 @@ class SceneAnalysisViewModel(
         overlayRenderJob = null
         // 正在解码的描述跟着会话一起结束：用户已经停了引导，几秒后再冒出一句场景描述
         // 只会让他以为辅助还在跑。
-        describeJob?.cancel()
-        describeJob = null
+        describeSession.cancel("guidance session stopped")
         latestSceneResult = null
         stopSceneAnalysisUseCase()
         speechManager.stop()
@@ -591,8 +627,7 @@ class SceneAnalysisViewModel(
         analysisJob = null
         overlayRenderJob?.cancel()
         overlayRenderJob = null
-        describeJob?.cancel()
-        describeJob = null
+        describeSession.cancel("view model cleared")
         stopSceneAnalysisUseCase()
         speechManager.stop()
         hapticManager.cancel()

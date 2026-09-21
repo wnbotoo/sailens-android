@@ -424,6 +424,12 @@ sailens-output 提供共享 output mechanism：
 的产品策略。Guidance 产生 typed event/urgency；Describe 产生 information result；shell
 再把它们映射到 output priority。
 
+抢占不等于冲一次语音队列。冲队列只清掉已经排进去的子句，VLM 还在往下解码，描述会接在告警
+后面继续念——用户听到的是一句没头没尾的景物描述跟在“前方有台阶”之后，而他看不到屏幕，
+分不清哪句是当前的。所以 shell 的 SceneDescriptionSession 在取消生成的同时**让它的 token
+失效**：已经解码并派发出去的那一片仍然会跑完，但它不能出声，也不能走读屏公告。取消经由
+VlmRuntime.shouldStop 传到 decode，让被放弃的那次生成及时把加速器交出来。
+
 Screen-reader announcement 在 sailens-shell 里只有一个 collector，因为真实 Android View
 属于 presentation。
 

@@ -443,6 +443,14 @@ The product policy that a Guidance safety alert outranks Describe information be
 sailens-shell / edition composition. Guidance emits typed events/urgency; Describe emits information
 results; the shell maps them onto output priorities.
 
+Preemption is more than flushing the speech queue. Flushing removes what is already queued, but the
+VLM keeps decoding, so the description resumes behind the alert and the person hears half a sentence
+about scenery arriving right after "step down ahead" with no way to tell which is current. The
+shell's SceneDescriptionSession therefore cancels the generation *and* invalidates its token, so a
+chunk already decoded and dispatched can still run but cannot speak or announce. Cancellation
+reaches the decode through VlmRuntime.shouldStop, which frees the accelerator instead of letting an
+abandoned generation hold it.
+
 Screen-reader announcements have one collector in sailens-shell because the actual Android View
 belongs to presentation.
 
