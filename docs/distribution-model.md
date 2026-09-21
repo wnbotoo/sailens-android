@@ -2,9 +2,8 @@
 
 # Sailens repository and distribution model
 
-> Status: **accepted target positioning.** This document records the product/repository decision before
-> the identity changes are implemented. The current code may still use the old application IDs and the
-> downstream repository may still be named `sailens-yolo`; those are changed in a separate follow-up.
+> Status: **implemented positioning.** Sailens Android uses the reference-host identity described
+> here, and the first-party distribution uses the Sailens product identity.
 
 ## 1. Decision
 
@@ -20,8 +19,7 @@ Sailens has one Android platform and one first-party Android distribution.
 - buildable and installable for development and BYO-model validation, but **not the application that
   Sailens intends to publish to an app store**.
 
-**Official Sailens Android distribution — currently `wnbotoo/sailens-yolo`, target
-`wnbotoo/sailens-app`**
+**Official Sailens Android distribution — `wnbotoo/sailens-app`**
 
 - the first-party application maintained by Sailens for end users;
 - the application that is intended to be published under the product name **Sailens**;
@@ -47,7 +45,7 @@ The accepted target is:
 | Role | Repository | Product/repository name | Android namespace | applicationId | Store product |
 |---|---|---|---|---|---|
 | Platform + reference host | `sailens-android` | Sailens Android | `com.sailens` | `com.sailens.reference` | no |
-| Official distribution | `sailens-app` (currently `sailens-yolo`) | Sailens | `com.sailens` | `com.sailens` | yes |
+| Official distribution | `sailens-app` | Sailens | `com.sailens` | `com.sailens` | yes |
 
 The Kotlin/Android namespace remains `com.sailens` in both repositories. Namespace and
 `applicationId` solve different problems; changing the product identity does **not** justify a
@@ -164,30 +162,25 @@ Sailens v1.x.y
 └── official product configuration
 ```
 
-## 7. Planned identity migration
+## 7. Implemented identity
 
-The positioning decision is documented first. A separate implementation change will then:
+### `sailens-android`
 
-### In `sailens-android`
+- repository: `sailens-android`;
+- namespace: `com.sailens`;
+- reference-host applicationId: `com.sailens.reference`;
+- launcher identity: **Sailens Reference**.
 
-- keep repository name `sailens-android`;
-- keep namespace `com.sailens`;
-- change the reference host `applicationId` from `com.sailens` to
-  `com.sailens.reference`;
-- update reference-host identity/about text where needed.
+### Official distribution
 
-### In the official distribution
+- repository: `sailens-app`;
+- namespace: `com.sailens`;
+- applicationId: `com.sailens`;
+- product name: **Sailens**;
+- "YOLO" appears only in model provenance/licence material, not product branding.
 
-- rename repository `sailens-yolo` to `sailens-app`;
-- keep namespace `com.sailens`;
-- change `applicationId` from `com.sailens.yolo` to `com.sailens`;
-- present the application to end users as **Sailens**;
-- update source URLs, identity tests and release/store metadata;
-- move "YOLO Edition" wording out of product branding and into model provenance/licence
-  documentation.
-
-The migration does **not** require changes to the nine-module architecture, package names, composite
-build mechanism or capability model.
+This identity does **not** change the nine-module architecture, package names, composite-build
+mechanism or capability model.
 
 ## 8. Non-goals of the positioning change
 
