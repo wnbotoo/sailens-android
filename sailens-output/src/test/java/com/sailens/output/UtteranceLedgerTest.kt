@@ -2,6 +2,7 @@ package com.sailens.output
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -102,6 +103,42 @@ class UtteranceLedgerTest {
         ledger.withdraw(describe, nowMs = 0)
 
         assertEquals(0, ledger.size())
+    }
+
+    // ---- Handing back: only what the engine accepted can end the queue ----------------------------
+
+    @Test
+    fun `an utterance the engine refused to take back does not become the end of the queue`() {
+        // The first survivor goes back in; the engine refuses the second. The first one's end is
+        // what gives the audio focus back. If the refused one were recorded as the end, nothing
+        // would ever release the focus and other apps' audio would stay ducked.
+        val last = ledger.handBack(
+            listOf(entry("warning", owner = null), entry("notice", owner = null)),
+        ) { it.id == "warning" }
+
+        assertEquals("warning", last)
+        assertEquals("a refused utterance is not queued", 1, ledger.size())
+    }
+
+    @Test
+    fun `when the engine takes nothing back there is nothing to wait for`() {
+        val last = ledger.handBack(listOf(entry("warning", owner = null))) { false }
+
+        assertNull("the caller must give the focus back itself", last)
+        assertEquals(0, ledger.size())
+    }
+
+    @Test
+    fun `handing back keeps the original order`() {
+        val submitted = mutableListOf<String>()
+
+        val last = ledger.handBack(listOf(entry("first", owner = null), entry("second", owner = null))) {
+            submitted += it.id
+            true
+        }
+
+        assertEquals(listOf("first", "second"), submitted)
+        assertEquals("second", last)
     }
 
     private fun entry(id: String, owner: SpeechOwner?, expiresAtMs: Long? = null) =

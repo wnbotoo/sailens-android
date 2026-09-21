@@ -84,4 +84,24 @@ internal class UtteranceLedger {
         entries.clear()
         return survivors
     }
+
+    /**
+     * Hands [utterances] back to the engine through [submit], in order, and records the ones it
+     * accepts.
+     *
+     * @return the id of the last one accepted — the utterance whose end is now the end of the queue
+     *   — or null when the engine accepted none. One the engine refused never reports back, so it is
+     *   neither recorded nor returned: waiting for it to finish would wait forever.
+     */
+    fun handBack(utterances: List<Entry>, submit: (Entry) -> Boolean): String? {
+        // Not synchronized as a whole, so the lock is never held while submit calls into the
+        // engine. Each add is.
+        var lastAccepted: String? = null
+        for (utterance in utterances) {
+            if (!submit(utterance)) continue
+            add(utterance)
+            lastAccepted = utterance.id
+        }
+        return lastAccepted
+    }
 }

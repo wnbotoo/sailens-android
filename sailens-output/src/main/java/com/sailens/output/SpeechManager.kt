@@ -323,7 +323,16 @@ public class SpeechManager(
             )
             // Keep the audio focus we already hold: releasing it here would let other apps' audio
             // swell for a moment between the flush and the hand-back.
-            survivors.forEach(::requeue)
+            val lastHandedBack = ledger.handBack(survivors.map(::withFreshId), ::submitAgain)
+            if (lastHandedBack == null) {
+                // The engine took none of it back, so nothing will finish and give the focus back.
+                // Other apps' audio would stay ducked until the next stop or release.
+                releaseAudioFocus()
+                return@runOnMain
+            }
+            // Only an utterance the engine accepted can finish. Pointing at one it refused would
+            // hold the focus for good, even after the accepted ones before it had finished.
+            latestUtteranceId = lastHandedBack
         }
     }
 
@@ -331,20 +340,22 @@ public class SpeechManager(
     public fun hasQueued(owner: SpeechOwner): Boolean = ledger.has(owner)
 
     /**
-     * Hands one utterance back to the engine under a fresh id. Reusing the old id would let the
-     * late stop callback of the flushed original release audio focus under the replacement.
+     * The same utterance under a fresh id. Reusing the old id would let the late stop callback of
+     * the flushed original release audio focus under the replacement.
      */
-    private fun requeue(entry: UtteranceLedger.Entry) {
-        val utteranceId = "${entry.id}$REQUEUE_UTTERANCE_ID_SUFFIX${nextResubmitId++}"
+    private fun withFreshId(entry: UtteranceLedger.Entry): UtteranceLedger.Entry =
+        entry.copy(id = "${entry.id}$REQUEUE_UTTERANCE_ID_SUFFIX${nextResubmitId++}")
+
+    /** Hands one utterance back to the engine. Returns whether the engine accepted it. */
+    private fun submitAgain(entry: UtteranceLedger.Entry): Boolean {
         requestAudioFocus()
-        latestUtteranceId = utteranceId
-        val result = tts?.speak(entry.text, TextToSpeech.QUEUE_ADD, null, utteranceId)
+        val result = tts?.speak(entry.text, TextToSpeech.QUEUE_ADD, null, entry.id)
             ?: TextToSpeech.ERROR
         if (result == TextToSpeech.ERROR) {
             logger.warning(TAG, "TTS re-queue failed", mapOf("utteranceId" to entry.id))
-            return
+            return false
         }
-        ledger.add(entry.copy(id = utteranceId))
+        return true
     }
 
     private fun requestAudioFocus() {
