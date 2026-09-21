@@ -2,8 +2,9 @@
 
 # Sailens 仓库与发行模型
 
-> 状态：**定位已实施。**Sailens Android 使用本文定义的 reference-host identity；一方官方
-> 发行版使用 Sailens 产品 identity。
+> 状态：**Android 产品 identity 已实施；GitHub 仓库 rename 待最终验证后执行。**Sailens
+> Android 已使用本文定义的 reference-host identity；一方官方发行版也已在代码中使用 Sailens
+> 产品 identity。
 
 ## 1. 决策
 
@@ -140,7 +141,8 @@ Sailens Android 继续是 Apache-2.0，并且不附带模型权重。
 ### 官方 Sailens App
 
 - 保留当前已经 fresh-root 后的仓库历史；**不要**仅为了改名删除并重建仓库；
-- 仓库已原地 rename 为 `sailens-app`，并保留既有 fresh-root history；
+- 最终验证完成后把当前发行仓库原地 rename 为 `sailens-app`；保留既有 fresh-root history，
+  不删除重建；
 - 每个产品 release 都 pin 一个精确的 Sailens Android `main` commit；
 - release metadata 同时记录打包模型的版本/hash/provenance。
 
