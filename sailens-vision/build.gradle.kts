@@ -43,8 +43,8 @@ android {
 dependencies {
 
     implementation(libs.androidx.core.ktx)
-    implementation(project(":sailens-core"))
-    implementation(project(":sailens-runtime"))
+    api(project(":sailens-core"))
+    api(project(":sailens-runtime"))
     implementation(libs.google.litert)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

@@ -38,8 +38,8 @@ import org.koin.dsl.module
  * Wires the domain layer at the app composition root: stateless processors as singles and use cases
  * as factories. Domain classes carry no DI annotations themselves, so their graph is assembled here.
  *
- * Configs come from [profileBindingsModule]; the obstacle provider is bound in `dataModule` under
- * the `realtimeObstacleProvider` qualifier.
+ * Configs come from [profileBindingsModule]; the perception sources are bound in `guidanceModule`,
+ * the obstacle provider under the `realtimeObstacleProvider` qualifier.
  */
 val domainBindingsModule = module {
     // Processors — stateless, shared singletons.

@@ -66,10 +66,11 @@ presentation
 
 模块边界:
 
-- `:domain` 只放接口、模型和纯 use case,不要出现 Android API。
-- `:data` 继续负责 ML runtime 和模型资产。
-- `:presentation` 负责 UI、权限、系统 ASR、硬件键输入、TTS 仲裁。
-- `:app` 继续做 Koin 绑定,决定启用哪些具体实现。
+- `sailens-vlm` 只放引擎契约:帧 + 完整 prompt -> 流式文本,不含产品策略。
+- `sailens-describe` 负责 Describe 的 prompt、快照新鲜度和请求调度。
+- `sailens-runtime` 负责模型来源、session 和加速器选择,不管最终落地哪个 runtime。
+- `sailens-shell` 负责 UI、权限、系统 ASR、硬件键输入;TTS 仲裁在 `sailens-output`。
+- `:app` 继续做 Koin 绑定,决定某个 edition 启用哪些具体实现。
 
 ## 4. SceneSnapshotProvider
 

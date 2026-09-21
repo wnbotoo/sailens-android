@@ -50,8 +50,7 @@ Apache-2.0 code license. Whatever you bring, that is yours to check.
 ## Architecture
 
 Nine reusable `sailens-*` libraries plus the reference app, organised around the two product
-pipelines rather than technical layers -- see [docs/architecture.md](docs/architecture.md). A
-transitional `:data` still holds the LiteRT providers and disappears when they move.
+pipelines rather than technical layers -- see [docs/architecture.md](docs/architecture.md).
 
 ```text
 :sailens-core     shared contracts: ImageFrame, geometry, BinaryMask, MlRuntimeInfo, LogService
@@ -64,7 +63,6 @@ transitional `:data` still holds the LiteRT providers and disappears when they m
 :sailens-describe Describe product logic: prompts, snapshot freshness, scheduling
 :sailens-shell    reusable presentation: SailensRoot(), navigation, design system, Guidance UI
 :app              Koin wiring, Application/MainActivity, runtime profile, edition spec
-:data             transitional: LiteRT semantic/detection providers
 ```
 
 Dependencies point downward only; Guidance and Describe never depend on each other. Frames flow
@@ -96,7 +94,7 @@ Every document below has a Chinese version alongside it (`*.zh-CN.md`), linked f
 
 | | | |
 |---|---|---|
-| [`docs/architecture.md`](docs/architecture.md) | [中文](docs/architecture.zh-CN.md) | Reviewed Sailens modular restructure proposal (not implemented) |
+| [`docs/architecture.md`](docs/architecture.md) | [中文](docs/architecture.zh-CN.md) | Sailens modular structure: module boundaries, seams, migration plan and verification |
 | [`docs/models.md`](docs/models.md) | [中文](docs/models.zh-CN.md) | Model contract, backend config, performance red lines |
 | [`docs/perception-profiles.md`](docs/perception-profiles.md) | [中文](docs/perception-profiles.zh-CN.md) | Perception tiers, scheduling, tracker TTL |
 | [`docs/npu-litert-qnn.md`](docs/npu-litert-qnn.md) | [中文](docs/npu-litert-qnn.zh-CN.md) | Qualcomm NPU wiring, delivery, diagnosis |

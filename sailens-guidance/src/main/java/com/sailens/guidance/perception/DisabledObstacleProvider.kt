@@ -1,4 +1,4 @@
-package com.sailens.data.source.ml.obstacle
+package com.sailens.guidance.perception
 
 import com.sailens.core.frame.ImageFrame
 import com.sailens.core.runtime.MlRuntimeInfo

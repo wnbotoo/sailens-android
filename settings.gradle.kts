@@ -27,7 +27,6 @@ include(":app")
 
 include(":sailens-guidance")
 include(":sailens-shell")
-include(":data")
 include(":sailens-camera")
 include(":sailens-core")
 include(":sailens-runtime")

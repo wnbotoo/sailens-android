@@ -1,42 +1,32 @@
-package com.sailens.data.source.ml.obstacle
-import com.sailens.vision.detection.DetectionModelConfig
-import com.sailens.vision.detection.DetectionLayout
-import com.sailens.vision.detection.Detection
-import com.sailens.vision.detection.DetectionPostProcessor
-import com.sailens.vision.taxonomy.CocoTaxonomy
-import com.sailens.guidance.model.common.ObstacleCategory
-import com.sailens.guidance.model.perception.ObstacleDetection
-import com.sailens.guidance.semantics.CocoNavigationSemantics
-import com.sailens.guidance.semantics.NavigationSemantics
+package com.sailens.vision.detection
 
 import android.content.Context
 import android.os.SystemClock
+import com.google.ai.edge.litert.Accelerator
+import com.google.ai.edge.litert.TensorBuffer
+import com.sailens.core.frame.ImageFrame
+import com.sailens.core.log.LogService
+import com.sailens.core.runtime.MlRuntimeInfo
 import com.sailens.runtime.CatalogModelSourceResolver
 import com.sailens.runtime.InputPreprocessBackend
+import com.sailens.runtime.InputPreprocessCache
 import com.sailens.runtime.ModelInputDataType
+import com.sailens.runtime.ModelInputPreprocessor
 import com.sailens.runtime.ModelSourceResolver
+import com.sailens.runtime.ModelTensorConfig
 import com.sailens.runtime.ModelType
 import com.sailens.runtime.TensorQuantization
 import com.sailens.runtime.TfliteModelMetadata
 import com.sailens.runtime.TfliteModelMetadataReader
-import com.sailens.runtime.TfliteTensorMetadata
 import com.sailens.runtime.TfliteTensorElementType
-import com.sailens.runtime.ModelInputPreprocessor
-import com.sailens.runtime.InputPreprocessCache
-import com.sailens.runtime.ModelTensorConfig
+import com.sailens.runtime.TfliteTensorMetadata
 import com.sailens.runtime.imageTensorSpec
 import com.sailens.runtime.resolveModelInputDataType
 import com.sailens.runtime.session.AcceleratorSelection
 import com.sailens.runtime.session.LiteRtSession
 import com.sailens.runtime.session.LiteRtSessionFactory
-import com.sailens.guidance.config.PerceptionConfig
-import com.sailens.core.frame.ImageFrame
-import com.sailens.core.runtime.MlRuntimeInfo
-import com.sailens.guidance.model.perception.ObstacleModelOutput
-import com.sailens.guidance.repository.ObstacleProvider
-import com.sailens.core.log.LogService
-import com.google.ai.edge.litert.Accelerator
-import com.google.ai.edge.litert.TensorBuffer
+import com.sailens.vision.taxonomy.CocoTaxonomy
+import com.sailens.vision.taxonomy.Taxonomy
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.isActive
@@ -44,30 +34,29 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.cancellation.CancellationException
 
-private const val TAG = "LiteRtObstacleProvider"
+private const val TAG = "LiteRtDetectionRunner"
 
 /**
- * LiteRT obstacle detection provider: a single bbox-head detection network.
+ * LiteRT object detection: a single bbox-head detection network.
+ *
+ * Generic on purpose. It reports class ids, labels, confidences and boxes; it does not know what
+ * any of those mean for a product. A caller that only cares about some classes passes
+ * [allowedClassIds] so the rest are dropped inside NMS rather than allocated and then filtered
+ * (architecture.md 6.3).
  */
-class LiteRtObstacleProvider(
+class LiteRtDetectionRunner(
     private val context: Context,
-    private val perceptionConfig: PerceptionConfig,
+    /** Class ids worth decoding. Empty means "all of them". */
+    private val allowedClassIds: IntArray,
+    private val confidenceThreshold: Float,
+    private val maxDetections: Int,
     private val modelConfig: DetectionModelConfig = DetectionModelConfig(),
     private val modelSourceResolver: ModelSourceResolver = CatalogModelSourceResolver,
     private val preprocessCache: InputPreprocessCache? = null,
     private val logService: LogService,
-    /**
-     * Turns detected classes into navigation meaning. The detector itself stays generic
-     * (architecture.md §6.3): it reports what the model saw, and this decides what that means for
-     * someone walking.
-     */
-    private val navigationSemantics: NavigationSemantics = CocoNavigationSemantics,
-) : ObstacleProvider {
-
-    /** Classes that map to a real obstacle category. Everything else never leaves the detector. */
-    private val allowedClassIds: IntArray = (0 until modelConfig.classCount)
-        .filter { navigationSemantics.toObstacleCategory(it) != ObstacleCategory.UNKNOWN }
-        .toIntArray()
+    /** Supplies human-readable labels for class ids. A dataset fact, not a product decision. */
+    private val taxonomy: Taxonomy = CocoTaxonomy,
+) {
 
     @OptIn(ExperimentalCoroutinesApi::class)
     private val singleThreadDispatcher = Dispatchers.IO.limitedParallelism(1)
@@ -87,10 +76,10 @@ class LiteRtObstacleProvider(
     @Volatile
     private var _isInitialized = false
 
-    override val isInitialized: Boolean
+    val isInitialized: Boolean
         get() = _isInitialized
 
-    override suspend fun initialize() {
+    suspend fun initialize() {
         if (_isInitialized) return
 
         withContext(singleThreadDispatcher) {
@@ -98,16 +87,16 @@ class LiteRtObstacleProvider(
             try {
                 initializeSession()
                 _isInitialized = true
-                logService.info(TAG, "Obstacle model initialized with ${session?.accelerator}")
+                logService.info(TAG, "Detection model initialized with ${session?.accelerator}")
             } catch (error: CancellationException) {
                 cleanupInternal()
                 throw error
             } catch (error: Exception) {
                 cleanupInternal()
-                throw IllegalStateException("Failed to initialize obstacle model", error)
+                throw IllegalStateException("Failed to initialize detection model", error)
             } catch (error: UnsatisfiedLinkError) {
                 cleanupInternal()
-                throw IllegalStateException("Failed to initialize obstacle model", error)
+                throw IllegalStateException("Failed to initialize detection model", error)
             }
         }
     }
@@ -120,7 +109,7 @@ class LiteRtObstacleProvider(
             },
             selection = acceleratorSelection(),
             logTag = TAG,
-            modelLabel = "obstacle model",
+            modelLabel = "detection model",
             logService = logService,
         )
         try {
@@ -163,8 +152,8 @@ class LiteRtObstacleProvider(
         method.invoke(buffer) as Long
     }.getOrDefault(0L)
 
-    override suspend fun detect(frame: ImageFrame): ObstacleModelOutput {
-        if (!_isInitialized) return ObstacleModelOutput(emptyList())
+    suspend fun detect(frame: ImageFrame): DetectionOutput {
+        if (!_isInitialized) return DetectionOutput(emptyList())
 
         return withContext(singleThreadDispatcher) {
             if (!isActive) throw CancellationException("Coroutine cancelled")
@@ -173,13 +162,13 @@ class LiteRtObstacleProvider(
         }
     }
 
-    private fun detectInitialized(frame: ImageFrame): ObstacleModelOutput {
-        val activeInputBuffer = inputBuffer ?: return ObstacleModelOutput(emptyList())
-        val activeDetectionBuffer = detectionBuffer ?: return ObstacleModelOutput(emptyList())
-        val activeSession = session ?: return ObstacleModelOutput(emptyList())
-        val activeProcessor = processor ?: return ObstacleModelOutput(emptyList())
-        val activePostProcessor = postProcessor ?: return ObstacleModelOutput(emptyList())
-        val activeTensorBindings = resolvedTensorBindings ?: return ObstacleModelOutput(emptyList())
+    private fun detectInitialized(frame: ImageFrame): DetectionOutput {
+        val activeInputBuffer = inputBuffer ?: return DetectionOutput(emptyList())
+        val activeDetectionBuffer = detectionBuffer ?: return DetectionOutput(emptyList())
+        val activeSession = session ?: return DetectionOutput(emptyList())
+        val activeProcessor = processor ?: return DetectionOutput(emptyList())
+        val activePostProcessor = postProcessor ?: return DetectionOutput(emptyList())
+        val activeTensorBindings = resolvedTensorBindings ?: return DetectionOutput(emptyList())
         val activeInputDataType = inputDataType
 
         val startTime = SystemClock.uptimeMillis()
@@ -215,12 +204,12 @@ class LiteRtObstacleProvider(
                 if (!hasLoggedTensorInfo) {
                     logService.info(
                         TAG,
-                        "obstacle runtime tensors (zero-copy): detection=${activeTensorBindings.detectionOutputTensorName}[idx=${activeTensorBindings.detectionBufferIndex}], detectionValues=${activeTensorBindings.detectionElementCount}, frame=${frame.width}x${frame.height}, rotation=${frame.rotationDegrees}, inputType=$activeInputDataType, accelerator=${activeSession.accelerator}"
+                        "detection runtime tensors (zero-copy): detection=${activeTensorBindings.detectionOutputTensorName}[idx=${activeTensorBindings.detectionBufferIndex}], detectionValues=${activeTensorBindings.detectionElementCount}, frame=${frame.width}x${frame.height}, rotation=${frame.rotationDegrees}, inputType=$activeInputDataType, accelerator=${activeSession.accelerator}"
                     )
                     hasLoggedTensorInfo = true
                 }
-                return ObstacleModelOutput(
-                    detections = handleOutput.detections.toObstacleDetections(),
+                return DetectionOutput(
+                    detections = handleOutput.detections,
                     preprocessTimeMs = afterPreprocessTime - startTime,
                     inferenceTimeMs = afterModelTime - afterPreprocessTime,
                     outputReadTimeMs = 0L,
@@ -246,18 +235,18 @@ class LiteRtObstacleProvider(
         if (!hasLoggedTensorInfo) {
             logService.info(
                 TAG,
-                "obstacle runtime tensors: detection=${activeTensorBindings.detectionOutputTensorName}[idx=${activeTensorBindings.detectionBufferIndex}], detectionValues=${detectionTensor.size}, frame=${frame.width}x${frame.height}, rotation=${frame.rotationDegrees}, inputType=$activeInputDataType, accelerator=${activeSession.accelerator}"
+                "detection runtime tensors: detection=${activeTensorBindings.detectionOutputTensorName}[idx=${activeTensorBindings.detectionBufferIndex}], detectionValues=${detectionTensor.size}, frame=${frame.width}x${frame.height}, rotation=${frame.rotationDegrees}, inputType=$activeInputDataType, accelerator=${activeSession.accelerator}"
             )
             hasLoggedTensorInfo = true
         }
 
         val postProcessOutput = when (detectionTensor) {
-            is ObstacleDetectionTensor.FloatTensor -> activePostProcessor.postProcessWithBackend(
+            is DetectionTensor.FloatTensor -> activePostProcessor.postProcessWithBackend(
                 frame = frame,
                 rawDetections = detectionTensor.values,
             )
 
-            is ObstacleDetectionTensor.Int8Tensor -> activePostProcessor.postProcessWithBackend(
+            is DetectionTensor.Int8Tensor -> activePostProcessor.postProcessWithBackend(
                 frame = frame,
                 rawDetections = detectionTensor.values,
                 quantization = detectionTensor.quantization,
@@ -265,8 +254,8 @@ class LiteRtObstacleProvider(
         }
         val afterPostprocessTime = SystemClock.uptimeMillis()
 
-        return ObstacleModelOutput(
-            detections = postProcessOutput.detections.toObstacleDetections(),
+        return DetectionOutput(
+            detections = postProcessOutput.detections,
             preprocessTimeMs = afterPreprocessTime - startTime,
             inferenceTimeMs = afterModelTime - afterPreprocessTime,
             outputReadTimeMs = afterOutputReadTime - afterModelTime,
@@ -280,7 +269,7 @@ class LiteRtObstacleProvider(
         )
     }
 
-    override fun release() {
+    fun release() {
         runBlocking(singleThreadDispatcher) {
             cleanupInternal()
         }
@@ -296,10 +285,10 @@ class LiteRtObstacleProvider(
         val inputSpec = imageTensorSpec(
             dimensions = inputDimensions,
             expectedChannels = 3,
-            description = "obstacle input",
+            description = "detection input",
         )
         require(inputSpec.width == inputSpec.height) {
-            "obstacle post-processor expects square input, got ${inputSpec.width}x${inputSpec.height}"
+            "detection post-processor expects square input, got ${inputSpec.width}x${inputSpec.height}"
         }
         val outputSpec = validateOutputTensors(metadata)
 
@@ -312,7 +301,7 @@ class LiteRtObstacleProvider(
             outputChannels = 1,
             mean = Triple(0f, 0f, 0f),
             std = Triple(1f, 1f, 1f),
-            confidenceThreshold = perceptionConfig.minObstacleConfidence,
+            confidenceThreshold = confidenceThreshold,
             resizeFilter = modelConfig.resizeFilter,
         )
 
@@ -330,18 +319,18 @@ class LiteRtObstacleProvider(
             preprocessCache = preprocessCache,
         )
         postProcessor = DetectionPostProcessor(
-            taxonomy = CocoTaxonomy,
+            taxonomy = taxonomy,
             inputSize = inputSpec.width,
             classCount = modelConfig.classCount,
             allowedClassIds = allowedClassIds,
             detectionLayout = outputSpec.detectionLayout,
-            confidenceThreshold = perceptionConfig.minObstacleConfidence,
-            maxDetections = perceptionConfig.maxObstacles,
+            confidenceThreshold = confidenceThreshold,
+            maxDetections = maxDetections,
         )
 
         logService.info(
             TAG,
-            "obstacle tensor config: input=${inputSpec.width}x${inputSpec.height}x${inputSpec.channels}:${inputSpec.layout}, output=$outputSpec, inputType=${resolvedInputDataType.dataType}, tensorElement=${resolvedInputDataType.elementTypeName}"
+            "detection tensor config: input=${inputSpec.width}x${inputSpec.height}x${inputSpec.channels}:${inputSpec.layout}, output=$outputSpec, inputType=${resolvedInputDataType.dataType}, tensorElement=${resolvedInputDataType.elementTypeName}"
         )
 
         return ResolvedTensorBindings(
@@ -357,8 +346,8 @@ class LiteRtObstacleProvider(
         )
     }
 
-    private fun validateOutputTensors(metadata: TfliteModelMetadata): ObstacleOutputTensorSpec {
-        val detectionTensor = resolveObstacleDetectionOutputTensor(
+    private fun validateOutputTensors(metadata: TfliteModelMetadata): DetectionOutputTensorSpec {
+        val detectionTensor = resolveDetectionOutputTensor(
             metadata = metadata,
             expectedRawAttributes = RAW_BOX_ATTRIBUTES + modelConfig.classCount,
             expectedEndToEndAttributes = END_TO_END_FIXED_ATTRIBUTES,
@@ -366,7 +355,7 @@ class LiteRtObstacleProvider(
         val detectionMetadata = detectionTensor.metadata
         val detectionSpec = detectionTensor.spec
 
-        return ObstacleOutputTensorSpec(
+        return DetectionOutputTensorSpec(
             detectionTensorName = detectionMetadata.name,
             detectionIndex = metadata.outputIndexOf(detectionMetadata),
             detectionCount = detectionSpec.detectionCount,
@@ -378,23 +367,23 @@ class LiteRtObstacleProvider(
         )
     }
 
-    private fun resolveObstacleDetectionOutputTensor(
+    private fun resolveDetectionOutputTensor(
         metadata: TfliteModelMetadata,
         expectedRawAttributes: Int,
         expectedEndToEndAttributes: Int,
-    ): ResolvedObstacleDetectionTensor {
+    ): ResolvedDetectionTensor {
         metadata.outputs.forEach { tensor ->
-            val spec = ObstacleDetectionTensorSpec.fromOrNull(
+            val spec = DetectionTensorSpec.fromOrNull(
                 dimensions = tensor.shape,
                 expectedRawAttributes = expectedRawAttributes,
                 expectedEndToEndAttributes = expectedEndToEndAttributes,
             )
             if (spec != null) {
-                return ResolvedObstacleDetectionTensor(metadata = tensor, spec = spec)
+                return ResolvedDetectionTensor(metadata = tensor, spec = spec)
             }
         }
         error(
-            "Unable to resolve obstacle detection output tensor from " +
+            "Unable to resolve detection output tensor from " +
                 "tensors=${metadata.outputs.map { it.name to it.shape }}"
         )
     }
@@ -404,15 +393,15 @@ class LiteRtObstacleProvider(
         elementType: TfliteTensorElementType,
         quantization: TensorQuantization?,
         tensorName: String,
-    ): ObstacleDetectionTensor {
+    ): DetectionTensor {
         return when (elementType) {
-            TfliteTensorElementType.FLOAT32 -> ObstacleDetectionTensor.FloatTensor(tensorBuffer.readFloat())
-            TfliteTensorElementType.INT8 -> ObstacleDetectionTensor.Int8Tensor(
+            TfliteTensorElementType.FLOAT32 -> DetectionTensor.FloatTensor(tensorBuffer.readFloat())
+            TfliteTensorElementType.INT8 -> DetectionTensor.Int8Tensor(
                 values = tensorBuffer.readInt8(),
                 quantization = quantization,
             )
 
-            else -> error("Unsupported obstacle output tensor '$tensorName' element type: $elementType")
+            else -> error("Unsupported detection output tensor '$tensorName' element type: $elementType")
         }
     }
 
@@ -474,12 +463,12 @@ class LiteRtObstacleProvider(
         _isInitialized = false
     }
 
-    private sealed interface ObstacleDetectionTensor {
+    private sealed interface DetectionTensor {
         val size: Int
 
         data class FloatTensor(
             val values: FloatArray,
-        ) : ObstacleDetectionTensor {
+        ) : DetectionTensor {
             override val size: Int
                 get() = values.size
         }
@@ -487,18 +476,18 @@ class LiteRtObstacleProvider(
         data class Int8Tensor(
             val values: ByteArray,
             val quantization: TensorQuantization?,
-        ) : ObstacleDetectionTensor {
+        ) : DetectionTensor {
             override val size: Int
                 get() = values.size
         }
     }
 
-    private data class ResolvedObstacleDetectionTensor(
+    private data class ResolvedDetectionTensor(
         val metadata: TfliteTensorMetadata,
-        val spec: ObstacleDetectionTensorSpec,
+        val spec: DetectionTensorSpec,
     )
 
-    private data class ObstacleDetectionTensorSpec(
+    private data class DetectionTensorSpec(
         val detectionCount: Int,
         val attributes: Int,
         val layout: DetectionLayout,
@@ -509,10 +498,10 @@ class LiteRtObstacleProvider(
                 dimensions: List<Int>,
                 expectedRawAttributes: Int,
                 expectedEndToEndAttributes: Int,
-            ): ObstacleDetectionTensorSpec? {
+            ): DetectionTensorSpec? {
                 if (dimensions.size != 3 || dimensions[0] != 1) return null
                 if (dimensions[1] == expectedRawAttributes) {
-                    return ObstacleDetectionTensorSpec(
+                    return DetectionTensorSpec(
                         detectionCount = dimensions[2],
                         attributes = dimensions[1],
                         layout = DetectionLayout.RAW_TRANSPOSED,
@@ -520,7 +509,7 @@ class LiteRtObstacleProvider(
                     )
                 }
                 if (dimensions[2] == expectedEndToEndAttributes) {
-                    return ObstacleDetectionTensorSpec(
+                    return DetectionTensorSpec(
                         detectionCount = dimensions[1],
                         attributes = dimensions[2],
                         layout = DetectionLayout.END_TO_END,
@@ -532,7 +521,7 @@ class LiteRtObstacleProvider(
         }
     }
 
-    private data class ObstacleOutputTensorSpec(
+    private data class DetectionOutputTensorSpec(
         val detectionTensorName: String,
         val detectionIndex: Int,
         val detectionCount: Int,
@@ -558,29 +547,11 @@ class LiteRtObstacleProvider(
         val detectionOutputQuantization: TensorQuantization?,
     )
 
-    /**
-     * Vision reports classes; Guidance decides what they mean. A class with no obstacle category
-     * is dropped here rather than inside the detector, so the detector stays reusable by a product
-     * that cares about a different set of classes (architecture.md §6.3).
-     */
-    private fun List<Detection>.toObstacleDetections(): List<ObstacleDetection> =
-        mapNotNull { detection ->
-            val category = navigationSemantics.toObstacleCategory(detection.classId)
-            if (category == ObstacleCategory.UNKNOWN) return@mapNotNull null
-            ObstacleDetection(
-                classId = detection.classId,
-                className = detection.label,
-                confidence = detection.confidence,
-                boundingBox = detection.boundingBox,
-                category = category,
-            )
-        }
-
     private companion object {
         const val RAW_BOX_ATTRIBUTES = 4
         const val END_TO_END_FIXED_ATTRIBUTES = 6
 
-        // The default obstacle fallback keeps the full-integer NPU/CPU path. GPU can still be
+        // The default detection fallback keeps the full-integer NPU/CPU path. GPU can still be
         // requested explicitly; the model source resolver will then choose the GPU-friendly asset.
         val ACCELERATOR_FALLBACK_ORDER = listOf(
             Accelerator.NPU,

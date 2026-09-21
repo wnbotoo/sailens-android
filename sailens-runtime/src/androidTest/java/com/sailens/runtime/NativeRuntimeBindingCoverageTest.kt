@@ -14,8 +14,8 @@ import java.lang.reflect.Modifier
  * Layer A of the native verification plan (docs/architecture.md §12.2) for `libsailens_runtime.so`.
  *
  * The native code split three ways in gate G3, so layer A splits with it: this covers the
- * preprocessing kernels that moved here, and the copy in :data covers the vision and Guidance
- * kernels that stayed. Both libraries have to keep the same guarantee.
+ * preprocessing kernels that moved here; the sibling suites in sailens-vision and sailens-guidance$
+ * cover the generic vision and fused Guidance kernels. All three have to keep the same guarantee.
  *
  * `libsailens_runtime.so` binds its methods in `JNI_OnLoad` with `RegisterNatives` and exports no
  * `Java_<mangled>` symbols, so name-based binding is not merely unused, it is impossible:

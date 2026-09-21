@@ -1,25 +1,39 @@
-package com.sailens.data.source.ml.semantic
-import com.sailens.vision.semantic.NativeSemanticArgmaxPostprocessor
+package com.sailens.vision.semantic
 
 import android.os.SystemClock
+import com.google.ai.edge.litert.Accelerator
+import com.sailens.core.frame.ImageFrame
+import com.sailens.core.runtime.MlRuntimeInfo
 import com.sailens.runtime.InputPreprocessBackend
+import com.sailens.runtime.InputPreprocessCache
 import com.sailens.runtime.ModelInputDataType
+import com.sailens.runtime.ModelInputPreprocessor
 import com.sailens.runtime.ModelInputQuantization
+import com.sailens.runtime.ModelTensorConfig
 import com.sailens.runtime.TensorQuantization
 import com.sailens.runtime.TfliteTensorElementType
-import com.sailens.runtime.ModelTensorConfig
-import com.sailens.runtime.ModelInputPreprocessor
-import com.sailens.runtime.InputPreprocessCache
 import com.sailens.runtime.session.LiteRtSession
-import com.sailens.core.runtime.MlRuntimeInfo
-import com.sailens.core.frame.ImageFrame
-import com.sailens.guidance.kernel.NavigationScorePostprocessor
-import com.sailens.guidance.kernel.SemanticPostprocessResult
-import com.sailens.guidance.model.perception.SegmentationMask
-import com.sailens.guidance.model.perception.SegmentationOutput
-import com.google.ai.edge.litert.Accelerator
 
-internal class LiteRTSegmenter(
+/** One semantic inference: the postprocessed value plus the timings traces are built from. */
+data class SegmentationRunResult<R>(
+    val value: R,
+    val preprocessTimeMs: Long,
+    val modelTimeMs: Long,
+    val outputReadTimeMs: Long,
+    val postprocessTimeMs: Long,
+    val runtimeInfo: MlRuntimeInfo,
+)
+
+/**
+ * Runs one semantic segmentation session: preprocess, infer, postprocess.
+ *
+ * Generic in its result: the runner owns the tensor work and hands the scores to a
+ * [SemanticPostprocessor], which owns what they mean. Guidance supplies a postprocessor that
+ * computes navigation statistics in the same native pass as the argmax; a caller that only wants a
+ * class map supplies [ClassMapPostprocessor]. Either way the score tensor is scanned once
+ * (architecture.md 6.5).
+ */
+class SegmentationRunner<R>(
     private val session: LiteRtSession,
     private val config: ModelTensorConfig,
     private val inputDataType: ModelInputDataType,
@@ -28,7 +42,7 @@ internal class LiteRTSegmenter(
     inputQuantization: ModelInputQuantization,
     preferNativeYuvPreprocessing: Boolean,
     preprocessCache: InputPreprocessCache? = null,
-    private val nativeScorePostprocessor: NavigationScorePostprocessor? = null,
+    private val postprocessor: SemanticPostprocessor<R>,
 ) {
     val accelerator: Accelerator get() = session.accelerator
     private val inputBuffer = session.inputBuffers.single()
@@ -44,17 +58,27 @@ internal class LiteRTSegmenter(
     // 缓存结果 Mask 数组 (一维数组，存储索引)
     private val cachedResultMask = IntArray(config.outputWidth * config.outputHeight)
 
+    private val scoreSpec = SemanticScoreSpec(
+        width = config.outputWidth,
+        height = config.outputHeight,
+        channels = config.outputChannels,
+        layout = config.outputLayout,
+    )
+
     private val inputPreprocessor = ModelInputPreprocessor(
         config = config,
         inputQuantization = inputQuantization,
         preferNativeYuvPreprocessing = preferNativeYuvPreprocessing,
         preprocessCache = preprocessCache,
     )
-    private val nativeArgmaxPostprocessor = NativeSemanticArgmaxPostprocessor(config)
+    private val argmaxPostprocessor = ArgmaxPostprocessor(
+        config = config,
+        kotlinArgmax = { scores, resultMask -> inputPreprocessor.postprocess(scores, resultMask) },
+    )
 
     // Raw LiteRtTensorBuffer* handle for the output tensor, extracted once via reflection.
     // Non-zero only when the JniHandle accessor is available (LiteRT 2.1.3+). When available,
-    // segment() uses this to lock the buffer directly and skip the 30 MB readFloat() allocation.
+    // run() offers it to the postprocessor so it can skip the 30 MB readFloat() allocation.
     private val outputBufferHandle: Long = extractOutputBufferHandle()
 
     private fun extractOutputBufferHandle(): Long = runCatching {
@@ -66,7 +90,7 @@ internal class LiteRTSegmenter(
         method.invoke(outputBuffer) as Long
     }.getOrDefault(0L)
 
-    fun segment(rawFrame: ImageFrame): SegmentationOutput {
+    fun run(rawFrame: ImageFrame): SegmentationRunResult<R> {
         val startTime = SystemClock.uptimeMillis()
 
         // 1. 预处理: YUV/RGBA frame -> model input tensor layout
@@ -78,32 +102,24 @@ internal class LiteRTSegmenter(
         session.run()
         val afterModelTime = SystemClock.uptimeMillis()
 
-        // 3. Postprocess: try zero-copy handle path first (avoids 30 MB readFloat() allocation).
-        //    Route to the element-type-specific variant so INT8 bytes are never misread as
-        //    float* (the default runtime uses a full-integer-quant model -> INT8 output).
-        //    If the handle path returns null for any reason (native lib unavailable, dlsym
-        //    failure, lock failure, validation error), fall back to readOutputScores() and
-        //    proceed through the normal native/Kotlin postprocess chain.
-        val handleResult: SemanticPostprocessResult? = when {
+        // 3. Postprocess: offer the still-in-LiteRT tensor first (avoids the 30 MB readFloat()
+        //    allocation). Route to the element-type-specific variant so INT8 bytes are never
+        //    misread as float* (the default runtime uses a full-integer-quant model -> INT8
+        //    output). If the postprocessor declines for any reason (native lib unavailable, dlsym
+        //    failure, lock failure, validation error), copy the tensor out and offer it again,
+        //    then fall back to generic argmax.
+        val handleOutcome: SemanticPostprocessOutcome<R>? = when {
             outputBufferHandle == 0L -> null
-            outputElementType == TfliteTensorElementType.FLOAT32 ->
-                nativeScorePostprocessor?.postprocessScoresFromHandle(
-                    tensorBufferHandle = outputBufferHandle,
-                    reusableResultMask = cachedResultMask,
-                    width = config.outputWidth,
-                    height = config.outputHeight,
-                    channels = config.outputChannels,
-                    scoreLayout = config.outputLayout,
-                )
-            outputElementType == TfliteTensorElementType.INT8 ->
-                nativeScorePostprocessor?.postprocessInt8ScoresFromHandle(
-                    tensorBufferHandle = outputBufferHandle,
-                    reusableResultMask = cachedResultMask,
-                    width = config.outputWidth,
-                    height = config.outputHeight,
-                    channels = config.outputChannels,
-                    scoreLayout = config.outputLayout,
-                )
+            outputElementType == TfliteTensorElementType.FLOAT32 -> postprocessor.postprocessScores(
+                scores = SemanticScores.FloatHandle(outputBufferHandle),
+                spec = scoreSpec,
+                reusableClassMap = cachedResultMask,
+            )
+            outputElementType == TfliteTensorElementType.INT8 -> postprocessor.postprocessScores(
+                scores = SemanticScores.Int8Handle(outputBufferHandle),
+                spec = scoreSpec,
+                reusableClassMap = cachedResultMask,
+            )
             else -> null
         }
 
@@ -112,7 +128,7 @@ internal class LiteRTSegmenter(
         // and capture the real copy cost in outputReadTimeMs.
         val outputScores: SemanticOutputScores?
         val afterOutputReadTime: Long
-        if (handleResult != null) {
+        if (handleOutcome != null) {
             outputScores = null
             afterOutputReadTime = afterModelTime
         } else {
@@ -120,70 +136,47 @@ internal class LiteRTSegmenter(
             afterOutputReadTime = SystemClock.uptimeMillis()
         }
 
-        val nativePostprocessResult: SemanticPostprocessResult? = handleResult
+        val fusedOutcome: SemanticPostprocessOutcome<R>? = handleOutcome
             ?: when (outputScores) {
-                is SemanticOutputScores.FloatScores -> nativeScorePostprocessor?.postprocessScores(
-                    scores = outputScores.values,
-                    reusableResultMask = cachedResultMask,
-                    width = config.outputWidth,
-                    height = config.outputHeight,
-                    channels = config.outputChannels,
-                    scoreLayout = config.outputLayout,
+                is SemanticOutputScores.FloatScores -> postprocessor.postprocessScores(
+                    scores = SemanticScores.FloatValues(outputScores.values),
+                    spec = scoreSpec,
+                    reusableClassMap = cachedResultMask,
                 )
-                is SemanticOutputScores.Int8Scores -> nativeScorePostprocessor?.postprocessInt8Scores(
-                    scores = outputScores.values,
-                    reusableResultMask = cachedResultMask,
-                    width = config.outputWidth,
-                    height = config.outputHeight,
-                    channels = config.outputChannels,
-                    scoreLayout = config.outputLayout,
+                is SemanticOutputScores.Int8Scores -> postprocessor.postprocessScores(
+                    scores = SemanticScores.Int8Values(outputScores.values),
+                    spec = scoreSpec,
+                    reusableClassMap = cachedResultMask,
                 )
-                // The native score postprocessor reads bytes as signed int8; feeding UINT8 there would
-                // flip sign across the 128 boundary and corrupt argmax. Route UINT8 through the float
-                // argmax path (unsigned dequant below) instead. A native UINT8 score path is a later step.
+                // The native score kernels read bytes as signed int8; feeding UINT8 there would
+                // flip sign across the 128 boundary and corrupt argmax. Route UINT8 through the
+                // float argmax path (unsigned dequant below) instead.
                 is SemanticOutputScores.Uint8Scores -> null
                 null -> null
             }
 
-        val postprocessBackend = when {
-            handleResult != null && outputElementType == TfliteTensorElementType.INT8 -> "native_score_int8"
-            handleResult != null -> "native_score"
-            nativePostprocessResult != null && outputScores is SemanticOutputScores.Int8Scores -> "native_score_int8"
-            nativePostprocessResult != null -> "native_score"
-            else -> {
-                val scores = outputScores!!.toFloatArray(outputQuantization)
-                if (nativeArgmaxPostprocessor.argmaxScores(scores, cachedResultMask)) "native_argmax"
-                else { inputPreprocessor.postprocess(scores, cachedResultMask); "kotlin_argmax" }
-            }
+        val outcome: SemanticPostprocessOutcome<R> = fusedOutcome ?: run {
+            val scores = outputScores!!.toFloatArray(outputQuantization)
+            val backend = argmaxPostprocessor.argmax(scores, cachedResultMask)
+            SemanticPostprocessOutcome(
+                // cachedResultMask 会在下一帧继续复用，fromClassMap 必须做快照
+                value = postprocessor.fromClassMap(cachedResultMask, scoreSpec),
+                backend = backend,
+            )
         }
         val afterPostprocessTime = SystemClock.uptimeMillis()
 
-        // 4. 包装结果
-        // cachedResultMask 会在下一帧继续复用，这里必须做快照，避免下游读取时被后续推理覆盖
-        val mask = nativePostprocessResult?.mask ?: SegmentationMask(
-            config.outputWidth,
-            config.outputHeight,
-            cachedResultMask.clone(),
-        )
-
-        val preprocessTimeMs = afterPreprocessTime - startTime
-        val modelTimeMs = afterModelTime - afterPreprocessTime
-        val outputReadTimeMs = afterOutputReadTime - afterModelTime
-        val postprocessTimeMs = afterPostprocessTime - afterOutputReadTime
-
-        return SegmentationOutput(
-            mask,
-            preprocessTimeMs,
-            modelTimeMs + outputReadTimeMs,
-            postprocessTimeMs,
-            modelTimeMs,
-            outputReadTimeMs,
-            nativePostprocessResult?.stats,
-            MlRuntimeInfo(
+        return SegmentationRunResult(
+            value = outcome.value,
+            preprocessTimeMs = afterPreprocessTime - startTime,
+            modelTimeMs = afterModelTime - afterPreprocessTime,
+            outputReadTimeMs = afterOutputReadTime - afterModelTime,
+            postprocessTimeMs = afterPostprocessTime - afterOutputReadTime,
+            runtimeInfo = MlRuntimeInfo(
                 accelerator = session.accelerator.name,
                 acceleratorSelection = session.acceleratorSelection,
                 preprocessBackend = preprocessBackend.traceName,
-                postprocessBackend = postprocessBackend,
+                postprocessBackend = outcome.backend,
             ),
         )
     }
@@ -202,7 +195,7 @@ internal class LiteRTSegmenter(
                 inputPreprocessor.preprocessUint8(rawFrame, rawFrame.rotationDegrees, cachedInputInt8Array)
             }
 
-            ModelInputDataType.AUTO -> error("AUTO input type must be resolved before creating LiteRTSegmenter")
+            ModelInputDataType.AUTO -> error("AUTO input type must be resolved before creating SegmentationRunner")
         }
     }
 
@@ -212,7 +205,7 @@ internal class LiteRTSegmenter(
             // UINT8 writes the same raw bytes as INT8; the buffer's tensor type decides interpretation.
             ModelInputDataType.INT8,
             ModelInputDataType.UINT8 -> inputBuffer.writeInt8(cachedInputInt8Array)
-            ModelInputDataType.AUTO -> error("AUTO input type must be resolved before creating LiteRTSegmenter")
+            ModelInputDataType.AUTO -> error("AUTO input type must be resolved before creating SegmentationRunner")
         }
     }
 

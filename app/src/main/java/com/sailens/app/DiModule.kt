@@ -2,7 +2,7 @@ package com.sailens.app
 
 import com.sailens.BuildConfig
 import com.sailens.camera.di.cameraModule
-import com.sailens.data.di.dataModule
+import com.sailens.guidance.di.guidanceModule
 import com.sailens.shell.config.UiFeatureFlags
 import com.sailens.shell.di.shellDebugModule
 import com.sailens.shell.di.shellModule
@@ -11,7 +11,7 @@ import org.koin.core.module.dsl.viewModel
 import org.koin.dsl.module
 
 val appModule = module {
-    includes(dataModule)
+    includes(guidanceModule)
     includes(profileBindingsModule)
     includes(domainBindingsModule)
     includes(cameraModule)

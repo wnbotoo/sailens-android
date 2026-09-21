@@ -1,24 +1,20 @@
-package com.sailens.data.source.ml.semantic
-import com.sailens.guidance.kernel.NavigationScorePostprocessor
-import com.sailens.guidance.kernel.SemanticPostprocessResult
-import com.sailens.vision.semantic.SemanticModelConfig
+package com.sailens.vision.semantic
 
 import android.content.Context
+import com.google.ai.edge.litert.Accelerator
+import com.sailens.core.frame.ImageFrame
+import com.sailens.core.log.LogService
 import com.sailens.runtime.CatalogModelSourceResolver
-import com.sailens.runtime.ModelSourceResolver
-import com.sailens.runtime.ModelType
-import com.sailens.runtime.TfliteTensorMetadata
-import com.sailens.runtime.TfliteModelMetadataReader
-import com.sailens.runtime.ModelTensorConfig
 import com.sailens.runtime.InputPreprocessCache
+import com.sailens.runtime.ModelSourceResolver
+import com.sailens.runtime.ModelTensorConfig
+import com.sailens.runtime.ModelType
+import com.sailens.runtime.TfliteModelMetadataReader
+import com.sailens.runtime.TfliteTensorMetadata
 import com.sailens.runtime.imageTensorSpec
 import com.sailens.runtime.resolveModelInputDataType
 import com.sailens.runtime.session.AcceleratorSelection
 import com.sailens.runtime.session.LiteRtSessionFactory
-import com.sailens.core.frame.ImageFrame
-import com.sailens.guidance.model.perception.SegmentationOutput
-import com.sailens.core.log.LogService
-import com.google.ai.edge.litert.Accelerator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.isActive
@@ -28,47 +24,49 @@ import kotlin.coroutines.cancellation.CancellationException
 private const val TAG = "SemanticSegModel"
 
 /**
- * LiteRT semantic segmentation model.
+ * LiteRT semantic segmentation: owns the session lifecycle and the tensor configuration.
  *
  * 角色：理解可行走区域（哪里能走）。
- * 数据集：Cityscapes 19 类，与现有 domain 分析链路兼容。
  *
  * 加速器选择 + fallback 由 [LiteRtSessionFactory] / AcceleratorSelector 统一处理；本类只负责
- * 读张量元数据、配 pre/post，并把会话交给 [LiteRTSegmenter]。
+ * 读张量元数据、配 pre/post，并把会话交给 [SegmentationRunner]。
+ *
+ * Generic in its result: what a class id means is the caller's [SemanticPostprocessor], not this
+ * class's business (architecture.md 6.3, 6.5).
  */
-class LiteRtSemanticSegmentationModel(
+class LiteRtSemanticSegmenter<R>(
     private val context: Context,
+    private val postprocessor: SemanticPostprocessor<R>,
     private val modelConfig: SemanticModelConfig = SemanticModelConfig(),
     private val modelSourceResolver: ModelSourceResolver = CatalogModelSourceResolver,
-    private val nativeScorePostprocessor: NavigationScorePostprocessor? = null,
     private val preprocessCache: InputPreprocessCache? = null,
     private val logService: LogService,
-) : SegmentationModel {
+) {
 
     @OptIn(ExperimentalCoroutinesApi::class)
     private val singleThreadDispatcher = Dispatchers.IO.limitedParallelism(1)
 
-    private var segmenter: LiteRTSegmenter? = null
+    private var runner: SegmentationRunner<R>? = null
 
     @Volatile
     private var _isInitialized = false
 
-    override val isInitialized: Boolean
+    val isInitialized: Boolean
         get() = _isInitialized
 
-    override suspend fun initialize() {
+    suspend fun initialize() {
         if (_isInitialized) return
 
         withContext(singleThreadDispatcher) {
-            segmenter?.cleanup()
-            segmenter = null
+            runner?.cleanup()
+            runner = null
             _isInitialized = false
 
             try {
-                val initializedSegmenter = createSegmenter()
-                segmenter = initializedSegmenter
+                val initializedRunner = createRunner()
+                runner = initializedRunner
                 _isInitialized = true
-                logService.info(TAG, "Semantic model initialized with ${initializedSegmenter.accelerator}")
+                logService.info(TAG, "Semantic model initialized with ${initializedRunner.accelerator}")
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
@@ -81,7 +79,7 @@ class LiteRtSemanticSegmentationModel(
         }
     }
 
-    override suspend fun segment(frame: ImageFrame): Result<SegmentationOutput> {
+    suspend fun segment(frame: ImageFrame): Result<SegmentationRunResult<R>> {
         if (!_isInitialized) {
             return Result.failure(IllegalStateException("Segmenter not initialized"))
         }
@@ -92,7 +90,7 @@ class LiteRtSemanticSegmentationModel(
                     return@withContext Result.failure(CancellationException("Coroutine cancelled"))
                 }
 
-                val output = segmenter?.segment(frame)
+                val output = runner?.run(frame)
                 if (output != null) {
                     Result.success(output)
                 } else {
@@ -106,15 +104,15 @@ class LiteRtSemanticSegmentationModel(
         }
     }
 
-    override suspend fun release() {
+    suspend fun release() {
         withContext(singleThreadDispatcher) {
-            segmenter?.cleanup()
-            segmenter = null
+            runner?.cleanup()
+            runner = null
             _isInitialized = false
         }
     }
 
-    private fun createSegmenter(): LiteRTSegmenter {
+    private fun createRunner(): SegmentationRunner<R> {
         val session = LiteRtSessionFactory.create(
             context = context,
             sourceResolver = { accelerator ->
@@ -147,7 +145,7 @@ class LiteRtSemanticSegmentationModel(
                 TAG,
                 "semantic tensor config: source=${session.source.label}, input=${inputMetadata.name}:${config.inputWidth}x${config.inputHeight}:${config.inputLayout}, output=${outputMetadata.name}:${config.outputWidth}x${config.outputHeight}x${config.outputChannels}:${config.outputLayout}, inputType=${inputDataType.dataType}, tensorElement=${inputDataType.elementTypeName}"
             )
-            LiteRTSegmenter(
+            SegmentationRunner(
                 session = session,
                 config = config,
                 inputDataType = inputDataType.dataType,
@@ -156,7 +154,7 @@ class LiteRtSemanticSegmentationModel(
                 inputQuantization = inputMetadata.quantization?.toInputQuantization() ?: modelConfig.inputQuantization,
                 preferNativeYuvPreprocessing = modelConfig.preferNativeYuvPreprocessing,
                 preprocessCache = preprocessCache,
-                nativeScorePostprocessor = nativeScorePostprocessor,
+                postprocessor = postprocessor,
             )
         } catch (error: CancellationException) {
             session.close()
@@ -201,7 +199,6 @@ class LiteRtSemanticSegmentationModel(
             resizeFilter = modelConfig.resizeFilter,
         )
     }
-
 
     private companion object {
         val ACCELERATOR_FALLBACK_ORDER = listOf(

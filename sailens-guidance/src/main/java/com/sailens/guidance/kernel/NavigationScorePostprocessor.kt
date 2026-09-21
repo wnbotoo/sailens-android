@@ -1,6 +1,10 @@
 package com.sailens.guidance.kernel
 
 import com.sailens.runtime.ImageTensorLayout
+import com.sailens.vision.semantic.SemanticPostprocessOutcome
+import com.sailens.vision.semantic.SemanticPostprocessor
+import com.sailens.vision.semantic.SemanticScoreSpec
+import com.sailens.vision.semantic.SemanticScores
 import com.sailens.runtime.nativeValue
 import com.sailens.guidance.config.AnalysisConfig
 import com.sailens.core.mask.BinaryMask
@@ -18,11 +22,22 @@ data class SemanticPostprocessResult(
     val stats: SegmentationAnalysisStats,
 )
 
+/**
+ * What Guidance gets back from one semantic frame.
+ *
+ * [stats] is null when the fused native pass did not run and the class map came from a plain
+ * argmax; SegmentationAnalyzer then extracts the same statistics in Kotlin.
+ */
+data class NavigationSemanticResult(
+    val mask: SegmentationMask,
+    val stats: SegmentationAnalysisStats?,
+)
+
 class NavigationScorePostprocessor(
     private val config: AnalysisConfig,
     navigationSemantics: NavigationSemantics,
     private val logService: LogService,
-) {
+) : SemanticPostprocessor<NavigationSemanticResult> {
     private val lookup = SemanticClassLookup.from(navigationSemantics)
     private var hasLoggedBackend = false
     private var reusablePassableWords = LongArray(0)
@@ -281,6 +296,76 @@ class NavigationScorePostprocessor(
         }
     }
 
+    /**
+     * Generic seam (architecture.md 6.5): sailens-vision hands over the scores, this decides what
+     * they mean. Every variant routes into the fused native pass above, so the tensor is scanned
+     * once and the navigation statistics come out of the same traversal as the argmax.
+     *
+     * Returning null declines the frame; the runner then computes a plain argmax and calls
+     * [fromClassMap].
+     */
+    override fun postprocessScores(
+        scores: SemanticScores,
+        spec: SemanticScoreSpec,
+        reusableClassMap: IntArray,
+    ): SemanticPostprocessOutcome<NavigationSemanticResult>? {
+        val result = when (scores) {
+            is SemanticScores.FloatHandle -> postprocessScoresFromHandle(
+                tensorBufferHandle = scores.tensorBufferHandle,
+                reusableResultMask = reusableClassMap,
+                width = spec.width,
+                height = spec.height,
+                channels = spec.channels,
+                scoreLayout = spec.layout,
+            )
+            is SemanticScores.Int8Handle -> postprocessInt8ScoresFromHandle(
+                tensorBufferHandle = scores.tensorBufferHandle,
+                reusableResultMask = reusableClassMap,
+                width = spec.width,
+                height = spec.height,
+                channels = spec.channels,
+                scoreLayout = spec.layout,
+            )
+            is SemanticScores.FloatValues -> postprocessScores(
+                scores = scores.values,
+                reusableResultMask = reusableClassMap,
+                width = spec.width,
+                height = spec.height,
+                channels = spec.channels,
+                scoreLayout = spec.layout,
+            )
+            is SemanticScores.Int8Values -> postprocessInt8Scores(
+                scores = scores.values,
+                reusableResultMask = reusableClassMap,
+                width = spec.width,
+                height = spec.height,
+                channels = spec.channels,
+                scoreLayout = spec.layout,
+            )
+        } ?: return null
+
+        val backend = when (scores) {
+            is SemanticScores.Int8Handle, is SemanticScores.Int8Values -> BACKEND_NATIVE_SCORE_INT8
+            is SemanticScores.FloatHandle, is SemanticScores.FloatValues -> BACKEND_NATIVE_SCORE
+        }
+        return SemanticPostprocessOutcome(
+            value = NavigationSemanticResult(mask = result.mask, stats = result.stats),
+            backend = backend,
+        )
+    }
+
+    /**
+     * Fallback wrap: the runner already did a plain argmax, so there are no navigation statistics
+     * for this frame and SegmentationAnalyzer will extract them from the mask in Kotlin instead.
+     */
+    override fun fromClassMap(
+        classMap: IntArray,
+        spec: SemanticScoreSpec,
+    ): NavigationSemanticResult = NavigationSemanticResult(
+        mask = SegmentationMask(spec.width, spec.height, classMap.clone()),
+        stats = null,
+    )
+
     private fun buildStats(
         width: Int,
         height: Int,
@@ -494,7 +579,11 @@ class NavigationScorePostprocessor(
         }
     }
 
-    private companion object {
+    companion object {
+        // Trace names for the fused paths. Part of the performance contract (architecture.md 12.3).
+        const val BACKEND_NATIVE_SCORE: String = "native_score"
+        const val BACKEND_NATIVE_SCORE_INT8: String = "native_score_int8"
+
         private const val UNKNOWN_GROUND = -1
 
         private const val OUT_PASSABLE_PIXEL_COUNT = 0

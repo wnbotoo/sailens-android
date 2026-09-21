@@ -80,10 +80,11 @@ presentation
 
 Module boundaries:
 
-- `:domain` holds interfaces, models, and pure use cases only — no Android APIs.
-- `:data` keeps owning ML runtime and model assets.
-- `:presentation` owns UI, permissions, system ASR, hardware key input, TTS arbitration.
-- `:app` keeps doing Koin binding and decides which implementations are enabled.
+- `sailens-vlm` holds the engine contract: frame + complete prompt -> streamed text, no product policy.
+- `sailens-describe` owns Describe's prompts, snapshot freshness and request scheduling.
+- `sailens-runtime` owns model sources, sessions and accelerator selection for whatever runtime lands.
+- `sailens-shell` owns UI, permissions, system ASR, hardware key input; `sailens-output` owns TTS arbitration.
+- `:app` keeps doing Koin binding and decides which implementations an edition enables.
 
 ## 4. SceneSnapshotProvider
 

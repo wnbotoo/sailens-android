@@ -16,9 +16,9 @@ import java.lang.reflect.Modifier
 /**
  * Layer A of the native verification plan (docs/architecture.md §12.2): binding coverage.
  *
- * The native code split three ways in gate G3, so layer A split with it: this covers the vision
- * and Guidance kernels that stayed in :data, and NativeRuntimeBindingCoverageTest in
- * sailens-runtime covers the preprocessing kernels that moved. Both libraries keep the same
+ * The native code split three ways in gate G3, so layer A split with it: this covers the
+ * fused Guidance kernels, and NativeRuntimeBindingCoverageTest / NativeVisionBindingCoverageTest
+ * cover the preprocessing and generic vision kernels. All three libraries keep the same
  * guarantee.
  *
  * `libsailens_guidance.so` binds its methods in `JNI_OnLoad` with `RegisterNatives` and exports no
@@ -100,7 +100,7 @@ class NativeGuidanceBindingCoverageTest {
             .sortedBy { it.key }
 
         assertEquals(
-            "These are the 5 of the migration baseline's 13 JNI entry points still in :data after G3 " +
+            "These are the 5 of the migration baseline JNI entry points that belong to Guidance after G3 " +
                 "split the preprocessing kernels into sailens-runtime and the vision kernels into " +
                 "sailens-vision. A changed " +
                 "declaration must be mirrored in the RegisterNatives table in " +

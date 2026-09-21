@@ -76,7 +76,7 @@ android {
         release {
             buildConfigField("boolean", "SHOW_DIAGNOSTICS", "false")
             // R8 relies on the default native-methods keep rule plus the JNI keeps in
-            // :data consumer-rules.pro (JNI is name-bound). Smoke-test a release build on
+            // sailens-runtime/vision/guidance consumer-rules.pro. Smoke-test a release build on
             // device before relying on it: name-based JNI / reflection break at runtime, not build.
             isMinifyEnabled = true
             isShrinkResources = true
@@ -131,7 +131,6 @@ dependencies {
     implementation(project(":sailens-vision"))
     implementation(project(":sailens-vlm"))
     implementation(project(":sailens-guidance"))
-    implementation(project(":data"))
     implementation(project(":sailens-camera"))
     implementation(project(":sailens-output"))
     implementation(project(":sailens-describe"))

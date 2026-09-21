@@ -14,7 +14,7 @@ pipeline that turns the scene ahead into speech and haptics. This file is the re
   Weights carry their own licenses and dataset terms independent of this code license.
 
 ## Big picture
-- Modules (`settings.gradle.kts`): nine `sailens-*` libraries plus `:app`, and a shrinking transitional `:data`.
+- Modules (`settings.gradle.kts`): nine `sailens-*` libraries plus `:app`. Nothing else.
   The migration in `docs/architecture.md` §11 replaced the old layer-first split (`:domain`, `:presentation`, `:ux`, `:camera`).
 - Direction: dependencies point downward and never come back up. `:sailens-core` has none.
   `sailens-guidance` and `sailens-describe` never depend on each other, and nothing shared depends on either.
@@ -27,7 +27,6 @@ pipeline that turns the scene ahead into speech and haptics. This file is the re
 - `:sailens-guidance` — all navigation logic: `NavigationSemantics`, the fused scoring kernel and connectivity (`kernel/`, native half `libsailens_guidance.so`), analysis, events, cooldown, tracking, depth, sensors, trace/replay. **No Compose or UI dependency** — that is what keeps it a separate module from the shell.
 - `:sailens-describe` — Describe product logic: prompt policy, snapshot freshness, request scheduling.
 - `:sailens-shell` — reusable presentation and composition: `SailensRoot()`, navigation, design system, Guidance UI, settings, diagnostics, about, trace replay UI, the Guidance haptic vocabulary (`GuidanceHaptic`), `SceneEvent`→`Announcement` mapping, camera-permission policy UI, `FileLogService`, and the capability model (`app/`).
-- `:data` — what is left of the old data layer: the LiteRT semantic/detection providers that adapt vision runners to Guidance ports. It disappears when those move.
 - `:app` — the thin host: `MainApplication`, `MainActivity`, Koin wiring, runtime profile, and the edition spec (`SailensEdition.kt`) that says what this build offers and promises.
 - Capability model (§5.2): *configured* (a null spec), *expected* (`CapabilityExpectations`), *available* (`PipelinePreflight`, cheap and static — it must never load a model), *runtime state*. Zero pipelines is legal; A ships no weights and lands there.
 
@@ -73,8 +72,7 @@ pipeline that turns the scene ahead into speech and haptics. This file is the re
 .\gradlew.bat --no-daemon projects
 .\gradlew.bat --no-daemon :app:assembleDebug
 .\gradlew.bat --no-daemon test
-.\gradlew.bat --no-daemon :domain:test
-.\gradlew.bat --no-daemon :data:test
+.\gradlew.bat --no-daemon :sailens-guidance:test
 .\gradlew.bat --no-daemon :app:testDebugUnitTest
 .\gradlew.bat --no-daemon :app:tasks
 ```
@@ -84,9 +82,9 @@ pipeline that turns the scene ahead into speech and haptics. This file is the re
   `main`, no amending a pushed commit. Fix mistakes with a new commit that reverts or corrects them.
   A force-push does not just inconvenience clones: anything built on a rewritten commit is orphaned
   from this history, and reconciling it costs far more than the tidy log was worth.
-- Keep Android/platform APIs out of `:domain`.
+- Keep navigation logic free of UI: `sailens-guidance` has no Compose dependency, and that is what keeps it a separate module from the shell.
 - If you change frame resolution/format, update both camera use-case config and ML preprocessing assumptions.
-- If you change model files, update `ModelCatalog` / `ModelSourceResolver`; if you change class counts, mask coefficient counts, resize filter, or backend targets, update `SailensRuntimeProfile.kt` first. Only change `SemanticModelConfig` or `ObstacleModelConfig` when the model contract/defaults change.
+- If you change model files, update `ModelCatalog` / `ModelSourceResolver`; if you change class counts, mask coefficient counts, resize filter, or backend targets, update `SailensRuntimeProfile.kt` first. Only change `SemanticModelConfig` or `DetectionModelConfig` when the model contract/defaults change.
 - If you change backend reporting fields, update `MlRuntimeInfo`, trace encoding/parsing/reporting, live debug UI, and trace replay UI together.
 - Keep start/stop lifecycle symmetry: components with `reset()` should remain wired through `StopSceneAnalysisUseCase`.
 - Present a plan and get agreement before starting a refactor.

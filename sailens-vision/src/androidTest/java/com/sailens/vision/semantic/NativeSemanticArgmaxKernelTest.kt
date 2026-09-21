@@ -14,7 +14,7 @@ import kotlin.random.Random
 /**
  * Layer B of the native verification plan (docs/architecture.md §12.2) for the generic semantic
  * argmax kernel, which moved to sailens-vision in G3. The fused Guidance scoring kernel is a
- * different kernel in a different library and is covered by :data's suite.
+ * different kernel in a different library, covered by sailens-guidance's NavigationScoreKernelTest.
  *
  * Needs a physical arm64 device: `./gradlew.bat :sailens-vision:connectedDebugAndroidTest`.
  */

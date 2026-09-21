@@ -50,6 +50,7 @@ dependencies {
     api(project(":sailens-vision"))
     implementation(project(":sailens-runtime"))
     implementation(libs.androidx.core.ktx)
+    implementation(libs.koin.android)
 
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.serialization.json)
