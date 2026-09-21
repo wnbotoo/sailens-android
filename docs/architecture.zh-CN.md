@@ -30,7 +30,7 @@ application-level contract。
 
 代码围绕这两条 pipeline 和它们共享的 Sailens 基础能力组织。官方维护的一方 Android
 发行版是本仓库之上的薄应用，通过 git submodule 精确 pin，并用 Gradle composite build
-消费。当前仓库名仍是 `sailens-yolo`，已确认的目标名是 `sailens-app`。产品命名与仓库职责
+消费。官方发行仓库为 `sailens-app`。产品命名与仓库职责
 见 [distribution-model.zh-CN.md](distribution-model.zh-CN.md)。
 
 ## 2. 目标与非目标
@@ -223,12 +223,12 @@ lifecycle。shell 提供 SailensRoot()、navigation entries 和 Koin modules 等
 继续保持零权重并支持 BYO model。reference host 可以合法地以零 available pipeline 启动，
 显示清晰的 zero-pipeline state。
 
-reference host 不是计划上架应用商店的产品。已确认的目标 identity 是 namespace
-`com.sailens`、applicationId `com.sailens.reference`。
+reference host 不是应用商店产品。它使用 namespace `com.sailens`、
+applicationId `com.sailens.reference`。
 
-**Sailens 官方 Android 发行版 —— 当前仓库 `sailens-yolo`，目标 `sailens-app`**
+**Sailens 官方 Android 发行版 —— `sailens-app`**
 
-面向最终用户的一方官方产品是 Sailens Android 之上的薄应用。它把本仓库作为 git submodule
+面向最终用户的一方官方产品 **Sailens** 是 Sailens Android 之上的薄应用。它把本仓库作为 git submodule
 精确 pin，并通过 composite build 消费 `sailens-*` libraries。它负责官方 model bundle、
 产品 identity、capability expectation、release 配置和 distribution-specific notice。
 
@@ -292,7 +292,7 @@ Taxonomy.classCount，并分别报 ModelOutputUnreadable 或 ModelClassCountMism
 "没有"。它止步于证据的边界：没有 labels 就无法机器校验 channel **顺序**，那仍然是人工 release
 gate（§6.2）。
 
-expectation 是 edition-level validation，不是 framework 限制。例如 sailens-yolo 可以声明
+expectation 是 edition-level validation，不是 framework 限制。例如官方 Sailens 发行版可以声明
 Guidance required。如果它打包的 sem model 缺失、声明的 taxonomy 不兼容，或其他**静态配置**
 contract 失败，这是 edition configuration failure，即使 Sailens framework 本身允许
 zero-pipeline。
@@ -560,7 +560,7 @@ capability spec、diagnostics flags 和 OSS metadata。
 
 ## 7. 开发方式：composite build，不上 Maven
 
-官方发行版（当前 `sailens-yolo`，目标 `sailens-app`）把 Sailens Android 作为 git
+官方 `sailens-app` 发行版把 Sailens Android 作为 git
 submodule pin 到具体 commit，并通过 Gradle composite build 引入。
 
 ~~~kotlin

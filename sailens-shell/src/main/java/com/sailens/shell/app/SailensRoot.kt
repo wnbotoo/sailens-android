@@ -66,7 +66,7 @@ fun SailensRoot(
      * the only composable that exists for as long as the app does: a per-screen collector drops
      * every announcement raised while another screen is on top (architecture.md §6.6).
      *
-     * Required, with no default, on purpose: every host copies its wiring from Core Edition's, and
+     * Required, with no default, on purpose: every host copies its wiring from Sailens Android's, and
      * a host that forgot this would compile and then deliver no screen-reader announcement at all.
      */
     screenReaderAnnouncer: ScreenReaderAnnouncer,

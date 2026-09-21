@@ -1,6 +1,6 @@
 **English** | [简体中文](README.zh-CN.md)
 
-# Sailens
+# Sailens Android
 
 **Sailens** — *Smart AI LENS*.
 
@@ -22,12 +22,12 @@ This repository is **Sailens Android**: the Apache-2.0, model-neutral Android pl
 reference host that implements reusable Sailens capabilities. It is buildable and installable for
 development and BYO-model validation, but it is **not** the app-store product.
 
-The official first-party Android distribution is maintained separately (currently
-`wnbotoo/sailens-yolo`, target repository name `sailens-app`) and is intended to ship to users
-under the product name **Sailens**. The accepted repository/product boundary, target application
-IDs, release model and decision to defer Maven publication are documented in
-[`docs/distribution-model.md`](docs/distribution-model.md). The identity changes themselves are
-intentionally left to a follow-up change.
+The official first-party Android distribution is maintained separately as
+`wnbotoo/sailens-app` and ships to users under the product name **Sailens**. This reference host
+uses `applicationId = "com.sailens.reference"`; the official product owns
+`applicationId = "com.sailens"`. The repository/product boundary, release model and decision to
+defer Maven publication are documented in
+[`docs/distribution-model.md`](docs/distribution-model.md).
 
 ## Bring your own model
 

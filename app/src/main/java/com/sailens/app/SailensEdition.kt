@@ -15,12 +15,12 @@ import com.sailens.vision.taxonomy.CityscapesTaxonomy
 import com.sailens.vlm.SceneDescriber
 
 /**
- * What this edition of Sailens offers.
+ * What the Sailens Android reference host offers.
  *
- * A (sailens-android) is the reference host and ships **no model weights**, so it configures both
+ * Sailens Android is the reference host and ships **no model weights**, so it configures both
  * pipelines but promises neither: a fresh install legitimately lands on the zero-pipeline state
- * and points at the setup docs (architecture.md §5.1). An edition that does package weights --
- * sailens-yolo -- sets `guidanceRequired = true`, and then a missing model becomes a fatal
+ * and points at the setup docs (architecture.md §5.1). The official Sailens distribution
+ * packages weights and sets `guidanceRequired = true`, so a missing model becomes a fatal
  * configuration state rather than a shrug.
  *
  * The Guidance check reads the model's TFLite metadata tables and compares its output class count
@@ -42,8 +42,8 @@ fun sailensEditionSpec(
             if (sceneDescriber.isAvailable) null else StaticUnavailableReason.EngineUnavailable
         },
     ),
-    // A ships zero weights, so it promises nothing. This is the line an edition with packaged
-    // models changes.
+    // The reference host ships zero weights, so it promises nothing. A distribution with packaged
+    // models changes this expectation.
     expectations = CapabilityExpectations(
         guidanceRequired = false,
         describeRequired = false,

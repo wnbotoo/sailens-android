@@ -287,7 +287,7 @@
     <string name="config_reason_engine">没有可用的引擎</string>
     <string name="config_reason_not_configured">这个版本没有配置它</string>
     <string name="zero_pipeline_title">尚未安装模型</string>
-    <string name="zero_pipeline_body">Sailens 本身不附带模型权重。加入语义分割模型即可启用导航辅助，见 docs/models.md。</string>
+    <string name="zero_pipeline_body">此构建不包含模型权重。加入语义分割模型即可启用导航辅助，见 docs/models.md。</string>
     <string name="btn_back">返回</string>
     <string name="btn_describe">前面是什么？</string>
     <string name="btn_describe_cancel">停止</string>

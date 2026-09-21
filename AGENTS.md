@@ -16,10 +16,10 @@ pipeline that turns the scene ahead into speech and haptics. This file is the re
 ## Repository and product boundary
 - This repository is **Sailens Android**, the Apache-2.0 model-neutral platform plus a reference
   host. It is not the app-store product.
-- The first-party shipping app is a separate thin distribution (currently `sailens-yolo`, target
-  `sailens-app`) that consumes this repository by exact submodule pin + Gradle composite build.
-- Long-term product identity belongs to that distribution: product name **Sailens**,
-  `applicationId = "com.sailens"`. This repository's reference host is planned to move to
+- The first-party shipping app is the separate thin `sailens-app` distribution, which consumes
+  this repository by exact submodule pin + Gradle composite build.
+- Product identity belongs to that distribution: product name **Sailens**,
+  `applicationId = "com.sailens"`. This repository is the **Sailens Reference** host with
   `applicationId = "com.sailens.reference"`; both keep namespace `com.sailens`.
 - Do not add store branding, official bundled weights or release-product identity to the platform
   repository. Reusable capability belongs here; distribution choices belong in the shipping app.
@@ -76,7 +76,7 @@ pipeline that turns the scene ahead into speech and haptics. This file is the re
 - LiteRT model execution with native YUV preprocessing (`native_yuv`), OpenCV fallback (`opencv_fallback`), and same-frame preprocessing cache hits (`shared_native_yuv` / `shared_quantized_native_yuv`).
 - Semantic postprocess can use native fused score/stat extraction (`native_score`) or fallback argmax paths.
 - Obstacle detection postprocess supports raw attribute-major tensors (`[1, 4+classCount, N]`) and end-to-end tensors (`[1, N, 6]`); layout is auto-resolved from the output tensor shape. The realtime path decodes straight from the output buffer handle (zero-copy) when available.
-- No weights ship here. `ModelCatalog` resolves `sem` -> `app/src/main/assets/sem.tflite` and `det` -> `app/src/main/assets/det.tflite`; both are git-ignored, so a local working copy can hold weights that never reach a commit. Absent weights are not an error here: static preflight finds no model and, because A promises nothing, the app opens on the zero-pipeline screen. That is expected, not a bug to "fix" by committing a model. (An edition that declares Guidance required, like sailens-yolo, turns the same absence into a fatal configuration state instead.)
+- No weights ship here. `ModelCatalog` resolves `sem` -> `app/src/main/assets/sem.tflite` and `det` -> `app/src/main/assets/det.tflite`; both are git-ignored, so a local working copy can hold weights that never reach a commit. Absent weights are not an error here: static preflight finds no model and, because A promises nothing, the app opens on the zero-pipeline screen. That is expected, not a bug to "fix" by committing a model. (A distribution that declares Guidance required, such as the official Sailens app, turns the same absence into a fatal configuration state instead.)
 - Shape, layout, dtype, and quantization are auto-resolved from the selected TFLite metadata and are not runtime profile fields, so swapping a conforming model needs no code change. To use separate GPU/NPU model files, update `ModelCatalog` / `ModelSourceResolver`, then set `acceleratorBackend` in `SailensRuntimeProfile.kt`. See `docs/models.md`.
 - Class channel order is validated only by *count* and by the declared `TaxonomyId` (`NavigationSemanticsBinding`), never by meaning: a wrong-order model passes that check, runs silently and mislabels the scene for a user who cannot see it. Treat it as a safety property (`docs/models.md`).
 - `FileLogService` writes JSONL logs under app internal `files/logs/`.

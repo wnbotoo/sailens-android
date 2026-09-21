@@ -1,6 +1,6 @@
 [English](README.md) | **简体中文**
 
-# Sailens
+# Sailens Android
 
 **Sailens** —— *Smart AI LENS*。
 
@@ -19,11 +19,11 @@
 负责实现可复用的 Sailens capability。它可以 build/install，用于开发和 BYO-model 验证，但
 **不是**计划提交应用商店的最终产品。
 
-官方维护的一方 Android 发行版位于独立仓库（当前为 `wnbotoo/sailens-yolo`，目标仓库名
-`sailens-app`），未来以产品名 **Sailens** 面向最终用户发布。已经确认的仓库/产品边界、
-目标 applicationId、release 模型以及暂不发布 Maven 的决策，见
-[`docs/distribution-model.zh-CN.md`](docs/distribution-model.zh-CN.md)。真正的 identity
-改动有意留到后续独立变更。
+官方维护的一方 Android 发行版位于独立仓库 `wnbotoo/sailens-app`，以产品名
+**Sailens** 面向最终用户发布。本 reference host 使用
+`applicationId = "com.sailens.reference"`；官方产品拥有
+`applicationId = "com.sailens"`。仓库/产品边界、release 模型以及暂不发布 Maven 的决策见
+[`docs/distribution-model.zh-CN.md`](docs/distribution-model.zh-CN.md)。
 
 ## 自备模型
 
