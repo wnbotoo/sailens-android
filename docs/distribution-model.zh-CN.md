@@ -140,7 +140,7 @@ Sailens Android 继续是 Apache-2.0，并且不附带模型权重。
 ### 官方 Sailens App
 
 - 保留当前已经 fresh-root 后的仓库历史；**不要**仅为了改名删除并重建仓库；
-- 原地把 `sailens-yolo` rename 为 `sailens-app`；
+- 仓库已原地 rename 为 `sailens-app`，并保留既有 fresh-root history；
 - 每个产品 release 都 pin 一个精确的 Sailens Android `main` commit；
 - release metadata 同时记录打包模型的版本/hash/provenance。
 
