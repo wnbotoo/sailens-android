@@ -48,9 +48,9 @@ data class DescribeSpec(
 /**
  * What this edition promises, as opposed to what it merely offers.
  *
- * This is distribution-level validation, not a framework restriction (§5.2). The official Sailens
- * app declares Guidance required because that is the product it ships; the platform itself is happy with zero
- * pipelines.
+ * This is distribution-level validation, not a framework restriction (§5.2). The official
+ * Sailens app declares Guidance required because that is the product it ships; the platform
+ * itself is happy with zero pipelines.
  */
 data class CapabilityExpectations(
     val guidanceRequired: Boolean = false,
