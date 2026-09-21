@@ -32,10 +32,10 @@ The platform accepts all four product combinations:
 Zero pipelines is a legitimate shell state. Whether a particular application edition is expected to
 provide one of them is a separate application-level contract.
 
-The code is organised around those two pipelines plus shared Sailens infrastructure. The official
-first-party Android distribution is a thin application over this repository, pinned as a git
-submodule and consumed through a Gradle composite build. It is maintained as `sailens-app`. Product naming and repository ownership are specified
-in [distribution-model.md](distribution-model.md).
+The code is organised around those two pipelines plus shared Sailens infrastructure. The official first-party Android distribution is a thin application over this repository, pinned
+as a git submodule and consumed through a Gradle composite build. It is maintained as
+`sailens-app`. Product naming and repository ownership are specified in
+[distribution-model.md](distribution-model.md).
 
 ## 2. Goals and non-goals
 
