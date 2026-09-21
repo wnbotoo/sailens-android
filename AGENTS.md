@@ -16,10 +16,10 @@ pipeline that turns the scene ahead into speech and haptics. This file is the re
 ## Repository and product boundary
 - This repository is **Sailens Android**, the Apache-2.0 model-neutral platform plus a reference
   host. It is not the app-store product.
-- The first-party shipping app is a separate thin distribution (currently `sailens-yolo`, target
-  `sailens-app`) that consumes this repository by exact submodule pin + Gradle composite build.
-- Long-term product identity belongs to that distribution: product name **Sailens**,
-  `applicationId = "com.sailens"`. This repository's reference host is planned to move to
+- The first-party shipping app is the separate thin `sailens-app` distribution, which consumes
+  this repository by exact submodule pin + Gradle composite build.
+- Product identity belongs to that distribution: product name **Sailens**,
+  `applicationId = "com.sailens"`. This repository is the **Sailens Reference** host with
   `applicationId = "com.sailens.reference"`; both keep namespace `com.sailens`.
 - Do not add store branding, official bundled weights or release-product identity to the platform
   repository. Reusable capability belongs here; distribution choices belong in the shipping app.
