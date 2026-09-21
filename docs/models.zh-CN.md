@@ -3,9 +3,12 @@
 # 模型契约与 Backend 配置
 
 > **本仓库不附带任何模型权重。** 应用是 bring-your-own-model：你提供满足下文契约的 TFLite 图，
-> 放到约定路径即可运行。`data/src/main/assets/*.tflite` 已在 `.gitignore` 中，本地工作区可以
+> 放到约定路径即可运行。`app/src/main/assets/*.tflite` 已在 `.gitignore` 中，本地工作区可以
 > 放权重而不会进任何提交。
-> 没有权重时，模型加载在 init 阶段失败，并作为「开始分析失败」呈现给用户。
+> 没有权重时不会报错：preflight 发现没有模型，而这个版本没有承诺任何能力，所以应用会停在
+> zero-pipeline 屏，并指向这里。声明了导航为必需的 edition 则把缺失或不匹配的模型当作配置失败——
+> 进入 fatal 屏，先震动，再把原因说出来（architecture.zh-CN.md §5.2）。模型通过了 preflight、却在
+> 某台设备上起不来，属于运行时失败，显示可重试的「开始分析失败」。
 
 Sailens 按盲人辅助导航场景拆成两类模型：
 
@@ -25,8 +28,8 @@ det 未运行的帧由 tracker prediction 补偿，轨迹按 `detectionResultTtl
 ## 放置模型
 
 ```text
-data/src/main/assets/sem.tflite     # 语义分割
-data/src/main/assets/det.tflite     # 障碍物检测
+app/src/main/assets/sem.tflite     # 语义分割
+app/src/main/assets/det.tflite     # 障碍物检测
 ```
 
 文件名由 `ModelCatalog` 固定。输入/输出 tensor 名、输入类型、NHWC/NCHW layout 和量化 scale/zero-point

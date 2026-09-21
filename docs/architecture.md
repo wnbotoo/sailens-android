@@ -2,8 +2,10 @@
 
 # Sailens architecture
 
-> Status: **proposal, reviewed and revised.** Nothing in this document is implemented yet. It
-> replaces the current layer-first module structure and the fork-based A/B repository relationship.
+> Status: **agreed, and implemented in A.** It replaces the layer-first module structure and the
+> fork-based A/B repository relationship. Gates G1, G3, G4 and G5 have landed, as have steps 2 and
+> 4 of G2. **Step 3 -- B as a composite-build consumer -- is the one outstanding item.** §11 tracks
+> the plan, not the progress.
 
 ## 1. Summary
 
@@ -61,9 +63,10 @@ repository through a Gradle composite build.
   independent compile, dependency, test, native, or public-API boundary is useful.
 - Behaviour changes, except the explicit pipeline-availability behaviour in step 10.
 
-## 3. Where the code is today
+## 3. Where the code started
 
-The repository has six modules split primarily by technical layer:
+This is the pre-migration baseline the plan below replaces. It had six modules split primarily by
+technical layer:
 
 ~~~text
 :domain         (no deps)
@@ -141,6 +144,7 @@ sailens-guidance ─────────► sailens-vision ───► sail
         └─────────────────────────┴─────────────────────┘
 
 sailens-describe ─────────► sailens-vlm ─────► sailens-runtime
+        ├──────────────────► sailens-camera     (FrameSnapshotProvider, §6.1)
         └────────────────────────────────────► sailens-core
 
 sailens-camera ───────────────────────────────► sailens-core
@@ -182,8 +186,19 @@ Packages do not repeat the product name:
 Composite-build coordinates follow the module names, for example
 com.sailens:sailens-shell.
 
-Reusable library modules enable Kotlin explicit API mode. Internal implementation symbols stay
-internal unless another module genuinely needs them.
+Kotlin explicit API mode is enabled where the public surface is already small and deliberate:
+**sailens-core, sailens-camera, sailens-vlm, sailens-output and sailens-describe**. In those
+modules the compiler refuses a declaration without a visibility modifier, so the API cannot grow
+by accident.
+
+It is **not** enabled on sailens-runtime, sailens-vision, sailens-guidance or sailens-shell. Turning
+it on there today would mean writing `public` on roughly nine hundred declarations that are public
+only because nobody has said otherwise — which enshrines an accidental surface rather than gating
+it. The prerequisite is narrowing those modules first (most of sailens-shell's composables and
+sailens-guidance's processors want `internal`), and that is a separate piece of work with its own
+review. Until then, the gate in §12.5 applies to the five modules listed above and to nothing else.
+
+Internal implementation symbols stay internal unless another module genuinely needs them.
 
 ### 4.4 sailens-shell package structure
 
@@ -278,6 +293,15 @@ static bindings such as TaxonomyId ↔ NavigationSemantics agree. It must not cr
 initialize GPU/NPU delegates, allocate inference buffers or run a probe inference merely to decide
 whether a control should exist. That work stays lazy at session start, as it does today.
 
+"Cheap" is not "shallow". Reading the TFLite flatbuffer tables from a memory-mapped model costs the
+pages the tables sit on and no native runtime, and it is what turns preflight into an actual check:
+*the asset exists* is passed by a model of the wrong shape, which then fails at session start —
+after the person has pressed start and begun walking. SemanticModelPreflight therefore verifies that
+the output tensor parses and that its class count matches the declared Taxonomy.classCount, and
+reports ModelOutputUnreadable or ModelClassCountMismatch rather than a generic absence. It stops
+where the evidence stops: channel *order* is not machine-verifiable without labels and stays a
+manual release gate (§6.2).
+
 Application expectations are edition-level validation, not a framework restriction. For example,
 sailens-yolo may declare Guidance required. If its packaged semantic model is missing, its declared
 taxonomy is incompatible, or another **static configuration** contract fails, that is an edition
@@ -288,7 +312,16 @@ Static configuration failure has build-type-specific handling:
 - **debug/development:** fail fast so packaging/wiring mistakes are discovered immediately;
 - **release:** enter an explicit fatal configuration state instead of crashing/restarting. The state
   must be accessible and must actively signal the failure through an available non-visual channel
-  at least once; if speech is unavailable, haptics are the fallback.
+  at least once.
+
+The signal is **haptic first, then speech** — not "speech, or haptics if speech is broken". At the
+moment a fatal configuration state is reached, nothing has started a TTS engine, because the app
+never got to the screen that does. Treating that as "speech is unavailable" means the user gets one
+buzz and is never told what is wrong. So the haptic fires immediately, because it needs no engine,
+and the engine is then started so the reason can be spoken once it is ready. If it never becomes
+ready, the haptic has already happened. Signalling is once per process: a LaunchedEffect restarts on
+configuration change and process-death restore, and a fatal state that buzzes on every rotation
+teaches the user to ignore it.
 
 A pipeline may still pass preflight and fail when the real session initializes on a particular
 device (for example a GPU delegate or output-buffer allocation fails). That is a **runtime failure**,
@@ -297,6 +330,17 @@ analysis-start-failed path; Describe follows the equivalent request/runtime erro
 
 An optional but statically unavailable pipeline is not presented as a dead control. The shell either
 hides it or presents an explicit edition-level explanation outside the normal action path.
+
+The four combinations therefore route to four different places, and a Describe-only edition does not
+land on the guidance screen — that screen is a start/stop control for a navigation session it does
+not have, and the one thing it *can* do would not be on it:
+
+| Guidance | Describe | Start destination |
+|---|---|---|
+| available | available | guidance, with a Describe action |
+| available | — | guidance, no Describe control |
+| — | available | the Describe screen |
+| — | — | the zero-pipeline screen |
 
 ## 6. Design decisions
 
@@ -314,13 +358,23 @@ interface FrameSource {
 
 interface FrameSnapshotProvider {
     fun currentFrame(maxAgeMs: Long): ImageFrame?
+    suspend fun awaitCurrentFrame(maxAgeMs: Long, timeoutMs: Long): ImageFrame?
+    fun openSnapshotLease(): FrameLease
 }
 ~~~
 
-Both can be backed by the same camera session.
+Both are backed by the same camera session, and **demand is explicit**. Turning a camera image into
+an ImageFrame copies every plane, so it happens only when something has asked for one — but asking
+is not the same as running Guidance. A stream subscription and a snapshot lease are each sufficient
+on their own. That is what lets Describe answer while Guidance is stopped, without capture
+converting frames nobody reads.
 
 Describe rejects a stale snapshot. It must never silently describe a frame from several seconds ago.
 This preserves the intent already documented in the VLM/ASR assistant plan.
+
+A snapshot request is also bounded in time. It opens demand, waits for a frame that satisfies the
+freshness bound, and gives up rather than waiting indefinitely: a person who pressed a button is
+owed an answer, and "I could not see" is a better answer than silence.
 
 Describe remains independent of CameraX: another source can implement FrameSnapshotProvider later.
 
@@ -430,8 +484,45 @@ The product policy that a Guidance safety alert outranks Describe information be
 sailens-shell / edition composition. Guidance emits typed events/urgency; Describe emits information
 results; the shell maps them onto output priorities.
 
-Screen-reader announcements have one collector in sailens-shell because the actual Android View
-belongs to presentation.
+Preemption is more than flushing the speech queue. Flushing removes what is already queued, but the
+VLM keeps decoding, so the description resumes behind the alert and the person hears half a sentence
+about scenery arriving right after "step down ahead" with no way to tell which is current. Stopping
+the right description takes three things, and each is owned by one shell-wide object rather than by
+a screen:
+
+- **One SceneDescriptionCoordinator for the whole shell.** It owns the description in flight: the
+  job, the token that says whether it may still speak, and the speech it has queued. The guidance
+  screen preempts through it, and the Describe screen starts and cancels through it, so the
+  description Guidance stops is the one actually running — whichever screen it is on. (An earlier
+  iteration gave each screen its own session; a warning then cancelled the guidance screen's idle
+  session while the Describe screen's description kept talking.) Preempting cancels the generation,
+  invalidates the token so a chunk already decoded cannot speak, and withdraws Describe's queued
+  speech, including the tail of an answer that finished decoding but is still being read out.
+  Cancellation reaches the decode through VlmRuntime.shouldStop, which frees the accelerator.
+- **Speech ownership is a mechanism in sailens-output.** Utterances can carry an opaque SpeechOwner,
+  and `withdraw(owner)` takes back that owner's speech and nothing else: the engine can only flush
+  its whole queue, so the output layer flushes and hands everyone else's utterances back in order.
+  Describe can therefore cancel only Describe — closing or cancelling a description cannot cut off a
+  warning that happens to be playing. Guidance, which outranks everything, still speaks with a flush.
+- **The shared engines outlive every screen.** The speech engine and the description model are
+  released by a SharedEngineOwner when the last screen holding a lease lets go, never by a screen on
+  its way out; closing Describe used to release the engine Guidance was still speaking through.
+
+A description speaks through the channel that was current when it started. If the channel changes
+mid-way — speech turned off, a screen reader turned on — the description is cancelled rather than
+finished half in one voice and half in another. The next request uses the new channel.
+
+Only one answer owns the output at a time. An answer can finish decoding while it is still being
+read out, and the Describe action comes back as soon as decoding ends, so a new request first
+withdraws whatever is left of the previous answer. Otherwise the rest of a description of where the
+person was would play ahead of the description of where they are now, with nothing to tell the two
+apart.
+
+Screen-reader announcements have exactly one collector, at the shell root, because the Android View
+belongs to presentation and the root is the only composable that exists for as long as the app
+does. Every screen publishes to the shared ScreenReaderAnnouncer. A per-screen collector drops every
+announcement raised while another screen is on top — which is how a navigation warning raised under
+the Describe screen used to reach no one.
 
 Guidance-specific haptic vocabulary stays in the shell's Guidance presentation package.
 SPEECH_UNAVAILABLE may remain a shared output-level signal because it describes the output channel,
@@ -549,7 +640,7 @@ From B:
 
 From A:
 
-- data/src/main/assets as the BYO location;
+- data/src/main/assets as the BYO location (moved to app/src/main/assets in step 10/11);
 - the old mlModelBinding arrangement after its replacement is proven;
 - Gradle modules :domain, :data, :presentation and :ux after their code has migrated.
 
@@ -567,21 +658,111 @@ There is no standalone sailens-ux or sailens-guidance-ui module in the target.
 
 ## 11. Migration plan
 
-Every step ends with A building, B building against the current A commit, and tests green.
+The implementation keeps eleven small **steps** because that makes dependency movement, commits and
+regression diagnosis manageable. A step is not an artificial human-review stop.
 
-| # | Step | Device/native check |
+After each step, run the targeted build/tests needed to prove that the tree is still internally
+consistent. If they pass, implementation continues directly to the next step in the same gate.
+Human review happens only at the five **review gates** below. A failed intermediate check is fixed
+inside the current gate rather than handed off as a half-migrated architecture.
+
+| # | Implementation step | Review gate |
 |---|---|---|
-| 1 | Convert JNI to RegisterNatives **and add native contract coverage** before package moves | yes |
-| 2 | Extract sailens-shell; move root Compose/navigation/settings/design/Guidance UI **and camera permission rationale UI** into it; refactor camera to expose only permission state/request primitives so its :ux dependency is gone; keep Application/MainActivity in app | app launch |
-| 3 | Convert B into a thin composite-build consumer; retire fork-only guardrails in B, not A's append-only history rule | B build/launch |
-| 4 | Extract sailens-core and sailens-camera; introduce FrameSource + FrameSnapshotProvider; verify camera remains independent of shell/design UI | camera session |
-| 5 | Extract sailens-runtime; split native runtime preprocessing | yes |
-| 6 | Extract sailens-vision; split Taxonomy / NavigationSemantics with TaxonomyId validation; split vision native code | yes |
-| 7 | Move navigation logic into sailens-guidance; move Guidance presentation only into shell; split Guidance native code | yes |
-| 8 | Extract sailens-output and make arbitration primitives explicit while preserving current behaviour | yes |
-| 9 | Extract sailens-vlm and sailens-describe; move prompt/snapshot/scheduling policy into Describe | targeted tests |
-| 10 | **Behaviour change:** implement configured/expected/static-availability/runtime-state model, fatal static-configuration handling and legal zero-pipeline state | yes |
-| 11 | Update README, AGENTS.md, models.md asset path, B documentation and architecture references | — |
+| 1 | Convert JNI to RegisterNatives and add binding + array-kernel contract coverage before package moves | **G1 — native safety foundation** |
+| 2 | Extract sailens-shell; move root Compose/navigation/settings/design/Guidance UI **and camera permission rationale UI** into it; refactor camera to expose only permission state/request primitives so its :ux dependency is gone; keep Application/MainActivity in app | **G2 — app/composition foundation** |
+| 3 | Convert B into a thin composite-build consumer; retire fork-only guardrails in B, not A's append-only history rule | G2 |
+| 4 | Extract sailens-core and sailens-camera; introduce FrameSource + FrameSnapshotProvider; verify camera remains independent of shell/design UI | G2 |
+| 5 | Extract sailens-runtime; split native runtime preprocessing | **G3 — vision/Guidance runtime** |
+| 6 | Extract sailens-vision; split Taxonomy / NavigationSemantics with TaxonomyId validation; split vision native code | G3 |
+| 7 | Move navigation logic into sailens-guidance; move Guidance presentation only into shell; split Guidance native code | G3 |
+| 8 | Extract sailens-output and make arbitration primitives explicit while preserving current behaviour | **G4 — output + Describe** |
+| 9 | Extract sailens-vlm and sailens-describe; move prompt/snapshot/scheduling policy into Describe | G4 |
+| 10 | **Behaviour change:** implement configured/expected/static-availability/runtime-state model, fatal static-configuration handling and legal zero-pipeline state | **G5 — capability semantics + closeout** |
+| 11 | Update README, AGENTS.md, models.md asset path, B documentation and architecture references | G5 |
+
+### 11.1 Review gates
+
+**G1 — native safety foundation**
+
+Stop before any package/module movement. Required evidence:
+
+- A builds and its existing JVM tests stay green;
+- Layer A binding coverage and Layer B array-kernel instrumentation tests in §12.2 pass on an arm64
+  device;
+- all 13 current JNI declarations are registered through RegisterNatives;
+- the built library has no exported Java_<mangled> JNI entry points; JNI_OnLoad is the sole JNI
+  registration entry point;
+- no inference behaviour is intentionally changed.
+
+This gate isolates JNI migration risk from every later package move.
+
+**G2 — app/composition foundation (steps 2–4)**
+
+Complete shell, B composite consumption, core and camera as one migration phase. Stop only after:
+
+- A builds/tests;
+- B resolves A through the real composite build and builds/launches;
+- A launches;
+- a camera session works;
+- camera has no dependency back to shell/design UI;
+- Application/MainActivity remain host-owned;
+- FrameSource and freshness-bounded FrameSnapshotProvider have their intended ownership.
+
+Steps 2–4 may be separate commits, but they should not create three separate review handoffs.
+
+**G3 — vision/Guidance runtime (steps 5–7)**
+
+Treat runtime, vision and Guidance as one coupled extraction. Stop only when the final dependency
+direction and all three native-library homes exist. Required evidence includes:
+
+- full A/B builds and tests;
+- libsailens_runtime.so, libsailens_vision.so and libsailens_guidance.so preserve the registration
+  guarantees from G1;
+- array-kernel contract tests still pass after the split;
+- B's real float models exercise native_score and native_bbox_nms_float_handle;
+- §12.3 performance red lines and same-frame preprocessing-cache reuse hold on the same target
+  device;
+- a real Guidance session completes without behavioural regression;
+- sailens-guidance has no Compose/UI dependency.
+
+This is the highest-risk structural gate and must not be merged into G4.
+
+**G4 — output + Describe (steps 8–9)**
+
+Complete the shared output mechanism and the headless Describe pipeline together, then verify:
+
+- current Guidance speech/haptic behaviour is preserved;
+- Guidance safety output can pre-empt Describe information according to shell policy while
+  sailens-output itself remains policy-neutral;
+- Describe uses FrameSnapshotProvider rather than collecting the continuous frame stream;
+- stale snapshots, cancellation and single-flight behaviour have targeted tests;
+- Guidance-only editions do not acquire a heavyweight concrete VLM runtime dependency;
+- if physical sailens-vlm extraction is deferred, the temporary dependency arrangement below is
+  still respected.
+
+**G5 — capability semantics + closeout (steps 10–11)**
+
+This is deliberately separate because step 10 changes product behaviour rather than merely moving
+code. Verify the complete state model and then update documentation against the implemented result:
+
+- all four pipeline combinations are valid;
+- static availability/preflight does not eagerly initialize LiteRT/GPU/NPU sessions;
+- required static-configuration failures follow the debug fail-fast / release accessible-fatal-state
+  contract;
+- device-specific session initialization failures remain runtime failures on the retryable path;
+- unavailable pipelines do not become dead accessibility controls;
+- final A/B build, tests, launch, native/performance checks and structural checks in §12 pass;
+- README, AGENTS.md and model/repository documentation describe the code that actually landed.
+
+### 11.2 Continuous verification inside a gate
+
+Review gates reduce handoffs, **not verification**. Each implementation step still runs the smallest
+useful checks immediately after its change (for example compile + targeted tests, a composite build,
+or a native instrumentation test). The implementer continues automatically when those checks pass
+and stops early only when a failure cannot be resolved inside the current gate.
+
+A gate may contain multiple focused commits. There is no requirement to squash a gate into one
+commit merely to make the review boundary match the Git history.
 
 sailens-vlm is the one extraction that may be deferred if it would initially contain only trivial
 interfaces and no concrete implementation. While deferred, the VLM contract lives as a package
@@ -619,7 +800,13 @@ the 171-test baseline in §12.1 and do not run in a JVM-only CI.
 - load every target native library;
 - each JNI_OnLoad/RegisterNatives registration checks and propagates failure;
 - the registration tables cover all 13 Kotlin native declarations;
-- a wrong class name, method name or JNI signature makes library loading fail.
+- a wrong class name, method name or JNI signature makes library loading fail;
+- **no library exports a `Java_<mangled>` symbol.** The entry points keep internal linkage, so
+  name-based binding is not merely unused but unavailable, and the registration table is the only
+  thing that can bind a method. Without this, a stale export could keep a method working while its
+  table row is wrong or missing, which is the failure the layer is here to catch. Each library
+  split in steps 5–7 must preserve the property; it is checkable with
+  `llvm-nm -D --defined-only <lib>.so | grep -E 'Java_|JNI_OnLoad'`, which should show `JNI_OnLoad` and no `Java_` entry points.
 
 This is the complete guard against the migration risk that motivated RegisterNatives: a renamed or
 missed binding cannot hide until a rare code path is executed.
@@ -630,6 +817,15 @@ missed binding cannot hide until a rare code path is executed.
 - include the float and int8 array kernels;
 - exercise semantic, detection, YUV/quantization and connectivity behaviour as applicable;
 - compare key outputs against the pre-refactor implementation where practical.
+
+Where a kernel and its Kotlin fallback are **not** equivalent, the test pins the native values
+rather than the comparison, because the native kernel is the shipping path. G1 found one such case:
+the connectivity kernel does not apply the perspective width scale that
+`KotlinConnectivityStatsExtractor` applies, and is not passed the two config values it would need.
+On a corridor that recedes normally the two disagree on five of nine outputs, including
+`floodReachRatio`, because the flood's early-stop test consumes that same retention. This is a
+pre-existing product divergence, not a refactor artefact; it is recorded in
+`NativeConnectivityKernelTest` and left for a separate behavioural decision.
 
 **C. Handle integration — model-backed**
 
@@ -654,6 +850,31 @@ After runtime/vision/Guidance native extraction, validate on the same target dev
 - preprocessing cache still reports same-frame reuse;
 - no extra full semantic-tensor read is introduced.
 
+**Measured state (SM8850, local BYO weights).** Re-measured after the rework; unchanged from the
+G3 exit measurement.
+
+| Red line | State |
+|---|---|
+| sem postprocessBackend = native_score | **holds** |
+| sem outputReadTimeMs ≈ 0 | **does not hold** — 15/22/64 ms (min/median/max) |
+| det postprocessBackend = native_bbox_nms_float_handle | **does not hold** — reports `native_bbox_nms`, the array path |
+| det outputReadTimeMs | 2/10/28 ms |
+| preprocessing cache same-frame reuse | **does not hold** — both models report `native_yuv`, never `shared_native_yuv` |
+| no extra full semantic-tensor read | holds |
+
+All three failures are **pre-existing, not refactor regressions**. The zero-copy pair was verified
+against a build of the pre-migration commit on the same device and is identical there; the traces
+from that build also show `native_yuv` on both models, so the same-frame cache has never been
+hitting either. The handle path has simply not been running: `libLiteRt.so` does export the
+lock/unlock symbols and the TensorBuffer handle reflection is valid for LiteRT 2.1.5, so the cause
+is further in, and the `std::call_once` around the dlsym is a suspect that is not confirmed. The
+cache is a separate matter: sem and det start concurrently, so neither finds the other's entry, and
+the reuse the line asks for would need the two preprocess steps ordered rather than raced.
+
+Restoring either changes the detection postprocess and the frame budget, so both are product
+decisions rather than part of this refactor. Treat these lines as targets to restore, not as
+properties that were preserved.
+
 ### 12.4 Session comparison
 
 Compare before/after traces on the same device and route:
@@ -674,7 +895,8 @@ During migration, verify:
 - sailens-core does not accumulate Android application services;
 - no shared lower module depends on sailens-shell;
 - concrete VLM runtime dependencies are not pulled into Guidance-only editions;
-- explicit API compilation prevents accidental library-surface growth.
+- explicit API compilation prevents accidental library-surface growth **in the five modules where
+  it is enabled** (§4.3); the other four are not gated and their surface is reviewed by hand.
 
 ## 13. Decisions resolved by this review
 

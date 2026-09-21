@@ -181,7 +181,7 @@ GPU(OpenCL)`run()` 是**异步入队**,~1ms 就返回,真实计算等**读回输
 本节是“发布时要做什么”。新人请先读懂 [§7.1 架构](#71-架构两条独立的下发线),再按 [§7.5 清单](#75-发布清单)执行。
 
 > **Sailens 现状 vs 生产目标(先认清差距)**
-> - **现状(debug 能用)**:模型放 `data/src/main/assets/`(随 APK,不走下发);运行时走 **JIT** dynamic feature(`litert_npu_runtime_libraries_jit`);本地用 `bundletool --mode=universal` 装;**没有** `device_targeting_configuration.xml`,**没有** AI Pack。
+> - **现状(debug 能用)**:模型放 `app/src/main/assets/`(随 APK,不走下发);运行时走 **JIT** dynamic feature(`litert_npu_runtime_libraries_jit`);本地用 `bundletool --mode=universal` 装;**没有** `device_targeting_configuration.xml`,**没有** AI Pack。
 > - **生产目标**:模型 **AOT 预编译 → AI Pack**(Play 按设备下发对的那份);运行时走 **dispatch-only** Feature Delivery(`litert_npu_runtime_libraries`,非 _jit)+ **device targeting**;经 Play(内测/正式)安装。下面 7.2–7.4 就是把现状搬到目标。
 
 ### 7.1 架构:两条独立的下发线

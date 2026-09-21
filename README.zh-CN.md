@@ -18,8 +18,8 @@
 本仓库**不带模型权重**。App 在运行时解析两个图：
 
 ```text
-data/src/main/assets/sem.tflite     # 语义可行走区域分割
-data/src/main/assets/det.tflite     # 障碍物检测
+app/src/main/assets/sem.tflite      # 语义可行走区域分割
+app/src/main/assets/det.tflite      # 障碍物检测
 ```
 
 两个路径都已被 gitignore，所以本地工作区可以放权重而不会进任何提交。
@@ -27,7 +27,10 @@ data/src/main/assets/det.tflite     # 障碍物检测
 丢进任何满足契约的 TFLite 图，管线就会用它——shape、layout、dtype、量化参数**都在加载时从模型
 metadata 自动读取**，所以**换模型通常不需要改代码**。
 
-没有权重时，模型加载在 init 阶段失败，并作为「开始分析失败」呈现给用户。
+没有权重时不会报错：preflight 发现没有模型，而这个版本没有承诺任何能力，所以应用会停在
+zero-pipeline 屏，并指向这里。声明了导航为必需的 edition（sailens-yolo）则把缺失或不匹配的模型
+当作配置失败——进入 fatal 屏，先震动，再把原因说出来。模型通过了 preflight、却在某台设备上起不来，
+属于运行时失败，显示可重试的「开始分析失败」。
 
 > **接模型前先读 [`docs/models.zh-CN.md`](docs/models.zh-CN.md)。** 契约不只是 shape：
 > **类别通道顺序只按_数量_校验，从不校验语义。** shape 正确但类别顺序不同的模型会毫无报错地运行，
@@ -45,18 +48,23 @@ metadata 自动读取**，所以**换模型通常不需要改代码**。
 
 ## 架构
 
-四个 Gradle 模块 + 两个支撑模块的 clean architecture，用 Koin 装配：
+九个可复用的 `sailens-*` library 加一个参考 app，按两条产品 pipeline 而不是技术分层组织 ——
+见 [docs/architecture.zh-CN.md](docs/architecture.zh-CN.md)。
 
 ```text
-:domain        感知 / 分析 / 决策用例 —— 不含任何 Android API
-:data          LiteRT 推理、深度、日志、trace
-:presentation  UI 状态、overlay 渲染、TTS、触觉
-:app           Koin 装配、根 Compose、运行时 profile
-:camera        CameraX 采集与帧流
-:ux            设计系统
+:sailens-core     共享契约：ImageFrame、geometry、BinaryMask、MlRuntimeInfo、LogService
+:sailens-camera   CameraX 采集、FrameSource / FrameSnapshotProvider、预览、相机权限状态
+:sailens-runtime  LiteRT session、加速器选择、模型来源、YUV 预处理
+:sailens-vision   分割 / 检测 runner、数据集 taxonomy、默认后处理
+:sailens-vlm      VLM 引擎契约：帧 + 完整 prompt -> 流式文本
+:sailens-output   TTS、音频焦点、读屏检测、触觉原语
+:sailens-guidance 导航逻辑：语义、连通性、安全分析、事件、深度、trace
+:sailens-describe Describe 产品逻辑：prompt、快照新鲜度、请求调度
+:sailens-shell    可复用表现层：SailensRoot()、导航、设计系统、Guidance 与 Describe UI
+:app              Koin 装配、Application/MainActivity、运行时 profile、edition spec
 ```
 
-外层模块向内依赖 `:domain` 接口。帧的流向：
+依赖只向下；Guidance 和 Describe 互不依赖。帧的流向：
 `CameraX → ImageFrameAnalyzer → SharedFlow<ImageFrame> → ProcessFrameUseCase → AnalyzeSceneUseCase
 → DecideEventsUseCase → 语音/触觉`。
 
@@ -84,7 +92,7 @@ metadata 自动读取**，所以**换模型通常不需要改代码**。
 
 | | | |
 |---|---|---|
-| [`docs/architecture.zh-CN.md`](docs/architecture.zh-CN.md) | [English](docs/architecture.md) | 已完成本轮评审的 Sailens 模块化重构方案（尚未实现） |
+| [`docs/architecture.zh-CN.md`](docs/architecture.zh-CN.md) | [English](docs/architecture.md) | Sailens 模块结构：模块边界、seam、迁移计划与验收 |
 | [`docs/models.zh-CN.md`](docs/models.zh-CN.md) | [English](docs/models.md) | 模型契约、backend 配置、性能红线 |
 | [`docs/perception-profiles.zh-CN.md`](docs/perception-profiles.zh-CN.md) | [English](docs/perception-profiles.md) | 感知挡位、调度、tracker TTL |
 | [`docs/npu-litert-qnn.zh-CN.md`](docs/npu-litert-qnn.zh-CN.md) | [English](docs/npu-litert-qnn.md) | 高通 NPU 接线、交付、诊断 |

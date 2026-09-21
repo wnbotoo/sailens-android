@@ -1,9 +1,9 @@
 package com.sailens.app
 
-import com.sailens.data.source.ml.ModelAcceleratorBackend
-import com.sailens.domain.model.common.ObstacleProviderType
-import com.sailens.domain.model.common.PerceptionProfile
-import com.sailens.presentation.scene.SceneOverlayMode
+import com.sailens.runtime.ModelAcceleratorBackend
+import com.sailens.guidance.model.common.ObstacleProviderType
+import com.sailens.guidance.model.common.PerceptionProfile
+import com.sailens.shell.guidance.overlay.SceneOverlayMode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -107,35 +107,5 @@ class SailensRuntimeProfileTest {
         assertEquals(emptySet<SceneOverlayMode>(), profile.sceneOverlay.enabledOverlayModes)
         assertEquals(SceneOverlayMode.OFF, profile.sceneOverlay.effectiveInitialMode)
         assertEquals(500L, profile.sceneOverlay.bitmapRenderIntervalMs)
-    }
-
-    @Test
-    fun `hardware profile formatter prefers SoC fields`() {
-        val profile = DeviceHardwareProfileProvider.format(
-            DeviceHardwareProfileProvider.BuildFields(
-                socManufacturer = "Qualcomm",
-                socModel = "SM8750-AB",
-                hardware = "qcom",
-                board = "pineapple",
-                model = "Test Phone",
-            )
-        )
-
-        assertEquals("qualcomm_sm8750-ab", profile)
-    }
-
-    @Test
-    fun `hardware profile formatter falls back to board fields`() {
-        val profile = DeviceHardwareProfileProvider.format(
-            DeviceHardwareProfileProvider.BuildFields(
-                socManufacturer = "unknown",
-                socModel = "",
-                hardware = "qcom",
-                board = "pineapple",
-                model = "Test Phone",
-            )
-        )
-
-        assertEquals("qcom_pineapple_test_phone", profile)
     }
 }

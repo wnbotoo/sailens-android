@@ -2,8 +2,9 @@
 
 # Sailens 架构
 
-> 状态：**提案，已完成本轮 review 并修订。**本文档中的结构尚未实施。它将替代当前按
-> 技术层拆分的模块结构，以及 A/B 两仓库之间基于 fork 的关系。
+> 状态：**已定案，A 侧已实施。**它替代按技术层拆分的模块结构，以及 A/B 两仓库之间基于 fork
+> 的关系。G1、G3、G4、G5 以及 G2 的第 2、4 步都已落地；**只剩第 3 步 —— B 转为 composite
+> build 消费方。**§11 记录的是计划，不是进度。
 
 ## 1. 摘要
 
@@ -56,9 +57,9 @@ application-level contract。
   public-API boundary 有价值时才拆 module。
 - 行为变更；唯一例外是第 10 步明确标出的 pipeline availability 行为。
 
-## 3. 当前代码结构
+## 3. 重构前的代码结构
 
-仓库目前有六个主要 module，主要按技术层拆分：
+这是下面的迁移计划要替换掉的起点。当时有六个主要 module，主要按技术层拆分：
 
 ~~~text
 :domain         (无依赖)
@@ -131,6 +132,7 @@ sailens-guidance ─────────► sailens-vision ───► sail
         └─────────────────────────┴─────────────────────┘
 
 sailens-describe ─────────► sailens-vlm ─────► sailens-runtime
+        ├──────────────────► sailens-camera     (FrameSnapshotProvider, §6.1)
         └────────────────────────────────────► sailens-core
 
 sailens-camera ───────────────────────────────► sailens-core
@@ -170,8 +172,17 @@ Kotlin/Java package 不重复产品名：
 
 Composite build 坐标跟 module 名一致，例如 com.sailens:sailens-shell。
 
-所有可复用 library module 开启 Kotlin explicit API mode。除非确实需要跨模块使用，内部
-实现符号保持 internal。
+Kotlin explicit API mode 已经在 public surface 本来就小而克制的模块上开启：**sailens-core、
+sailens-camera、sailens-vlm、sailens-output、sailens-describe**。在这些模块里，任何没有写
+visibility 修饰符的声明都编译不过，API 就不会被无意扩大。
+
+sailens-runtime、sailens-vision、sailens-guidance、sailens-shell **没有开**。现在开的代价是往
+大约九百个声明上加 `public`——它们之所以是 public，只是因为没人说过不是，这等于把一个意外
+形成的 surface 固化下来，而不是给它上闸。前置条件是先收窄这几个模块（sailens-shell 的大部分
+composable、sailens-guidance 的大部分 processor 应该是 `internal`），那是另一件独立的、需要
+单独评审的工作。在此之前，§12.5 的这条 gate 只对上面五个模块成立，别的模块不成立。
+
+除非确实需要跨模块使用，内部实现符号保持 internal。
 
 ### 4.4 sailens-shell 内部 package
 
@@ -265,6 +276,14 @@ NavigationSemantics 等静态 binding 是否一致。它不能为了决定一个
 compiled model、初始化 GPU/NPU delegate、分配 inference buffer 或跑一次 probe inference。
 真正的模型/加速器初始化继续保持 lazy，在 session 启动时发生，和今天一样。
 
+**"低成本"不等于"只看表面"。**从 mmap 的模型里读 TFLite flatbuffer table，代价是那几页内存，
+不加载任何 native runtime——而这正是让 preflight 成为一次真检查的关键："资产存在"这种检查，
+形状不对的模型照样能过，然后在 session 启动时才炸——那时用户已经按下开始、已经往前走了。
+所以 SemanticModelPreflight 会验证 output tensor 能否解析、它的类别数是否等于声明的
+Taxonomy.classCount，并分别报 ModelOutputUnreadable 或 ModelClassCountMismatch，而不是笼统的
+"没有"。它止步于证据的边界：没有 labels 就无法机器校验 channel **顺序**，那仍然是人工 release
+gate（§6.2）。
+
 expectation 是 edition-level validation，不是 framework 限制。例如 sailens-yolo 可以声明
 Guidance required。如果它打包的 sem model 缺失、声明的 taxonomy 不兼容，或其他**静态配置**
 contract 失败，这是 edition configuration failure，即使 Sailens framework 本身允许
@@ -274,8 +293,14 @@ zero-pipeline。
 
 - **debug/development：**fail fast，让 packaging/wiring 错误尽早暴露；
 - **release：**进入明确的 fatal configuration state，不 crash、不进入 restart loop。这个状态必须
-  对 accessibility 可达，并且至少主动通过当前可用的非视觉通道通知一次；speech 不可用时由
-  haptic 兜底。
+  对 accessibility 可达，并且至少主动通过当前可用的非视觉通道通知一次。
+
+这次通知是**先震动，再说话**，而不是"能说就说、说不了才震"。走到 fatal configuration state 的
+那一刻，根本没有任何地方启动过 TTS 引擎——应用压根没走到那个屏幕。把这当成"speech 不可用"，
+结果就是用户只收到一下震动，永远不知道出了什么问题。所以震动先发（它不需要引擎），然后再把
+引擎起起来，等就绪后把原因说一遍；如果引擎始终起不来，那一下震动已经发生了。整个进程只通知
+一次：LaunchedEffect 会在配置变更和进程重建时重跑，而一个每次转屏都震一下的 fatal state，
+只会教会用户忽略它。
 
 pipeline 也可能通过 preflight，却在某台设备上真正初始化 session 时失败，例如 GPU delegate
 或 output buffer allocation 失败。这是 **runtime failure**，并不与 Available 矛盾。
@@ -284,6 +309,16 @@ request/runtime error 路径。
 
 optional 但静态 unavailable 的 pipeline 不应作为死控件暴露。shell 可以隐藏它，或者在普通
 action path 之外提供明确的 edition-level explanation。
+
+因此四种组合会落到四个不同的地方，而**只有 Describe 的 edition 不会落到导航屏**——那块屏幕
+整体就是一个导航会话的开始/停止控件，而它根本没有那个会话，它唯一能做的事也不在上面：
+
+| Guidance | Describe | 起始目的地 |
+|---|---|---|
+| available | available | 导航屏，并提供 Describe 入口 |
+| available | — | 导航屏，没有 Describe 控件 |
+| — | available | Describe 屏 |
+| — | — | zero-pipeline 屏 |
 
 ## 6. 设计决策
 
@@ -301,13 +336,21 @@ interface FrameSource {
 
 interface FrameSnapshotProvider {
     fun currentFrame(maxAgeMs: Long): ImageFrame?
+    suspend fun awaitCurrentFrame(maxAgeMs: Long, timeoutMs: Long): ImageFrame?
+    fun openSnapshotLease(): FrameLease
 }
 ~~~
 
-二者可以由同一个 camera session 实现。
+二者由同一个 camera session 实现，而且 **demand 是显式的**。把相机图像转成 ImageFrame 要复制
+每个 plane，所以只有有人要的时候才转——但“有人要”不等于“Guidance 在跑”。stream 订阅和
+snapshot lease 各自都足以构成需求。这正是 Describe 能在导航停着时回答问题、同时又不会
+让相机白转没人读的帧的原因。
 
 Describe 必须拒绝过旧 snapshot，绝不能静默描述几秒前的旧画面。这与已有 VLM/ASR
 assistant plan 的安全意图保持一致。
+
+snapshot 请求同样有时间上限：它开出需求、等一张满足新鲜度的帧，等不到就放弃而不是一直挂着
+——用户已经按下按钮，"我看不到"也比沉默好。
 
 Describe 仍然不依赖 CameraX；未来其他 source 只需要实现 FrameSnapshotProvider。
 
@@ -415,8 +458,35 @@ sailens-output 提供共享 output mechanism：
 的产品策略。Guidance 产生 typed event/urgency；Describe 产生 information result；shell
 再把它们映射到 output priority。
 
-Screen-reader announcement 在 sailens-shell 里只有一个 collector，因为真实 Android View
-属于 presentation。
+抢占不等于冲一次语音队列。冲队列只清掉已经排进去的子句，VLM 还在往下解码，描述会接在告警
+后面继续念——用户听到的是一句没头没尾的景物描述跟在“前方有台阶”之后，而他看不到屏幕，
+分不清哪句是当前的。要停住“对的那一段”描述需要三件事，每件都由一个 shell 级的对象持有，
+而不是由某个屏幕持有：
+
+- **整个 shell 只有一个 SceneDescriptionCoordinator。**它持有正在进行的那次描述：job、表示它
+  还能不能出声的 token、以及它排进去的语音。导航屏通过它抢占，描述屏通过它发起和取消，所以
+  Guidance 停掉的一定是真正在跑的那一段——不管它在哪个屏幕上。（上一版给每个屏幕各一个
+  session，告警取消的是导航屏那个空闲的 session，描述屏上的描述照样往下念。）抢占会取消生成、
+  让 token 失效（已经解码出来的片段不能再出声），并撤回 Describe 排进去的语音——包括已经解码
+  完、但还在念的那段尾巴。取消经由 VlmRuntime.shouldStop 传到 decode，及时把加速器交出来。
+- **语音归属是 sailens-output 里的机制。**每条语音可以带一个不透明的 SpeechOwner，
+  `withdraw(owner)` 只收回这个 owner 的语音、不动别人的：引擎只能整队清空，所以输出层清空后
+  按原顺序把其他人的语音交还回去。于是 Describe 只能取消 Describe 自己——关闭或取消一次描述，
+  不可能把恰好正在播的告警掐掉。优先级最高的 Guidance 仍然用 flush 说话。
+- **共享引擎比任何屏幕活得久。**语音引擎和描述模型由 SharedEngineOwner 在最后一个持有 lease
+  的屏幕放手时释放，而不是由某个屏幕在离开时释放；以前关掉描述屏会把 Guidance 还在用的语音
+  引擎释放掉。
+
+一次描述用它开始时的那条通道说话。如果中途通道变了——关掉了语音、打开了读屏——这次描述会被
+取消，而不是半句一个声音、半句另一个声音地念完。下一次请求使用新通道。
+
+同一时刻只有一个回答占着输出。一次回答可能已经解码完、却还在念，而解码一结束“描述”就又能
+按了，所以新请求开始之前，先撤回上一次回答没念完的部分。否则用户会先听到对刚才所在位置的描述
+的后半段，然后才是对眼前的描述，而且分不出哪段是哪段。
+
+读屏播报**只有一个收集者，在 shell 根部**：Android View 属于表现层，而根部是唯一一个与应用
+同寿命的 composable。所有屏幕都发布到共享的 ScreenReaderAnnouncer。按屏幕各自收集的话，另一个
+屏幕盖在上面时发出的播报会全部丢掉——以前在描述屏上发生的导航告警就是这样谁也收不到的。
 
 Guidance-specific haptic vocabulary 留在 shell 的 Guidance presentation package。
 SPEECH_UNAVAILABLE 可以继续作为共享 output-level signal，因为它描述的是输出通道本身，
@@ -531,7 +601,7 @@ B 中：
 
 A 中：
 
-- data/src/main/assets 作为 BYO 路径；
+- data/src/main/assets 作为 BYO 路径（第 10/11 步已移到 app/src/main/assets）；
 - 新替代方案验证后，旧 mlModelBinding；
 - 代码迁移完成后，旧 :domain、:data、:presentation、:ux modules。
 
@@ -549,21 +619,105 @@ A 中：
 
 ## 11. 迁移计划
 
-每一步结束后：A 构建成功、B 依赖当前 A commit 构建成功、测试全绿。
+实现仍然保留 11 个较小的 **step**，因为这样更利于控制依赖移动、组织 commit 和定位 regression。
+但 step 不再等同于“必须停下来等人工 review”。
 
-| # | 步骤 | 真机/native 检查 |
+每个 step 做完后，立即跑能证明当前 tree 自洽的 targeted build/tests。只要通过，就直接在同一个
+gate 内继续下一步。只有到下面 5 个 **review gate** 才停下来做人审。如果中间检查失败，就在
+当前 gate 内修复，而不是把一个半迁移状态交出来。
+
+| # | Implementation step | Review gate |
 |---|---|---|
-| 1 | JNI 改成 RegisterNatives，**并在挪 package 前补 native contract coverage** | 是 |
-| 2 | 抽 sailens-shell；root Compose/navigation/settings/design/Guidance UI **以及 camera permission rationale UI** 进入 shell；camera 改为只暴露权限状态/请求 primitive，解除对 :ux 的依赖；Application/MainActivity 留在 app | app launch |
-| 3 | B 变成薄 composite-build consumer；移除 B 的 fork-only guardrail，不删除 A 的 append-only 规则 | B build/launch |
-| 4 | 抽 sailens-core 与 sailens-camera；引入 FrameSource + FrameSnapshotProvider；验证 camera 仍不依赖 shell/design UI | camera session |
-| 5 | 抽 sailens-runtime；拆 native runtime preprocessing | 是 |
-| 6 | 抽 sailens-vision；Taxonomy / NavigationSemantics 拆分并加入 TaxonomyId 校验；拆 vision native | 是 |
-| 7 | 导航逻辑迁到 sailens-guidance；Guidance presentation 只进 shell；拆 Guidance native | 是 |
-| 8 | 抽 sailens-output；把 arbitration primitive 显式化，同时保持当前行为 | 是 |
-| 9 | 抽 sailens-vlm 与 sailens-describe；prompt/snapshot/scheduling policy 迁入 Describe | targeted tests |
-| 10 | **行为变更：**实现 configured/expected/static-availability/runtime-state model、fatal static-configuration handling 与合法 zero-pipeline state | 是 |
-| 11 | 更新 README、AGENTS.md、models.md asset 路径、B 文档与所有 architecture reference | — |
+| 1 | JNI 改成 RegisterNatives，并在挪 package 前补 binding + array-kernel contract coverage | **G1 — native safety foundation** |
+| 2 | 抽 sailens-shell；root Compose/navigation/settings/design/Guidance UI **以及 camera permission rationale UI** 进入 shell；camera 改为只暴露权限状态/请求 primitive，解除对 :ux 的依赖；Application/MainActivity 留在 app | **G2 — app/composition foundation** |
+| 3 | B 变成薄 composite-build consumer；移除 B 的 fork-only guardrail，不删除 A 的 append-only 规则 | G2 |
+| 4 | 抽 sailens-core 与 sailens-camera；引入 FrameSource + FrameSnapshotProvider；验证 camera 仍不依赖 shell/design UI | G2 |
+| 5 | 抽 sailens-runtime；拆 native runtime preprocessing | **G3 — vision/Guidance runtime** |
+| 6 | 抽 sailens-vision；Taxonomy / NavigationSemantics 拆分并加入 TaxonomyId 校验；拆 vision native | G3 |
+| 7 | 导航逻辑迁到 sailens-guidance；Guidance presentation 只进 shell；拆 Guidance native | G3 |
+| 8 | 抽 sailens-output；把 arbitration primitive 显式化，同时保持当前行为 | **G4 — output + Describe** |
+| 9 | 抽 sailens-vlm 与 sailens-describe；prompt/snapshot/scheduling policy 迁入 Describe | G4 |
+| 10 | **行为变更：**实现 configured/expected/static-availability/runtime-state model、fatal static-configuration handling 与合法 zero-pipeline state | **G5 — capability semantics + closeout** |
+| 11 | 更新 README、AGENTS.md、models.md asset 路径、B 文档与所有 architecture reference | G5 |
+
+### 11.1 Review gates
+
+**G1 — native safety foundation**
+
+任何 package/module movement 开始前必须停一次。验收证据：
+
+- A 构建成功，现有 JVM tests 保持全绿；
+- §12.2 的 Layer A binding coverage 与 Layer B array-kernel instrumentation tests 在 arm64 真机通过；
+- 当前 13 个 JNI declaration 全部通过 RegisterNatives 注册；
+- 构建出的 native library 不导出任何 Java_<mangled> JNI entry point；JNI_OnLoad 是唯一 JNI
+  registration entry point；
+- 不引入任何有意的 inference 行为变化。
+
+这个 gate 的作用是把 JNI migration 风险和后续所有 package move 完全隔离开。
+
+**G2 — app/composition foundation（steps 2–4）**
+
+把 shell、B composite consumption、core、camera 当成一个完整 migration phase。完成以下检查后
+才停：
+
+- A build/tests 通过；
+- B 通过真实 composite build 解析 A，并能 build/launch；
+- A 能 launch；
+- camera session 正常；
+- camera 不反向依赖 shell/design UI；
+- Application/MainActivity 仍归各 host app；
+- FrameSource 与带 freshness 上限的 FrameSnapshotProvider ownership 正确。
+
+steps 2–4 可以各自保留独立 commit，但不再制造三个独立 review handoff。
+
+**G3 — vision/Guidance runtime（steps 5–7）**
+
+runtime、vision、Guidance 作为一次耦合较强的 extraction 连续完成。只有最终 dependency
+direction 和三个 native library 归属都形成后才停。验收至少包括：
+
+- A/B 完整 build 与 tests；
+- libsailens_runtime.so、libsailens_vision.so、libsailens_guidance.so 都保持 G1 的注册保证；
+- native 拆分后 array-kernel contract tests 仍通过；
+- B 的真实 float model 覆盖 native_score 与 native_bbox_nms_float_handle 两条 handle 热路径；
+- 同一目标设备上保持 §12.3 性能红线与 same-frame preprocessing-cache reuse；
+- 跑通真实 Guidance session，且没有行为 regression；
+- sailens-guidance 不含 Compose/UI dependency。
+
+这是整个结构重构风险最高的 gate，不能再和 G4 合并。
+
+**G4 — output + Describe（steps 8–9）**
+
+shared output mechanism 与 headless Describe pipeline 连续完成，然后验证：
+
+- 当前 Guidance speech/haptic 行为保持；
+- Guidance safety output 可以按 shell policy 抢占 Describe information，同时 sailens-output
+  自身仍保持 policy-neutral；
+- Describe 使用 FrameSnapshotProvider，而不是 collect continuous frame stream；
+- stale snapshot、cancellation、single-flight 有 targeted tests；
+- Guidance-only edition 不会被拖入 heavyweight concrete VLM runtime dependency；
+- 如果物理 sailens-vlm extraction 被延迟，下文定义的临时依赖安排仍然成立。
+
+**G5 — capability semantics + closeout（steps 10–11）**
+
+这个 gate 单独存在，因为 Step 10 已经不是纯代码搬迁，而是产品行为变化。验证完整状态模型后，
+再基于真正落地的代码做最终文档同步：
+
+- 四种 pipeline 组合全部合法；
+- static availability/preflight 不会 eager initialize LiteRT/GPU/NPU session；
+- required static-configuration failure 符合 debug fail-fast / release accessible-fatal-state contract；
+- device-specific session initialization failure 仍然属于 runtime failure，并走可重试路径；
+- unavailable pipeline 不会变成无效的 accessibility control；
+- 最终 A/B build、tests、launch、native/performance 与 §12 structural checks 全通过；
+- README、AGENTS.md 和 model/repository 文档描述的是最终真正落地的代码。
+
+### 11.2 Gate 内持续验证
+
+review gate 变少，**不代表验证变少**。每个 implementation step 完成后仍立即运行最小但有效的
+检查，例如 compile + targeted tests、composite build 或 native instrumentation test。通过后由
+实现者自动继续；只有某个失败无法在当前 gate 内解决时才提前停下来。
+
+一个 gate 可以包含多个聚焦的 commit。没有必要为了让 review boundary 和 Git history 一一对应，
+强行把整个 gate squash 成一个 commit。
 
 sailens-vlm 是唯一允许延迟物理 Gradle extraction 的边界：如果一开始真的只有几个 trivial
 interface 且没有 concrete implementation，可以先保持 logical boundary。推迟期间，VLM contract
@@ -599,7 +753,12 @@ JVM 的 CI 里执行。
 - load 每一个目标 native library；
 - JNI_OnLoad/RegisterNatives 的每次注册都检查并向上传播失败；
 - registration table 覆盖全部 13 个 Kotlin native declaration；
-- class name、method name 或 JNI signature 任意错误都会让 library load 失败。
+- class name、method name 或 JNI signature 任意错误都会让 library load 失败；
+- **任何 library 都不导出 `Java_<mangled>` 符号。**entry point 保持 internal linkage，
+  按名字绑定不只是“没用上”，而是根本不可用，registration table 成为唯一的绑定来源。
+  否则一个残留的导出符号可以在 table 那一行写错或缺失的情况下让方法照常工作——而这正是本层
+  要抓的失败。第 5–7 步拆库时必须保住这条性质；用
+  `llvm-nm -D --defined-only <lib>.so | grep -E 'Java_|JNI_OnLoad'` 可以检查；结果应当显示 `JNI_OnLoad`，且没有任何 `Java_` entry point。
 
 这已经完整覆盖 RegisterNatives 最初要解决的迁移风险：漏改或改错 binding 不会再隐藏到某条
 冷路径第一次执行时才暴露。
@@ -610,6 +769,13 @@ JVM 的 CI 里执行。
 - 覆盖 float 与 int8 array kernel；
 - 按实际职责覆盖 semantic、detection、YUV/quantization、connectivity；
 - 能做的地方，对关键输出做 pre/post refactor equivalence 对比。
+
+某个 kernel 和它的 Kotlin fallback **本来就不等价**时，测试钉住 native 的实际取值，而不是钉住
+那个对比 —— 因为 native 才是出货路径。G1 发现了一例:connectivity kernel 不做
+`KotlinConnectivityStatsExtractor` 的透视宽度缩放，而且根本没拿到所需的那两个 config 值。
+对一条正常向远处收窄的走廊，两者在 9 个输出里有 5 个不一致，**包括 `floodReachRatio`** ——
+因为洪泛的提前终止判据用的就是同一个 retention。这是既有的产品级分歧，不是重构造成的，
+已记录在 `NativeConnectivityKernelTest`，留作单独的行为决策。
 
 **C. Handle integration —— 需要真实模型**
 
@@ -634,6 +800,27 @@ runtime/vision/Guidance native 拆分后，在同一目标设备验证：
 - preprocessing cache 仍然命中 same-frame reuse；
 - 没有新增完整 semantic tensor 的额外读取。
 
+**实测状态（SM8850，本地 BYO 权重）。**本轮返工后重新测过，与 G3 退出时的结果一致。
+
+| 红线 | 状态 |
+|---|---|
+| sem postprocessBackend = native_score | **成立** |
+| sem outputReadTimeMs ≈ 0 | **不成立** —— 15/22/64 ms（最小/中位/最大） |
+| det postprocessBackend = native_bbox_nms_float_handle | **不成立** —— 报的是 `native_bbox_nms`，数组路径 |
+| det outputReadTimeMs | 2/10/28 ms |
+| preprocessing cache same-frame reuse | **不成立** —— 两个模型都报 `native_yuv`，从没出现过 `shared_native_yuv` |
+| 没有新增完整 semantic tensor 的额外读取 | 成立 |
+
+这三项失效都是**既有状态，不是重构引入的回归**。两条 zero-copy 红线在同一台机器上用重构前的
+commit 重新构建对跑过，结果完全一致；那次构建的 trace 里两个模型同样都是 `native_yuv`，说明
+same-frame cache 也从来没命中过。handle 路径只是一直没在跑：`libLiteRt.so` 确实导出了
+lock/unlock 符号，TensorBuffer 的 handle 反射在 LiteRT 2.1.5 上也合法，所以原因更靠里；
+dlsym 外面那层 `std::call_once` 是嫌疑但未证实。cache 是另一回事：sem 和 det 是并发起跑的，
+谁也读不到对方的条目，这条红线要的复用需要把两次预处理排成先后而不是并行。
+
+无论恢复哪一条，都会改变检测后处理和帧预算，属于产品决策，不在本次重构范围内。因此这几条
+应当视为"待恢复的目标"，而不是"已保住的性质"。
+
 ### 12.4 Session 对比
 
 同一设备、同一路线比较重构前后 trace：
@@ -654,7 +841,8 @@ trace compare 仍然只是 coarse integration check，不是 golden frame replay
 - sailens-core 没有逐渐吸收 Android application service；
 - 低层 shared module 不依赖 sailens-shell；
 - Guidance-only edition 不会被拖入 concrete VLM runtime dependency；
-- explicit API compile 能阻止 public surface 无意扩大。
+- explicit API compile 能阻止 public surface 无意扩大——**只在已开启的那五个模块上成立**
+  （§4.3）；另外四个模块没有这道闸，surface 靠人工 review。
 
 ## 13. 本轮 review 已确定的决策
 

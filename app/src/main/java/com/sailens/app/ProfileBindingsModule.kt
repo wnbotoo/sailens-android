@@ -2,15 +2,16 @@ package com.sailens.app
 
 import com.sailens.BuildConfig
 import com.sailens.camera.CameraRuntimeConfig
-import com.sailens.data.source.ml.obstacle.ObstacleModelConfig
-import com.sailens.data.source.ml.semantic.SemanticModelConfig
-import com.sailens.data.source.ml.vlm.VlmModelConfig
-import com.sailens.domain.config.AnalysisConfig
-import com.sailens.domain.config.PerceptionConfig
-import com.sailens.domain.config.PipelinePerformanceBudget
-import com.sailens.domain.config.TraceRuntimeConfig
-import com.sailens.presentation.scene.SceneOverlayConfig
-import com.sailens.presentation.settings.PerceptionSettingsStore
+import com.sailens.vision.detection.DetectionModelConfig
+import com.sailens.vision.semantic.SemanticModelConfig
+import com.sailens.vlm.VlmModelConfig
+import com.sailens.guidance.config.AnalysisConfig
+import com.sailens.runtime.hardware.DeviceHardwareProfileProvider
+import com.sailens.guidance.config.PerceptionConfig
+import com.sailens.guidance.config.PipelinePerformanceBudget
+import com.sailens.guidance.config.TraceRuntimeConfig
+import com.sailens.shell.guidance.overlay.SceneOverlayConfig
+import com.sailens.shell.guidance.settings.PerceptionSettingsStore
 import org.koin.dsl.module
 
 /**
@@ -32,7 +33,7 @@ val profileBindingsModule = module {
     }
     single<CameraRuntimeConfig> { get<SailensRuntimeProfile>().camera }
     single<SemanticModelConfig> { get<SailensRuntimeProfile>().semanticModel }
-    single<ObstacleModelConfig> { get<SailensRuntimeProfile>().realtimeObstacleModel }
+    single<DetectionModelConfig> { get<SailensRuntimeProfile>().realtimeObstacleModel }
     // The VLM's backend is the profile's call (the ultra tier reserves NPU for it); everything else
     // about it — prompt, decode budget — is the model config's own default.
     single {

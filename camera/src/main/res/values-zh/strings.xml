@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <string name="permission_camera_title">需要相机权限</string>
-    <string name="permission_camera_rationale">Sailens 通过相机识别前方道路并为你导览。画面只在本机处理，不会上传。</string>
-    <string name="permission_confirm">允许</string>
-    <string name="permission_cancel">暂不</string>
-</resources>

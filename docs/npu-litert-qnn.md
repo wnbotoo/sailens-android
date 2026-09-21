@@ -298,7 +298,7 @@ This section is "what to do at release time". Read [§7.1 architecture](#71-arch
 first, then follow [§7.5 checklist](#75-release-checklist).
 
 > **Sailens today vs the production target (know the gap)**
-> - **Today (debug works)**: models live in `data/src/main/assets/` (ride along with the APK, no
+> - **Today (debug works)**: models live in `app/src/main/assets/` (ride along with the APK, no
 >   delivery); the runtime is the **JIT** dynamic feature (`litert_npu_runtime_libraries_jit`);
 >   local install is `bundletool --mode=universal`; there is **no**
 >   `device_targeting_configuration.xml` and **no** AI Pack.

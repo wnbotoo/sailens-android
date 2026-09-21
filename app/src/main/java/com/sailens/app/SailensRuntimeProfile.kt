@@ -1,16 +1,16 @@
 package com.sailens.app
 
 import com.sailens.camera.CameraRuntimeConfig
-import com.sailens.data.source.ml.ModelAcceleratorBackend
-import com.sailens.data.source.ml.obstacle.ObstacleModelConfig
-import com.sailens.data.source.ml.semantic.SemanticModelConfig
-import com.sailens.domain.config.AnalysisConfig
-import com.sailens.domain.config.PerceptionConfig
-import com.sailens.domain.config.PipelinePerformanceBudget
-import com.sailens.domain.config.TraceRuntimeConfig
-import com.sailens.domain.model.common.ObstacleProviderType
-import com.sailens.domain.model.common.PerceptionProfile
-import com.sailens.presentation.scene.SceneOverlayConfig
+import com.sailens.runtime.ModelAcceleratorBackend
+import com.sailens.vision.detection.DetectionModelConfig
+import com.sailens.vision.semantic.SemanticModelConfig
+import com.sailens.guidance.config.AnalysisConfig
+import com.sailens.guidance.config.PerceptionConfig
+import com.sailens.guidance.config.PipelinePerformanceBudget
+import com.sailens.guidance.config.TraceRuntimeConfig
+import com.sailens.guidance.model.common.ObstacleProviderType
+import com.sailens.guidance.model.common.PerceptionProfile
+import com.sailens.shell.guidance.overlay.SceneOverlayConfig
 
 enum class SailensPerformanceTier(val profileName: String) {
     STANDARD("standard"),
@@ -44,7 +44,7 @@ data class SailensRuntimeProfile(
     val targetHardwareProfile: String,
     val camera: CameraRuntimeConfig,
     val semanticModel: SemanticModelConfig,
-    val realtimeObstacleModel: ObstacleModelConfig,
+    val realtimeObstacleModel: DetectionModelConfig,
     val vlmModelBackend: ModelAcceleratorBackend,
     val perception: PerceptionConfig,
     val analysis: AnalysisConfig,
@@ -144,7 +144,7 @@ data class SailensRuntimeProfile(
                 semanticModel = SemanticModelConfig(
                     acceleratorBackend = semanticBackend,
                 ),
-                realtimeObstacleModel = ObstacleModelConfig(
+                realtimeObstacleModel = DetectionModelConfig(
                     acceleratorBackend = realtimeObstacleBackend,
                 ),
                 vlmModelBackend = vlmBackend,

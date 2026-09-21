@@ -1,33 +1,36 @@
 package com.sailens.app
 
-import com.sailens.domain.processor.analysis.ConnectivityAnalysisProcessor
-import com.sailens.domain.processor.analysis.ConnectivityChecker
-import com.sailens.domain.processor.analysis.CrossValidator
-import com.sailens.domain.processor.analysis.GroundTypeDetector
-import com.sailens.domain.processor.analysis.ObstacleOcclusionAnalyzer
-import com.sailens.domain.processor.analysis.RoadSafetyAnalyzer
-import com.sailens.domain.processor.analysis.FrameQualityAnalyzer
-import com.sailens.domain.processor.analysis.SceneClassifier
-import com.sailens.domain.processor.decision.CooldownManager
-import com.sailens.domain.processor.decision.EventConflictResolver
-import com.sailens.domain.processor.decision.EventGenerator
-import com.sailens.domain.processor.decision.EventMerger
-import com.sailens.domain.processor.perception.ObstacleExtractor
-import com.sailens.domain.processor.perception.ObstacleTracker
-import com.sailens.domain.processor.perception.PerceptionProfileManager
-import com.sailens.domain.processor.perception.SegmentationAnalysisProcessor
-import com.sailens.domain.processor.perception.SegmentationAnalyzer
-import com.sailens.domain.usecase.decision.DecideEventsUseCase
-import com.sailens.domain.usecase.perception.AnalyzeSceneUseCase
-import com.sailens.domain.usecase.perception.ProcessFrameUseCase
-import com.sailens.domain.usecase.scene.DescribeSceneUseCase
-import com.sailens.domain.usecase.scene.StartSceneAnalysisUseCase
-import com.sailens.domain.usecase.scene.StopSceneAnalysisUseCase
-import com.sailens.domain.usecase.trace.BuildTraceReplayReportUseCase
-import com.sailens.domain.usecase.trace.EvaluateTraceReplayBudgetUseCase
-import com.sailens.domain.usecase.trace.ListTraceSessionsUseCase
-import com.sailens.domain.usecase.trace.LoadLatestTraceReplayReportUseCase
-import com.sailens.domain.usecase.trace.LoadTraceReplayReportUseCase
+import com.sailens.guidance.processor.analysis.ConnectivityAnalysisProcessor
+import com.sailens.guidance.processor.analysis.ConnectivityChecker
+import com.sailens.guidance.processor.analysis.CrossValidator
+import com.sailens.guidance.processor.analysis.GroundTypeDetector
+import com.sailens.guidance.processor.analysis.ObstacleOcclusionAnalyzer
+import com.sailens.guidance.processor.analysis.RoadSafetyAnalyzer
+import com.sailens.guidance.processor.analysis.FrameQualityAnalyzer
+import com.sailens.guidance.processor.analysis.SceneClassifier
+import com.sailens.guidance.processor.decision.CooldownManager
+import com.sailens.guidance.processor.decision.EventConflictResolver
+import com.sailens.guidance.processor.decision.EventGenerator
+import com.sailens.guidance.processor.decision.EventMerger
+import com.sailens.guidance.processor.perception.ObstacleExtractor
+import com.sailens.guidance.processor.perception.ObstacleTracker
+import com.sailens.guidance.processor.perception.PerceptionProfileManager
+import com.sailens.guidance.processor.perception.SegmentationAnalysisProcessor
+import com.sailens.guidance.processor.perception.SegmentationAnalyzer
+import com.sailens.guidance.usecase.decision.DecideEventsUseCase
+import com.sailens.guidance.usecase.perception.AnalyzeSceneUseCase
+import com.sailens.guidance.usecase.perception.ProcessFrameUseCase
+import com.sailens.describe.DescribeSceneUseCase
+import com.sailens.vlm.LiteRtVlmEngine
+import com.sailens.vlm.SceneDescriber
+import com.sailens.guidance.usecase.scene.StartSceneAnalysisUseCase
+import com.sailens.guidance.usecase.scene.StopSceneAnalysisUseCase
+import com.sailens.guidance.usecase.trace.BuildTraceReplayReportUseCase
+import com.sailens.guidance.usecase.trace.EvaluateTraceReplayBudgetUseCase
+import com.sailens.guidance.usecase.trace.ListTraceSessionsUseCase
+import com.sailens.guidance.usecase.trace.LoadLatestTraceReplayReportUseCase
+import com.sailens.guidance.usecase.trace.LoadTraceReplayReportUseCase
+import org.koin.android.ext.koin.androidContext
 import org.koin.core.qualifier.named
 import org.koin.dsl.module
 
@@ -35,18 +38,18 @@ import org.koin.dsl.module
  * Wires the domain layer at the app composition root: stateless processors as singles and use cases
  * as factories. Domain classes carry no DI annotations themselves, so their graph is assembled here.
  *
- * Configs come from [profileBindingsModule]; the obstacle provider is bound in `dataModule` under
- * the `realtimeObstacleProvider` qualifier.
+ * Configs come from [profileBindingsModule]; the perception sources are bound in `guidanceModule`,
+ * the obstacle provider under the `realtimeObstacleProvider` qualifier.
  */
 val domainBindingsModule = module {
     // Processors — stateless, shared singletons.
-    single<SegmentationAnalysisProcessor> { SegmentationAnalyzer(config = get(), classMapper = get()) }
+    single<SegmentationAnalysisProcessor> { SegmentationAnalyzer(config = get(), navigationSemantics = get()) }
     single<ConnectivityAnalysisProcessor> { ConnectivityChecker(config = get(), statsExtractor = get()) }
-    single { ObstacleExtractor(config = get(), classMapper = get()) }
+    single { ObstacleExtractor(config = get(), navigationSemantics = get()) }
     single { ObstacleTracker(config = get()) }
     // 设置页选择的挡位经由 manager 在下一次导航会话开始时生效
     single { PerceptionProfileManager(initialConfig = get()) }
-    single { RoadSafetyAnalyzer(config = get(), classMapper = get()) }
+    single { RoadSafetyAnalyzer(config = get(), navigationSemantics = get()) }
     single { ObstacleOcclusionAnalyzer(config = get()) }
     single { GroundTypeDetector(config = get()) }
     single { SceneClassifier(config = get()) }
@@ -126,7 +129,24 @@ val domainBindingsModule = module {
             logService = get(),
         )
     }
-    factory { DescribeSceneUseCase(sceneDescriber = get(), logService = get()) }
+    // Which VLM engine an edition ships is an edition decision (architecture.md §6.11), so the
+    // binding lives in the host app rather than in a library module. With the default
+    // UnavailableVlmRuntimeFactory the engine reports isAvailable == false and the UI hides the
+    // action, so constructing it costs nothing until a real runtime is injected.
+    single<SceneDescriber> {
+        LiteRtVlmEngine(
+            context = androidContext(),
+            config = get(),
+            logService = get(),
+        )
+    }
+    factory {
+        DescribeSceneUseCase(
+            sceneDescriber = get(),
+            frameSnapshots = get(),
+            logService = get(),
+        )
+    }
     factory { BuildTraceReplayReportUseCase() }
     factory { EvaluateTraceReplayBudgetUseCase(get()) }
     factory { ListTraceSessionsUseCase(get()) }

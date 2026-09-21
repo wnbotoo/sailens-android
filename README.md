@@ -21,8 +21,8 @@ Target devices are Snapdragon 8 Gen 1 and beyond class hardware.
 This repository ships **no model weights**. The app resolves two graphs at runtime:
 
 ```text
-data/src/main/assets/sem.tflite     # semantic walkable-area segmentation
-data/src/main/assets/det.tflite     # obstacle detection
+app/src/main/assets/sem.tflite     # semantic walkable-area segmentation
+app/src/main/assets/det.tflite     # obstacle detection
 ```
 
 Both paths are git-ignored, so a working copy can carry weights without them entering a commit.
@@ -30,7 +30,12 @@ Drop in any TFLite graph that satisfies the contract and the pipeline picks it u
 dtype, and quantization are all read back from the model's metadata at load time, so **swapping a
 model normally needs no code change**.
 
-With no weights present, model loading fails at init and surfaces as a start-analysis error.
+With no weights present, nothing fails: preflight finds no model and, since this build promises
+nothing, the app opens on a zero-pipeline screen that points here. An edition that declares
+navigation required (sailens-yolo) treats a missing or mismatched model as a configuration failure
+instead — a fatal screen, a haptic signal, and the reason spoken aloud. A model that passes preflight
+but cannot start on a particular device is a runtime failure and shows the retryable start-analysis
+error.
 
 > **Read [`docs/models.md`](docs/models.md) before bringing a model.** The contract is not just
 > shapes: class channel order is validated only by *count*, never by meaning. A model with the right
@@ -49,18 +54,23 @@ Apache-2.0 code license. Whatever you bring, that is yours to check.
 
 ## Architecture
 
-Clean architecture over four Gradle modules plus two support modules, wired with Koin:
+Nine reusable `sailens-*` libraries plus the reference app, organised around the two product
+pipelines rather than technical layers -- see [docs/architecture.md](docs/architecture.md).
 
 ```text
-:domain        perception / analysis / decision use cases — no Android APIs
-:data          LiteRT inference, depth, logging, trace
-:presentation  UI state, overlay rendering, TTS, haptics
-:app           Koin wiring, root Compose, runtime profile
-:camera        CameraX capture and frame stream
-:ux            design system
+:sailens-core     shared contracts: ImageFrame, geometry, BinaryMask, MlRuntimeInfo, LogService
+:sailens-camera   CameraX capture, FrameSource / FrameSnapshotProvider, preview, permission state
+:sailens-runtime  LiteRT sessions, accelerator selection, model sources, YUV preprocessing
+:sailens-vision   segmentation / detection runners, dataset taxonomies, postprocessors
+:sailens-vlm      VLM engine contract: frame + prompt -> streamed text
+:sailens-output   TTS, audio focus, screen-reader detection, haptic primitive
+:sailens-guidance navigation logic: semantics, connectivity, safety, events, depth, trace
+:sailens-describe Describe product logic: prompts, snapshot freshness, scheduling
+:sailens-shell    reusable presentation: SailensRoot(), navigation, design system, Guidance + Describe UI
+:app              Koin wiring, Application/MainActivity, runtime profile, edition spec
 ```
 
-Outer modules depend inward on `:domain` interfaces. Frames flow
+Dependencies point downward only; Guidance and Describe never depend on each other. Frames flow
 `CameraX → ImageFrameAnalyzer → SharedFlow<ImageFrame> → ProcessFrameUseCase → AnalyzeSceneUseCase
 → DecideEventsUseCase → speech/haptics`.
 
@@ -89,7 +99,7 @@ Every document below has a Chinese version alongside it (`*.zh-CN.md`), linked f
 
 | | | |
 |---|---|---|
-| [`docs/architecture.md`](docs/architecture.md) | [中文](docs/architecture.zh-CN.md) | Reviewed Sailens modular restructure proposal (not implemented) |
+| [`docs/architecture.md`](docs/architecture.md) | [中文](docs/architecture.zh-CN.md) | Sailens modular structure: module boundaries, seams, migration plan and verification |
 | [`docs/models.md`](docs/models.md) | [中文](docs/models.zh-CN.md) | Model contract, backend config, performance red lines |
 | [`docs/perception-profiles.md`](docs/perception-profiles.md) | [中文](docs/perception-profiles.zh-CN.md) | Perception tiers, scheduling, tracker TTL |
 | [`docs/npu-litert-qnn.md`](docs/npu-litert-qnn.md) | [中文](docs/npu-litert-qnn.zh-CN.md) | Qualcomm NPU wiring, delivery, diagnosis |

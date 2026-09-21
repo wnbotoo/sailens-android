@@ -24,11 +24,16 @@ dependencyResolutionManagement {
 
 rootProject.name = "Sailens"
 include(":app")
-include(":ux")
-include(":domain")
-include(":presentation")
-include(":data")
-include(":camera")
+
+include(":sailens-guidance")
+include(":sailens-shell")
+include(":sailens-camera")
+include(":sailens-core")
+include(":sailens-runtime")
+include(":sailens-vision")
+include(":sailens-output")
+include(":sailens-vlm")
+include(":sailens-describe")
 
 val enableLitertNpuRuntime = providers.gradleProperty("sailens.enableLitertNpuRuntime")
     .map { it.toBooleanStrict() }

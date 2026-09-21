@@ -59,7 +59,8 @@ android {
 
         // arm64-v8a covers every modern 64-bit Android SoC (Qualcomm, MediaTek Dimensity, Google
         // Tensor) — this is NOT a vendor restriction. It drops 32-bit-only and x86 (emulator/ChromeOS)
-        // to shrink the APK and native build time for the packaged native libs (OpenCV + sailens_ml).
+        // to shrink the APK and native build time for the packaged native libs (OpenCV plus
+        // libsailens_runtime / libsailens_vision / libsailens_guidance).
         ndk {
             abiFilters += "arm64-v8a"
         }
@@ -76,7 +77,7 @@ android {
         release {
             buildConfigField("boolean", "SHOW_DIAGNOSTICS", "false")
             // R8 relies on the default native-methods keep rule plus the JNI keeps in
-            // :data consumer-rules.pro (JNI is name-bound). Smoke-test a release build on
+            // sailens-runtime/vision/guidance consumer-rules.pro. Smoke-test a release build on
             // device before relying on it: name-based JNI / reflection break at runtime, not build.
             isMinifyEnabled = true
             isShrinkResources = true
@@ -120,16 +121,21 @@ dependencies {
     implementation(libs.koin.android)
     implementation(libs.koin.androidx.compose)
     // Required for LiteRT's downloadLibrary() to install the on-demand Qualcomm NPU runtime module.
+    implementation(libs.google.litert)
     implementation(libs.google.play.feature.delivery)
     implementation(libs.google.play.feature.delivery.ktx)
     if (enableLitertNpuRuntime) {
         implementation(project(":litert_npu_runtime_libraries_jit:runtime_strings"))
     }
-    implementation(project(":domain"))
-    implementation(project(":data"))
-    implementation(project(":camera"))
-    implementation(project(":presentation"))
-    implementation(project(":ux"))
+    implementation(project(":sailens-core"))
+    implementation(project(":sailens-runtime"))
+    implementation(project(":sailens-vision"))
+    implementation(project(":sailens-vlm"))
+    implementation(project(":sailens-guidance"))
+    implementation(project(":sailens-camera"))
+    implementation(project(":sailens-output"))
+    implementation(project(":sailens-describe"))
+    implementation(project(":sailens-shell"))
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

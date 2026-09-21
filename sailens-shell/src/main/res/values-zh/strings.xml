@@ -1,0 +1,300 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Navigation -->
+    <string name="permission_camera_required">需要相机权限才能使用</string>
+    <string name="btn_pause">暂停</string>
+    <string name="btn_resume">恢复</string>
+    <string name="btn_settings">设置</string>
+    <string name="btn_retry">重试</string>
+    <string name="event_count_format">事件: %d</string>
+    <string name="frame_count_format">帧: %d</string>
+    <string name="title_sailens">Sailens</string>
+    <string name="label_camera_preview">相机预览</string>
+    <string name="status_preview_live">运行中</string>
+    <string name="status_preview_idle">待机</string>
+    <string name="status_label_error">需要处理</string>
+    <string name="status_label_starting">正在启动</string>
+    <string name="status_label_standby">待机</string>
+    <string name="status_label_latest_guidance">最新提示</string>
+    <string name="status_label_monitoring">正在观察前方</string>
+    <string name="status_error_title">分析已停止</string>
+    <string name="error_analysis_start_failed">无法启动实时分析。此设备可能不满足实时分析的运行要求。</string>
+    <string name="status_starting_title">正在启动辅助</string>
+    <string name="status_idle_title">辅助未开启</string>
+    <string name="status_clear_title">前方暂未发现明显风险</string>
+    <string name="status_starting_detail">正在准备辅助。</string>
+    <string name="status_idle_detail">准备好后即可开启。</string>
+    <string name="status_guidance_detail">当前提示已生效。</string>
+    <string name="status_clear_detail">当前没有紧急提示。</string>
+    <string name="status_speech_ready">语音就绪</string>
+    <string name="status_speech_initializing">语音启动中</string>
+    <string name="status_speech_off">语音已关闭</string>
+    <string name="status_speech_unavailable">语音不可用</string>
+    <string name="status_speech_screen_reader">由读屏播报</string>
+    <string name="status_interrupted_title">辅助已中断</string>
+    <string name="status_interrupted_detail">回到本应用即可继续。中断期间不会有任何提示。</string>
+    <string name="status_speech_unavailable_title">语音无法启动</string>
+    <string name="status_speech_unavailable_detail">设备的语音引擎没有响应，当前只能依靠震动提醒。请检查系统的文字转语音设置。</string>
+    <string name="notice_guidance_interrupted">辅助已中断</string>
+    <string name="action_replay_last_guidance">重播上一条提示</string>
+    <string name="btn_start_guidance">开启辅助</string>
+    <string name="btn_stop_guidance">停止辅助</string>
+    <string name="btn_open_trace_reports">Trace 报告</string>
+    <string name="label_live_pipeline">实时 Pipeline</string>
+    <string name="msg_no_live_pipeline_debug">开启辅助后会显示实时 Pipeline 指标。</string>
+    <string name="content_desc_segmentation_overlay">场景叠加层</string>
+
+    <!-- Settings -->
+    <string name="title_settings">设置</string>
+    <string name="cd_navigate_back">返回</string>
+    <string name="settings_section_feedback">提醒</string>
+    <string name="settings_section_diagnostics">诊断</string>
+    <string name="settings_diagnostics_trace_reports_supporting">查看已保存的 Trace 会话、回放指标，复制摘要或分享 JSONL 文件。</string>
+    <string name="settings_app_version_label">版本</string>
+    <string name="settings_app_version_value">%1$s (%2$d)</string>
+    <string name="settings_section_about">关于</string>
+    <string name="settings_app_license_label">许可证与源代码</string>
+    <string name="settings_open_source_label">开源许可</string>
+    <string name="about_tagline">Sailens 是一款端侧智能镜头，为盲人/低视力用户描述前方道路。</string>
+    <string name="oss_title">开源许可</string>
+    <string name="label_speech_rate">语速</string>
+    <string name="settings_speech_rate_value">%1$.1f 倍速</string>
+    <string name="settings_speech_rate_sample">前方有人，靠左</string>
+    <string name="btn_preview_speech_rate">试听当前语速</string>
+    <string name="label_feedback_speech">语音提醒</string>
+    <string name="label_feedback_haptics">震动提醒</string>
+    <string name="settings_feedback_speech_supporting">开启后，在辅助过程中播报前方风险和行走提示。</string>
+    <string name="settings_feedback_haptics_supporting">开启后用震动传达方位。关闭语音后，震动就是唯一的提示通道。</string>
+
+    <!-- 震动词汇表 -->
+    <string name="settings_section_haptic_vocabulary">震动含义</string>
+    <string name="settings_haptic_vocabulary_intro">点按任意一行可以试一下手感。记住这几种节奏后，关掉语音也能出行。</string>
+    <string name="haptic_label_left">左侧有障碍</string>
+    <string name="haptic_label_ahead">前方有障碍</string>
+    <string name="haptic_label_right">右侧有障碍</string>
+    <string name="haptic_label_multiple">两侧都有障碍</string>
+    <string name="haptic_label_blocked">前方不通，请停下</string>
+    <string name="haptic_label_notice">一般提示，如路口、红绿灯</string>
+    <string name="haptic_label_sensor_failure">看不见了，请检查镜头</string>
+    <string name="haptic_label_speech_unavailable">语音坏了，只剩震动</string>
+    <string name="haptic_label_interrupted">辅助已中断</string>
+    <string name="haptic_rhythm_left">一下短震</string>
+    <string name="haptic_rhythm_ahead">两下短震</string>
+    <string name="haptic_rhythm_right">三下短震</string>
+    <string name="haptic_rhythm_multiple">四下短震</string>
+    <string name="haptic_rhythm_blocked">一下长震</string>
+    <string name="haptic_rhythm_notice">一下中等长度的震动</string>
+    <string name="haptic_rhythm_sensor_failure">长、短、长</string>
+    <string name="haptic_rhythm_speech_unavailable">短、短、一下特长</string>
+    <string name="haptic_rhythm_interrupted">三下最长的震动</string>
+    <string name="label_overlay_mode">叠加层模式</string>
+    <string name="label_current_overlay_mode">当前叠加层：%1$s</string>
+    <string name="btn_overlay_off">关闭</string>
+    <string name="btn_overlay_passable_area_mask">可行走区域 Mask</string>
+    <string name="btn_overlay_semantic_class_mask">语义类别 Mask</string>
+    <string name="btn_overlay_detection_boxes">物体框</string>
+    <string name="settings_section_perception">感知</string>
+    <string name="label_perception_profile_basic">基础</string>
+    <string name="settings_perception_basic_supporting">仅可通行区域与方向提示，最稳定省电</string>
+    <string name="label_perception_profile_default">标准</string>
+    <string name="settings_perception_default_supporting">增加障碍物识别：行人、车辆及路面物体</string>
+    <string name="settings_perception_apply_hint">更改将在下次开始导航时生效</string>
+    <string name="title_live_pipeline_debug">实时 Pipeline 调试</string>
+    <string name="debug_semantic_provider">语义提供者：%1$s</string>
+    <string name="debug_obstacle_provider">障碍物提供者：%1$s</string>
+    <string name="debug_perception_profile">感知挡位：%1$s</string>
+    <string name="debug_semantic_runtime">语义加速器：%1$s（%2$s）</string>
+    <string name="debug_semantic_backends">语义后端：pre=%1$s，post=%2$s</string>
+    <string name="debug_obstacle_runtime">障碍物加速器：%1$s（%2$s）</string>
+    <string name="debug_obstacle_backends">障碍物后端：pre=%1$s，post=%2$s</string>
+    <string name="debug_passable_ratio">全局可通行占比：%1$d%%</string>
+    <string name="debug_navigation_passable_ratio">导航区域可通行占比：%1$d%%</string>
+    <string name="debug_obstacle_ratio">障碍占比：%1$d%%</string>
+    <string name="debug_road_ratio">道路占比：%1$d%%</string>
+    <string name="debug_bottom_coverage">底部覆盖率：%1$d%%</string>
+    <string name="debug_bottom_width_ratio">底部最大宽度：%1$d%%</string>
+    <string name="debug_blockage_confidence">阻塞置信度：%1$d%%</string>
+    <string name="debug_blockage_reason">阻塞原因：%1$s</string>
+    <string name="debug_road_vehicle_source">道路车辆：%1$s（%2$d%%），%3$s，bottom/center/area：%4$d/%5$d/%6$d%%</string>
+    <string name="debug_occluded_passable">障碍物遮挡可行走：%1$d%%</string>
+    <string name="debug_vertical_reach">纵向连通：%1$d%%（%2$d/%3$d 层）</string>
+    <string name="debug_flood_reach">洪泛连通：%1$d%%</string>
+    <string name="debug_width_retention_p25">宽度保持 P25：%1$d%%</string>
+    <string name="debug_stability_deltas">稳定性变化 nav/road/block/vert/flood/width：%1$d/%2$d/%3$d/%4$d/%5$d/%6$d%%</string>
+    <string name="debug_dominant_classes">主要类别：%1$s</string>
+    <string name="debug_total_pipeline_ms">当前总耗时：%1$dms</string>
+    <string name="debug_pipeline_breakdown_ms">拆分 处理/分析/决策：%1$d/%2$d/%3$dms</string>
+    <string name="debug_inference_ms">当前推理耗时：%1$dms</string>
+    <string name="debug_mask_source_age_ms">Mask 陈旧度：%1$dms</string>
+    <string name="debug_recent_avg_pipeline_ms">近期平均总耗时：%1$.1fms</string>
+    <string name="debug_recent_p95_pipeline_ms">近期 P95 总耗时：%1$dms</string>
+    <string name="debug_recent_dropped_rate">近期丢帧：%1$d%%（上一帧 +%2$d）</string>
+    <string name="debug_tracked_obstacle_count">已跟踪障碍物：%1$d</string>
+    <string name="debug_raw_obstacle_detection_count">原始检测：%1$d</string>
+    <string name="debug_obstacle_count_deltas">障碍物数量变化 tracked/raw-run：%1$d / %2$d</string>
+    <string name="debug_raw_obstacle_classes">原始障碍物类别：%1$s</string>
+    <string name="debug_tracked_obstacle_categories">跟踪障碍物类型：%1$s</string>
+    <string name="debug_runtime_budget_ok">运行时预算：通过</string>
+    <string name="debug_runtime_budget_warning">运行时预算：超出目标</string>
+    <string name="title_trace_replay_debug">Trace 回放调试</string>
+    <string name="title_trace_sessions_page">Trace 会话列表</string>
+    <string name="title_trace_report_page">Trace 回放报告</string>
+    <string name="msg_trace_sessions_page_description">查看已存储的 Trace 会话，并为某次运行打开回放报告。</string>
+    <string name="msg_loading_trace_sessions">正在加载已存储的 Trace 会话…</string>
+    <string name="msg_loading_trace_report">正在加载回放报告…</string>
+    <string name="btn_open_trace_replay">回放报告</string>
+    <string name="btn_back_to_live">返回实时分析</string>
+    <string name="btn_back_to_sessions">返回会话列表</string>
+    <string name="btn_open_trace_report">打开报告</string>
+    <string name="btn_refresh_trace_sessions">刷新 Trace</string>
+    <string name="btn_load_latest_trace_report">加载最新报告</string>
+    <string name="btn_copy_trace_report">复制报告</string>
+    <string name="btn_share_trace_file">分享 JSONL</string>
+    <string name="title_share_trace_file">分享 Trace 文件</string>
+    <string name="trace_file_not_found">未找到 Trace 文件</string>
+    <string name="label_trace_sessions">已存储会话</string>
+    <string name="label_trace_report">回放报告</string>
+    <string name="msg_no_trace_sessions">暂无 Trace 会话</string>
+    <string name="msg_no_trace_report">加载一个会话后即可查看回放指标</string>
+    <string name="trace_report_copied">Trace 报告已复制</string>
+    <string name="trace_report_budget_ok">预算状态：通过</string>
+    <string name="trace_report_budget_warning">预算告警</string>
+    <string name="trace_report_session_id">会话：%1$s</string>
+    <string name="trace_report_pipeline_mode">模式：%1$s</string>
+    <string name="trace_report_target_hardware">目标设备：%1$s</string>
+    <string name="trace_report_frames">帧数：%1$d</string>
+    <string name="trace_report_observed_frames">观测到的总帧数：%1$d</string>
+    <string name="trace_report_dropped">丢帧：%1$d（%2$d%%）</string>
+    <string name="trace_report_avg_pipeline">平均总耗时：%1$.1fms</string>
+    <string name="trace_report_p95_pipeline">P95 总耗时：%1$dms</string>
+    <string name="trace_report_avg_inference">平均感知耗时：%1$.1fms</string>
+    <string name="trace_report_duration">持续时间：%1$dms</string>
+    <string name="trace_report_camera_fps">相机输入 FPS：%1$.1f</string>
+    <string name="trace_report_pipeline_fps">Pipeline 输出 FPS：%1$.1f</string>
+    <string name="trace_report_throughput_fps">Pipeline 吞吐 FPS：%1$.1f</string>
+    <string name="trace_report_logic_ms">逻辑处理：分析 %1$.1fms，决策 %2$.1fms，合计 %3$.1fms</string>
+    <string name="trace_report_semantic_runs">语义运行：%1$d 次，运行 FPS：%2$.1f</string>
+    <string name="trace_report_semantic_stage_ms">语义耗时：总计 %1$.1fms，pre %2$.1f，infer %3$.1f，read %4$.1f，post %5$.1f</string>
+    <string name="trace_report_obstacle_runs">障碍物运行：%1$d 次，运行 FPS：%2$.1f</string>
+    <string name="trace_report_obstacle_stage_ms">障碍物耗时：总计 %1$.1fms，pre %2$.1f，infer %3$.1f，read %4$.1f，post %5$.1f</string>
+    <string name="trace_report_mask_render">Mask 渲染：%1$d/%2$d，FPS：%3$.1f，平均：%4$.1fms，陈旧度 avg/max：%5$.1f/%6$dms</string>
+    <string name="trace_report_semantic_backend">语义后端：accel=%1$s，pre=%2$s，post=%3$s</string>
+    <string name="trace_report_obstacle_backend">障碍物后端：accel=%1$s，pre=%2$s，post=%3$s</string>
+    <string name="trace_report_errors">错误数：%1$d</string>
+    <string name="trace_report_dominant_classes">主要类别：%1$s</string>
+    <string name="trace_report_message_keys">消息键：%1$s</string>
+    <string name="trace_report_blocked_rate">阻塞帧比例：%1$d%%</string>
+    <string name="trace_report_danger_rate">危险帧比例：%1$d%%</string>
+    <string name="trace_report_avg_navigation_passable">平均导航区可通行：%1$d%%</string>
+    <string name="trace_report_avg_road_ratio">平均道路占比：%1$d%%</string>
+    <string name="trace_report_avg_blockage_confidence">平均阻塞置信度：%1$d%%</string>
+    <string name="trace_report_avg_vertical_reach">平均纵向连通：%1$d%%</string>
+    <string name="trace_report_avg_flood_reach">平均洪泛连通：%1$d%%</string>
+    <string name="trace_report_avg_width_retention">平均宽度保持 P25：%1$d%%</string>
+    <string name="trace_report_occluded_passable">遮挡可通行 avg/max/delta avg/max：%1$d/%2$d/%3$d/%4$d%%</string>
+    <string name="trace_report_stability_deltas">稳定性 avg/max nav %1$d/%2$d%%，road %3$d/%4$d%%，block %5$d/%6$d%%，vert %7$d/%8$d%%，flood %9$d/%10$d%%，width %11$d/%12$d%%</string>
+    <string name="trace_report_obstacle_stability">障碍物稳定性 raw-run 平均 %1$.1f，raw-run 变化 avg/max %2$.1f/%3$d，tracked 变化 avg/max %4$.1f/%5$d</string>
+    <string name="trace_report_raw_obstacle_classes">原始障碍物类别：%1$s</string>
+    <string name="trace_report_tracked_obstacle_categories">跟踪障碍物类型：%1$s</string>
+    <string name="trace_report_road_vehicle_sources">道路车辆：来源 %1$s，平均置信度 %2$d%%，原因 %3$s，bottom/center/area：%4$d/%5$d/%6$d%%</string>
+    <string name="trace_report_blockage_reasons">阻塞原因：%1$s</string>
+    <string name="trace_session_button_label">会话 %1$s</string>
+    <string name="trace_session_selected_label">当前会话 %1$s</string>
+    <string name="trace_session_file_name">文件：%1$s</string>
+    <string name="trace_session_last_modified">最后修改：%1$s</string>
+    <string name="value_unknown">未知</string>
+    <string name="interval_format_ms">%d毫秒</string>
+    <string name="btn_save">保存</string>
+    <string name="btn_reset">重置</string>
+    <string name="settings_saved">设置已保存</string>
+
+    <!--
+      事件消息。
+
+      行走场景的文案守则：
+      1. 越短越好。中文 TTS 1.0x 下每字约 0.18 秒；按 1.2 m/s 步速，多两个字就多走 0.4 米。
+      2. 不写"请小心/请注意"。它不改变用户的任何动作（用户本来就在小心），只增加播报时长。
+      3. 不写"疑似"。盲人无法验证不确定性，"疑似有车"和"有车"对应的动作完全一样（停下）。
+         该说就直说，不够确定就提高阈值别说。
+      4. 只描述"是什么/在哪"。紧迫前缀和方向后缀由 event_modifier_* 拼上去，见 SceneEventTextResolver。
+    -->
+
+    <!-- 修饰：前缀/后缀模板。%1$s 是基础文案。 -->
+    <string name="event_modifier_near">注意，%1$s</string>
+    <string name="event_modifier_bias_left">%1$s，靠左</string>
+    <string name="event_modifier_bias_right">%1$s，靠右</string>
+
+    <string name="event_obstacle_left">左侧有障碍</string>
+    <string name="event_obstacle_center">前方有障碍</string>
+    <string name="event_obstacle_right">右侧有障碍</string>
+    <string name="event_obstacle_front_left">左前方有障碍</string>
+    <string name="event_obstacle_front_right">右前方有障碍</string>
+    <string name="event_obstacle_left_center">左侧和前方有障碍</string>
+    <string name="event_obstacle_center_right">前方和右侧有障碍</string>
+    <string name="event_obstacle_left_right">左右两侧都有障碍</string>
+    <string name="event_obstacle_multiple">多个方向有障碍</string>
+    <string name="event_obstacle_left_person">左侧有行人</string>
+    <string name="event_obstacle_center_person">前方有行人</string>
+    <string name="event_obstacle_right_person">右侧有行人</string>
+    <string name="event_obstacle_front_left_person">左前方有行人</string>
+    <string name="event_obstacle_front_right_person">右前方有行人</string>
+    <string name="event_obstacle_left_center_person">左侧和前方有行人</string>
+    <string name="event_obstacle_center_right_person">前方和右侧有行人</string>
+    <string name="event_obstacle_left_right_person">左右两侧有行人</string>
+    <string name="event_obstacle_multiple_person">多个方向有行人</string>
+    <string name="event_obstacle_left_vehicle">左侧有车辆</string>
+    <string name="event_obstacle_center_vehicle">前方有车辆</string>
+    <string name="event_obstacle_right_vehicle">右侧有车辆</string>
+    <string name="event_obstacle_front_left_vehicle">左前方有车辆</string>
+    <string name="event_obstacle_front_right_vehicle">右前方有车辆</string>
+    <string name="event_obstacle_left_center_vehicle">左侧和前方有车辆</string>
+    <string name="event_obstacle_center_right_vehicle">前方和右侧有车辆</string>
+    <string name="event_obstacle_left_right_vehicle">左右两侧有车辆</string>
+    <string name="event_obstacle_multiple_vehicle">多个方向有车辆</string>
+    <string name="event_blocked">前方不通</string>
+    <string name="event_path_complex">前方路况复杂</string>
+    <string name="event_narrowing">通道变窄</string>
+    <string name="event_intersection">前方路口</string>
+    <string name="event_traffic_light">前方红绿灯</string>
+    <string name="event_road_warning">前方车道</string>
+    <string name="event_road_warning_vehicle">前方有车</string>
+
+    <!--
+      地面变化：原先 5 个 key 是同一句话，等于 5 倍维护成本换 0 信息量，且把"走进机动车道"
+      （危险）和"走上人行道"（安全）说成了同一件事。现在只保留真正需要提醒的那一个方向，
+      其余映射到统一兜底。整组事件默认关闭，见 AnalysisConfig.enableGroundChangeEvents。
+    -->
+    <string name="event_ground_change">路面变化</string>
+    <string name="event_ground_to_road">前方车道</string>
+    <string name="event_ground_to_terrain">路面变化</string>
+    <string name="event_ground_to_sidewalk">路面变化</string>
+    <string name="event_ground_to_indoor">路面变化</string>
+
+    <!-- 输入质量。用户无法自行察觉这类失效，所以措辞直接给出可执行动作。 -->
+    <string name="event_camera_blocked">镜头被遮挡</string>
+    <string name="event_low_light">光线不足</string>
+    <string name="permission_camera_title">需要相机权限</string>
+    <string name="permission_camera_rationale">Sailens 通过相机识别前方道路并为你导览。画面只在本机处理，不会上传。</string>
+    <string name="permission_confirm">允许</string>
+    <string name="permission_cancel">暂不</string>
+    <string name="pipeline_guidance">导航辅助</string>
+    <string name="pipeline_describe">场景描述</string>
+    <string name="config_failure_title">Sailens 无法启动</string>
+    <string name="config_failure_message">%1$s是必需的，但当前不可用：%2$s</string>
+    <string name="config_failure_hint">这个安装包配置有问题。请重新安装，或查看安装说明。</string>
+    <string name="config_reason_model_missing">没有找到模型文件</string>
+    <string name="config_reason_taxonomy">模型的类别定义对不上</string>
+    <string name="config_reason_engine">没有可用的引擎</string>
+    <string name="config_reason_not_configured">这个版本没有配置它</string>
+    <string name="zero_pipeline_title">尚未安装模型</string>
+    <string name="zero_pipeline_body">Sailens 本身不附带模型权重。加入语义分割模型即可启用导航辅助，见 docs/models.md。</string>
+    <string name="btn_back">返回</string>
+    <string name="btn_describe">前面是什么？</string>
+    <string name="btn_describe_cancel">停止</string>
+    <string name="describe_idle">按下按钮，听一听相机看到了什么。</string>
+    <string name="describe_in_progress">正在识别…</string>
+    <string name="describe_failed">这次没能描述出来，再试一次。</string>
+    <string name="btn_open_describe">场景描述</string>
+    <string name="config_reason_model_output">模型的输出读不出来</string>
+    <string name="config_reason_class_count">模型的类别数量和这个版本预期的不一样</string>
+</resources>

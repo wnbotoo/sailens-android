@@ -1,0 +1,111 @@
+package com.sailens.runtime
+
+import android.content.Context
+import java.io.FileInputStream
+import java.io.InputStream
+import java.nio.ByteBuffer
+import java.nio.channels.FileChannel
+
+/**
+ * Where a model's bytes come from.
+ *
+ * Decouples the LiteRT loading layer from packaging. Today every model is an [Asset] bundled in the
+ * APK; a model delivered via Play Asset Delivery (AI Pack) or a self-hosted download instead resolves
+ * to a [File] under the app's storage. The accelerator/NPU compile path is identical for both — only
+ * the byte source differs (asset mmap vs. file mmap), so the loading layer threads a [ModelSource]
+ * rather than a bare asset path.
+ *
+ * The seam that decides Asset vs. File (and triggers an asset-pack/download fetch when needed) is
+ * [ModelSourceResolver]: a config carrying a [File] source is loaded straight from disk.
+ */
+sealed interface ModelSource {
+
+    /** Short identifier for logs and error messages. */
+    val label: String
+
+    /**
+     * Model packaged in the APK's `assets/`, read through the app's
+     * [android.content.res.AssetManager].
+     */
+    data class Asset(val assetPath: String) : ModelSource {
+        override val label: String get() = assetPath
+    }
+
+    /** Model materialized as a file on disk: an asset-pack location, or a downloaded + cached file. */
+    data class File(val file: java.io.File) : ModelSource {
+        override val label: String get() = file.name
+    }
+
+    /**
+     * Cheap existence check for preflight: does this source resolve to bytes that are actually
+     * there? (architecture.md §5.2)
+     *
+     * Opens and immediately closes the stream. It reads no model data, compiles nothing and
+     * initialises no accelerator -- which is the whole point: preflight decides whether a control
+     * should exist, long before the user has asked for the work.
+     */
+    fun exists(context: Context): Boolean = runCatching {
+        openStream(context).close()
+    }.isSuccess
+
+    /**
+     * Maps the model bytes read-only, without copying them into the heap.
+     *
+     * Metadata lives in the flatbuffer tables near the front of the file, but the file itself is
+     * tens of megabytes of weights. Preflight runs at startup on the main thread, so pulling the
+     * whole model into a ByteArray to read four numbers out of it is exactly the kind of cold-start
+     * cost §5.2 says preflight must not have. A mapping touches only the pages actually read.
+     *
+     * Falls back to a heap copy when the asset turns out to be compressed in the APK (`.tflite` is
+     * in AGP's default noCompress list, so this should not happen) or the platform refuses the
+     * mapping. Correct either way, just no longer free.
+     */
+    fun mapBytes(context: Context): ByteBuffer = when (this) {
+        is Asset -> runCatching {
+            context.assets.openFd(assetPath).use { descriptor ->
+                FileInputStream(descriptor.fileDescriptor).use { input ->
+                    input.channel.map(
+                        FileChannel.MapMode.READ_ONLY,
+                        descriptor.startOffset,
+                        descriptor.declaredLength,
+                    )
+                }
+            }
+        }.getOrElse { ByteBuffer.wrap(openStream(context).use { it.readBytes() }) }
+
+        is File -> runCatching {
+            FileInputStream(file).use { input ->
+                input.channel.map(FileChannel.MapMode.READ_ONLY, 0, file.length())
+            }
+        }.getOrElse { ByteBuffer.wrap(openStream(context).use { it.readBytes() }) }
+    }
+
+    /** Opens the model bytes (e.g. for metadata reading). The caller owns the stream and must close it. */
+    fun openStream(context: Context): InputStream = when (this) {
+        is Asset -> context.assets.open(assetPath)
+        is File -> file.inputStream()
+    }
+
+    /**
+     * Verifies the model is present and readable, throwing [IllegalStateException] otherwise. For an
+     * [Asset] this means it was packaged into the APK; for a [File] it means it has already been
+     * delivered/downloaded. Whatever fetches an asset pack or downloaded file is responsible for
+     * doing so *before* this check runs.
+     */
+    fun ensureAvailable(context: Context) {
+        when (this) {
+            is Asset -> runCatching { context.assets.open(assetPath).use {} }
+                .onFailure { error ->
+                    throw IllegalStateException(
+                        "Model asset '$assetPath' is not packaged in app assets.",
+                        error,
+                    )
+                }
+
+            is File -> check(file.isFile && file.canRead()) {
+                "Model file '${file.absolutePath}' is not available " +
+                    "(asset pack / download not delivered yet?)."
+            }
+        }
+    }
+}
