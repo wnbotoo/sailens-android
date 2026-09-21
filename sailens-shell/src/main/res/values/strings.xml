@@ -296,7 +296,7 @@
     <string name="config_reason_engine">no engine is available</string>
     <string name="config_reason_not_configured">it is not configured in this build</string>
     <string name="zero_pipeline_title">No model installed</string>
-    <string name="zero_pipeline_body">Sailens ships without model weights. Add a semantic model to enable navigation assistance; see docs/models.md.</string>
+    <string name="zero_pipeline_body">This build does not include model weights. Add a semantic model to enable navigation assistance; see docs/models.md.</string>
     <string name="btn_back">Back</string>
     <string name="btn_describe">What is in front of me?</string>
     <string name="btn_describe_cancel">Stop</string>
