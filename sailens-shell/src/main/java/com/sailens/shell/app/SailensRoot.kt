@@ -65,8 +65,11 @@ fun SailensRoot(
      * The one route to the screen reader. Its collector lives here, at the root, because this is
      * the only composable that exists for as long as the app does: a per-screen collector drops
      * every announcement raised while another screen is on top (architecture.md §6.6).
+     *
+     * Required, with no default, on purpose: every host copies its wiring from Core Edition's, and
+     * a host that forgot this would compile and then deliver no screen-reader announcement at all.
      */
-    screenReaderAnnouncer: ScreenReaderAnnouncer? = null,
+    screenReaderAnnouncer: ScreenReaderAnnouncer,
     modifier: Modifier = Modifier,
 ) {
     val capabilities = remember(spec) { PipelinePreflight.evaluate(spec) }
@@ -75,10 +78,8 @@ fun SailensRoot(
     }
 
     val view = LocalView.current
-    if (screenReaderAnnouncer != null) {
-        LaunchedEffect(screenReaderAnnouncer, view) {
-            screenReaderAnnouncer.announcements.collect { text -> view.announceForAccessibility(text) }
-        }
+    LaunchedEffect(screenReaderAnnouncer, view) {
+        screenReaderAnnouncer.announcements.collect { text -> view.announceForAccessibility(text) }
     }
 
     SailensTheme {

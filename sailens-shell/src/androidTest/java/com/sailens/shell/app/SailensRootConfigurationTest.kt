@@ -11,6 +11,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.sailens.shell.FileLogService
 import com.sailens.shell.R
+import com.sailens.shell.device.ScreenReaderAnnouncer
 import com.sailens.shell.device.HapticManager
 import com.sailens.output.SpeechManager
 import org.junit.Assert.assertFalse
@@ -47,6 +48,7 @@ class SailensRootConfigurationTest {
         compose.setContent {
             SailensRoot(
                 windowSizeClass = windowSizeClass,
+                screenReaderAnnouncer = ScreenReaderAnnouncer(),
                 spec = brokenPromise(),
                 failFastOnConfigurationError = false,
             )
@@ -60,6 +62,7 @@ class SailensRootConfigurationTest {
         compose.setContent {
             SailensRoot(
                 windowSizeClass = windowSizeClass,
+                screenReaderAnnouncer = ScreenReaderAnnouncer(),
                 spec = brokenPromise(),
                 failFastOnConfigurationError = true,
             )
@@ -71,6 +74,7 @@ class SailensRootConfigurationTest {
         compose.setContent {
             SailensRoot(
                 windowSizeClass = windowSizeClass,
+                screenReaderAnnouncer = ScreenReaderAnnouncer(),
                 spec = SailensAppSpec(
                     guidance = GuidanceSpec(
                         verifySemanticModel = { StaticUnavailableReason.ModelSourceMissing },
