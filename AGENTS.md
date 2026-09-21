@@ -13,6 +13,21 @@ pipeline that turns the scene ahead into speech and haptics. This file is the re
   Never add a `.tflite` to a commit; `app/src/main/assets/*.tflite` is git-ignored on purpose.
   Weights carry their own licenses and dataset terms independent of this code license.
 
+## Repository and product boundary
+- This repository is **Sailens Android**, the Apache-2.0 model-neutral platform plus a reference
+  host. It is not the app-store product.
+- The first-party shipping app is a separate thin distribution (currently `sailens-yolo`, target
+  `sailens-app`) that consumes this repository by exact submodule pin + Gradle composite build.
+- Long-term product identity belongs to that distribution: product name **Sailens**,
+  `applicationId = "com.sailens"`. This repository's reference host is planned to move to
+  `applicationId = "com.sailens.reference"`; both keep namespace `com.sailens`.
+- Do not add store branding, official bundled weights or release-product identity to the platform
+  repository. Reusable capability belongs here; distribution choices belong in the shipping app.
+- The `sailens-*` Gradle modules are architecture/API boundaries, not a commitment to publish nine
+  Maven artifacts. Source/composite consumption remains the policy until a stable external SDK
+  surface and independent consumers justify Maven publication.
+- Full decision: `docs/distribution-model.md`.
+
 ## Big picture
 - Modules (`settings.gradle.kts`): nine `sailens-*` libraries plus `:app`. Nothing else.
   The migration in `docs/architecture.md` §11 replaced the old layer-first split (`:domain`, `:presentation`, `:ux`, `:camera`).
