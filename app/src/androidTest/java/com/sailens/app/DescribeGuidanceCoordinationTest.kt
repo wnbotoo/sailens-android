@@ -28,6 +28,7 @@ import com.sailens.shell.describe.SpeechManagerDescribeVoice
 import com.sailens.shell.device.SharedEngineOwner
 import com.sailens.shell.guidance.screen.SceneAnalysisViewModel
 import com.sailens.vlm.SceneDescriber
+import com.sailens.vlm.SceneDescription
 import com.sailens.vlm.SceneDescriptionChunk
 import com.sailens.vlm.SceneDescriptionRequest
 import kotlinx.coroutines.delay
@@ -48,6 +49,7 @@ import org.koin.core.context.startKoin
 import org.koin.core.context.stopKoin
 import org.koin.core.qualifier.named
 import org.koin.dsl.module
+import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.random.Random
 
@@ -59,6 +61,9 @@ import kotlin.random.Random
  * one running — while the description the user was actually listening to kept decoding and kept
  * talking after the warning. And each screen released the shared speech engine on its way out, so
  * closing Describe could leave Guidance with no voice.
+ *
+ * One Describe-only case lives here too, because it means nothing without a real engine: an answer
+ * that has finished decoding is still being read out when the person asks again.
  *
  * Everything here is the production object graph: the app's own [appModule], both real ViewModels,
  * the real coordinator, the real engine owner and the real [SpeechManager] speaking through the
@@ -123,11 +128,13 @@ class DescribeGuidanceCoordinationTest {
 
         // Start guidance with the lens covered: the real pipeline reports an obstructed camera.
         camera.obstructed = true
+        val guidanceStartedAt = System.nanoTime()
         instrumentation.runOnMainSync { guidanceScreen.toggleAnalysis() }
         awaitTrue("Guidance to announce a warning", 10_000) {
             guidanceScreen.uiState.value.lastAnnouncedEvent != null
         }
-        val preemptedAt = voice.firstWithdrawalAt()
+        // Not the first withdrawal of the test: starting the description withdrew too.
+        val preemptedAt = voice.firstWithdrawalAfter(guidanceStartedAt)
         assertNotNull("the warning must withdraw Describe's speech", preemptedAt)
 
         // The fake VLM offers a new clause every 150 ms for as long as it is allowed to run.
@@ -193,6 +200,43 @@ class DescribeGuidanceCoordinationTest {
         instrumentation.runOnMainSync { speech.withdraw(guidance) }
     }
 
+    @Test
+    fun askingAgainTakesThePreviousAnswerOffTheAirFirst() {
+        val describeScreen = viewModel<DescribeViewModel>()
+        val speech = koin.get<SpeechManager>()
+        val coordinator = koin.get<SceneDescriptionCoordinator>()
+        awaitTrue("the speech engine to come up", 10_000) { speech.isReady }
+
+        // The first answer decodes at once and takes seconds to read out, so Describe is offered
+        // again while it is still playing.
+        describer.answers += FIRST_ANSWER
+        instrumentation.runOnMainSync { describeScreen.describe("Could not describe the scene.") }
+        awaitTrue("the first answer to finish decoding", 5_000) {
+            coordinator.state.value.let { it.isComplete && !it.isDescribing }
+        }
+        assertTrue("the first answer must still be being read out", voice.real.hasQueuedSpeech)
+
+        val askedAgainAt = System.nanoTime()
+        instrumentation.runOnMainSync { describeScreen.describe("Could not describe the scene.") }
+
+        val withdrawnAt = voice.firstWithdrawalAfter(askedAgainAt)
+        assertNotNull("asking again must take the first answer back", withdrawnAt)
+        assertEquals(
+            "the engine must hold nothing of the first answer once it is taken back",
+            false,
+            voice.queuedAfterLastWithdrawal,
+        )
+        awaitTrue("the second answer to start speaking", 5_000) {
+            voice.spokenAfter(askedAgainAt).isNotEmpty()
+        }
+        assertEquals(
+            "the second answer may queue nothing before the first is gone",
+            voice.spokenAfter(askedAgainAt),
+            voice.spokenAfter(withdrawnAt!!),
+        )
+        instrumentation.runOnMainSync { describeScreen.cancel() }
+    }
+
     private inline fun <reified T : ViewModel> viewModel(store: ViewModelStore = ViewModelStore()): T {
         stores += store
         var viewModel: T? = null
@@ -221,6 +265,11 @@ class DescribeGuidanceCoordinationTest {
     private class RecordingVoice(val real: SpeechManagerDescribeVoice) : DescribeVoice {
         private val events = CopyOnWriteArrayList<Pair<String, Long>>()
 
+        /** Whether the engine still held any of Describe's speech right after the last withdrawal. */
+        @Volatile
+        var queuedAfterLastWithdrawal: Boolean? = null
+            private set
+
         override suspend fun awaitReady(): Boolean = real.awaitReady()
 
         override fun speak(text: String) {
@@ -231,24 +280,40 @@ class DescribeGuidanceCoordinationTest {
         override fun withdraw() {
             events += "withdraw" to System.nanoTime()
             real.withdraw()
+            // Withdrawals arrive on Main, where SpeechManager applies them before returning.
+            queuedAfterLastWithdrawal = real.hasQueuedSpeech
         }
 
         fun spoken(): List<String> = events.filter { it.first.startsWith("speak:") }.map { it.first }
 
-        fun firstWithdrawalAt(): Long? = events.firstOrNull { it.first == "withdraw" }?.second
+        fun firstWithdrawalAfter(timeNs: Long): Long? =
+            events.firstOrNull { it.first == "withdraw" && it.second > timeNs }?.second
 
         fun spokenAfter(timeNs: Long): List<String> =
             events.filter { it.first.startsWith("speak:") && it.second > timeNs }.map { it.first }
     }
 
-    /** A VLM that keeps decoding until it is stopped, and says so when it is. */
+    /**
+     * A VLM that keeps decoding until it is stopped, and says so when it is — unless [answers] holds
+     * one for this request, which it gives at once, whole, and ends.
+     */
     private class StreamingDescriber : SceneDescriber {
         @Volatile
         var decodeStopped = false
+        val answers = ConcurrentLinkedQueue<String>()
         override val isAvailable: Boolean = true
         override val isReady: Boolean = true
         override suspend fun initialize() = Unit
         override fun describe(request: SceneDescriptionRequest): Flow<SceneDescriptionChunk> = flow {
+            answers.poll()?.let { answer ->
+                emit(SceneDescriptionChunk.Delta(answer))
+                emit(
+                    SceneDescriptionChunk.Completed(
+                        SceneDescription(text = answer, backend = "test", latencyMs = 0, timeToFirstTokenMs = 0),
+                    ),
+                )
+                return@flow
+            }
             try {
                 var clause = 0
                 while (true) {
@@ -317,6 +382,10 @@ class DescribeGuidanceCoordinationTest {
     private companion object {
         const val WIDTH = 64
         const val HEIGHT = 48
+
+        /** Several seconds of speech, so it is still playing long after it has been decoded. */
+        const val FIRST_ANSWER = "A bus stop is two metres ahead. A bench stands under its shelter. " +
+            "Behind it, bicycles are parked along the kerb. Further on, the pavement narrows beside a hedge."
 
         fun yuvFrame(sequence: Long, uniform: Boolean): ImageFrame {
             val random = Random(sequence)

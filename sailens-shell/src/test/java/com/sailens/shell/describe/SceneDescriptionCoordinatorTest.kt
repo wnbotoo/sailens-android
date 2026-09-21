@@ -94,7 +94,7 @@ class SceneDescriptionCoordinatorTest {
         settle()
 
         assertEquals("nothing may be spoken after the warning", listOf("A tree is ahead."), voice.spoken)
-        assertTrue("what Describe had queued must be withdrawn", voice.withdrawals >= 1)
+        assertTrue("what Describe had queued must be withdrawn: ${voice.queued}", voice.queued.isEmpty())
         assertFalse(coordinator.state.value.isDescribing)
     }
 
@@ -299,7 +299,6 @@ class SceneDescriptionCoordinatorTest {
     private class RecordingVoice : DescribeVoice {
         val spoken: MutableList<String> = Collections.synchronizedList(mutableListOf())
         val queued: MutableList<String> = Collections.synchronizedList(mutableListOf())
-        var withdrawals = 0
         var ready = true
         val hasQueued: Boolean get() = queued.isNotEmpty()
 
@@ -311,7 +310,6 @@ class SceneDescriptionCoordinatorTest {
         }
 
         override fun withdraw() {
-            withdrawals++
             queued.clear()
         }
     }
