@@ -28,6 +28,9 @@ interface DescribeVoice {
 
     /** Takes back everything Describe has queued or is speaking. Nothing else. */
     fun withdraw()
+
+    /** Whether anything Describe queued is still queued or speaking. */
+    val hasQueuedSpeech: Boolean
 }
 
 class SpeechManagerDescribeVoice(
@@ -54,8 +57,7 @@ class SpeechManagerDescribeVoice(
         speechManager.withdraw(owner)
     }
 
-    /** Whether anything Describe queued is still queued or speaking. For diagnostics and tests. */
-    val hasQueuedSpeech: Boolean
+    override val hasQueuedSpeech: Boolean
         get() = speechManager.hasQueued(owner)
 
     private companion object {

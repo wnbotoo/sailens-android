@@ -359,6 +359,13 @@ class SceneAnalysisViewModel(
         // Guidance 为这一条（且只为这一条）记了冷却，见 DecideEventsUseCase。
         val primaryEvent = events.first()
 
+        // 用户正在听自己要的场景描述时，不紧急的提示（红绿灯、侧方障碍、"暂停通行提示"）先等它说完：
+        // 不送达、撤销冷却记录，条件仍成立时描述结束后的某一帧再给。紧急的照旧打断，见下。
+        if (guidanceWaitsForDescription(primaryEvent.priority, sceneDescriptionCoordinator.holdsTheFloor)) {
+            revokeUndeliveredEvent(primaryEvent)
+            return
+        }
+
         // 导航要出声了，正在解码的场景描述必须先让路——不管它在哪个屏幕上跑。协调器是整个
         // shell 共用的那一个，所以这里取消的就是用户正在听的那一段描述。
         sceneDescriptionCoordinator.preemptForGuidance(primaryEvent.messageKey)

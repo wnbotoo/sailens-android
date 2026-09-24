@@ -103,6 +103,17 @@ class SceneDescriptionCoordinator(
     }
 
     /**
+     * Whether a description is decoding or still being read out. Guidance holds back prompts that
+     * are not urgent while this is true (see `guidanceWaitsForDescription`); urgent ones call
+     * [preemptForGuidance].
+     *
+     * Through a screen reader, Describe's speech is out of sight once announced, so there only the
+     * decoding counts.
+     */
+    val holdsTheFloor: Boolean
+        get() = session.isDescribing || voice.hasQueuedSpeech
+
+    /**
      * Guidance is about to speak. Call this before, not after: by the time a warning is queued, no
      * clause of the description may be left in front of it or behind it.
      */
