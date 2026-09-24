@@ -17,11 +17,11 @@ Sailens 按盲人辅助导航场景拆成两类模型：
   （见 `ObstacleOcclusionAnalyzer`），不依赖独立的实例分割模型。
 
 运行 profile 在 `app/src/main/java/com/sailens/app/SailensRuntimeProfile.kt` 定义；它决定模型角色参数、
-backend target 和 pipeline cadence。当前发布档位是 `standard` / `ultra`：`standard` 两个视觉模型都跑 GPU，
-`ultra` 预留 NPU 给未来 VLM、视觉模型仍跑 GPU。物理模型文件由 `ModelSourceResolver` / `ModelCatalog`
+backend target 和 pipeline cadence。目前只有一个 profile `standard`：所有模型（含 VLM）都以 GPU 为目标。
+曾经的 `ultra` 档（给 VLM 预留 NPU）从未被选中过，已删除。物理模型文件由 `ModelSourceResolver` / `ModelCatalog`
 根据 `(ModelType, actual accelerator)` 解析。
 
-与 backend 档位正交的是**感知挡位**（`PerceptionProfile`，设置页可选，详见 `docs/perception-profiles.zh-CN.md`）：
+与 runtime profile 正交的是**感知挡位**（`PerceptionProfile`，设置页可选，详见 `docs/perception-profiles.zh-CN.md`）：
 BASIC 只跑 `sem`，DEFAULT 跑 `sem + det`。调度按各模型目标帧率的时间间隔进行（`PerceptionScheduler`）；
 det 未运行的帧由 tracker prediction 补偿，轨迹按 `detectionResultTtlMs` 时间过期。
 
@@ -74,6 +74,11 @@ RAW_TRANSPOSED   [1, 4 + classCount, N]     前 4 个是 cx, cy, w, h；其后�
 END_TO_END       [1, N, 6]                  x1, y1, x2, y2, conf, classId
 ```
 
+**框的坐标单位靠声明，不靠推断。** `DetectionModelConfig.coordinateSpace` 指明框是 `NORMALIZED`
+（模型输入的 [0, 1]；默认值，Ultralytics 导出的 TFLite 就是这种）还是 `MODEL_PIXELS`（640 输入即 0..640）。
+输出本身回答不了这个问题：像素坐标模型在左上角输出的一个很小的框，数值上和归一化框一模一样。
+填错不会报错，只会让每个框都错位——和类别顺序一样，换 det 模型时要人工确认。
+
 `END_TO_END` 是 DETR 系导出的天然形状。多张量输出（如 boxes / scores / class_idx 分开）**当前不支持**，
 需要给 `ObstacleDetectionLayout` 加一档 + 一条解码分支。
 
@@ -81,12 +86,13 @@ runtime 只保留允许的障碍物类别，并用 class-aware NMS 去重。类�
 （`CocoClassMapper`），与 sem 同理：**顺序错会静默乱套**。
 
 ```kotlin
-ObstacleModelConfig(
+DetectionModelConfig(
     classCount = 80,
+    coordinateSpace = DetectionCoordinateSpace.NORMALIZED,
 )
 ```
 
-换 det 模型时**必须先确认输出 shape**，避免 bbox / class 维度被解释错。
+换 det 模型时**必须先确认输出 shape 和框的坐标单位**，避免 bbox / class 维度被解释错。
 
 ## 归一化
 
@@ -152,7 +158,8 @@ ModelAcceleratorBackend.NPU
 初始化失败就失败。LiteRT 的 NPU 编译路径可能在模型内部做 CPU 分区/fallback；应用层不会把 NPU
 静默切成 GPU/CPU。**调试模型/backend 兼容性时不要启用 fallback**，否则会掩盖真正的失败点。
 
-视觉模型请求 NPU 目前**不支持（抛异常）**——NPU 留给未来的 VLM 路径。
+视觉模型请求 NPU 目前**不支持（抛异常）**：`ModelCatalog` 里没有 NPU 模型文件。NPU 是未来可能的能力，
+不是当前的资源分配。
 
 如果以后启用 `PREFER_BACKEND` / `FIRST_AVAILABLE`，`LiteRtSessionFactory` 会对每个 actual accelerator
 attempt 调用 `ModelSourceResolver`，因此 fallback 到另一个 accelerator 时会重新选择模型文件，

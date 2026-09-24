@@ -98,8 +98,8 @@ ProcessFrameUseCase reads activeConfig per frame
 - At app start, `profileBindingsModule` reads the initial tier from `PerceptionSettingsStore` and
   assembles `SailensRuntimeProfile`. The persisted default is **DEFAULT**
   (`PerceptionSettingsStore.DEFAULT_PROFILE`).
-- The perception tier is orthogonal to the backend tier (standard/ultra, which decides GPU/NPU
-  allocation).
+- The perception tier is orthogonal to the runtime profile (which decides each model's accelerator;
+  today there is only `standard`).
 
 ## 4. Observability
 

@@ -59,9 +59,10 @@ static LetterboxGeometry createGeometry(int frameWidth, int frameHeight, int rot
     };
 }
 
-static float toModelPixels(float value, int inputSize) {
-    return value <= 2.0f ? value * inputSize : value;
-}
+// Whether a head reports boxes in [0, 1] or in model-input pixels is part of the model contract
+// (DetectionModelConfig.coordinateSpace), resolved on the Kotlin side and passed in as
+// modelPixelScale. It is never inferred from the values: a tiny box in the top-left corner of a
+// pixel-space head is numerically indistinguishable from a normalised box.
 
 static bool decodeModelRect(
         const LetterboxGeometry& geometry,
@@ -164,6 +165,7 @@ static std::vector<Candidate> decodeRawDetections(
         int dataSize,
         const LetterboxGeometry& geometry,
         int inputSize,
+        float modelPixelScale,
         int attributesPerDetection,
         float confidenceThreshold,
         int maxDetections,
@@ -203,10 +205,10 @@ static std::vector<Candidate> decodeRawDetections(
             continue;
         }
 
-        const float cx = toModelPixels(scoreAt(detectionIndex), inputSize);
-        const float cy = toModelPixels(scoreAt(detectionCount + detectionIndex), inputSize);
-        const float width = toModelPixels(scoreAt(detectionCount * 2 + detectionIndex), inputSize);
-        const float height = toModelPixels(scoreAt(detectionCount * 3 + detectionIndex), inputSize);
+        const float cx = scoreAt(detectionIndex) * modelPixelScale;
+        const float cy = scoreAt(detectionCount + detectionIndex) * modelPixelScale;
+        const float width = scoreAt(detectionCount * 2 + detectionIndex) * modelPixelScale;
+        const float height = scoreAt(detectionCount * 3 + detectionIndex) * modelPixelScale;
 
         Rect rect{};
         if (!decodeModelRect(
@@ -293,6 +295,7 @@ nativePostProcessRawFloat(
         jint frameHeight,
         jint rotationDegrees,
         jint inputSize,
+        jfloat modelPixelScale,
         jint attributesPerDetection,
         jfloat confidenceThreshold,
         jint maxDetections,
@@ -331,6 +334,7 @@ nativePostProcessRawFloat(
             rawSize,
             geometry,
             inputSize,
+            modelPixelScale,
             attributesPerDetection,
             confidenceThreshold,
             maxDetections,
@@ -349,6 +353,7 @@ nativePostProcessRawInt8(
         jint frameHeight,
         jint rotationDegrees,
         jint inputSize,
+        jfloat modelPixelScale,
         jint attributesPerDetection,
         jfloat quantScale,
         jint quantZeroPoint,
@@ -388,6 +393,7 @@ nativePostProcessRawInt8(
             rawSize,
             geometry,
             inputSize,
+            modelPixelScale,
             attributesPerDetection,
             confidenceThreshold,
             maxDetections,
@@ -467,6 +473,7 @@ nativePostProcessRawFloatFromHandle(
         jint frameHeight,
         jint rotationDegrees,
         jint inputSize,
+        jfloat modelPixelScale,
         jint attributesPerDetection,
         jfloat confidenceThreshold,
         jint maxDetections,
@@ -504,6 +511,7 @@ nativePostProcessRawFloatFromHandle(
             rawElementCount,
             geometry,
             inputSize,
+            modelPixelScale,
             attributesPerDetection,
             confidenceThreshold,
             maxDetections,
@@ -528,6 +536,7 @@ nativePostProcessRawInt8FromHandle(
         jint frameHeight,
         jint rotationDegrees,
         jint inputSize,
+        jfloat modelPixelScale,
         jint attributesPerDetection,
         jfloat quantScale,
         jint quantZeroPoint,
@@ -568,6 +577,7 @@ nativePostProcessRawInt8FromHandle(
             rawElementCount,
             geometry,
             inputSize,
+            modelPixelScale,
             attributesPerDetection,
             confidenceThreshold,
             maxDetections,
@@ -595,16 +605,16 @@ const JNINativeMethod kSemanticArgmaxPostprocessorMethods[] = {
 
 const JNINativeMethod kDetectionPostProcessorMethods[] = {
         {"nativePostProcessRawFloat",
-         "([FIIIIIFI[I)[F",
+         "([FIIIIFIFI[I)[F",
          reinterpret_cast<void*>(nativePostProcessRawFloat)},
         {"nativePostProcessRawInt8",
-         "([BIIIIIFIFI[I)[F",
+         "([BIIIIFIFIFI[I)[F",
          reinterpret_cast<void*>(nativePostProcessRawInt8)},
         {"nativePostProcessRawFloatFromHandle",
-         "(JIIIIIIFI[I)[F",
+         "(JIIIIIFIFI[I)[F",
          reinterpret_cast<void*>(nativePostProcessRawFloatFromHandle)},
         {"nativePostProcessRawInt8FromHandle",
-         "(JIIIIIIFIFI[I)[F",
+         "(JIIIIIFIFIFI[I)[F",
          reinterpret_cast<void*>(nativePostProcessRawInt8FromHandle)},
 };
 

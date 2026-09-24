@@ -12,11 +12,6 @@ import com.sailens.guidance.model.common.ObstacleProviderType
 import com.sailens.guidance.model.common.PerceptionProfile
 import com.sailens.shell.guidance.overlay.SceneOverlayConfig
 
-enum class SailensPerformanceTier(val profileName: String) {
-    STANDARD("standard"),
-    ULTRA("ultra"),
-}
-
 /**
  * Single app-level "preset" that bundles every runtime-tuning knob — camera source resolution, the
  * per-model accelerator targets, the perception/analysis configs, and pipeline cadence — so they are
@@ -26,17 +21,17 @@ enum class SailensPerformanceTier(val profileName: String) {
  * physical `.tflite` for each (type, accelerator) pairing is resolved in the data layer by
  * `ModelSourceResolver` / `ModelCatalog`, so no file name appears here.
  *
- * Tier policy:
- * - [standard]: all bundled vision models run on GPU. This is the broad release default.
- * - [ultra]: reserves NPU for a future VLM path, so the realtime vision models stay on GPU.
+ * There is one profile, [standard]: every model, the VLM included, targets the GPU. An `ultra`
+ * tier that reserved the NPU for the VLM used to sit beside it, but nothing ever selected it — no
+ * VLM runtime this app can ship gets the NPU on the target SoCs — so it was removed rather than
+ * kept as a promise. A second profile comes back when a second hardware path actually exists.
  *
- * Orthogonal to the tier, [PerceptionProfile] decides *which* models run per frame (see
+ * Orthogonal to the profile, [PerceptionProfile] decides *which* models run per frame (see
  * `PerceptionConfig.forProfile`): BASIC = sem only, DEFAULT = sem + det. The shipped default is
  * DEFAULT (seeded from `PerceptionSettingsStore`).
  */
 data class SailensRuntimeProfile(
     val name: String,
-    val tier: SailensPerformanceTier,
     /**
      * Descriptive label of the detected SoC/device (from [DeviceHardwareProfileProvider.detect]).
      * A tag for logs/traces and the Settings screen.
@@ -53,83 +48,12 @@ data class SailensRuntimeProfile(
     val sceneOverlay: SceneOverlayConfig,
 ) {
     companion object {
-        fun select(
-            targetHardwareProfile: String = UNKNOWN_HARDWARE,
-            vlmNpuAvailable: Boolean = false,
-            enableDiagnostics: Boolean = true,
-            perceptionProfile: PerceptionProfile = PerceptionProfile.DEFAULT,
-        ): SailensRuntimeProfile {
-            return forTier(
-                tier = selectTier(targetHardwareProfile, vlmNpuAvailable),
-                targetHardwareProfile = targetHardwareProfile,
-                enableDiagnostics = enableDiagnostics,
-                perceptionProfile = perceptionProfile,
-            )
-        }
-
         fun standard(
             targetHardwareProfile: String = UNKNOWN_HARDWARE,
             enableDiagnostics: Boolean = true,
             perceptionProfile: PerceptionProfile = PerceptionProfile.DEFAULT,
-        ): SailensRuntimeProfile =
-            build(
-                tier = SailensPerformanceTier.STANDARD,
-                targetHardwareProfile = targetHardwareProfile,
-                semanticBackend = ModelAcceleratorBackend.GPU,
-                realtimeObstacleBackend = ModelAcceleratorBackend.GPU,
-                vlmBackend = ModelAcceleratorBackend.GPU,
-                enableDiagnostics = enableDiagnostics,
-                perceptionProfile = perceptionProfile,
-            )
-
-        fun ultra(
-            targetHardwareProfile: String = UNKNOWN_HARDWARE,
-            enableDiagnostics: Boolean = true,
-            perceptionProfile: PerceptionProfile = PerceptionProfile.DEFAULT,
-        ): SailensRuntimeProfile =
-            build(
-                tier = SailensPerformanceTier.ULTRA,
-                targetHardwareProfile = targetHardwareProfile,
-                semanticBackend = ModelAcceleratorBackend.GPU,
-                realtimeObstacleBackend = ModelAcceleratorBackend.GPU,
-                vlmBackend = ModelAcceleratorBackend.NPU,
-                enableDiagnostics = enableDiagnostics,
-                perceptionProfile = perceptionProfile,
-            )
-
-        internal fun selectTier(
-            targetHardwareProfile: String,
-            vlmNpuAvailable: Boolean = false,
-        ): SailensPerformanceTier {
-            return if (vlmNpuAvailable && targetHardwareProfile != UNKNOWN_HARDWARE) {
-                SailensPerformanceTier.ULTRA
-            } else {
-                SailensPerformanceTier.STANDARD
-            }
-        }
-
-        private fun forTier(
-            tier: SailensPerformanceTier,
-            targetHardwareProfile: String,
-            enableDiagnostics: Boolean,
-            perceptionProfile: PerceptionProfile,
-        ): SailensRuntimeProfile = when (tier) {
-            SailensPerformanceTier.STANDARD ->
-                standard(targetHardwareProfile, enableDiagnostics, perceptionProfile)
-            SailensPerformanceTier.ULTRA ->
-                ultra(targetHardwareProfile, enableDiagnostics, perceptionProfile)
-        }
-
-        private fun build(
-            tier: SailensPerformanceTier,
-            targetHardwareProfile: String,
-            semanticBackend: ModelAcceleratorBackend,
-            realtimeObstacleBackend: ModelAcceleratorBackend,
-            vlmBackend: ModelAcceleratorBackend,
-            enableDiagnostics: Boolean,
-            perceptionProfile: PerceptionProfile,
         ): SailensRuntimeProfile {
-            val name = tier.profileName
+            val name = STANDARD
             val camera = CameraRuntimeConfig(
                 previewWidth = 1280,
                 previewHeight = 720,
@@ -138,16 +62,15 @@ data class SailensRuntimeProfile(
             )
             return SailensRuntimeProfile(
                 name = name,
-                tier = tier,
                 targetHardwareProfile = targetHardwareProfile,
                 camera = camera,
                 semanticModel = SemanticModelConfig(
-                    acceleratorBackend = semanticBackend,
+                    acceleratorBackend = ModelAcceleratorBackend.GPU,
                 ),
                 realtimeObstacleModel = DetectionModelConfig(
-                    acceleratorBackend = realtimeObstacleBackend,
+                    acceleratorBackend = ModelAcceleratorBackend.GPU,
                 ),
-                vlmModelBackend = vlmBackend,
+                vlmModelBackend = ModelAcceleratorBackend.GPU,
                 perception = PerceptionConfig.forProfile(
                     profile = perceptionProfile,
                     runtimeProfileName = name,
@@ -161,6 +84,7 @@ data class SailensRuntimeProfile(
             )
         }
 
+        private const val STANDARD = "standard"
         private const val UNKNOWN_HARDWARE = "unknown_hardware"
     }
 }

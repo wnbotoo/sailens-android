@@ -35,7 +35,7 @@ class ModelCatalogTest {
     }
 
     @Test
-    fun `NPU sources are intentionally unsupported (NPU is reserved for the VLM)`() {
+    fun `NPU sources are intentionally unsupported (no vision model ships an NPU file)`() {
         assertThrows(IllegalArgumentException::class.java) {
             ModelCatalog.source(ModelType.SEMANTIC_SEGMENTATION, ModelAcceleratorBackend.NPU)
         }

@@ -34,6 +34,8 @@ class DetectionPostProcessor(
     private val inputSize: Int = 640,
     private val classCount: Int = taxonomy.classCount,
     private val detectionLayout: DetectionLayout = DetectionLayout.RAW_TRANSPOSED,
+    /** Declared by the model contract; see [DetectionCoordinateSpace]. */
+    coordinateSpace: DetectionCoordinateSpace = DetectionCoordinateSpace.NORMALIZED,
     private val confidenceThreshold: Float = 0.25f,
     private val maxDetections: Int = 10,
     /**
@@ -44,6 +46,8 @@ class DetectionPostProcessor(
     allowedClassIds: IntArray = IntArray(classCount) { it },
 ) {
 
+    /** Takes a box value to model-input pixels. */
+    private val modelPixelScale: Float = coordinateSpace.modelPixelScale(inputSize)
     private val rawAttributesPerDetection = RAW_BOX_ATTRIBUTES + classCount
     private val attributesPerDetection = when (detectionLayout) {
         DetectionLayout.RAW_TRANSPOSED -> rawAttributesPerDetection
@@ -56,6 +60,7 @@ class DetectionPostProcessor(
     private val nativePostProcessor = NativeDetectionPostProcessor(
         taxonomy = taxonomy,
         inputSize = inputSize,
+        modelPixelScale = modelPixelScale,
         confidenceThreshold = confidenceThreshold,
         maxDetections = maxDetections,
         allowedClassIds = this.allowedClassIds,
@@ -219,6 +224,7 @@ class DetectionPostProcessor(
 
             val decodedRect = decodeRawRect(
                 geometry = geometry,
+                modelPixelScale = modelPixelScale,
                 cx = scoreAt(detectionIndex),
                 cy = scoreAt(detectionCount + detectionIndex),
                 width = scoreAt(detectionCount * 2 + detectionIndex),
@@ -263,6 +269,7 @@ class DetectionPostProcessor(
 
             val decodedRect = decodeEndToEndRect(
                 geometry = geometry,
+                modelPixelScale = modelPixelScale,
                 left = scoreAt(base),
                 top = scoreAt(base + 1),
                 right = scoreAt(base + 2),
@@ -327,15 +334,16 @@ class DetectionPostProcessor(
 
     private fun decodeRawRect(
         geometry: LetterboxGeometry,
+        modelPixelScale: Float,
         cx: Float,
         cy: Float,
         width: Float,
         height: Float,
     ): DecodedRect? {
-        val modelCx = toModelPixels(cx)
-        val modelCy = toModelPixels(cy)
-        val modelWidth = toModelPixels(width)
-        val modelHeight = toModelPixels(height)
+        val modelCx = cx * modelPixelScale
+        val modelCy = cy * modelPixelScale
+        val modelWidth = width * modelPixelScale
+        val modelHeight = height * modelPixelScale
 
         return decodeModelRect(
             geometry = geometry,
@@ -348,6 +356,7 @@ class DetectionPostProcessor(
 
     private fun decodeEndToEndRect(
         geometry: LetterboxGeometry,
+        modelPixelScale: Float,
         left: Float,
         top: Float,
         right: Float,
@@ -355,15 +364,16 @@ class DetectionPostProcessor(
     ): DecodedRect? {
         val decodedXyxy = decodeModelRect(
             geometry = geometry,
-            modelLeft = toModelPixels(left),
-            modelTop = toModelPixels(top),
-            modelRight = toModelPixels(right),
-            modelBottom = toModelPixels(bottom),
+            modelLeft = left * modelPixelScale,
+            modelTop = top * modelPixelScale,
+            modelRight = right * modelPixelScale,
+            modelBottom = bottom * modelPixelScale,
         )
         if (decodedXyxy != null) return decodedXyxy
 
         return decodeRawRect(
             geometry = geometry,
+            modelPixelScale = modelPixelScale,
             cx = left,
             cy = top,
             width = right,
@@ -395,10 +405,6 @@ class DetectionPostProcessor(
                 height = ((unpaddedBottom - unpaddedTop) / geometry.rotatedHeight).coerceIn(0f, 1f),
             ),
         )
-    }
-
-    private fun toModelPixels(value: Float): Float {
-        return if (value <= 2f) value * inputSize else value
     }
 
     private fun Candidate.toDetection(): Detection {

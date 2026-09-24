@@ -60,22 +60,22 @@ class NativeVisionBindingCoverageTest {
         NativeBinding(
             NativeDetectionPostProcessor::class.java,
             "nativePostProcessRawFloat",
-            "([FIIIIIFI[I)[F",
+            "([FIIIIFIFI[I)[F",
         ),
         NativeBinding(
             NativeDetectionPostProcessor::class.java,
             "nativePostProcessRawInt8",
-            "([BIIIIIFIFI[I)[F",
+            "([BIIIIFIFIFI[I)[F",
         ),
         NativeBinding(
             NativeDetectionPostProcessor::class.java,
             "nativePostProcessRawFloatFromHandle",
-            "(JIIIIIIFI[I)[F",
+            "(JIIIIIFIFI[I)[F",
         ),
         NativeBinding(
             NativeDetectionPostProcessor::class.java,
             "nativePostProcessRawInt8FromHandle",
-            "(JIIIIIIFIFI[I)[F",
+            "(JIIIIIFIFIFI[I)[F",
         ),
     )
 
@@ -153,6 +153,7 @@ class NativeVisionBindingCoverageTest {
             NativeDetectionPostProcessor::class.java -> NativeDetectionPostProcessor(
                 taxonomy = CocoTaxonomy,
                 inputSize = 640,
+                modelPixelScale = 640f,
                 confidenceThreshold = 0.25f,
                 maxDetections = 10,
                 allowedClassIds = intArrayOf(0),

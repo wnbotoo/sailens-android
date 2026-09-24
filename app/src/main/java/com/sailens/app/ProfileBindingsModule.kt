@@ -24,7 +24,7 @@ import org.koin.dsl.module
  */
 val profileBindingsModule = module {
     single {
-        SailensRuntimeProfile.select(
+        SailensRuntimeProfile.standard(
             targetHardwareProfile = DeviceHardwareProfileProvider.detect(),
             enableDiagnostics = BuildConfig.SHOW_DIAGNOSTICS,
             // 设置页持久化的挡位选择；运行中的切换走 PerceptionProfileManager
@@ -34,7 +34,7 @@ val profileBindingsModule = module {
     single<CameraRuntimeConfig> { get<SailensRuntimeProfile>().camera }
     single<SemanticModelConfig> { get<SailensRuntimeProfile>().semanticModel }
     single<DetectionModelConfig> { get<SailensRuntimeProfile>().realtimeObstacleModel }
-    // The VLM's backend is the profile's call (the ultra tier reserves NPU for it); everything else
+    // The VLM's backend is the profile's call; everything else
     // about it — prompt, decode budget — is the model config's own default.
     single {
         VlmModelConfig(

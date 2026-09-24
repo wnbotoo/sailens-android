@@ -81,7 +81,7 @@ ProcessFrameUseCase 逐帧读取 activeConfig
   切换本身安全，但收口到会话边界可避免会话内配置漂移。设置页有"下次开始导航时生效"提示。
 - 应用启动时 `profileBindingsModule` 从 `PerceptionSettingsStore` 读初始挡位装配
   `SailensRuntimeProfile`。当前持久化默认值为 **DEFAULT**（`PerceptionSettingsStore.DEFAULT_PROFILE`）。
-- 感知挡位与 backend 档位（standard/ultra，决定 GPU/NPU 分配）正交。
+- 感知挡位与 runtime profile（决定各模型的加速器，目前只有 `standard`）正交。
 
 ## 4. 观测
 

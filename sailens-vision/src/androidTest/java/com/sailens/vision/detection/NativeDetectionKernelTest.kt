@@ -41,6 +41,7 @@ class NativeDetectionKernelTest {
     @Test
     fun rawFloatKernelDecodesTopDetectionsWithNms() {
         val postProcessor = DetectionPostProcessor(
+            coordinateSpace = DetectionCoordinateSpace.MODEL_PIXELS,
             confidenceThreshold = 0.25f,
             maxDetections = 10,
             allowedClassIds = obstacleClassIds,
@@ -61,6 +62,7 @@ class NativeDetectionKernelTest {
     @Test
     fun rawFloatKernelKeepsStaticObstacleClassNames() {
         val postProcessor = DetectionPostProcessor(
+            coordinateSpace = DetectionCoordinateSpace.MODEL_PIXELS,
             confidenceThreshold = 0.25f,
             maxDetections = 10,
             allowedClassIds = obstacleClassIds,
@@ -85,10 +87,10 @@ class NativeDetectionKernelTest {
             allowedClassIds = obstacleClassIds,
         )
         val frame = createFrame()
-        // Normalised box coordinates, the convention a full-integer-quant export uses: one scale
-        // has to cover boxes and class scores, and `toModelPixels` maps anything <= 2.0 back up by
-        // inputSize. Feeding the float kernel model pixels and the int8 kernel [0, 1] would be
-        // comparing two different decodes.
+        // Normalised box coordinates (the default coordinate space), the convention a
+        // full-integer-quant export uses: one scale has to cover boxes and class scores. Feeding
+        // the float kernel model pixels and the int8 kernel [0, 1] would be comparing two
+        // different decodes.
         val raw = scenarioDetections(coordinateScale = 1f / INPUT_SIZE)
 
         val floatOutput = postProcessor.postProcessWithBackend(frame, raw)
@@ -120,6 +122,29 @@ class NativeDetectionKernelTest {
             )
             assertEquals(expected.confidence, actual.confidence, 1f / 127f)
         }
+    }
+
+    @Test
+    fun declaredPixelSpaceKeepsATinyCornerBoxInTheCorner() {
+        // Every coordinate of this pixel-space box is <= 2: numerically it looks normalised. The
+        // declared contract, not the values, decides the unit.
+        val postProcessor = DetectionPostProcessor(
+            coordinateSpace = DetectionCoordinateSpace.MODEL_PIXELS,
+            confidenceThreshold = 0.25f,
+            maxDetections = 10,
+            allowedClassIds = obstacleClassIds,
+        )
+        val raw = FloatArray(ATTRIBUTES)
+        setRawDetection(
+            raw, detectionIndex = 0, detectionCount = 1,
+            cx = 1.5f, cy = 141.5f, width = 2f, height = 2f, classId = 0, score = 0.9f,
+        )
+
+        val output = postProcessor.postProcessWithBackend(createFrame(), raw)
+
+        assertEquals("native_bbox_nms", output.backend)
+        val box = output.detections.single().boundingBox
+        assertTrue("a corner box must stay in the corner: $box", box.x < 0.01f && box.width < 0.01f)
     }
 
     @Test
