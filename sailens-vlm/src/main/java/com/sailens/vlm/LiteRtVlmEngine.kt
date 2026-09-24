@@ -52,6 +52,10 @@ public class LiteRtVlmEngine(
         if (_isReady) return
 
         withContext(singleThreadDispatcher) {
+            // Checked again here, where calls are serialized: two callers can both pass the check
+            // above, and without this the second one would tear down the runtime the first had just
+            // built — possibly under a description already running on it.
+            if (_isReady) return@withContext
             cleanupInternal()
             check(runtimeFactory.isAvailable(context)) {
                 "VLM runtime unavailable (no GenAI library/model wired)."
@@ -90,9 +94,11 @@ public class LiteRtVlmEngine(
      * [SceneDescriptionChunk.Completed] carries the whole text. Consumers must handle that.
      */
     override fun describe(request: SceneDescriptionRequest): Flow<SceneDescriptionChunk> = channelFlow {
-        val activeRuntime = runtime ?: error("VLM engine not initialized")
-
         withContext(singleThreadDispatcher) {
+            // Read on the engine's own thread, after any initialize/release queued before this
+            // request: a reference taken outside could be a runtime that is closed by the time the
+            // decode starts.
+            val activeRuntime = runtime ?: error("VLM engine not initialized")
             val start = SystemClock.uptimeMillis()
             var firstTokenAt = 0L
 
