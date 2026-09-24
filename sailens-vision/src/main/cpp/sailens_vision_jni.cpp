@@ -59,8 +59,21 @@ static LetterboxGeometry createGeometry(int frameWidth, int frameHeight, int rot
     };
 }
 
-static float toModelPixels(float value, int inputSize) {
-    return value <= 2.0f ? value * inputSize : value;
+// Whether a detection head reports boxes in [0, 1] or in model-input pixels is a property of the
+// model, so it is decided once per output tensor from all of its box values, never per value: a
+// pixel-space box that happens to touch the top-left corner has a coordinate <= 2 and, judged on
+// its own, would be scaled by inputSize and thrown off the frame. A normalised head never exceeds
+// this bound; a pixel-space head's anchors span the whole input and always do.
+constexpr float kNormalizedCoordinateMax = 2.0f;
+
+template <typename ScoreAt>
+static float coordinateScale(ScoreAt scoreAt, int boxValueCount, int inputSize) {
+    for (int index = 0; index < boxValueCount; ++index) {
+        if (scoreAt(index) > kNormalizedCoordinateMax) {
+            return 1.0f;
+        }
+    }
+    return static_cast<float>(inputSize);
 }
 
 static bool decodeModelRect(
@@ -179,6 +192,8 @@ static std::vector<Candidate> decodeRawDetections(
     }
 
     const int detectionCount = dataSize / attributesPerDetection;
+    // Raw layout keeps the four box rows first: cx, cy, w, h for every anchor.
+    const float modelPixelScale = coordinateScale(scoreAt, detectionCount * kRawBoxAttributes, inputSize);
     std::vector<Candidate> candidates;
     candidates.reserve(std::min(detectionCount, kMaxNmsCandidates));
 
@@ -203,10 +218,10 @@ static std::vector<Candidate> decodeRawDetections(
             continue;
         }
 
-        const float cx = toModelPixels(scoreAt(detectionIndex), inputSize);
-        const float cy = toModelPixels(scoreAt(detectionCount + detectionIndex), inputSize);
-        const float width = toModelPixels(scoreAt(detectionCount * 2 + detectionIndex), inputSize);
-        const float height = toModelPixels(scoreAt(detectionCount * 3 + detectionIndex), inputSize);
+        const float cx = scoreAt(detectionIndex) * modelPixelScale;
+        const float cy = scoreAt(detectionCount + detectionIndex) * modelPixelScale;
+        const float width = scoreAt(detectionCount * 2 + detectionIndex) * modelPixelScale;
+        const float height = scoreAt(detectionCount * 3 + detectionIndex) * modelPixelScale;
 
         Rect rect{};
         if (!decodeModelRect(

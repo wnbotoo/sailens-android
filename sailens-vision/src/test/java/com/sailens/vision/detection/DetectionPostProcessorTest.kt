@@ -80,6 +80,55 @@ class DetectionPostProcessorTest {
     }
 
     @Test
+    fun `a pixel-space box touching the left edge is not rescaled as if normalised`() {
+        val postProcessor = DetectionPostProcessor(
+            detectionLayout = DetectionLayout.END_TO_END,
+            confidenceThreshold = 0.25f,
+            maxDetections = 10,
+            allowedClassIds = obstacleClassIds,
+        )
+        val raw = FloatArray(6)
+        // Model pixels. left = 1.5 alone looks normalised; the box as a whole plainly is not.
+        setEndToEndDetection(raw, 0, attributes = 6, left = 1.5f, top = 200f, right = 120f, bottom = 400f, classId = 0, score = 0.9f)
+
+        val box = postProcessor.postProcess(createFrame(), raw).single().boundingBox
+
+        // 1280x720 letterboxed into 640: scale 0.5, no horizontal padding.
+        assertEquals(1.5f / 0.5f / 1280f, box.x, 1e-4f)
+        assertEquals((120f - 1.5f) / 0.5f / 1280f, box.width, 1e-4f)
+    }
+
+    @Test
+    fun `normalised and pixel-space raw outputs decode to the same boxes`() {
+        val postProcessor = DetectionPostProcessor(
+            confidenceThreshold = 0.25f,
+            maxDetections = 10,
+            allowedClassIds = obstacleClassIds,
+        )
+        val pixels = FloatArray(84 * 2)
+        setRawDetection(pixels, 0, detectionCount = 2, cx = 320f, cy = 340f, width = 120f, height = 180f, classId = 0, score = 0.94f)
+        // A small box hugging the top-left corner of the content: every coordinate is <= 2 pixels.
+        setRawDetection(pixels, 1, detectionCount = 2, cx = 1.5f, cy = 141.5f, width = 2f, height = 2f, classId = 2, score = 0.9f)
+        val normalised = FloatArray(pixels.size) { index ->
+            if (index < 4 * 2) pixels[index] / 640f else pixels[index]
+        }
+
+        val fromPixels = postProcessor.postProcess(createFrame(), pixels)
+        val fromNormalised = postProcessor.postProcess(createFrame(), normalised)
+
+        assertEquals(2, fromPixels.size)
+        fromPixels.zip(fromNormalised).forEach { (a, b) ->
+            assertEquals(a.label, b.label)
+            assertEquals(a.boundingBox.x, b.boundingBox.x, 1e-4f)
+            assertEquals(a.boundingBox.y, b.boundingBox.y, 1e-4f)
+            assertEquals(a.boundingBox.width, b.boundingBox.width, 1e-4f)
+            assertEquals(a.boundingBox.height, b.boundingBox.height, 1e-4f)
+        }
+        val corner = fromPixels.single { it.label == "car" }.boundingBox
+        assertTrue("the corner box must stay a corner box: $corner", corner.x < 0.01f && corner.width < 0.01f)
+    }
+
+    @Test
     fun `invalid output shape returns no detections`() {
         val postProcessor = DetectionPostProcessor()
 

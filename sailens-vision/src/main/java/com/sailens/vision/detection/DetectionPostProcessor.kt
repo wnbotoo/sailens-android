@@ -200,6 +200,8 @@ class DetectionPostProcessor(
         if (detectionCount == 0 || allowedClassIds.isEmpty()) return emptyList()
 
         val geometry = LetterboxGeometry.from(frame, inputSize)
+        // Raw layout keeps the four box rows first: cx, cy, w, h for every anchor.
+        val modelPixelScale = coordinateScale(RAW_BOX_ATTRIBUTES * detectionCount) { scoreAt(it) }
         val candidates = ArrayList<Candidate>(minOf(detectionCount, MAX_NMS_CANDIDATES))
 
         for (detectionIndex in 0 until detectionCount) {
@@ -219,6 +221,7 @@ class DetectionPostProcessor(
 
             val decodedRect = decodeRawRect(
                 geometry = geometry,
+                modelPixelScale = modelPixelScale,
                 cx = scoreAt(detectionIndex),
                 cy = scoreAt(detectionCount + detectionIndex),
                 width = scoreAt(detectionCount * 2 + detectionIndex),
@@ -251,6 +254,9 @@ class DetectionPostProcessor(
         if (detectionCount == 0 || allowedClassIds.isEmpty()) return emptyList()
 
         val geometry = LetterboxGeometry.from(frame, inputSize)
+        val modelPixelScale = coordinateScale(detectionCount * END_TO_END_BOX_ATTRIBUTES) { index ->
+            scoreAt((index / END_TO_END_BOX_ATTRIBUTES) * END_TO_END_FIXED_ATTRIBUTES + index % END_TO_END_BOX_ATTRIBUTES)
+        }
         val candidates = ArrayList<Candidate>(minOf(detectionCount, MAX_NMS_CANDIDATES))
 
         for (detectionIndex in 0 until detectionCount) {
@@ -263,6 +269,7 @@ class DetectionPostProcessor(
 
             val decodedRect = decodeEndToEndRect(
                 geometry = geometry,
+                modelPixelScale = modelPixelScale,
                 left = scoreAt(base),
                 top = scoreAt(base + 1),
                 right = scoreAt(base + 2),
@@ -327,15 +334,16 @@ class DetectionPostProcessor(
 
     private fun decodeRawRect(
         geometry: LetterboxGeometry,
+        modelPixelScale: Float,
         cx: Float,
         cy: Float,
         width: Float,
         height: Float,
     ): DecodedRect? {
-        val modelCx = toModelPixels(cx)
-        val modelCy = toModelPixels(cy)
-        val modelWidth = toModelPixels(width)
-        val modelHeight = toModelPixels(height)
+        val modelCx = cx * modelPixelScale
+        val modelCy = cy * modelPixelScale
+        val modelWidth = width * modelPixelScale
+        val modelHeight = height * modelPixelScale
 
         return decodeModelRect(
             geometry = geometry,
@@ -348,6 +356,7 @@ class DetectionPostProcessor(
 
     private fun decodeEndToEndRect(
         geometry: LetterboxGeometry,
+        modelPixelScale: Float,
         left: Float,
         top: Float,
         right: Float,
@@ -355,15 +364,16 @@ class DetectionPostProcessor(
     ): DecodedRect? {
         val decodedXyxy = decodeModelRect(
             geometry = geometry,
-            modelLeft = toModelPixels(left),
-            modelTop = toModelPixels(top),
-            modelRight = toModelPixels(right),
-            modelBottom = toModelPixels(bottom),
+            modelLeft = left * modelPixelScale,
+            modelTop = top * modelPixelScale,
+            modelRight = right * modelPixelScale,
+            modelBottom = bottom * modelPixelScale,
         )
         if (decodedXyxy != null) return decodedXyxy
 
         return decodeRawRect(
             geometry = geometry,
+            modelPixelScale = modelPixelScale,
             cx = left,
             cy = top,
             width = right,
@@ -397,8 +407,21 @@ class DetectionPostProcessor(
         )
     }
 
-    private fun toModelPixels(value: Float): Float {
-        return if (value <= 2f) value * inputSize else value
+    /**
+     * The factor that takes this output's box values to model-input pixels: [inputSize] for a head
+     * that reports boxes in [0, 1], 1 for one that reports pixels.
+     *
+     * Decided once per output tensor from all of its box values, never per value. Judged value by
+     * value, a pixel-space box touching the top-left corner has a coordinate <= 2, gets scaled by
+     * [inputSize] on that one coordinate, and lands off the frame. A normalised head never exceeds
+     * [NORMALIZED_COORDINATE_MAX]; a pixel-space head's anchors span the whole input and always do.
+     * The native kernel applies the same rule.
+     */
+    private inline fun coordinateScale(boxValueCount: Int, boxValueAt: (Int) -> Float): Float {
+        for (index in 0 until boxValueCount) {
+            if (boxValueAt(index) > NORMALIZED_COORDINATE_MAX) return 1f
+        }
+        return inputSize.toFloat()
     }
 
     private fun Candidate.toDetection(): Detection {
@@ -427,6 +450,8 @@ class DetectionPostProcessor(
     private companion object {
         const val RAW_BOX_ATTRIBUTES = 4
         const val END_TO_END_FIXED_ATTRIBUTES = 6
+        const val END_TO_END_BOX_ATTRIBUTES = 4
+        const val NORMALIZED_COORDINATE_MAX = 2f
         const val END_TO_END_CONFIDENCE_OFFSET = 4
         const val END_TO_END_CLASS_OFFSET = 5
         const val NMS_IOU_THRESHOLD = 0.45f
