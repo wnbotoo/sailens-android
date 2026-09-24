@@ -18,6 +18,6 @@ data class SemanticModelConfig(
     val preferNativeYuvPreprocessing: Boolean = true,
     val resizeFilter: ResizeFilter = ResizeFilter.NEAREST,
     val acceleratorSelectionMode: ModelAcceleratorSelectionMode = ModelAcceleratorSelectionMode.EXPLICIT,
-    // Bundled vision models run on the GPU; the NPU is reserved for the future VLM. ModelCatalog has no NPU asset.
+    // Vision models run on the GPU; ModelCatalog has no NPU asset for them.
     val acceleratorBackend: ModelAcceleratorBackend = ModelAcceleratorBackend.GPU,
 )

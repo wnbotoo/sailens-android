@@ -323,13 +323,14 @@ class LiteRtDetectionRunner(
             classCount = modelConfig.classCount,
             allowedClassIds = allowedClassIds,
             detectionLayout = outputSpec.detectionLayout,
+            coordinateSpace = modelConfig.coordinateSpace,
             confidenceThreshold = confidenceThreshold,
             maxDetections = maxDetections,
         )
 
         logService.info(
             TAG,
-            "detection tensor config: input=${inputSpec.width}x${inputSpec.height}x${inputSpec.channels}:${inputSpec.layout}, output=$outputSpec, inputType=${resolvedInputDataType.dataType}, tensorElement=${resolvedInputDataType.elementTypeName}"
+            "detection tensor config: input=${inputSpec.width}x${inputSpec.height}x${inputSpec.channels}:${inputSpec.layout}, output=$outputSpec, boxes=${modelConfig.coordinateSpace}, inputType=${resolvedInputDataType.dataType}, tensorElement=${resolvedInputDataType.elementTypeName}"
         )
 
         return ResolvedTensorBindings(

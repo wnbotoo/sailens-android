@@ -59,22 +59,10 @@ static LetterboxGeometry createGeometry(int frameWidth, int frameHeight, int rot
     };
 }
 
-// Whether a detection head reports boxes in [0, 1] or in model-input pixels is a property of the
-// model, so it is decided once per output tensor from all of its box values, never per value: a
-// pixel-space box that happens to touch the top-left corner has a coordinate <= 2 and, judged on
-// its own, would be scaled by inputSize and thrown off the frame. A normalised head never exceeds
-// this bound; a pixel-space head's anchors span the whole input and always do.
-constexpr float kNormalizedCoordinateMax = 2.0f;
-
-template <typename ScoreAt>
-static float coordinateScale(ScoreAt scoreAt, int boxValueCount, int inputSize) {
-    for (int index = 0; index < boxValueCount; ++index) {
-        if (scoreAt(index) > kNormalizedCoordinateMax) {
-            return 1.0f;
-        }
-    }
-    return static_cast<float>(inputSize);
-}
+// Whether a head reports boxes in [0, 1] or in model-input pixels is part of the model contract
+// (DetectionModelConfig.coordinateSpace), resolved on the Kotlin side and passed in as
+// modelPixelScale. It is never inferred from the values: a tiny box in the top-left corner of a
+// pixel-space head is numerically indistinguishable from a normalised box.
 
 static bool decodeModelRect(
         const LetterboxGeometry& geometry,
@@ -177,6 +165,7 @@ static std::vector<Candidate> decodeRawDetections(
         int dataSize,
         const LetterboxGeometry& geometry,
         int inputSize,
+        float modelPixelScale,
         int attributesPerDetection,
         float confidenceThreshold,
         int maxDetections,
@@ -192,8 +181,6 @@ static std::vector<Candidate> decodeRawDetections(
     }
 
     const int detectionCount = dataSize / attributesPerDetection;
-    // Raw layout keeps the four box rows first: cx, cy, w, h for every anchor.
-    const float modelPixelScale = coordinateScale(scoreAt, detectionCount * kRawBoxAttributes, inputSize);
     std::vector<Candidate> candidates;
     candidates.reserve(std::min(detectionCount, kMaxNmsCandidates));
 
@@ -308,6 +295,7 @@ nativePostProcessRawFloat(
         jint frameHeight,
         jint rotationDegrees,
         jint inputSize,
+        jfloat modelPixelScale,
         jint attributesPerDetection,
         jfloat confidenceThreshold,
         jint maxDetections,
@@ -346,6 +334,7 @@ nativePostProcessRawFloat(
             rawSize,
             geometry,
             inputSize,
+            modelPixelScale,
             attributesPerDetection,
             confidenceThreshold,
             maxDetections,
@@ -364,6 +353,7 @@ nativePostProcessRawInt8(
         jint frameHeight,
         jint rotationDegrees,
         jint inputSize,
+        jfloat modelPixelScale,
         jint attributesPerDetection,
         jfloat quantScale,
         jint quantZeroPoint,
@@ -403,6 +393,7 @@ nativePostProcessRawInt8(
             rawSize,
             geometry,
             inputSize,
+            modelPixelScale,
             attributesPerDetection,
             confidenceThreshold,
             maxDetections,
@@ -482,6 +473,7 @@ nativePostProcessRawFloatFromHandle(
         jint frameHeight,
         jint rotationDegrees,
         jint inputSize,
+        jfloat modelPixelScale,
         jint attributesPerDetection,
         jfloat confidenceThreshold,
         jint maxDetections,
@@ -519,6 +511,7 @@ nativePostProcessRawFloatFromHandle(
             rawElementCount,
             geometry,
             inputSize,
+            modelPixelScale,
             attributesPerDetection,
             confidenceThreshold,
             maxDetections,
@@ -543,6 +536,7 @@ nativePostProcessRawInt8FromHandle(
         jint frameHeight,
         jint rotationDegrees,
         jint inputSize,
+        jfloat modelPixelScale,
         jint attributesPerDetection,
         jfloat quantScale,
         jint quantZeroPoint,
@@ -583,6 +577,7 @@ nativePostProcessRawInt8FromHandle(
             rawElementCount,
             geometry,
             inputSize,
+            modelPixelScale,
             attributesPerDetection,
             confidenceThreshold,
             maxDetections,
@@ -610,16 +605,16 @@ const JNINativeMethod kSemanticArgmaxPostprocessorMethods[] = {
 
 const JNINativeMethod kDetectionPostProcessorMethods[] = {
         {"nativePostProcessRawFloat",
-         "([FIIIIIFI[I)[F",
+         "([FIIIIFIFI[I)[F",
          reinterpret_cast<void*>(nativePostProcessRawFloat)},
         {"nativePostProcessRawInt8",
-         "([BIIIIIFIFI[I)[F",
+         "([BIIIIFIFIFI[I)[F",
          reinterpret_cast<void*>(nativePostProcessRawInt8)},
         {"nativePostProcessRawFloatFromHandle",
-         "(JIIIIIIFI[I)[F",
+         "(JIIIIIFIFI[I)[F",
          reinterpret_cast<void*>(nativePostProcessRawFloatFromHandle)},
         {"nativePostProcessRawInt8FromHandle",
-         "(JIIIIIIFIFI[I)[F",
+         "(JIIIIIFIFIFI[I)[F",
          reinterpret_cast<void*>(nativePostProcessRawInt8FromHandle)},
 };
 

@@ -153,6 +153,7 @@ class NativeVisionBindingCoverageTest {
             NativeDetectionPostProcessor::class.java -> NativeDetectionPostProcessor(
                 taxonomy = CocoTaxonomy,
                 inputSize = 640,
+                modelPixelScale = 640f,
                 confidenceThreshold = 0.25f,
                 maxDetections = 10,
                 allowedClassIds = intArrayOf(0),

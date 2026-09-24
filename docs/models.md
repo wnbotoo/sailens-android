@@ -26,7 +26,7 @@ decides per-model role parameters, backend target, and pipeline cadence. There i
 NPU for the VLM was never selected and has been removed. Physical model files are resolved by `ModelSourceResolver` / `ModelCatalog` from
 `(ModelType, actual accelerator)`.
 
-Orthogonal to the tier is the **perception profile** (`PerceptionProfile`, user-selectable; see
+Orthogonal to the runtime profile is the **perception profile** (`PerceptionProfile`, user-selectable; see
 [`perception-profiles.md`](perception-profiles.md)): `BASIC` runs `sem` only, `DEFAULT` runs
 `sem + det`. Scheduling runs each model on its own target-FPS interval (`PerceptionScheduler`);
 frames where det does not run are compensated by tracker prediction, and tracks expire on
@@ -88,6 +88,12 @@ RAW_TRANSPOSED   [1, 4 + classCount, N]     first 4 are cx, cy, w, h; then per-c
 END_TO_END       [1, N, 6]                  x1, y1, x2, y2, conf, classId
 ```
 
+**Box units are declared, not inferred.** `DetectionModelConfig.coordinateSpace` says whether boxes
+are `NORMALIZED` ([0, 1] of the model input; the default, and what Ultralytics TFLite exports
+produce) or `MODEL_PIXELS` (0..640 for a 640 input). The output cannot tell you: a tiny box in the
+top-left corner of a pixel-space head is numerically a normalised box. A wrong value misplaces every
+box without an error, so, like the class order, check it by hand when you swap a det model.
+
 `END_TO_END` is the natural shape for DETR-family exports. Multi-tensor outputs (separate
 boxes / scores / class_idx) are **not currently supported**; they need a new `ObstacleDetectionLayout`
 case plus a decode branch.
@@ -97,13 +103,14 @@ is hardcoded COCO 80 (`CocoTaxonomy`, read for meaning through `CocoNavigationSe
 with sem, **a wrong order silently misbehaves**.
 
 ```kotlin
-ObstacleModelConfig(
+DetectionModelConfig(
     classCount = 80,
+    coordinateSpace = DetectionCoordinateSpace.NORMALIZED,
 )
 ```
 
-When swapping a det model, **confirm the output shape first** so box/class dimensions are not
-misinterpreted.
+When swapping a det model, **confirm the output shape and the box units first** so box/class
+dimensions are not misinterpreted.
 
 ## Normalization
 
@@ -177,8 +184,8 @@ backend is attempted, and init failure is a failure. LiteRT's NPU compile path m
 or fall back to CPU *inside* the model; the app layer will not silently switch NPU to GPU/CPU.
 **Do not enable fallback while debugging model/backend compatibility** — it masks the real failure.
 
-Requesting NPU for a vision model is currently **unsupported (throws)** — the NPU is reserved for
-the future VLM path.
+Requesting NPU for a vision model is currently **unsupported (throws)**: `ModelCatalog` has no NPU
+model files. NPU support is a possible future capability, not a current allocation.
 
 If `PREFER_BACKEND` / `FIRST_AVAILABLE` are enabled later, `LiteRtSessionFactory` calls
 `ModelSourceResolver` for each actual accelerator attempt, so falling back to another accelerator

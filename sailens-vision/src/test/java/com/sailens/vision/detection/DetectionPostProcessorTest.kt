@@ -18,6 +18,7 @@ class DetectionPostProcessorTest {
     @Test
     fun `raw output decodes top detections with nms`() {
         val postProcessor = DetectionPostProcessor(
+            coordinateSpace = DetectionCoordinateSpace.MODEL_PIXELS,
             confidenceThreshold = 0.25f,
             maxDetections = 10,
             allowedClassIds = obstacleClassIds,
@@ -41,6 +42,7 @@ class DetectionPostProcessorTest {
     @Test
     fun `raw output keeps readable static obstacle class names`() {
         val postProcessor = DetectionPostProcessor(
+            coordinateSpace = DetectionCoordinateSpace.MODEL_PIXELS,
             confidenceThreshold = 0.25f,
             maxDetections = 10,
             allowedClassIds = obstacleClassIds,
@@ -60,6 +62,7 @@ class DetectionPostProcessorTest {
     fun `end to end output decodes filtered detections`() {
         val postProcessor = DetectionPostProcessor(
             detectionLayout = DetectionLayout.END_TO_END,
+            coordinateSpace = DetectionCoordinateSpace.MODEL_PIXELS,
             confidenceThreshold = 0.25f,
             maxDetections = 10,
             allowedClassIds = obstacleClassIds,
@@ -80,41 +83,38 @@ class DetectionPostProcessorTest {
     }
 
     @Test
-    fun `a pixel-space box touching the left edge is not rescaled as if normalised`() {
+    fun `a single tiny pixel-space end-to-end box stays in the corner`() {
+        // The case no rule over the values can decide: one detection, every coordinate <= 2.
         val postProcessor = DetectionPostProcessor(
             detectionLayout = DetectionLayout.END_TO_END,
+            coordinateSpace = DetectionCoordinateSpace.MODEL_PIXELS,
             confidenceThreshold = 0.25f,
             maxDetections = 10,
             allowedClassIds = obstacleClassIds,
         )
         val raw = FloatArray(6)
-        // Model pixels. left = 1.5 alone looks normalised; the box as a whole plainly is not.
-        setEndToEndDetection(raw, 0, attributes = 6, left = 1.5f, top = 200f, right = 120f, bottom = 400f, classId = 0, score = 0.9f)
+        // 1280x720 letterboxed into 640: scale 0.5, 140 px of padding above the content.
+        setEndToEndDetection(raw, 0, attributes = 6, left = 0.5f, top = 140.5f, right = 1.5f, bottom = 141.5f, classId = 0, score = 0.9f)
 
         val box = postProcessor.postProcess(createFrame(), raw).single().boundingBox
 
-        // 1280x720 letterboxed into 640: scale 0.5, no horizontal padding.
-        assertEquals(1.5f / 0.5f / 1280f, box.x, 1e-4f)
-        assertEquals((120f - 1.5f) / 0.5f / 1280f, box.width, 1e-4f)
+        assertEquals(0.5f / 0.5f / 1280f, box.x, 1e-5f)
+        assertEquals(0.5f / 0.5f / 720f, box.y, 1e-5f)
+        assertEquals(1f / 0.5f / 1280f, box.width, 1e-5f)
+        assertEquals(1f / 0.5f / 720f, box.height, 1e-5f)
     }
 
     @Test
-    fun `normalised and pixel-space raw outputs decode to the same boxes`() {
-        val postProcessor = DetectionPostProcessor(
-            confidenceThreshold = 0.25f,
-            maxDetections = 10,
-            allowedClassIds = obstacleClassIds,
-        )
+    fun `the same box decodes identically from either declared coordinate space`() {
         val pixels = FloatArray(84 * 2)
         setRawDetection(pixels, 0, detectionCount = 2, cx = 320f, cy = 340f, width = 120f, height = 180f, classId = 0, score = 0.94f)
-        // A small box hugging the top-left corner of the content: every coordinate is <= 2 pixels.
         setRawDetection(pixels, 1, detectionCount = 2, cx = 1.5f, cy = 141.5f, width = 2f, height = 2f, classId = 2, score = 0.9f)
         val normalised = FloatArray(pixels.size) { index ->
             if (index < 4 * 2) pixels[index] / 640f else pixels[index]
         }
 
-        val fromPixels = postProcessor.postProcess(createFrame(), pixels)
-        val fromNormalised = postProcessor.postProcess(createFrame(), normalised)
+        val fromPixels = decoder(DetectionCoordinateSpace.MODEL_PIXELS).postProcess(createFrame(), pixels)
+        val fromNormalised = decoder(DetectionCoordinateSpace.NORMALIZED).postProcess(createFrame(), normalised)
 
         assertEquals(2, fromPixels.size)
         fromPixels.zip(fromNormalised).forEach { (a, b) ->
@@ -124,9 +124,27 @@ class DetectionPostProcessorTest {
             assertEquals(a.boundingBox.width, b.boundingBox.width, 1e-4f)
             assertEquals(a.boundingBox.height, b.boundingBox.height, 1e-4f)
         }
-        val corner = fromPixels.single { it.label == "car" }.boundingBox
-        assertTrue("the corner box must stay a corner box: $corner", corner.x < 0.01f && corner.width < 0.01f)
     }
+
+    @Test
+    fun `an out-of-range value in a normalised output does not flip the unit of the others`() {
+        val raw = FloatArray(84 * 2)
+        setRawDetection(raw, 0, detectionCount = 2, cx = 0.5f, cy = 0.53f, width = 0.2f, height = 0.3f, classId = 0, score = 0.94f)
+        // A stray anchor far outside [0, 1]. A value-based guess would call the whole tensor pixels.
+        setRawDetection(raw, 1, detectionCount = 2, cx = 7f, cy = 7f, width = 0.1f, height = 0.1f, classId = 2, score = 0.1f)
+
+        val person = decoder(DetectionCoordinateSpace.NORMALIZED).postProcess(createFrame(), raw).single()
+
+        assertEquals("person", person.label)
+        assertEquals((0.5f - 0.1f) * 640f / 0.5f / 1280f, person.boundingBox.x, 1e-4f)
+    }
+
+    private fun decoder(space: DetectionCoordinateSpace) = DetectionPostProcessor(
+        coordinateSpace = space,
+        confidenceThreshold = 0.25f,
+        maxDetections = 10,
+        allowedClassIds = obstacleClassIds,
+    )
 
     @Test
     fun `invalid output shape returns no detections`() {

@@ -34,6 +34,8 @@ class DetectionPostProcessor(
     private val inputSize: Int = 640,
     private val classCount: Int = taxonomy.classCount,
     private val detectionLayout: DetectionLayout = DetectionLayout.RAW_TRANSPOSED,
+    /** Declared by the model contract; see [DetectionCoordinateSpace]. */
+    coordinateSpace: DetectionCoordinateSpace = DetectionCoordinateSpace.NORMALIZED,
     private val confidenceThreshold: Float = 0.25f,
     private val maxDetections: Int = 10,
     /**
@@ -44,6 +46,8 @@ class DetectionPostProcessor(
     allowedClassIds: IntArray = IntArray(classCount) { it },
 ) {
 
+    /** Takes a box value to model-input pixels. */
+    private val modelPixelScale: Float = coordinateSpace.modelPixelScale(inputSize)
     private val rawAttributesPerDetection = RAW_BOX_ATTRIBUTES + classCount
     private val attributesPerDetection = when (detectionLayout) {
         DetectionLayout.RAW_TRANSPOSED -> rawAttributesPerDetection
@@ -56,6 +60,7 @@ class DetectionPostProcessor(
     private val nativePostProcessor = NativeDetectionPostProcessor(
         taxonomy = taxonomy,
         inputSize = inputSize,
+        modelPixelScale = modelPixelScale,
         confidenceThreshold = confidenceThreshold,
         maxDetections = maxDetections,
         allowedClassIds = this.allowedClassIds,
@@ -200,8 +205,6 @@ class DetectionPostProcessor(
         if (detectionCount == 0 || allowedClassIds.isEmpty()) return emptyList()
 
         val geometry = LetterboxGeometry.from(frame, inputSize)
-        // Raw layout keeps the four box rows first: cx, cy, w, h for every anchor.
-        val modelPixelScale = coordinateScale(RAW_BOX_ATTRIBUTES * detectionCount) { scoreAt(it) }
         val candidates = ArrayList<Candidate>(minOf(detectionCount, MAX_NMS_CANDIDATES))
 
         for (detectionIndex in 0 until detectionCount) {
@@ -254,9 +257,6 @@ class DetectionPostProcessor(
         if (detectionCount == 0 || allowedClassIds.isEmpty()) return emptyList()
 
         val geometry = LetterboxGeometry.from(frame, inputSize)
-        val modelPixelScale = coordinateScale(detectionCount * END_TO_END_BOX_ATTRIBUTES) { index ->
-            scoreAt((index / END_TO_END_BOX_ATTRIBUTES) * END_TO_END_FIXED_ATTRIBUTES + index % END_TO_END_BOX_ATTRIBUTES)
-        }
         val candidates = ArrayList<Candidate>(minOf(detectionCount, MAX_NMS_CANDIDATES))
 
         for (detectionIndex in 0 until detectionCount) {
@@ -407,23 +407,6 @@ class DetectionPostProcessor(
         )
     }
 
-    /**
-     * The factor that takes this output's box values to model-input pixels: [inputSize] for a head
-     * that reports boxes in [0, 1], 1 for one that reports pixels.
-     *
-     * Decided once per output tensor from all of its box values, never per value. Judged value by
-     * value, a pixel-space box touching the top-left corner has a coordinate <= 2, gets scaled by
-     * [inputSize] on that one coordinate, and lands off the frame. A normalised head never exceeds
-     * [NORMALIZED_COORDINATE_MAX]; a pixel-space head's anchors span the whole input and always do.
-     * The native kernel applies the same rule.
-     */
-    private inline fun coordinateScale(boxValueCount: Int, boxValueAt: (Int) -> Float): Float {
-        for (index in 0 until boxValueCount) {
-            if (boxValueAt(index) > NORMALIZED_COORDINATE_MAX) return 1f
-        }
-        return inputSize.toFloat()
-    }
-
     private fun Candidate.toDetection(): Detection {
         return Detection(
             classId = classId,
@@ -450,8 +433,6 @@ class DetectionPostProcessor(
     private companion object {
         const val RAW_BOX_ATTRIBUTES = 4
         const val END_TO_END_FIXED_ATTRIBUTES = 6
-        const val END_TO_END_BOX_ATTRIBUTES = 4
-        const val NORMALIZED_COORDINATE_MAX = 2f
         const val END_TO_END_CONFIDENCE_OFFSET = 4
         const val END_TO_END_CLASS_OFFSET = 5
         const val NMS_IOU_THRESHOLD = 0.45f

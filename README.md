@@ -89,8 +89,8 @@ Dependencies point downward only; Guidance and Describe never depend on each oth
 
 Two orthogonal knobs:
 
-- **Runtime tier** (`SailensRuntimeProfile`): which accelerator each model targets. Vision runs on
-  the GPU; the NPU is reserved for a future VLM path.
+- **Runtime profile** (`SailensRuntimeProfile`): which accelerator each model targets. Today there
+  is one profile, `standard`, and every model targets the GPU.
 - **Perception profile** (`PerceptionProfile`, user-selectable): `BASIC` runs `sem` only, `DEFAULT`
   runs `sem + det`.
 

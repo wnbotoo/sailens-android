@@ -82,8 +82,8 @@ zero-pipeline 屏，并指向这里。官方发行版声明导航为必需，因
 
 两个正交的旋钮：
 
-- **运行时档位**（`SailensRuntimeProfile`）：每个模型跑在哪个加速器上。视觉模型跑 GPU；
-  NPU 预留给未来的 VLM 路径。
+- **Runtime profile**（`SailensRuntimeProfile`）：每个模型跑在哪个加速器上。目前只有一个
+  profile `standard`，所有模型都以 GPU 为目标。
 - **感知挡位**（`PerceptionProfile`，用户可选）：`BASIC` 只跑 `sem`，`DEFAULT` 跑 `sem + det`。
 
 ## 构建
