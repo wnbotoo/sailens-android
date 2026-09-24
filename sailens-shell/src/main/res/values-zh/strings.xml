@@ -77,7 +77,8 @@
     <string name="haptic_label_multiple">两侧都有障碍</string>
     <string name="haptic_label_blocked">前方不通，请停下</string>
     <string name="haptic_label_notice">一般提示，如路口、红绿灯</string>
-    <string name="haptic_label_sensor_failure">看不见了，请检查镜头</string>
+    <!-- 镜头被挡、太暗、认不出地面都用这个节奏：此时没有"前方不通"不代表能走。 -->
+    <string name="haptic_label_sensor_failure">看不清前方能否通行，请停下确认</string>
     <string name="haptic_label_speech_unavailable">语音坏了，只剩震动</string>
     <string name="haptic_label_interrupted">辅助已中断</string>
     <string name="haptic_rhythm_left">一下短震</string>

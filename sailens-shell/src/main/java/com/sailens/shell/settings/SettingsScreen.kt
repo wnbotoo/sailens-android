@@ -233,7 +233,7 @@ private fun GuidanceHaptic.labelResId(): Int = when (this) {
     GuidanceHaptic.MULTIPLE -> R.string.haptic_label_multiple
     GuidanceHaptic.BLOCKED -> R.string.haptic_label_blocked
     GuidanceHaptic.NOTICE -> R.string.haptic_label_notice
-    GuidanceHaptic.SENSOR_FAILURE -> R.string.haptic_label_sensor_failure
+    GuidanceHaptic.VISION_UNRELIABLE -> R.string.haptic_label_sensor_failure
     GuidanceHaptic.SPEECH_UNAVAILABLE -> R.string.haptic_label_speech_unavailable
     GuidanceHaptic.INTERRUPTED -> R.string.haptic_label_interrupted
 }
@@ -245,7 +245,7 @@ private fun GuidanceHaptic.rhythmResId(): Int = when (this) {
     GuidanceHaptic.MULTIPLE -> R.string.haptic_rhythm_multiple
     GuidanceHaptic.BLOCKED -> R.string.haptic_rhythm_blocked
     GuidanceHaptic.NOTICE -> R.string.haptic_rhythm_notice
-    GuidanceHaptic.SENSOR_FAILURE -> R.string.haptic_rhythm_sensor_failure
+    GuidanceHaptic.VISION_UNRELIABLE -> R.string.haptic_rhythm_sensor_failure
     GuidanceHaptic.SPEECH_UNAVAILABLE -> R.string.haptic_rhythm_speech_unavailable
     GuidanceHaptic.INTERRUPTED -> R.string.haptic_rhythm_interrupted
 }

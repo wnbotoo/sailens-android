@@ -77,7 +77,9 @@
     <string name="haptic_label_multiple">Obstacles on both sides</string>
     <string name="haptic_label_blocked">Path blocked, stop</string>
     <string name="haptic_label_notice">General notice, such as an intersection</string>
-    <string name="haptic_label_sensor_failure">Cannot see, check the camera</string>
+    <!-- Covered camera, too dark, or ground the model cannot recognise: in every case, no "path
+         blocked" does not mean the way is clear. -->
+    <string name="haptic_label_sensor_failure">Can\'t tell if the way ahead is clear, stop and check</string>
     <string name="haptic_label_speech_unavailable">Voice is broken, vibration only</string>
     <string name="haptic_label_interrupted">Guidance interrupted</string>
     <string name="haptic_rhythm_left">One short buzz</string>

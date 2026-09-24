@@ -31,7 +31,7 @@ class HapticManager(context: Context) {
     fun trigger(event: SceneEvent): Boolean {
         val haptic = GuidanceHaptic.forEvent(event)
         if (!arbiter.tryClaim(event.priority.value, haptic.durationMs)) return false
-        player.play(timings = haptic.timings, amplitude = GuidanceHaptic.amplitudeFor(event.priority))
+        player.play(timings = haptic.timings, amplitude = GuidanceHaptic.amplitudeFor(event))
         return true
     }
 
