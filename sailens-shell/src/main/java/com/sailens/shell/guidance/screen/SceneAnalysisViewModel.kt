@@ -475,6 +475,8 @@ class SceneAnalysisViewModel(
     }
 
     fun acknowledgeInterruption() {
+        // 回到前台时相机要重新绑定，第一帧之前的空档不是卡死：给它重新计启动宽限。
+        if (_uiState.value.isRunning && stallWatchJob != null) stallDetector.start(clock())
         _uiState.update { it.copy(wasInterrupted = false) }
     }
 
