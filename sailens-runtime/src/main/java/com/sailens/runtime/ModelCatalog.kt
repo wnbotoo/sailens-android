@@ -15,8 +15,7 @@ package com.sailens.runtime
  * declared the pipeline required (architecture.md §5.2).
  *
  * Vision models are expected to run on the GPU. Requesting NPU for any vision type is unsupported
- * here (throws) — the NPU is reserved for the future VLM path (see VlmModelConfig /
- * SailensRuntimeProfile ultra tier). Prefer NHWC graphs: NCHW exports with a float32 I/O wrapper
+ * here (throws). Prefer NHWC graphs: NCHW exports with a float32 I/O wrapper
  * cost a per-frame host transpose and fragment on the GPU/NPU delegates.
  *
  * [ModelSourceResolver] wraps this catalog today. When model download lands, another resolver can

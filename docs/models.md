@@ -21,9 +21,9 @@ Sailens splits the blind-navigation problem into two models:
   separate instance-segmentation model.
 
 The runtime profile lives in `app/src/main/java/com/sailens/app/SailensRuntimeProfile.kt`; it
-decides per-model role parameters, backend target, and pipeline cadence. The shipped tiers are
-`standard` (both vision models on GPU) and `ultra` (reserves the NPU for a future VLM; vision models
-stay on GPU). Physical model files are resolved by `ModelSourceResolver` / `ModelCatalog` from
+decides per-model role parameters, backend target, and pipeline cadence. There is one profile,
+`standard`: every model, the VLM included, targets the GPU. An `ultra` tier that reserved the
+NPU for the VLM was never selected and has been removed. Physical model files are resolved by `ModelSourceResolver` / `ModelCatalog` from
 `(ModelType, actual accelerator)`.
 
 Orthogonal to the tier is the **perception profile** (`PerceptionProfile`, user-selectable; see

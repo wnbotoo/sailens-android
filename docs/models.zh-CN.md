@@ -17,8 +17,8 @@ Sailens 按盲人辅助导航场景拆成两类模型：
   （见 `ObstacleOcclusionAnalyzer`），不依赖独立的实例分割模型。
 
 运行 profile 在 `app/src/main/java/com/sailens/app/SailensRuntimeProfile.kt` 定义；它决定模型角色参数、
-backend target 和 pipeline cadence。当前发布档位是 `standard` / `ultra`：`standard` 两个视觉模型都跑 GPU，
-`ultra` 预留 NPU 给未来 VLM、视觉模型仍跑 GPU。物理模型文件由 `ModelSourceResolver` / `ModelCatalog`
+backend target 和 pipeline cadence。目前只有一个 profile `standard`：所有模型（含 VLM）都以 GPU 为目标。
+曾经的 `ultra` 档（给 VLM 预留 NPU）从未被选中过，已删除。物理模型文件由 `ModelSourceResolver` / `ModelCatalog`
 根据 `(ModelType, actual accelerator)` 解析。
 
 与 backend 档位正交的是**感知挡位**（`PerceptionProfile`，设置页可选，详见 `docs/perception-profiles.zh-CN.md`）：

@@ -15,7 +15,6 @@ class SailensRuntimeProfileTest {
         val profile = SailensRuntimeProfile.standard(targetHardwareProfile = "qualcomm_sm8750")
 
         assertEquals("standard", profile.name)
-        assertEquals(SailensPerformanceTier.STANDARD, profile.tier)
         assertEquals("qualcomm_sm8750", profile.targetHardwareProfile)
         assertEquals(960, profile.camera.analysisWidth)
         assertEquals(540, profile.camera.analysisHeight)
@@ -47,18 +46,6 @@ class SailensRuntimeProfileTest {
     }
 
     @Test
-    fun `ultra profile reserves NPU for VLM and keeps vision models on GPU`() {
-        val profile = SailensRuntimeProfile.ultra(targetHardwareProfile = "qualcomm_sm8750")
-
-        assertEquals("ultra", profile.name)
-        assertEquals(SailensPerformanceTier.ULTRA, profile.tier)
-        assertEquals(ModelAcceleratorBackend.GPU, profile.semanticModel.acceleratorBackend)
-        assertEquals(ModelAcceleratorBackend.GPU, profile.realtimeObstacleModel.acceleratorBackend)
-        assertEquals(ModelAcceleratorBackend.NPU, profile.vlmModelBackend)
-        assertEquals("ultra", profile.perception.runtimeProfileName)
-    }
-
-    @Test
     fun `basic perception profile runs semantic only`() {
         val profile = SailensRuntimeProfile.standard(
             targetHardwareProfile = "qualcomm_sm8750",
@@ -67,33 +54,6 @@ class SailensRuntimeProfileTest {
 
         assertEquals(PerceptionProfile.BASIC, profile.perception.profile)
         assertFalse(profile.perception.detectionEnabled)
-    }
-
-    @Test
-    fun `profile selector keeps hardware on standard without VLM NPU`() {
-        assertEquals(
-            SailensPerformanceTier.STANDARD,
-            SailensRuntimeProfile.selectTier("qualcomm_sm8750-ab"),
-        )
-        assertEquals(
-            SailensPerformanceTier.STANDARD,
-            SailensRuntimeProfile.selectTier("qti_sm8850"),
-        )
-        assertEquals(
-            SailensPerformanceTier.STANDARD,
-            SailensRuntimeProfile.selectTier("google_tensor_g5"),
-        )
-    }
-
-    @Test
-    fun `profile selector uses ultra only when VLM NPU is available`() {
-        assertEquals(
-            SailensPerformanceTier.ULTRA,
-            SailensRuntimeProfile.selectTier(
-                targetHardwareProfile = "qualcomm_sm8850",
-                vlmNpuAvailable = true,
-            ),
-        )
     }
 
     @Test
