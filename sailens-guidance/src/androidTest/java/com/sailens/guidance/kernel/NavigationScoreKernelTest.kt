@@ -5,6 +5,8 @@ import com.sailens.guidance.semantics.CityscapesNavigationSemantics
 import com.sailens.vision.taxonomy.CityscapesTaxonomy
 import com.sailens.runtime.ImageTensorLayout
 import com.sailens.runtime.ModelTensorConfig
+import com.sailens.vision.semantic.SemanticContentRegion
+import com.sailens.vision.semantic.cropClassMap
 import com.sailens.guidance.config.AnalysisConfig
 import com.sailens.guidance.model.perception.SegmentationMask
 import com.sailens.guidance.processor.perception.KotlinSegmentationStatsExtractor
@@ -75,6 +77,40 @@ class NavigationScoreKernelTest {
 
         // SegmentationAnalysisStats compares masks, ratios, bottom stats and class counts, so one
         // assertion covers every field the fused kernel produces.
+        assertEquals(expectedStats, result.stats)
+    }
+
+    @Test
+    fun fusedScoreKernelOverAContentRegionMatchesTheCroppedArgmaxPlusKotlinStats() {
+        // A letterboxed grid: the camera frame occupies the middle columns only. The fused kernel
+        // must report exactly what argmax-then-Kotlin-stats reports for the cropped class map --
+        // the padding must not reach a single statistic.
+        val scores = syntheticScores(ImageTensorLayout.NHWC)
+        val content = SemanticContentRegion(x = 11, y = 0, width = WIDTH - 22, height = HEIGHT)
+        val postprocessor = NavigationScorePostprocessor(
+            config = analysisConfig,
+            navigationSemantics = navigationSemantics,
+            logService = SilentLogService,
+        )
+
+        val result = postprocessor.postprocessScores(
+            scores = scores,
+            reusableResultMask = IntArray(content.pixelCount),
+            width = WIDTH,
+            height = HEIGHT,
+            channels = CLASS_COUNT,
+            scoreLayout = ImageTensorLayout.NHWC,
+            content = content,
+        )
+        checkNotNull(result) { "native score postprocess returned null" }
+
+        val cropped = IntArray(content.pixelCount)
+        cropClassMap(referenceArgmax(scores, ImageTensorLayout.NHWC), WIDTH, content, cropped)
+        assertArrayEquals("cropped argmax mask", cropped, result.mask.classMap)
+        assertEquals(content.width, result.mask.width)
+
+        val expectedStats = KotlinSegmentationStatsExtractor(analysisConfig, navigationSemantics)
+            .extract(SegmentationMask(content.width, content.height, cropped))
         assertEquals(expectedStats, result.stats)
     }
 
