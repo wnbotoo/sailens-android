@@ -36,6 +36,8 @@
     <string name="status_speech_unavailable_title">语音无法启动</string>
     <string name="status_speech_unavailable_detail">设备的语音引擎没有响应，当前只能依靠震动提醒。请检查系统的文字转语音设置。</string>
     <string name="notice_guidance_interrupted">辅助已中断</string>
+    <string name="notice_guidance_failed">辅助已停止：分析出错。重新启动前请不要依赖它。</string>
+    <string name="notice_guidance_stalled">辅助没有响应。请先停下，确认后再走。</string>
     <string name="action_replay_last_guidance">重播上一条提示</string>
     <string name="btn_start_guidance">开启辅助</string>
     <string name="btn_stop_guidance">停止辅助</string>

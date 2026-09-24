@@ -3,6 +3,7 @@ package com.sailens.guidance.processor.decision
 import com.sailens.guidance.model.common.DirectionZone
 import com.sailens.guidance.model.common.EventCategory
 import com.sailens.guidance.model.scene.SceneEvent
+import com.sailens.guidance.model.scene.SceneEventMessageKeys
 
 /**
  * 事件冲突解决器
@@ -30,7 +31,7 @@ class EventConflictResolver {
             dominant = EventCategory.ROAD_WARNING,
             suppressed = EventCategory.GROUND_CHANGE,
             condition = { _, ground ->
-                ground.messageKey == "event_ground_to_road"
+                ground.messageKey == SceneEventMessageKeys.GROUND_TO_ROAD
             }
         ),
 

@@ -177,21 +177,25 @@ public class SpeechManager(
 
     /**
      * 播报一条已经解析好文案的 [Announcement]。文案由上层决定，这里只负责怎么说出去。
+     *
+     * @return 这条是否被接受：立即开口，或因引擎未就绪而暂存待播时为 true；已过期、或正在念的
+     *   播报优先级不低于它（见 [Announcement.priority]）时为 false，调用方据此决定要不要再给一次。
+     *   只有在主线程调用时返回值才可靠；从其它线程调用会被投递到主线程，并乐观地返回 true。
      */
-    public fun speak(announcement: Announcement) {
-        runOnMain {
-            speakOnMain(announcement)
-        }
+    public fun speak(announcement: Announcement): Boolean {
+        if (Looper.myLooper() == Looper.getMainLooper()) return speakOnMain(announcement)
+        mainHandler.post { speakOnMain(announcement) }
+        return true
     }
 
-    private fun speakOnMain(announcement: Announcement) {
-        if (announcement.isExpired(System.currentTimeMillis())) {
+    private fun speakOnMain(announcement: Announcement): Boolean {
+        if (announcement.isExpired(SystemClock.elapsedRealtime())) {
             logger.debug(
                 TAG,
                 "Dropping expired scene event before speaking",
                 mapOf("key" to announcement.key)
             )
-            return
+            return false
         }
 
         if (!_isReady) {
@@ -204,20 +208,38 @@ public class SpeechManager(
             if (!isInitializing) {
                 initializeOnMain(forceRetry = false)
             }
-            return
+            return true
         }
 
-        speakReadyAnnouncement(announcement)
+        return speakReadyAnnouncement(announcement)
     }
 
-    private fun speakReadyAnnouncement(announcement: Announcement) {
-        if (!_isReady) return
+    private fun speakReadyAnnouncement(announcement: Announcement): Boolean {
+        if (!_isReady) return false
+        val now = SystemClock.elapsedRealtime()
         // 引擎就绪前排队的事件也要再验一次时效：pending 到就绪之间可能又过去了几百毫秒。
-        if (announcement.isExpired(System.currentTimeMillis())) return
+        if (announcement.isExpired(now)) return false
+
+        // 只有**严格更高**的优先级才能打断正在念的播报。否则一条 MEDIUM 的"路况复杂"会在
+        // CRITICAL 的"注意，前方有车"念到一半时把它 FLUSH 掉，而那条 CRITICAL 在冷却期内
+        // 不会再播。同级也不打断：两句都只念半截，用户一句也没听全。
+        val speakingPriority = ledger.highestLivePriority(now)
+        if (speakingPriority != null && announcement.priority <= speakingPriority) {
+            logger.debug(
+                TAG,
+                "Refusing announcement outranked by speech in progress",
+                mapOf(
+                    "key" to announcement.key,
+                    "priority" to announcement.priority,
+                    "speakingPriority" to speakingPriority,
+                )
+            )
+            return false
+        }
 
         val text = announcement.text
-        // 一律 FLUSH。唯一的例外是"辅助已停止/已恢复"这类系统状态提示，它们必须说完，
-        // 但那条路径走的是 speakSystemNotice()，不经过这里。
+        // 能开口就 FLUSH：最新且优先级更高的一句永远比排队的旧句有价值。系统状态提示（"辅助已
+        // 停止"）必须说完，走的是 speakSystemNotice()，不经过这里。
         val queueMode = TextToSpeech.QUEUE_FLUSH
 
         val utteranceId = announcement.id
@@ -240,6 +262,7 @@ public class SpeechManager(
                     "textLength" to text.length,
                 )
             )
+            return false
         } else {
             ledger.flushAndAdd(
                 UtteranceLedger.Entry(
@@ -247,6 +270,7 @@ public class SpeechManager(
                     text = text,
                     owner = null,
                     expiresAtMs = announcement.expiresAtMs,
+                    priority = announcement.priority,
                 )
             )
             logger.debug(
@@ -257,6 +281,7 @@ public class SpeechManager(
                     "queueMode" to queueMode,
                 )
             )
+            return true
         }
     }
 
@@ -308,7 +333,7 @@ public class SpeechManager(
         runOnMain {
             if (!ledger.has(owner)) return@runOnMain
 
-            val survivors = ledger.withdraw(owner, System.currentTimeMillis())
+            val survivors = ledger.withdraw(owner, SystemClock.elapsedRealtime())
             if (_isReady) tts?.stop()
             if (survivors.isEmpty()) {
                 // stop() does not promise a callback for every dropped utterance.

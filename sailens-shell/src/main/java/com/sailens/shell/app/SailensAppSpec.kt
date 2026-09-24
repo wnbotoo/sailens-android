@@ -37,6 +37,13 @@ data class SailensAppSpec(
 data class GuidanceSpec(
     /** Returns null when the configured semantic model is usable, or why it is not. */
     val verifySemanticModel: () -> StaticUnavailableReason?,
+    /**
+     * Returns null when the obstacle detector is usable, or why it is not. Null when the edition
+     * does not vouch for a detector: a bring-your-own-model host can legitimately run with the
+     * semantic model alone, while an edition that packages a detector should catch a missing or
+     * unreadable one here rather than after the user pressed start.
+     */
+    val verifyObstacleModel: (() -> StaticUnavailableReason?)? = null,
 )
 
 /** Describe's static configuration: is an engine wired and does it have a model bundle? */

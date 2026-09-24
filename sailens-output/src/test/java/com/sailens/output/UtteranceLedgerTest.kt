@@ -141,6 +141,34 @@ class UtteranceLedgerTest {
         assertEquals("second", last)
     }
 
-    private fun entry(id: String, owner: SpeechOwner?, expiresAtMs: Long? = null) =
-        UtteranceLedger.Entry(id = id, text = "text of $id", owner = owner, expiresAtMs = expiresAtMs)
+    @Test
+    fun `the highest live priority is what newer speech has to outrank`() {
+        ledger.flushAndAdd(entry("critical", owner = null, expiresAtMs = 5_000, priority = 3))
+        ledger.add(entry("notice", owner = null))
+
+        assertEquals(3, ledger.highestLivePriority(nowMs = 1_000))
+    }
+
+    @Test
+    fun `finished or expired speech no longer outranks anything`() {
+        ledger.flushAndAdd(entry("high", owner = null, expiresAtMs = 5_000, priority = 2))
+        assertEquals(2, ledger.highestLivePriority(nowMs = 4_000))
+        // A lost done-callback must not leave it outranking everything forever.
+        assertNull(ledger.highestLivePriority(nowMs = 5_001))
+
+        ledger.flushAndAdd(entry("medium", owner = null, expiresAtMs = 9_000, priority = 1))
+        ledger.finished("medium")
+        assertNull(ledger.highestLivePriority(nowMs = 6_000))
+    }
+
+    @Test
+    fun `speech without a priority never outranks an announcement`() {
+        ledger.add(entry("describe-1", owner = describe))
+        ledger.add(entry("notice", owner = null))
+
+        assertNull(ledger.highestLivePriority(nowMs = 0))
+    }
+
+    private fun entry(id: String, owner: SpeechOwner?, expiresAtMs: Long? = null, priority: Int? = null) =
+        UtteranceLedger.Entry(id = id, text = "text of $id", owner = owner, expiresAtMs = expiresAtMs, priority = priority)
 }

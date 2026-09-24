@@ -16,13 +16,16 @@ public data class Announcement(
     val key: String,
     val text: String,
     /**
-     * Higher wins when something newer arrives while an older one is still queued. The scale is
-     * the caller's; this module only compares.
+     * Something newer interrupts this only by being strictly higher. An equal or lower one that
+     * arrives while this is still being spoken is refused, and the caller decides whether to offer
+     * it again. The scale is the caller's; this module only compares.
      */
     val priority: Int,
     /**
-     * Wall-clock deadline. Guidance speech describes a moving world, so an announcement that
-     * missed its moment is worse than silence -- the person cannot see that it is stale.
+     * Deadline on the `SystemClock.elapsedRealtime()` clock. Guidance speech describes a moving
+     * world, so an announcement that missed its moment is worse than silence -- the person cannot
+     * see that it is stale. Monotonic rather than wall-clock: a clock set backwards must not make
+     * stale speech look fresh, nor fresh speech look stale.
      */
     val expiresAtMs: Long,
 ) {

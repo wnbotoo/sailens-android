@@ -191,6 +191,32 @@ class ProcessFrameUseCaseTest {
         )
     }
 
+    @Test
+    fun `a detector error is reported as a failed frame instead of escaping the pipeline`() {
+        val clock = FakeClock()
+        val useCase = createUseCase(
+            profile = PerceptionProfile.DEFAULT,
+            realtimeObstacleProvider = ThrowingObstacleProvider(),
+            clock = clock,
+        )
+
+        // Before: the exception escaped ProcessFrameUseCase and ended the whole flow on the first
+        // transient GPU error. Now it is one failed frame; StartSceneAnalysisUseCase decides when
+        // a run of them means the pipeline is down.
+        val result = runBlocking { useCase(createFrame(sequenceNumber = 1)) }
+
+        assertTrue(result.isFailure)
+        assertEquals("detector exploded", result.exceptionOrNull()?.message)
+    }
+
+    private class ThrowingObstacleProvider : ObstacleProvider {
+        override val isInitialized: Boolean = true
+        override suspend fun initialize() = Unit
+        override suspend fun detect(frame: ImageFrame): ObstacleModelOutput =
+            throw IllegalStateException("detector exploded")
+        override fun release() = Unit
+    }
+
     private fun createUseCase(
         profile: PerceptionProfile,
         clock: FakeClock,

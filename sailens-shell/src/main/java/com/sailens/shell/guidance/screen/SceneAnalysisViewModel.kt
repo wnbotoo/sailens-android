@@ -9,6 +9,7 @@ import com.sailens.guidance.model.scene.SceneEvent
 import com.sailens.guidance.model.scene.SceneResult
 import com.sailens.core.log.LogService
 import com.sailens.guidance.service.TraceService
+import com.sailens.guidance.usecase.decision.RevokeUndeliveredEventUseCase
 import com.sailens.guidance.usecase.scene.StartSceneAnalysisUseCase
 import com.sailens.guidance.usecase.scene.StopSceneAnalysisUseCase
 import com.sailens.shell.diagnostics.GuidanceDiagnosticsStore
@@ -16,6 +17,8 @@ import com.sailens.output.AccessibilityStatusProvider
 import com.sailens.shell.device.GuidanceHaptic
 import com.sailens.shell.device.HapticManager
 import com.sailens.shell.device.GuidanceAnnouncements
+import com.sailens.shell.device.GuidanceNotice
+import com.sailens.shell.device.GuidanceNoticeText
 import com.sailens.shell.device.SceneEventTextResolver
 import com.sailens.shell.device.ScreenReaderAnnouncer
 import com.sailens.shell.device.SharedEngineOwner
@@ -79,6 +82,11 @@ class SceneAnalysisViewModel(
     private val accessibilityStatusProvider: AccessibilityStatusProvider,
     private val textResolver: SceneEventTextResolver,
     private val announcements: GuidanceAnnouncements,
+    /** Tells Guidance a decided event never reached the user, so its cooldown does not mute it. */
+    private val revokeUndeliveredEvent: RevokeUndeliveredEventUseCase,
+    private val noticeText: GuidanceNoticeText,
+    /** The same monotonic clock Guidance stamps events with. */
+    private val clock: () -> Long = SystemClock::elapsedRealtime,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(
@@ -97,6 +105,8 @@ class SceneAnalysisViewModel(
     val uiEffect: SharedFlow<SceneAnalysisUiEffect> = _uiEffect.asSharedFlow()
 
     private var analysisJob: Job? = null
+    private var stallWatchJob: Job? = null
+    private val stallDetector = GuidanceStallDetector()
     private var releaseJob: Job? = null
     private var overlayRenderJob: Job? = null
     /**
@@ -278,6 +288,8 @@ class SceneAnalysisViewModel(
                 logger.warning(TAG, "Resource release timeout; proceeding with analysis anyway")
             }
 
+            startStallWatch()
+
             // collectLatest is often used for high-frequency data, discarding previous incomplete processing
             startSceneAnalysisUseCase(frameSource.frames).onStart {
                 _uiState.update {
@@ -286,9 +298,12 @@ class SceneAnalysisViewModel(
                 logger.info(TAG, "Scene analysis started")
             }.catch { e ->
                 logger.error(TAG, "Error in scene analysis", e)
+                stopStallWatch()
                 speechManager.stop()
                 hapticManager.cancel()
                 latestSceneResult = null
+                // 卡片对盲人不存在：这条失效必须出声/出震，而不只是把状态改成错误。
+                alertGuidanceUnavailable(GuidanceNotice.FAILED)
                 // Keep the raw cause in state + logs (logger.error above), but surface only a
                 // friendly, localized message to the user via the status card
                 // (error_analysis_start_failed). No raw-exception toast: it leaks internals and is
@@ -305,6 +320,7 @@ class SceneAnalysisViewModel(
                 }
             }.collectLatest { result ->
                 frameCount++
+                stallDetector.onResult(clock())
                 latestSceneResult = result
                 val overlayMode = _uiState.value.overlayMode
                 val events = result.events
@@ -312,7 +328,7 @@ class SceneAnalysisViewModel(
                     sceneOverlayConfig.enableDebugPanel && guidanceDiagnosticsStore.state.value.showDiagnostics
                 }
                 _uiState.update {
-                    it.withFrameEvents(events, System.currentTimeMillis()).copy(
+                    it.withFrameEvents(events, clock()).copy(
                         frameDisplayWidth = result.frameDisplayWidth,
                         frameDisplayHeight = result.frameDisplayHeight,
                         obstacleDetections = result.obstacleDetectionsForOverlay(overlayMode),
@@ -340,6 +356,7 @@ class SceneAnalysisViewModel(
 
     private fun onSceneEvents(events: List<SceneEvent>) {
         if (events.isEmpty()) return
+        // Guidance 为这一条（且只为这一条）记了冷却，见 DecideEventsUseCase。
         val primaryEvent = events.first()
 
         // 导航要出声了，正在解码的场景描述必须先让路——不管它在哪个屏幕上跑。协调器是整个
@@ -350,24 +367,84 @@ class SceneAnalysisViewModel(
 
         logger.debug(TAG, "Scene events generated, ${primaryEvent.messageKey}", mapOf("count" to events.size))
 
+        if (!deliver(primaryEvent, state)) {
+            // 被正在播的同级或更高优先级提示挡下了：用户没听到它，不能让它在冷却期里被静音。
+            // 条件仍成立时它会在下一帧重新生成、重新尝试。
+            revokeUndeliveredEvent(primaryEvent)
+            return
+        }
+
         if (state.hasGuidanceOutputChannel()) {
             _uiState.update { it.copy(lastAnnouncedEvent = primaryEvent) }
         }
+    }
 
+    /**
+     * 把 [event] 送到用户可感知的主通道：开了语音就是语音（读屏或自带 TTS），否则是震动。
+     * 主通道拒收时（正在播的提示优先级不低于它）副通道也不打扰，两者保持同一个节拍。
+     *
+     * @return 是否送达。两条通道都关着时只剩屏幕卡片，按"已送达"处理——那是用户的选择。
+     */
+    private fun deliver(event: SceneEvent, state: SceneAnalysisUiState): Boolean {
         if (state.isSpeechEnabled) {
             // 两条播报通道互斥。屏幕阅读器在工作时由它来念——这样语速/音量/语言跟随用户
             // 在 TalkBack 里的既有设置，也避免同一句被念两遍。走 shell 唯一的播报出口：
             // 描述屏在最上面时，这个屏幕的界面根本没有被组合，自己收的话这句会被静默丢掉。
-            if (state.isScreenReaderActive) {
-                screenReaderAnnouncer.announce(textResolver.resolve(primaryEvent.toSceneEventText()))
+            val spoken = if (state.isScreenReaderActive) {
+                screenReaderAnnouncer.announce(textResolver.resolve(event.toSceneEventText()))
+                true
             } else {
-                speechManager.speak(announcements.announcementFor(primaryEvent))
+                speechManager.speak(announcements.announcementFor(event))
+            }
+            if (!spoken) return false
+            if (state.isHapticsEnabled) hapticManager.trigger(event)
+            return true
+        }
+        if (state.isHapticsEnabled) return hapticManager.trigger(event)
+        return true
+    }
+
+    /**
+     * Guidance 在运行中失效：分析出错而停止，或长时间没有产出结果。
+     *
+     * 与 [onGuidanceInterrupted] 同一个道理：卡片对盲人不存在，"收不到提示"与"前方安全"是同一种
+     * 体验。震动不看 hapticsEnabled 开关，理由同 [onSpeechEngineUnavailable]——这是"应用无法工作"
+     * 的告知，不是导航提示。
+     */
+    private fun alertGuidanceUnavailable(notice: GuidanceNotice) {
+        logger.warning(TAG, "Guidance unavailable while running", mapOf("notice" to notice.name))
+        sceneDescriptionCoordinator.preemptForGuidance("guidance ${notice.name.lowercase()}")
+        hapticManager.play(GuidanceHaptic.INTERRUPTED)
+
+        val state = _uiState.value
+        if (!state.isSpeechEnabled) return
+        val text = noticeText.resolve(notice)
+        if (state.isScreenReaderActive) {
+            screenReaderAnnouncer.announce(text)
+        } else {
+            speechManager.speakSystemNotice(text)
+        }
+    }
+
+    private fun startStallWatch() {
+        stallWatchJob?.cancel()
+        stallDetector.start(clock())
+        stallWatchJob = viewModelScope.launch {
+            while (true) {
+                delay(GuidanceStallDetector.POLL_INTERVAL_MS)
+                // 进后台时 onGuidanceInterrupted 已经告知过；那时相机停帧是必然的，不重复报。
+                if (_uiState.value.wasInterrupted) continue
+                if (stallDetector.alarmDue(clock())) {
+                    alertGuidanceUnavailable(GuidanceNotice.STALLED)
+                }
             }
         }
+    }
 
-        if (state.isHapticsEnabled) {
-            hapticManager.trigger(primaryEvent)
-        }
+    private fun stopStallWatch() {
+        stallWatchJob?.cancel()
+        stallWatchJob = null
+        stallDetector.stop()
     }
 
     /**
@@ -449,6 +526,7 @@ class SceneAnalysisViewModel(
     }
 
     private fun stopSceneAnalysis() {
+        stopStallWatch()
         analysisJob?.cancel()
         analysisJob = null
         overlayRenderRequestId++
@@ -479,6 +557,7 @@ class SceneAnalysisViewModel(
     }
 
     override fun onCleared() {
+        stopStallWatch()
         analysisJob?.cancel()
         analysisJob = null
         overlayRenderJob?.cancel()

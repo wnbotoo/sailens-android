@@ -18,6 +18,7 @@ import com.sailens.guidance.processor.perception.PerceptionProfileManager
 import com.sailens.guidance.processor.perception.SegmentationAnalysisProcessor
 import com.sailens.guidance.processor.perception.SegmentationAnalyzer
 import com.sailens.guidance.usecase.decision.DecideEventsUseCase
+import com.sailens.guidance.usecase.decision.RevokeUndeliveredEventUseCase
 import com.sailens.guidance.usecase.perception.AnalyzeSceneUseCase
 import com.sailens.guidance.usecase.perception.ProcessFrameUseCase
 import com.sailens.describe.DescribeSceneUseCase
@@ -96,8 +97,12 @@ val domainBindingsModule = module {
             eventMerger = get(),
             cooldownManager = get(),
             deviceSensorRepository = get(),
+            // 与 ProcessFrameUseCase 同理：冷却和过期都靠时间差，必须用单调时钟。shell 的 TTS 过期
+            // 判定和状态卡片用的是同一个时钟（SystemClock.elapsedRealtime）。
+            clock = { android.os.SystemClock.elapsedRealtime() },
         )
     }
+    factory { RevokeUndeliveredEventUseCase(cooldownManager = get()) }
     factory {
         StartSceneAnalysisUseCase(
             profileManager = get(),

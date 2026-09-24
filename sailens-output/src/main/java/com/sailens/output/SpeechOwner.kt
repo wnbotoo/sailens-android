@@ -31,8 +31,16 @@ internal class UtteranceLedger {
         val text: String,
         /** Null for speech nobody claimed, which no owner can withdraw. */
         val owner: SpeechOwner?,
-        /** Wall-clock deadline, or null for speech that stays valid until it is spoken. */
+        /**
+         * Deadline on the `SystemClock.elapsedRealtime()` clock, or null for speech that stays
+         * valid until it is spoken.
+         */
         val expiresAtMs: Long?,
+        /**
+         * The caller's priority for an announcement that newer speech has to outrank to interrupt
+         * ([Announcement.priority]); null for speech that does not take part in that contest.
+         */
+        val priority: Int? = null,
     ) {
         fun isAliveAt(nowMs: Long): Boolean = expiresAtMs == null || nowMs <= expiresAtMs
     }
@@ -69,6 +77,17 @@ internal class UtteranceLedger {
 
     @Synchronized
     fun has(owner: SpeechOwner): Boolean = entries.values.any { it.owner === owner }
+
+    /**
+     * The highest priority among prioritized utterances still queued or speaking and still valid
+     * at [nowMs], or null when there are none.
+     *
+     * Expiry bounds this on purpose: if the engine ever loses a done callback, an entry would
+     * otherwise stay "speaking" forever and outrank everything after it.
+     */
+    @Synchronized
+    fun highestLivePriority(nowMs: Long): Int? =
+        entries.values.filter { it.priority != null && it.isAliveAt(nowMs) }.maxOfOrNull { it.priority!! }
 
     @Synchronized
     fun size(): Int = entries.size

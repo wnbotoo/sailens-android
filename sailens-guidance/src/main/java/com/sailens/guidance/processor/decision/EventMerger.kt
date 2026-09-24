@@ -4,6 +4,7 @@ import com.sailens.guidance.model.common.DirectionBias
 import com.sailens.guidance.model.common.DirectionZone
 import com.sailens.guidance.model.common.EventCategory
 import com.sailens.guidance.model.scene.SceneEvent
+import com.sailens.guidance.model.scene.SceneEventMessageKeys
 import java.util.UUID
 
 /**
@@ -53,7 +54,7 @@ class EventMerger {
         val suffixes = events
             .map { obstacleCategorySuffix(it.messageKey) ?: "unknown" }
             .distinct()
-        return "vehicle" in suffixes && suffixes.size > 1
+        return SceneEventMessageKeys.SUFFIX_VEHICLE in suffixes && suffixes.size > 1
     }
 
     private fun mergeObstacleEvents(events: List<SceneEvent>): SceneEvent {
@@ -76,8 +77,12 @@ class EventMerger {
             zones = allZones,
             events = events,
         )
-        val cooldownKeys = events
-            .flatMap { it.cooldownKeys.ifEmpty { setOf(it.dedupeKey) } }
+        // 每个组成事件保留自己的冷却 key 组：合并后的提示只要有**一个**方位是新的（或升级了）就该
+        // 放行。若把所有 key 拍平成一组再要求全部过冷却，一个刚播过的侧方障碍会把新出现在正前方
+        // 的同优先级障碍一起压住，直到侧方那组冷却到期。
+        val cooldownGroups = events.map { it.cooldownKeys.ifEmpty { setOf(it.dedupeKey) } }
+        val cooldownKeys = cooldownGroups
+            .flatten()
             .toMutableSet()
             .apply {
                 allZones.forEach { add("obstacle_${it.name}") }
@@ -98,6 +103,7 @@ class EventMerger {
             expiresAt = firstEvent.expiresAt,
             dedupeKey = dedupeKey,
             cooldownKeys = cooldownKeys,
+            cooldownGroups = cooldownGroups,
             confidence = maxConfidence,
             severity = maxSeverity,
             relatedZones = allZones,
@@ -110,20 +116,19 @@ class EventMerger {
         zones: List<DirectionZone>,
         events: List<SceneEvent>,
     ): String {
-        val zoneKey = when (zones) {
-            listOf(DirectionZone.LEFT) -> "event_obstacle_left"
-            listOf(DirectionZone.CENTER) -> "event_obstacle_center"
-            listOf(DirectionZone.RIGHT) -> "event_obstacle_right"
-            listOf(DirectionZone.FRONT_LEFT) -> "event_obstacle_front_left"
-            listOf(DirectionZone.FRONT_RIGHT) -> "event_obstacle_front_right"
-            listOf(DirectionZone.LEFT, DirectionZone.CENTER) -> "event_obstacle_left_center"
-            listOf(DirectionZone.CENTER, DirectionZone.RIGHT) -> "event_obstacle_center_right"
-            listOf(DirectionZone.LEFT, DirectionZone.RIGHT) -> "event_obstacle_left_right"
-            else -> "event_obstacle_multiple"
+        val zonePart = when (zones) {
+            listOf(DirectionZone.LEFT),
+            listOf(DirectionZone.CENTER),
+            listOf(DirectionZone.RIGHT),
+            listOf(DirectionZone.FRONT_LEFT),
+            listOf(DirectionZone.FRONT_RIGHT) -> SceneEventMessageKeys.zonePart(zones.single())
+            listOf(DirectionZone.LEFT, DirectionZone.CENTER) -> SceneEventMessageKeys.ZONES_LEFT_CENTER
+            listOf(DirectionZone.CENTER, DirectionZone.RIGHT) -> SceneEventMessageKeys.ZONES_CENTER_RIGHT
+            listOf(DirectionZone.LEFT, DirectionZone.RIGHT) -> SceneEventMessageKeys.ZONES_LEFT_RIGHT
+            else -> SceneEventMessageKeys.ZONES_MULTIPLE
         }
 
-        val suffix = sharedObstacleCategorySuffix(events) ?: return zoneKey
-        return "${zoneKey}_$suffix"
+        return SceneEventMessageKeys.obstacle(zonePart, sharedObstacleCategorySuffix(events))
     }
 
     /**
@@ -141,13 +146,8 @@ class EventMerger {
     }
 
     /** 与 EventGenerator.obstacleCategorySuffix 对应的反向解析；null 表示无类别后缀。 */
-    private fun obstacleCategorySuffix(messageKey: String): String? {
-        return when {
-            messageKey.endsWith("_person") -> "person"
-            messageKey.endsWith("_vehicle") -> "vehicle"
-            else -> null
-        }
-    }
+    private fun obstacleCategorySuffix(messageKey: String): String? =
+        SceneEventMessageKeys.obstacleSuffix(messageKey)
 
     private fun conflictingZones(bias: DirectionBias): Set<DirectionZone> = when (bias) {
         DirectionBias.LEFT -> setOf(DirectionZone.LEFT, DirectionZone.FRONT_LEFT)

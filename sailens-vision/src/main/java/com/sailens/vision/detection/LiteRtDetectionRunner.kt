@@ -19,7 +19,6 @@ import com.sailens.runtime.TensorQuantization
 import com.sailens.runtime.TfliteModelMetadata
 import com.sailens.runtime.TfliteModelMetadataReader
 import com.sailens.runtime.TfliteTensorElementType
-import com.sailens.runtime.TfliteTensorMetadata
 import com.sailens.runtime.imageTensorSpec
 import com.sailens.runtime.resolveModelInputDataType
 import com.sailens.runtime.session.AcceleratorSelection
@@ -347,13 +346,15 @@ class LiteRtDetectionRunner(
     }
 
     private fun validateOutputTensors(metadata: TfliteModelMetadata): DetectionOutputTensorSpec {
-        val detectionTensor = resolveDetectionOutputTensor(
-            metadata = metadata,
-            expectedRawAttributes = RAW_BOX_ATTRIBUTES + modelConfig.classCount,
-            expectedEndToEndAttributes = END_TO_END_FIXED_ATTRIBUTES,
+        // Same rule the static preflight uses (DetectionTensorContract), so a model that passes
+        // preflight is one this runner can bind.
+        val detectionMetadata = metadata.outputs.firstOrNull { tensor ->
+            DetectionTensorContract.outputSpecOrNull(tensor.shape, modelConfig.classCount) != null
+        } ?: error(
+            "Unable to resolve detection output tensor from " +
+                "tensors=${metadata.outputs.map { it.name to it.shape }}"
         )
-        val detectionMetadata = detectionTensor.metadata
-        val detectionSpec = detectionTensor.spec
+        val detectionSpec = DetectionTensorContract.outputSpecOrNull(detectionMetadata.shape, modelConfig.classCount)!!
 
         return DetectionOutputTensorSpec(
             detectionTensorName = detectionMetadata.name,
@@ -361,30 +362,9 @@ class LiteRtDetectionRunner(
             detectionCount = detectionSpec.detectionCount,
             detectionAttributes = detectionSpec.attributes,
             detectionLayout = detectionSpec.layout,
-            detectionShapeDescription = detectionSpec.shapeDescription,
+            detectionShapeDescription = "[1,${detectionMetadata.shape[1]},${detectionMetadata.shape[2]}]",
             detectionElementType = detectionMetadata.elementType,
             detectionQuantization = detectionMetadata.quantization,
-        )
-    }
-
-    private fun resolveDetectionOutputTensor(
-        metadata: TfliteModelMetadata,
-        expectedRawAttributes: Int,
-        expectedEndToEndAttributes: Int,
-    ): ResolvedDetectionTensor {
-        metadata.outputs.forEach { tensor ->
-            val spec = DetectionTensorSpec.fromOrNull(
-                dimensions = tensor.shape,
-                expectedRawAttributes = expectedRawAttributes,
-                expectedEndToEndAttributes = expectedEndToEndAttributes,
-            )
-            if (spec != null) {
-                return ResolvedDetectionTensor(metadata = tensor, spec = spec)
-            }
-        }
-        error(
-            "Unable to resolve detection output tensor from " +
-                "tensors=${metadata.outputs.map { it.name to it.shape }}"
         )
     }
 
@@ -482,45 +462,6 @@ class LiteRtDetectionRunner(
         }
     }
 
-    private data class ResolvedDetectionTensor(
-        val metadata: TfliteTensorMetadata,
-        val spec: DetectionTensorSpec,
-    )
-
-    private data class DetectionTensorSpec(
-        val detectionCount: Int,
-        val attributes: Int,
-        val layout: DetectionLayout,
-        val shapeDescription: String,
-    ) {
-        companion object {
-            fun fromOrNull(
-                dimensions: List<Int>,
-                expectedRawAttributes: Int,
-                expectedEndToEndAttributes: Int,
-            ): DetectionTensorSpec? {
-                if (dimensions.size != 3 || dimensions[0] != 1) return null
-                if (dimensions[1] == expectedRawAttributes) {
-                    return DetectionTensorSpec(
-                        detectionCount = dimensions[2],
-                        attributes = dimensions[1],
-                        layout = DetectionLayout.RAW_TRANSPOSED,
-                        shapeDescription = "[1,${dimensions[1]},${dimensions[2]}]",
-                    )
-                }
-                if (dimensions[2] == expectedEndToEndAttributes) {
-                    return DetectionTensorSpec(
-                        detectionCount = dimensions[1],
-                        attributes = dimensions[2],
-                        layout = DetectionLayout.END_TO_END,
-                        shapeDescription = "[1,${dimensions[1]},${dimensions[2]}]",
-                    )
-                }
-                return null
-            }
-        }
-    }
-
     private data class DetectionOutputTensorSpec(
         val detectionTensorName: String,
         val detectionIndex: Int,
@@ -548,9 +489,6 @@ class LiteRtDetectionRunner(
     )
 
     private companion object {
-        const val RAW_BOX_ATTRIBUTES = 4
-        const val END_TO_END_FIXED_ATTRIBUTES = 6
-
         // The default detection fallback keeps the full-integer NPU/CPU path. GPU can still be
         // requested explicitly; the model source resolver will then choose the GPU-friendly asset.
         val ACCELERATOR_FALLBACK_ORDER = listOf(

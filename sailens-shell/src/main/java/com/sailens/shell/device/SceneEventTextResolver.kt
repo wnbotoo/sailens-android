@@ -31,15 +31,15 @@ class SceneEventTextResolver(private val context: Context) {
         }
     }
 
-    @Suppress("DiscouragedApi")
     private fun resolveBaseMessage(
         messageKey: String,
         messageParams: Map<String, String>,
     ): String {
-        val resId = context.resources.getIdentifier(messageKey, "string", context.packageName)
+        // 编译期映射，而不是按名字 getIdentifier：后者对 release 的资源压缩不可见，文案会被
+        // 整批剥掉（见 SceneEventStrings）。
         // 兜底成 key 本身而不是空串：真出现缺失文案时，用户至少听得出"有个提示没翻译"，
-        // 而不是静默丢掉一条可能关乎安全的提示。
-        if (resId == 0) return messageKey
+        // 而不是静默丢掉一条可能关乎安全的提示。SceneEventStringsTest 保证这条兜底走不到。
+        val resId = SceneEventStrings.resourceFor(messageKey) ?: return messageKey
         if (messageParams.isEmpty()) return context.getString(resId)
 
         val args = messageParams.toSortedMap().values.toTypedArray()
