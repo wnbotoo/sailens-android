@@ -45,6 +45,7 @@ public class CameraViewModel(
                     // Rare (a deliberate turn of the phone) and otherwise invisible in traces.
                     Log.i(TAG, "Analysis target rotation ${imageAnalysis.targetRotation} -> $next (device at $orientation deg)")
                     imageAnalysis.targetRotation = next
+                    _analysisTargetRotation.value = next
                 }
             }
         }
@@ -73,6 +74,16 @@ public class CameraViewModel(
             ).build().apply {
                 setAnalyzer(executor, imageFrameAnalyzer)
             }
+
+    private val _analysisTargetRotation = MutableStateFlow(imageAnalysis.targetRotation)
+
+    /**
+     * The `Surface.ROTATION_*` the analysis frames are currently oriented for -- the phone's
+     * physical orientation, which can differ from the display's when the rotation lock is on.
+     * Anything drawn from analysis results on top of the preview (which follows the display) has
+     * to rotate by the difference.
+     */
+    public val analysisTargetRotation: StateFlow<Int> = _analysisTargetRotation.asStateFlow()
 
     private fun getResolutionSelector(preferredSize: Size): ResolutionSelector {
         val resolutionStrategy = ResolutionStrategy(
