@@ -36,7 +36,7 @@ Pass when the first CRITICAL event is immediate, de-escalation remains filtered,
 
 Disable or break the selected TTS engine so it transitions from INITIALIZING/READY to UNAVAILABLE.
 
-Pass when `SPEECH_UNAVAILABLE` plays once per transition, does not repeat while the state remains unavailable, does not alert when TalkBack owns output or speech is disabled, and is distinguishable from `SENSOR_FAILURE` and `INTERRUPTED`.
+Pass when `SPEECH_UNAVAILABLE` plays once per transition, does not repeat while the state remains unavailable, does not alert when TalkBack owns output or speech is disabled, and is distinguishable from `VISION_UNRELIABLE` and `INTERRUPTED`.
 
 ### A4. Live status and replay
 
@@ -58,7 +58,9 @@ Pass when guidance remains intelligible, ducking does not pump or persist, focus
 
 ## Phase B: Haptic vocabulary blind test
 
-Without revealing the cue, test navigation obstacles, `SPEECH_UNAVAILABLE`, `SENSOR_FAILURE`, and `INTERRUPTED` while handheld, pocketed, and walking. Preserve a confusion matrix, missed-cue rate, recognition time, and device model.
+Without revealing the cue, test navigation obstacles, `SPEECH_UNAVAILABLE`, `VISION_UNRELIABLE` (covered camera / too dark / ground judgement unavailable: "can't tell if the way ahead is clear, stop and check"), and `INTERRUPTED` while handheld, pocketed, and walking. Preserve a confusion matrix, missed-cue rate, recognition time, and device model.
+
+`VISION_UNRELIABLE` deliberately covers three causes with one rhythm, because for a haptic-only user they mean the same thing: no "path blocked" does not mean the way is clear. Also record whether testers act correctly on it in each cause. If the ground-judgement case needs a different response from a covered camera that users cannot infer, split it into its own symbol rather than overloading the label.
 
 Provisional engineering gate: at least 90% overall accuracy and no systematic confusion among the three failure alerts. If it fails, adjust timing rather than using visual copy to compensate for an indistinguishable cue.
 
