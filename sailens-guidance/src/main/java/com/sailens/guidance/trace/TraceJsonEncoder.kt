@@ -52,6 +52,8 @@ internal object TraceJsonEncoder {
         put("widthRetentionP25Delta", frameTrace.widthRetentionP25Delta)
         put("occludedPassableRatio", frameTrace.occludedPassableRatio)
         put("occludedPassableDelta", frameTrace.occludedPassableDelta)
+        put("groundRecognition", frameTrace.groundRecognition)
+        put("unrecognizedGroundRatio", frameTrace.unrecognizedGroundRatio)
         put("rawObstacleDetectionCount", frameTrace.rawObstacleDetectionCount)
         put("obstacleCountDelta", frameTrace.obstacleCountDelta)
         put("rawObstacleDetectionCountDelta", frameTrace.rawObstacleDetectionCountDelta)

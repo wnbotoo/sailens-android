@@ -27,6 +27,7 @@ object SceneEventMessageKeys {
     const val GROUND_TO_SIDEWALK = "event_ground_to_sidewalk"
     const val GROUND_TO_INDOOR = "event_ground_to_indoor"
     const val GROUND_CHANGE = "event_ground_change"
+    const val GROUND_UNRECOGNIZED = "event_ground_unrecognized"
 
     private const val OBSTACLE_PREFIX = "event_obstacle_"
 
@@ -65,6 +66,7 @@ object SceneEventMessageKeys {
                 CAMERA_BLOCKED, LOW_LIGHT, BLOCKED, PATH_COMPLEX, NARROWING, INTERSECTION,
                 TRAFFIC_LIGHT, ROAD_WARNING, ROAD_WARNING_VEHICLE, GROUND_TO_ROAD,
                 GROUND_TO_TERRAIN, GROUND_TO_SIDEWALK, GROUND_TO_INDOOR, GROUND_CHANGE,
+                GROUND_UNRECOGNIZED,
             )
         )
         val zoneParts = DirectionZone.entries.map(::zonePart) + MERGED_ZONE_PARTS

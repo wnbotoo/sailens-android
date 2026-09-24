@@ -20,6 +20,8 @@ data class SceneDebugInfo(
     val blockageConfidenceDelta: Float,
     val blockageReason: String,
     val occludedPassableRatio: Float,
+    val groundRecognition: String = "recognized",
+    val unrecognizedGroundRatio: Float = 0f,
     val verticalReachRatio: Float,
     val verticalReachDelta: Float,
     val floodReachRatio: Float,

@@ -77,7 +77,9 @@
     <string name="haptic_label_multiple">Obstacles on both sides</string>
     <string name="haptic_label_blocked">Path blocked, stop</string>
     <string name="haptic_label_notice">General notice, such as an intersection</string>
-    <string name="haptic_label_sensor_failure">Cannot see, check the camera</string>
+    <!-- Covered camera, too dark, or ground the model cannot recognise: in every case, no "path
+         blocked" does not mean the way is clear. -->
+    <string name="haptic_label_sensor_failure">Can\'t tell if the way ahead is clear, stop and check</string>
     <string name="haptic_label_speech_unavailable">Voice is broken, vibration only</string>
     <string name="haptic_label_interrupted">Guidance interrupted</string>
     <string name="haptic_rhythm_left">One short buzz</string>
@@ -119,6 +121,7 @@
     <string name="debug_blockage_reason">Blockage reason: %1$s</string>
     <string name="debug_road_vehicle_source">Road vehicle: %1$s %2$d%%, %3$s, bottom/center/area %4$d/%5$d/%6$d%%</string>
     <string name="debug_occluded_passable">Obstacle-occluded passable: %1$d%%</string>
+    <string name="debug_ground_recognition">Ground: %1$s (unrecognised %2$d%%)</string>
     <string name="debug_vertical_reach">Vertical reach: %1$d%% (%2$d/%3$d layers)</string>
     <string name="debug_flood_reach">Flood reach: %1$d%%</string>
     <string name="debug_width_retention_p25">Width retention P25: %1$d%%</string>
@@ -280,6 +283,11 @@
     <!-- Input quality. The user cannot notice these failures unaided, so the wording is actionable. -->
     <string name="event_camera_blocked">Camera is covered</string>
     <string name="event_low_light">Too dark to see</string>
+    <!-- The model does not recognise the ground at the user's feet (an indoor floor, the camera
+         pointed too high — or a wall right ahead, which it cannot tell apart), so "path blocked"
+         style alerts are paused. The wording must say the way ahead is unknown, not that it is
+         clear. Obstacle alerts continue. -->
+    <string name="event_ground_unrecognized">Can\'t see the ground, can\'t tell if the way ahead is clear</string>
     <!-- Camera permission rationale. The copy lives here, not in sailens-camera: it is product
          voice, and capture must not depend on the shell. -->
     <string name="permission_camera_title">Camera access needed</string>

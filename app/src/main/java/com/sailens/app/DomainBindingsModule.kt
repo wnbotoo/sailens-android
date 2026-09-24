@@ -3,6 +3,7 @@ package com.sailens.app
 import com.sailens.guidance.processor.analysis.ConnectivityAnalysisProcessor
 import com.sailens.guidance.processor.analysis.ConnectivityChecker
 import com.sailens.guidance.processor.analysis.CrossValidator
+import com.sailens.guidance.processor.analysis.GroundRecognitionAnalyzer
 import com.sailens.guidance.processor.analysis.GroundTypeDetector
 import com.sailens.guidance.processor.analysis.ObstacleOcclusionAnalyzer
 import com.sailens.guidance.processor.analysis.RoadSafetyAnalyzer
@@ -57,6 +58,14 @@ val domainBindingsModule = module {
     single { CrossValidator(config = get()) }
     // 有跨帧去抖状态，必须和其他 stabilizer 一样由 Start/Stop 对称 reset。
     single { FrameQualityAnalyzer() }
+    // 同上：有跨帧滞回状态，由 Start/Stop 对称 reset。进入/退出按时长判定，必须用单调时钟。
+    single {
+        GroundRecognitionAnalyzer(
+            config = get(),
+            navigationSemantics = get(),
+            clock = { android.os.SystemClock.elapsedRealtime() },
+        )
+    }
     single { EventGenerator(config = get()) }
     single { EventConflictResolver() }
     single { EventMerger() }
@@ -88,6 +97,7 @@ val domainBindingsModule = module {
             sceneClassifier = get(),
             crossValidator = get(),
             obstacleOcclusionAnalyzer = get(),
+            groundRecognitionAnalyzer = get(),
         )
     }
     factory {
@@ -130,6 +140,7 @@ val domainBindingsModule = module {
             groundTypeDetector = get(),
             sceneClassifier = get(),
             frameQualityAnalyzer = get(),
+            groundRecognitionAnalyzer = get(),
             cooldownManager = get(),
             logService = get(),
         )

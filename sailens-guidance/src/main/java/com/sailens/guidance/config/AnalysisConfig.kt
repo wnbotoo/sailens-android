@@ -80,6 +80,14 @@ data class AnalysisConfig(
     // 地面类型检测
     val groundTypeDominantThreshold: Float = 0.30f,
 
+    // 地面识别（见 GroundRecognitionAnalyzer）。模型认不出脚下地面时暂停连通性提示并告知用户；
+    // 用户无法自行察觉"前方不通"只是模型不认识地板，默认必开。
+    val enableGroundRecognitionGate: Boolean = true,
+    val groundUnrecognizedEnterRatio: Float = 0.60f,
+    val groundUnrecognizedExitRatio: Float = 0.35f,
+    val groundUnrecognizedEnterMs: Long = 1_500L,
+    val groundUnrecognizedExitMs: Long = 1_000L,
+
     // 语义统计区域
     val segmentationBottomRatio: Float = 0.20f,
     /** 画面长边的比例（见类注释）。 */

@@ -16,6 +16,7 @@ import com.sailens.guidance.model.perception.SegmentationOutput
 import com.sailens.guidance.processor.analysis.ConnectivityChecker
 import com.sailens.guidance.processor.analysis.CrossValidator
 import com.sailens.guidance.processor.analysis.FrameQualityAnalyzer
+import com.sailens.guidance.processor.analysis.GroundRecognitionAnalyzer
 import com.sailens.guidance.processor.analysis.GroundTypeDetector
 import com.sailens.guidance.processor.analysis.ObstacleOcclusionAnalyzer
 import com.sailens.guidance.processor.analysis.RoadSafetyAnalyzer
@@ -105,6 +106,11 @@ class StartSceneAnalysisFailureTest {
                 sceneClassifier = SceneClassifier(analysisConfig),
                 crossValidator = CrossValidator(analysisConfig),
                 obstacleOcclusionAnalyzer = ObstacleOcclusionAnalyzer(perceptionConfig),
+                groundRecognitionAnalyzer = GroundRecognitionAnalyzer(
+                    analysisConfig,
+                    semantics,
+                    clock = { 1_000L },
+                ),
             ),
             decideEventsUseCase = DecideEventsUseCase(
                 eventGenerator = EventGenerator(analysisConfig),

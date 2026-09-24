@@ -284,6 +284,9 @@ class DescribeGuidanceCoordinationTest {
             queuedAfterLastWithdrawal = real.hasQueuedSpeech
         }
 
+        override val hasQueuedSpeech: Boolean
+            get() = real.hasQueuedSpeech
+
         fun spoken(): List<String> = events.filter { it.first.startsWith("speak:") }.map { it.first }
 
         fun firstWithdrawalAfter(timeNs: Long): Long? =

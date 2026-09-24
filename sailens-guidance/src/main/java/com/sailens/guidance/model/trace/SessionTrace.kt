@@ -45,6 +45,9 @@ data class FrameTrace(
     val widthRetentionP25Delta: Double = 0.0,
     val occludedPassableRatio: Double = 0.0,
     val occludedPassableDelta: Double = 0.0,
+    /** [com.sailens.guidance.model.analysis.GroundRecognition] 的小写名。 */
+    val groundRecognition: String = "recognized",
+    val unrecognizedGroundRatio: Double = 0.0,
     val rawObstacleDetectionCount: Int = 0,
     val obstacleCountDelta: Int = 0,
     val rawObstacleDetectionCountDelta: Int = 0,

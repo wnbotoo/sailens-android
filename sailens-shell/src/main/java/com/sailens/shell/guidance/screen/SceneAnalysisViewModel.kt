@@ -359,20 +359,20 @@ class SceneAnalysisViewModel(
         // Guidance 为这一条（且只为这一条）记了冷却，见 DecideEventsUseCase。
         val primaryEvent = events.first()
 
-        // 导航要出声了，正在解码的场景描述必须先让路——不管它在哪个屏幕上跑。协调器是整个
-        // shell 共用的那一个，所以这里取消的就是用户正在听的那一段描述。
-        sceneDescriptionCoordinator.preemptForGuidance(primaryEvent.messageKey)
-
         val state = _uiState.value
 
         logger.debug(TAG, "Scene events generated, ${primaryEvent.messageKey}", mapOf("count" to events.size))
 
-        if (!deliver(primaryEvent, state)) {
-            // 被正在播的同级或更高优先级提示挡下了：用户没听到它，不能让它在冷却期里被静音。
-            // 条件仍成立时它会在下一帧重新生成、重新尝试。
-            revokeUndeliveredEvent(primaryEvent)
-            return
-        }
+        // 等描述 / 打断描述 / 送达 / 没送达就撤销冷却——整条规则在 offerGuidancePrompt 里，有单测。
+        // 协调器是整个 shell 共用的那一个，所以打断的就是用户正在听的那一段描述，不管它在哪个屏幕上。
+        val delivered = offerGuidancePrompt(
+            priority = primaryEvent.priority,
+            descriptionHoldsTheFloor = sceneDescriptionCoordinator.holdsTheFloor,
+            preemptDescription = { sceneDescriptionCoordinator.preemptForGuidance(primaryEvent.messageKey) },
+            deliver = { deliver(primaryEvent, state) },
+            revoke = { revokeUndeliveredEvent(primaryEvent) },
+        )
+        if (!delivered) return
 
         if (state.hasGuidanceOutputChannel()) {
             _uiState.update { it.copy(lastAnnouncedEvent = primaryEvent) }

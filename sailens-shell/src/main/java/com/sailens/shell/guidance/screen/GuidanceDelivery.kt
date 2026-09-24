@@ -1,5 +1,7 @@
 package com.sailens.shell.guidance.screen
 
+import com.sailens.guidance.model.common.EventPriority
+
 /**
  * Offers one Guidance prompt to the output channels the user has enabled and reports whether it
  * actually reached them.
@@ -41,4 +43,56 @@ internal inline fun deliverGuidanceEvent(
     if (speechEnabled) speak() // not ready: refused, but asks the engine to start
     if (hapticsEnabled) return vibrate()
     return !speechEnabled
+}
+
+/**
+ * Whether a Guidance prompt waits for a scene description instead of cutting it off.
+ *
+ * The user asked for the description, usually standing still. A prompt that is not urgent —
+ * a traffic light, a side obstacle, "path alerts paused" — is worth less than the answer they are
+ * listening to, and cutting a description off leaves them with half a sentence about where they
+ * are. So below [GUIDANCE_PREEMPTS_DESCRIPTION_AT] the prompt waits: it is not delivered, its
+ * cooldown record is revoked, and it is offered again on a later frame, after the description has
+ * finished, if it still holds. At or above it — a vehicle or person ahead, a blocked path, a
+ * covered lens — Guidance preempts as before.
+ */
+internal fun guidanceWaitsForDescription(
+    priority: EventPriority,
+    descriptionHoldsTheFloor: Boolean,
+): Boolean = descriptionHoldsTheFloor && priority < GUIDANCE_PREEMPTS_DESCRIPTION_AT
+
+internal val GUIDANCE_PREEMPTS_DESCRIPTION_AT: EventPriority = EventPriority.HIGH
+
+/**
+ * Offers the frame's primary Guidance prompt, and keeps the cooldown honest either way.
+ *
+ * DecideEventsUseCase has already recorded the prompt in the cooldown, provisionally. Only a prompt
+ * that reached the user may keep that record, so every path that does not deliver revokes it and the
+ * prompt is offered again on a later frame while its condition still holds:
+ *
+ * 1. A description holds the floor and the prompt is not urgent ([guidanceWaitsForDescription]):
+ *    wait. The description is left alone and nothing is delivered.
+ * 2. Otherwise the description gives way first ([preemptDescription]) — before the prompt is
+ *    spoken, so no clause of it can be left in front of the prompt or behind it.
+ * 3. [deliver] refused (a prompt of equal or higher priority is still being spoken): not delivered.
+ *
+ * @return whether the prompt was delivered.
+ */
+internal inline fun offerGuidancePrompt(
+    priority: EventPriority,
+    descriptionHoldsTheFloor: Boolean,
+    preemptDescription: () -> Unit,
+    deliver: () -> Boolean,
+    revoke: () -> Unit,
+): Boolean {
+    if (guidanceWaitsForDescription(priority, descriptionHoldsTheFloor)) {
+        revoke()
+        return false
+    }
+    preemptDescription()
+    if (!deliver()) {
+        revoke()
+        return false
+    }
+    return true
 }

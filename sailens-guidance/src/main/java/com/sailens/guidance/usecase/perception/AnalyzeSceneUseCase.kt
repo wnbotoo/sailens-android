@@ -4,6 +4,7 @@ import com.sailens.guidance.model.analysis.SceneSnapshot
 import com.sailens.guidance.model.perception.PerceptionResult
 import com.sailens.guidance.processor.analysis.ConnectivityAnalysisProcessor
 import com.sailens.guidance.processor.analysis.CrossValidator
+import com.sailens.guidance.processor.analysis.GroundRecognitionAnalyzer
 import com.sailens.guidance.processor.analysis.GroundTypeDetector
 import com.sailens.guidance.processor.analysis.ObstacleOcclusionAnalyzer
 import com.sailens.guidance.processor.analysis.RoadSafetyAnalyzer
@@ -19,6 +20,7 @@ class AnalyzeSceneUseCase(
     private val sceneClassifier: SceneClassifier,
     private val crossValidator: CrossValidator,
     private val obstacleOcclusionAnalyzer: ObstacleOcclusionAnalyzer,
+    private val groundRecognitionAnalyzer: GroundRecognitionAnalyzer,
 ) {
     operator fun invoke(perceptionResult: PerceptionResult): SceneSnapshot {
         val analysis = perceptionResult.analysis
@@ -44,6 +46,10 @@ class AnalyzeSceneUseCase(
         // 3. 交叉验证
         val validated = crossValidator.validate(connectivity, roadSafety, groundChange)
 
+        // 4. 连通性的前提——底部是模型认得的地面——是否成立。不成立时由 EventGenerator 暂停
+        //    连通性提示；这里不去改 connectivity 本身，诊断和 trace 仍能看到模型原本的判断。
+        val ground = groundRecognitionAnalyzer.analyze(analysis.segmentation)
+
         return SceneSnapshot(
             timestamp = perceptionResult.timestamp,
             obstacles = perceptionResult.obstacles,
@@ -53,6 +59,8 @@ class AnalyzeSceneUseCase(
             roadSafety = validated.roadSafety,
             groundTypeChange = validated.groundChange,
             occludedPassableRatio = occlusion.occludedPassableRatio,
+            groundRecognition = ground.recognition,
+            unrecognizedGroundRatio = ground.unrecognizedRatio,
         )
     }
 }

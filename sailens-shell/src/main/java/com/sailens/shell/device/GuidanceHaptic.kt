@@ -29,7 +29,7 @@ private const val LONG_GAP = 150L
  * | 右侧 | 3 短 |
  * | 多处 | 4 短 |
  * | 前方不通 | 1 长 |
- * | 输入失效 | 长-短-长 |
+ * | 看不清前方（镜头遮挡、过暗、认不出地面） | 长-短-长 |
  * | 一般提示 | 1 中 |
  * | 语音失效 | 短-短-特长 |
  * | 辅助中断 | 3 特长 |
@@ -61,8 +61,14 @@ enum class GuidanceHaptic(val timings: LongArray) {
     /** 前方不通：1 长。停下，而不是绕。 */
     BLOCKED(longArrayOf(0, LONG)),
 
-    /** 输入失效（镜头遮挡/过暗）：长-短-长。 */
-    SENSOR_FAILURE(longArrayOf(0, LONG, GAP, SHORT, GAP, LONG)),
+    /**
+     * 看不清前方能不能走：长-短-长。停下确认。
+     *
+     * 覆盖所有"视觉判断不可信"的情况：镜头被挡、环境过暗，以及模型认不出脚下的地面、
+     * 通行判断已暂停。对只开震动的用户，这些是同一件事——**此刻没有"前方不通"不代表能走**。
+     * 所以认不出地面不能映射成 [NOTICE]：一下"一般提示"传达不了"通行判断停了"。
+     */
+    VISION_UNRELIABLE(longArrayOf(0, LONG, GAP, SHORT, GAP, LONG)),
 
     /** 一般提示（路口、红绿灯、路面变化）：1 中。非方位类，不需要用户立刻动作。 */
     NOTICE(longArrayOf(0, MEDIUM)),
@@ -76,8 +82,8 @@ enum class GuidanceHaptic(val timings: LongArray) {
      * 必须存在这个符号，因为它是这条失效**唯一**能到达用户的通道：TTS 已经死了，说不出话；
      * 视觉卡片对盲人不存在；没开读屏的用户会把"语音坏了"直接理解成"前方安全"。
      *
-     * 收尾的特长震区别于 [SENSOR_FAILURE]（长-短-长）：一个说"我看不见"，
-     * 另一个说"我说不出话"，处置方式完全不同（前者挪手机，后者查系统语音设置）。
+     * 收尾的特长震区别于 [VISION_UNRELIABLE]（长-短-长）：一个说"我看不清"，
+     * 另一个说"我说不出话"，处置方式完全不同（前者停下确认，后者查系统语音设置）。
      */
     SPEECH_UNAVAILABLE(longArrayOf(0, SHORT, GAP, SHORT, GAP, EXTRA_LONG));
 
@@ -85,11 +91,12 @@ enum class GuidanceHaptic(val timings: LongArray) {
         /** 用户可以在设置页逐个试触感的顺序，从最常见到最少见。 */
         val learnableVocabulary: List<GuidanceHaptic> = listOf(
             LEFT, AHEAD, RIGHT, MULTIPLE, BLOCKED, NOTICE,
-            SENSOR_FAILURE, SPEECH_UNAVAILABLE, INTERRUPTED,
+            VISION_UNRELIABLE, SPEECH_UNAVAILABLE, INTERRUPTED,
         )
 
         fun forEvent(event: SceneEvent): GuidanceHaptic = when (event.category) {
-            EventCategory.SENSOR_QUALITY -> SENSOR_FAILURE
+            EventCategory.SENSOR_QUALITY,
+            EventCategory.GROUND_UNRECOGNIZED -> VISION_UNRELIABLE
             EventCategory.BLOCKED -> BLOCKED
             EventCategory.OBSTACLE,
             EventCategory.PATH_COMPLEX,
@@ -115,6 +122,21 @@ enum class GuidanceHaptic(val timings: LongArray) {
                 hasLeft -> LEFT
                 hasRight -> RIGHT
                 else -> AHEAD
+            }
+        }
+
+        /**
+         * [event] 的震动强度：按优先级分档，但"看不清"类符号不低于 HIGH 档。
+         *
+         * 认不出地面的状态提示是 LOW 优先级——它不该抢在障碍物提示前面，也不该打断描述——但
+         * 它说的是"通行判断停了"，用最弱一档震出来，隔着裤袋可能就错过了。
+         */
+        fun amplitudeFor(event: SceneEvent): Int {
+            val byPriority = amplitudeFor(event.priority)
+            return if (forEvent(event) == VISION_UNRELIABLE) {
+                maxOf(byPriority, amplitudeFor(EventPriority.HIGH))
+            } else {
+                byPriority
             }
         }
 

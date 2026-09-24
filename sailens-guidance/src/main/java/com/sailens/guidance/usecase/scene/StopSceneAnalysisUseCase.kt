@@ -2,6 +2,7 @@ package com.sailens.guidance.usecase.scene
 
 import com.sailens.guidance.processor.analysis.ConnectivityAnalysisProcessor
 import com.sailens.guidance.processor.analysis.FrameQualityAnalyzer
+import com.sailens.guidance.processor.analysis.GroundRecognitionAnalyzer
 import com.sailens.guidance.processor.analysis.GroundTypeDetector
 import com.sailens.guidance.processor.analysis.RoadSafetyAnalyzer
 import com.sailens.guidance.processor.analysis.SceneClassifier
@@ -27,6 +28,7 @@ class StopSceneAnalysisUseCase(
     private val groundTypeDetector: GroundTypeDetector,
     private val sceneClassifier: SceneClassifier,
     private val frameQualityAnalyzer: FrameQualityAnalyzer,
+    private val groundRecognitionAnalyzer: GroundRecognitionAnalyzer,
     private val cooldownManager: CooldownManager,
     private val logService: LogService,
 ) {
@@ -44,6 +46,7 @@ class StopSceneAnalysisUseCase(
         groundTypeDetector.reset()
         sceneClassifier.reset()
         frameQualityAnalyzer.reset()
+        groundRecognitionAnalyzer.reset()
         cooldownManager.reset()
     }
 

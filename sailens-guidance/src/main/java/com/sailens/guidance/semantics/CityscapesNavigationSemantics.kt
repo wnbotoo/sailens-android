@@ -20,6 +20,11 @@ object CityscapesNavigationSemantics : NavigationSemantics {
 
     override fun isTrafficLight(classId: Int): Boolean = classId == CityscapesTaxonomy.TRAFFIC_LIGHT
 
+    // `building` is deliberately not a barrier: this model also reads a near indoor floor as
+    // building, so "building fills the bottom" is ambiguous between a facade and an unknown floor.
+    override fun isBarrier(classId: Int): Boolean =
+        classId == CityscapesTaxonomy.WALL || classId == CityscapesTaxonomy.FENCE
+
     override fun toGroundType(classId: Int): GroundType = when (classId) {
         CityscapesTaxonomy.ROAD -> GroundType.ROAD
         CityscapesTaxonomy.SIDEWALK -> GroundType.SIDEWALK

@@ -122,12 +122,30 @@ class SceneDescriptionCoordinatorTest {
         chunks.send(completed("A bus stop, two metres ahead."))
         settle()
         assertFalse("decoding has finished", coordinator.state.value.isDescribing)
-        assertTrue(voice.hasQueued)
+        assertTrue(voice.hasQueuedSpeech)
 
         onMain { coordinator.preemptForGuidance("vehicle approaching") }
 
-        assertFalse("the answer is still being read out and must stop for the warning", voice.hasQueued)
+        assertFalse("the answer is still being read out and must stop for the warning", voice.hasQueuedSpeech)
     }
+
+    @Test
+    fun `the floor is held while decoding and while the answer is read out, then released`() =
+        runBlocking<Unit> {
+            assertFalse("nothing asked yet", coordinator.holdsTheFloor)
+
+            onMain { coordinator.describe(FAILURE) }
+            settle()
+            assertTrue("decoding", coordinator.holdsTheFloor)
+
+            chunks.send(completed("A bus stop, two metres ahead."))
+            settle()
+            assertFalse(coordinator.state.value.isDescribing)
+            assertTrue("decoded but still being read out", coordinator.holdsTheFloor)
+
+            onMain { coordinator.cancel("done") }
+            assertFalse("withdrawn", coordinator.holdsTheFloor)
+        }
 
     @Test
     fun `a preempted screen-reader answer is never announced`() = runBlocking<Unit> {
@@ -157,7 +175,7 @@ class SceneDescriptionCoordinatorTest {
             settle()
 
             assertEquals(listOf("A shop entrance."), voice.spoken)
-            assertFalse(voice.hasQueued)
+            assertFalse(voice.hasQueuedSpeech)
             assertFalse(coordinator.state.value.isDescribing)
         }
 
@@ -219,7 +237,7 @@ class SceneDescriptionCoordinatorTest {
 
             assertEquals(listOf("A pedestrian crossing."), voice.spoken)
             assertTrue("the rest must not be handed to the screen reader either", announced.isEmpty())
-            assertFalse(voice.hasQueued)
+            assertFalse(voice.hasQueuedSpeech)
             assertFalse(coordinator.state.value.isDescribing)
         }
 
@@ -233,7 +251,7 @@ class SceneDescriptionCoordinatorTest {
         settle()
 
         assertFalse(coordinator.state.value.isDescribing)
-        assertFalse(voice.hasQueued)
+        assertFalse(voice.hasQueuedSpeech)
     }
 
     @Test
@@ -300,7 +318,7 @@ class SceneDescriptionCoordinatorTest {
         val spoken: MutableList<String> = Collections.synchronizedList(mutableListOf())
         val queued: MutableList<String> = Collections.synchronizedList(mutableListOf())
         var ready = true
-        val hasQueued: Boolean get() = queued.isNotEmpty()
+        override val hasQueuedSpeech: Boolean get() = queued.isNotEmpty()
 
         override suspend fun awaitReady(): Boolean = ready
 

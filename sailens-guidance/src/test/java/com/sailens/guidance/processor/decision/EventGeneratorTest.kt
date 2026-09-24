@@ -2,6 +2,7 @@ package com.sailens.guidance.processor.decision
 
 import com.sailens.guidance.config.AnalysisConfig
 import com.sailens.guidance.model.analysis.FrameQuality
+import com.sailens.guidance.model.analysis.GroundRecognition
 import com.sailens.guidance.model.analysis.GroundTypeChange
 import com.sailens.guidance.model.analysis.RoadSafetyState
 import com.sailens.guidance.model.analysis.SceneElements
@@ -10,6 +11,7 @@ import com.sailens.guidance.model.analysis.WalkPathConnectivity
 import com.sailens.guidance.model.common.DirectionBias
 import com.sailens.guidance.model.common.DirectionZone
 import com.sailens.guidance.model.common.DistanceLevel
+import com.sailens.guidance.model.common.EventCategory
 import com.sailens.guidance.model.common.EventPriority
 import com.sailens.guidance.model.common.GroundType
 import com.sailens.core.geometry.NormalizedRect
@@ -425,6 +427,74 @@ class EventGeneratorTest {
         assertEquals(EventPriority.HIGH, events.single().priority)
     }
 
+    @Test
+    fun `unrecognized ground replaces blocked with a low priority status notice`() {
+        val generator = EventGenerator()
+
+        val events = generator.generate(
+            snapshot(
+                connectivity = blockedConnectivity(bias = null),
+                groundRecognition = GroundRecognition.UNRECOGNIZED,
+            ),
+            now = 1_000L,
+        )
+
+        assertEquals(listOf("event_ground_unrecognized"), events.map { it.messageKey })
+        assertEquals(EventCategory.GROUND_UNRECOGNIZED, events.single().category)
+        assertEquals(EventPriority.LOW, events.single().priority)
+    }
+
+    @Test
+    fun `uncertain ground still announces a blocked path at once`() {
+        // A wall right ahead and an unknown floor look the same to the model. Until the state is
+        // confirmed nothing is held back: "path blocked" must not be a frame late for a real wall.
+        val generator = EventGenerator(AnalysisConfig(enableNarrowingEvents = true))
+
+        val blocked = generator.generate(
+            snapshot(
+                connectivity = blockedConnectivity(bias = null),
+                groundRecognition = GroundRecognition.UNCERTAIN,
+            ),
+            now = 1_000L,
+        )
+        val narrowing = generator.generate(
+            snapshot(
+                connectivity = narrowingConnectivity(bias = null),
+                groundRecognition = GroundRecognition.UNCERTAIN,
+            ),
+            now = 1_000L,
+        )
+
+        assertEquals(listOf("event_blocked"), blocked.map { it.messageKey })
+        assertEquals(listOf("event_narrowing"), narrowing.map { it.messageKey })
+    }
+
+    @Test
+    fun `obstacles are still announced while the ground is unrecognized`() {
+        val generator = EventGenerator()
+        val person = obstacle(
+            box = NormalizedRect(x = 0.43f, y = 0.45f, width = 0.14f, height = 0.25f),
+            category = ObstacleCategory.PERSON,
+            zone = DirectionZone.CENTER,
+            distance = DistanceLevel.MEDIUM,
+            urgency = UrgencyLevel.HIGH,
+        )
+
+        val events = generator.generate(
+            snapshot(
+                obstacles = listOf(person),
+                connectivity = blockedConnectivity(bias = null),
+                groundRecognition = GroundRecognition.UNRECOGNIZED,
+            ),
+            now = 1_000L,
+        )
+
+        assertEquals(
+            setOf("event_ground_unrecognized", "event_obstacle_center_person"),
+            events.map { it.messageKey }.toSet(),
+        )
+    }
+
     private fun snapshot(obstacle: DetectedObstacle): SceneSnapshot {
         return snapshot(obstacles = listOf(obstacle))
     }
@@ -443,6 +513,7 @@ class EventGeneratorTest {
         ),
         groundTypeChange: GroundTypeChange? = null,
         frameQuality: FrameQuality = FrameQuality.OK,
+        groundRecognition: GroundRecognition = GroundRecognition.RECOGNIZED,
     ): SceneSnapshot {
         return SceneSnapshot(
             timestamp = obstacles.firstOrNull()?.timestamp ?: 1_000L,
@@ -453,6 +524,7 @@ class EventGeneratorTest {
             roadSafety = roadSafety,
             groundTypeChange = groundTypeChange,
             frameQuality = frameQuality,
+            groundRecognition = groundRecognition,
         )
     }
 
