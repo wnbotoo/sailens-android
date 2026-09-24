@@ -2,6 +2,7 @@ package com.sailens.guidance.processor.decision
 
 import com.sailens.guidance.config.AnalysisConfig
 import com.sailens.guidance.model.analysis.FrameQuality
+import com.sailens.guidance.model.analysis.GroundRecognition
 import com.sailens.guidance.model.analysis.GroundTypeChange
 import com.sailens.guidance.model.analysis.RoadSafetyState
 import com.sailens.guidance.model.analysis.SceneSnapshot
@@ -60,8 +61,16 @@ class EventGenerator(
             events.add(createSensorQualityEvent(snapshot.frameQuality, now))
         }
 
-        // 1. 阻塞 / 复杂路况事件
-        if (snapshot.connectivity.isBlocked) {
+        // 1. 连通性事件的前提是底部是模型认得的地面。不成立时它们只是在复述"模型不认识这种地面"
+        //    （室内地板被判成 building → 一直"前方不通"），所以一律不播；确认后改播一条状态提示，
+        //    让用户知道这项判断停了，而不是把"没提示"当成"能走"。障碍物检测不依赖地面，照常。
+        val pathJudgementReliable = snapshot.groundRecognition.isPathJudgementReliable
+        if (snapshot.groundRecognition == GroundRecognition.UNRECOGNIZED) {
+            events.add(createGroundUnrecognizedEvent(now))
+        }
+
+        // 2. 阻塞 / 复杂路况事件
+        if (pathJudgementReliable && snapshot.connectivity.isBlocked) {
             if (isHardBlocked(snapshot)) {
                 events.add(createBlockedEvent(snapshot, now))
             } else {
@@ -69,18 +78,22 @@ class EventGenerator(
             }
         }
 
-        // 2. 收窄事件
-        if (config.enableNarrowingEvents && snapshot.connectivity.isNarrowing && !snapshot.connectivity.isBlocked) {
+        // 3. 收窄事件
+        if (pathJudgementReliable &&
+            config.enableNarrowingEvents &&
+            snapshot.connectivity.isNarrowing &&
+            !snapshot.connectivity.isBlocked
+        ) {
             events.add(createNarrowingEvent(snapshot, now))
         }
 
-        // 3.  障碍物事件
+        // 4.  障碍物事件
         val significantObstacles = snapshot.obstacles.filter(::shouldAnnounceObstacle)
         if (significantObstacles.isNotEmpty()) {
             events.addAll(createObstacleEvents(significantObstacles, now))
         }
 
-        // 4. 路口事件
+        // 5. 路口事件
         val emitsIntersection = config.enableIntersectionEvents && snapshot.sceneElements.hasIntersection
         if (emitsIntersection) {
             events.add(createIntersectionEvent(now))
@@ -88,12 +101,12 @@ class EventGenerator(
             events.add(createTrafficLightEvent(now))
         }
 
-        // 5. 道路安全事件默认不播，避免把不稳定的车道/机动车道识别当作确定提示。
+        // 6. 道路安全事件默认不播，避免把不稳定的车道/机动车道识别当作确定提示。
         if (config.enableRoadWarningEvents && snapshot.roadSafety.isDangerous) {
             events.add(createRoadWarningEvent(snapshot.roadSafety, now))
         }
 
-        // 6. 地面变化事件默认不播，当前只作为分析/debug 信号保留。
+        // 7. 地面变化事件默认不播，当前只作为分析/debug 信号保留。
         if (config.enableGroundChangeEvents) {
             snapshot.groundTypeChange?.let {
                 events.add(createGroundChangeEvent(it, now))
@@ -127,6 +140,19 @@ class EventGenerator(
             expiresAt = now + 6000,
             dedupeKey = "sensor_quality_${quality.name.lowercase()}",
             severity = Severity.SEVERE,
+        )
+    }
+
+    private fun createGroundUnrecognizedEvent(now: Long): SceneEvent {
+        return SceneEvent(
+            timestamp = now,
+            category = EventCategory.GROUND_UNRECOGNIZED,
+            // 状态说明，不是眼前的危险：任何障碍物提示都该排在它前面，它也不该打断场景描述。
+            priority = EventPriority.LOW,
+            messageKey = SceneEventMessageKeys.GROUND_UNRECOGNIZED,
+            expiresAt = now + 5000,
+            dedupeKey = "ground_unrecognized",
+            severity = Severity.MODERATE,
         )
     }
 

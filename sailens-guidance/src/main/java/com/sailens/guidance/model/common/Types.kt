@@ -206,7 +206,15 @@ enum class EventCategory(val value: Int) {
      * 与其他类别的关键区别：它说明"本应用现在看不见"，因此必须抑制其余全部事件——
      * 此时任何基于画面的判断都是不可信的，而用户无法靠自己察觉这一点。
      */
-    SENSOR_QUALITY(10);
+    SENSOR_QUALITY(10),
+
+    /**
+     * 语义模型认不出脚下的地面，连通性提示（前方不通、路况复杂、收窄）已暂停。
+     *
+     * 与 [SENSOR_QUALITY] 不同：画面本身可用，检测到的障碍物照常播报；失效的只是"地面能不能走"
+     * 这一项判断。见 [com.sailens.guidance.model.analysis.GroundRecognition]。
+     */
+    GROUND_UNRECOGNIZED(11);
 
     companion object {
         fun fromValue(value: Int): EventCategory {

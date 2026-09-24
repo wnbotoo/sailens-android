@@ -210,6 +210,8 @@ object TraceReplayParser {
         widthRetentionP25Delta = entry.optionalDouble("widthRetentionP25Delta") ?: 0.0,
         occludedPassableRatio = entry.optionalDouble("occludedPassableRatio") ?: 0.0,
         occludedPassableDelta = entry.optionalDouble("occludedPassableDelta") ?: 0.0,
+        groundRecognition = entry.optionalString("groundRecognition") ?: "recognized",
+        unrecognizedGroundRatio = entry.optionalDouble("unrecognizedGroundRatio") ?: 0.0,
         rawObstacleDetectionCount = entry.optionalLong("rawObstacleDetectionCount")?.toInt() ?: 0,
         obstacleCountDelta = entry.optionalLong("obstacleCountDelta")?.toInt() ?: 0,
         rawObstacleDetectionCountDelta = entry.optionalLong("rawObstacleDetectionCountDelta")?.toInt() ?: 0,

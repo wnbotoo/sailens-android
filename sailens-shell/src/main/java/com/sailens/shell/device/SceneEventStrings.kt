@@ -21,6 +21,7 @@ internal object SceneEventStrings {
         "event_ground_to_road" to R.string.event_ground_to_road,
         "event_ground_to_sidewalk" to R.string.event_ground_to_sidewalk,
         "event_ground_to_terrain" to R.string.event_ground_to_terrain,
+        "event_ground_unrecognized" to R.string.event_ground_unrecognized,
         "event_intersection" to R.string.event_intersection,
         "event_low_light" to R.string.event_low_light,
         "event_narrowing" to R.string.event_narrowing,

@@ -20,6 +20,10 @@ data class SceneSnapshot(
      * 感知链路之外单独判定后回填——它看的是原始画面，而不是模型输出。
      */
     val frameQuality: FrameQuality = FrameQuality.OK,
+    /** 语义模型是否认得脚下的地面；不认得时连通性不可信。 */
+    val groundRecognition: GroundRecognition = GroundRecognition.RECOGNIZED,
+    /** 底部中央区域里模型解释不了的像素比例（未去抖，诊断用）。 */
+    val unrecognizedGroundRatio: Float = 0f,
 )
 
 /**

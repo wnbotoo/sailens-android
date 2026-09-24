@@ -120,6 +120,13 @@ internal fun SceneDebugInfoView(
         Text(stringResource(R.string.debug_occluded_passable, occludedPassablePercent))
         Text(
             stringResource(
+                R.string.debug_ground_recognition,
+                debugInfo.groundRecognition,
+                (debugInfo.unrecognizedGroundRatio * 100).toInt(),
+            )
+        )
+        Text(
+            stringResource(
                 R.string.debug_vertical_reach,
                 verticalReachPercent,
                 debugInfo.validLayers,

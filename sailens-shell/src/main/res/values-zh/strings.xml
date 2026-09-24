@@ -119,6 +119,7 @@
     <string name="debug_blockage_reason">阻塞原因：%1$s</string>
     <string name="debug_road_vehicle_source">道路车辆：%1$s（%2$d%%），%3$s，bottom/center/area：%4$d/%5$d/%6$d%%</string>
     <string name="debug_occluded_passable">障碍物遮挡可行走：%1$d%%</string>
+    <string name="debug_ground_recognition">地面识别：%1$s（未识别 %2$d%%）</string>
     <string name="debug_vertical_reach">纵向连通：%1$d%%（%2$d/%3$d 层）</string>
     <string name="debug_flood_reach">洪泛连通：%1$d%%</string>
     <string name="debug_width_retention_p25">宽度保持 P25：%1$d%%</string>
@@ -275,6 +276,8 @@
     <!-- 输入质量。用户无法自行察觉这类失效，所以措辞直接给出可执行动作。 -->
     <string name="event_camera_blocked">镜头被遮挡</string>
     <string name="event_low_light">光线不足</string>
+    <!-- 模型认不出脚下的地面（室内地板，或镜头抬得太高），"前方不通"一类提示已暂停；障碍物提示照常。 -->
+    <string name="event_ground_unrecognized">识别不到地面，暂停通行提示</string>
     <string name="permission_camera_title">需要相机权限</string>
     <string name="permission_camera_rationale">Sailens 通过相机识别前方道路并为你导览。画面只在本机处理，不会上传。</string>
     <string name="permission_confirm">允许</string>

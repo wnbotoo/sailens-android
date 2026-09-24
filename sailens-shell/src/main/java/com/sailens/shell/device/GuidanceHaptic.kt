@@ -98,7 +98,9 @@ enum class GuidanceHaptic(val timings: LongArray) {
             EventCategory.INTERSECTION,
             EventCategory.TRAFFIC_LIGHT,
             EventCategory.ROAD_WARNING,
-            EventCategory.GROUND_CHANGE -> NOTICE
+            EventCategory.GROUND_CHANGE,
+            // 状态说明而非方位：含义靠语音；只开震动时它是"有事"，不会被误读成"前方不通"（1 长）。
+            EventCategory.GROUND_UNRECOGNIZED -> NOTICE
         }
 
         private fun forZones(zones: List<DirectionZone>): GuidanceHaptic {

@@ -51,6 +51,8 @@ class CooldownManager(
         EventCategory.PATH_COMPLEX to 6000,
         EventCategory.TRAFFIC_LIGHT to 12000,
         EventCategory.SENSOR_QUALITY to 15000,
+        // 在室内可能一待就是很久：进入时说一次，之后一分钟提醒一次"这项判断仍然停着"就够了。
+        EventCategory.GROUND_UNRECOGNIZED to 60000,
     )
 
     private val keyCooldowns: Map<String, Long> = mapOf(
