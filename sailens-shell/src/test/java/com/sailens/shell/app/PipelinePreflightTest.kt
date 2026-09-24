@@ -113,6 +113,49 @@ class PipelinePreflightTest {
         assertTrue("a configured spec's predicate should run", called)
     }
 
+    @Test
+    fun `a vouched-for detector that is missing makes Guidance unavailable`() {
+        val capabilities = PipelinePreflight.evaluate(
+            SailensAppSpec(
+                guidance = GuidanceSpec(
+                    verifySemanticModel = { null },
+                    verifyObstacleModel = { StaticUnavailableReason.ModelSourceMissing },
+                ),
+            )
+        )
+
+        assertEquals(
+            PipelineAvailability.Unavailable(StaticUnavailableReason.ModelSourceMissing),
+            capabilities.guidance,
+        )
+    }
+
+    @Test
+    fun `the semantic model is reported first when both are unusable`() {
+        val capabilities = PipelinePreflight.evaluate(
+            SailensAppSpec(
+                guidance = GuidanceSpec(
+                    verifySemanticModel = { StaticUnavailableReason.TaxonomyIncompatible },
+                    verifyObstacleModel = { StaticUnavailableReason.ModelSourceMissing },
+                ),
+            )
+        )
+
+        assertEquals(
+            PipelineAvailability.Unavailable(StaticUnavailableReason.TaxonomyIncompatible),
+            capabilities.guidance,
+        )
+    }
+
+    @Test
+    fun `an edition that does not vouch for a detector is judged on the semantic model alone`() {
+        val capabilities = PipelinePreflight.evaluate(
+            SailensAppSpec(guidance = GuidanceSpec(verifySemanticModel = { null }))
+        )
+
+        assertEquals(PipelineAvailability.Available, capabilities.guidance)
+    }
+
     private fun guidanceSpec(present: Boolean, taxonomyOk: Boolean = true) = GuidanceSpec(
         verifySemanticModel = {
             when {

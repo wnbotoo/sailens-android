@@ -3,6 +3,7 @@ package com.sailens.guidance.processor.decision
 import com.sailens.guidance.model.common.EventCategory
 import com.sailens.guidance.model.common.EventPriority
 import com.sailens.guidance.model.scene.SceneEvent
+import java.util.UUID
 
 /**
  * 冷却管理器。
@@ -62,30 +63,50 @@ class CooldownManager(
         "sensor_quality_obstructed" to 8000,
     )
 
-    /** 每个冷却 key 上最后一次放行的事件：时间戳 + 当时的优先级。 */
+    /** 每个冷却 key 上最后一次放行的事件：时间戳 + 当时的优先级 + 写下它的事件。 */
     private data class CooldownRecord(
         val timestampMs: Long,
         val priority: EventPriority,
+        val eventId: UUID,
     )
 
     private val lastEventRecords = mutableMapOf<String, CooldownRecord>()
+
+    /** 撤销一次记录所需的全部信息：被覆盖前的旧记录（null = 原本没有）和那次放行的时间戳。 */
+    private data class RecordUndo(
+        val previous: Map<String, CooldownRecord?>,
+        val emittedAtMs: Long,
+    )
+
+    /** 最近几次记录的撤销信息。送达方的回执总是紧跟在决策之后，保留少量即可。 */
+    private val undoLog = LinkedHashMap<UUID, RecordUndo>()
 
     /**
      * 更新用户是否静止。由上游的运动检测驱动，见
      * [com.sailens.guidance.repository.DeviceSensorRepository.isStationary]。
      */
+    @Synchronized
     fun setStationary(stationary: Boolean) {
         isStationary = stationary
     }
 
+    @Synchronized
     fun filter(events: List<SceneEvent>, now: Long): List<SceneEvent> {
         val scale = currentCooldownScale(now)
         return events.filter { event -> event.passesCooldown(now, scale) }
     }
 
+    /**
+     * 任意一组冷却 key 全部通过即放行。合并事件每个组成事件各占一组（见 [SceneEvent.cooldownGroups]），
+     * 所以只要合并提示里有一个方位是新的或升级了，整条提示就能播出。
+     */
     private fun SceneEvent.passesCooldown(now: Long, scale: Float): Boolean {
         val eventScale = if (isExemptFromScaling()) 1.0f else scale
-        return cooldownKeys().all { key ->
+        return cooldownGroupsOrDefault().any { group -> passesGroup(group, now, eventScale) }
+    }
+
+    private fun SceneEvent.passesGroup(group: Set<String>, now: Long, eventScale: Float): Boolean {
+        return group.all { key ->
             val record = lastEventRecords[key] ?: return@all true
             val elapsed = now - record.timestampMs
             if (elapsed >= scaledCooldownFor(key, eventScale)) return@all true
@@ -98,9 +119,16 @@ class CooldownManager(
         }
     }
 
+    /**
+     * 记录一条**真正送达用户**的事件。只能由送达方调用：没播出去的事件（同帧的次要事件、被更高
+     * 优先级语音挡下的事件）一旦被记录，就会在自己的冷却期里被静音，而用户从没听到过它。
+     */
+    @Synchronized
     fun recordEvent(event: SceneEvent, now: Long) {
-        event.cooldownKeys().forEach { key ->
+        val previous = mutableMapOf<String, CooldownRecord?>()
+        event.allCooldownKeys().forEach { key ->
             val existing = lastEventRecords[key]
+            previous[key] = existing
             val withinBaseWindow = existing != null &&
                 now - existing.timestampMs < event.baseCooldownFor(key)
             lastEventRecords[key] = CooldownRecord(
@@ -113,15 +141,43 @@ class CooldownManager(
                     }
                     ?.priority
                     ?: event.priority,
+                eventId = event.id,
             )
         }
         recentEmissions.addLast(now)
         trimEmissionWindow(now)
+        undoLog[event.id] = RecordUndo(previous = previous, emittedAtMs = now)
+        while (undoLog.size > MAX_UNDO_ENTRIES) {
+            undoLog.remove(undoLog.keys.first())
+        }
     }
 
+    /**
+     * 撤销 [recordEvent] 对 [eventId] 的记录：这条事件最终没有送达用户（例如更高优先级的播报
+     * 还在念）。撤销后它下一帧还能被重新生成、重新放行，而不是在冷却期里被静音。
+     *
+     * 只恢复仍然由这条事件写着的 key：撤销之前如果已有别的事件改写了同一个 key，那条更新的记录
+     * 保持不动。未知 id（太旧或从未记录）是空操作。
+     */
+    @Synchronized
+    fun revoke(eventId: UUID) {
+        val undo = undoLog.remove(eventId) ?: return
+        undo.previous.forEach { (key, previousRecord) ->
+            if (lastEventRecords[key]?.eventId != eventId) return@forEach
+            if (previousRecord == null) {
+                lastEventRecords.remove(key)
+            } else {
+                lastEventRecords[key] = previousRecord
+            }
+        }
+        recentEmissions.lastIndexOf(undo.emittedAtMs).takeIf { it >= 0 }?.let(recentEmissions::removeAt)
+    }
+
+    @Synchronized
     fun reset() {
         lastEventRecords.clear()
         recentEmissions.clear()
+        undoLog.clear()
         isStationary = false
     }
 
@@ -131,6 +187,7 @@ class CooldownManager(
      * 传感器质量事件不受影响——见 [isExemptFromScaling]。用户静止不动并不代表镜头没被挡住，
      * 而事件风暴本身也不该压掉"我看不见了"这条。
      */
+    @Synchronized
     internal fun currentCooldownScale(now: Long): Float {
         trimEmissionWindow(now)
         var scale = 1.0f
@@ -148,6 +205,12 @@ class CooldownManager(
     private fun SceneEvent.cooldownKeys(): Set<String> = cooldownKeys.ifEmpty {
         setOf(dedupeKey.ifBlank { category.name })
     }
+
+    private fun SceneEvent.cooldownGroupsOrDefault(): List<Set<String>> =
+        cooldownGroups.filter { it.isNotEmpty() }.ifEmpty { listOf(cooldownKeys()) }
+
+    private fun SceneEvent.allCooldownKeys(): Set<String> =
+        cooldownKeys() + cooldownGroupsOrDefault().flatten()
 
     private fun SceneEvent.baseCooldownFor(key: String): Long =
         keyCooldowns[key] ?: cooldowns[category] ?: DEFAULT_COOLDOWN_MS
@@ -167,5 +230,6 @@ class CooldownManager(
 
     private companion object {
         const val DEFAULT_COOLDOWN_MS = 3000L
+        const val MAX_UNDO_ENTRIES = 16
     }
 }

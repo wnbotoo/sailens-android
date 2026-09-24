@@ -1,7 +1,9 @@
 package com.sailens.camera
 
 import android.content.Context
+import android.util.Log
 import android.util.Size
+import android.view.OrientationEventListener
 import androidx.camera.core.AspectRatio
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
@@ -17,6 +19,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import java.util.concurrent.Executors
 
+private const val TAG = "SailensCamera"
+
 public class CameraViewModel(
     private val camera: Camera,
     private val imageFrameAnalyzer: ImageAnalysis.Analyzer,
@@ -31,7 +35,26 @@ public class CameraViewModel(
         appContext: Context,
         lifecycleOwner: LifecycleOwner,
     ) {
-        camera.bind(appContext, lifecycleOwner, listOf(previewUseCase, imageAnalysis))
+        // Analysis frames follow how the phone is held, not the display (see AnalysisRotation).
+        // The preview keeps following the display: it is drawn on the screen.
+        val orientationListener = object : OrientationEventListener(appContext) {
+            override fun onOrientationChanged(orientation: Int) {
+                if (orientation == ORIENTATION_UNKNOWN) return
+                val next = AnalysisRotation.targetRotationFor(orientation, imageAnalysis.targetRotation)
+                if (next != imageAnalysis.targetRotation) {
+                    // Rare (a deliberate turn of the phone) and otherwise invisible in traces.
+                    Log.i(TAG, "Analysis target rotation ${imageAnalysis.targetRotation} -> $next (device at $orientation deg)")
+                    imageAnalysis.targetRotation = next
+                    _analysisTargetRotation.value = next
+                }
+            }
+        }
+        orientationListener.enable()
+        try {
+            camera.bind(appContext, lifecycleOwner, listOf(previewUseCase, imageAnalysis))
+        } finally {
+            orientationListener.disable()
+        }
     }
 
     private val previewUseCase = Preview.Builder()
@@ -51,6 +74,16 @@ public class CameraViewModel(
             ).build().apply {
                 setAnalyzer(executor, imageFrameAnalyzer)
             }
+
+    private val _analysisTargetRotation = MutableStateFlow(imageAnalysis.targetRotation)
+
+    /**
+     * The `Surface.ROTATION_*` the analysis frames are currently oriented for -- the phone's
+     * physical orientation, which can differ from the display's when the rotation lock is on.
+     * Anything drawn from analysis results on top of the preview (which follows the display) has
+     * to rotate by the difference.
+     */
+    public val analysisTargetRotation: StateFlow<Int> = _analysisTargetRotation.asStateFlow()
 
     private fun getResolutionSelector(preferredSize: Size): ResolutionSelector {
         val resolutionStrategy = ResolutionStrategy(

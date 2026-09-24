@@ -1,6 +1,7 @@
 package com.sailens.guidance.processor.perception
 
 import com.sailens.guidance.config.AnalysisConfig
+import com.sailens.guidance.config.widthFractionOfLongSide
 import com.sailens.core.mask.BinaryMask
 import com.sailens.core.mask.BottomStats
 import com.sailens.guidance.model.common.GroundType
@@ -44,8 +45,9 @@ class KotlinSegmentationStatsExtractor(
 
         val bottomStartY = ((1 - config.segmentationBottomRatio) * height).toInt()
         val navigationStartY = ((1 - config.segmentationNavigationRegionRatio) * height).toInt()
-        val centerStartX = ((1 - config.segmentationCenterRatio) / 2 * width).toInt()
-        val centerEndX = ((1 + config.segmentationCenterRatio) / 2 * width).toInt()
+        val centerRatio = widthFractionOfLongSide(config.segmentationCenterRatio, width, height)
+        val centerStartX = ((1 - centerRatio) / 2 * width).toInt()
+        val centerEndX = ((1 + centerRatio) / 2 * width).toInt()
 
         val groundTypeCounts = mutableMapOf<GroundType, Int>()
         var bottomCenterRoadPixels = 0

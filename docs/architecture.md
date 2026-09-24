@@ -891,6 +891,33 @@ Restoring either changes the detection postprocess and the frame budget, so both
 decisions rather than part of this refactor. Treat these lines as targets to restore, not as
 properties that were preserved.
 
+**Root cause and fix (2026-09 release review).** The zero-copy pair had three independent bugs, any
+one of which keeps the handle path from ever running (they masked each other, which is why none
+surfaced):
+
+1. `dlsym(RTLD_DEFAULT, ...)` cannot see the symbols: for apps targeting API 23+ bionic's
+   RTLD_DEFAULT skips libraries loaded RTLD_LOCAL, `System.loadLibrary` loads RTLD_LOCAL, and none
+   of the three native libraries lists `libLiteRt.so` as NEEDED (check with `llvm-readelf -d`).
+   Symbols are now looked up on `dlopen("libLiteRt.so", RTLD_NOLOAD)`.
+2. `LiteRtLockTensorBuffer` was declared with its last two parameters swapped; 2.1.5 is
+   `(buffer, void** host_mem_addr, lock_mode)`.
+3. The Kotlin `TensorBuffer` JNI handle points at the C++ `litert::TensorBuffer` wrapper, not the C
+   `LiteRtTensorBuffer`. The C handle is now read from the wrapper's first member and checked with
+   `LiteRtGetTensorBufferPackedSize` against the expected byte count before locking; a size
+   mismatch falls back to the copying path. Reading the first member is a **known ABI
+   dependency** (libLiteRt.so is built with the NDK libc++, whose `unique_ptr` stores its pointer
+   first), not a contract: a changed layout would crash rather than fall back. The LiteRT version
+   is pinned and `LiteRtVersionPinTest` fails on upgrade, which must be re-verified on a device.
+
+The cache now converts once per frame: the first caller claims the key and converts, the other
+waits at most 50 ms and copies (`InputPreprocessCache.awaitOrClaim`).
+
+All of this is verified on the host (the real kernel sources against a fake `libLiteRt.so` with
+the 2.1.5 signatures, loaded RTLD_LOCAL). **The device numbers have not been re-measured**: before
+merging, confirm on the target device that `sem outputReadTimeMs ≈ 0`, det reports
+`native_bbox_nms_float_handle`, one of the two models reports `shared_native_yuv`, and the handle
+and array paths produce identical output.
+
 ### 12.4 Session comparison
 
 Compare before/after traces on the same device and route:

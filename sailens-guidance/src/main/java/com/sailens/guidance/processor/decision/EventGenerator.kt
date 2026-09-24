@@ -14,6 +14,7 @@ import com.sailens.guidance.model.common.ObstacleCategory
 import com.sailens.guidance.model.common.Severity
 import com.sailens.guidance.model.common.UrgencyLevel
 import com.sailens.guidance.model.scene.SceneEvent
+import com.sailens.guidance.model.scene.SceneEventMessageKeys
 import com.sailens.guidance.model.perception.DetectedObstacle
 
 /**
@@ -107,8 +108,8 @@ class EventGenerator(
 
     private fun createSensorQualityEvent(quality: FrameQuality, now: Long): SceneEvent {
         val messageKey = when (quality) {
-            FrameQuality.OBSTRUCTED -> "event_camera_blocked"
-            FrameQuality.TOO_DARK -> "event_low_light"
+            FrameQuality.OBSTRUCTED -> SceneEventMessageKeys.CAMERA_BLOCKED
+            FrameQuality.TOO_DARK -> SceneEventMessageKeys.LOW_LIGHT
             FrameQuality.OK -> error("createSensorQualityEvent called with FrameQuality.OK")
         }
 
@@ -140,7 +141,7 @@ class EventGenerator(
             timestamp = now,
             category = EventCategory.BLOCKED,
             priority = priority,
-            messageKey = "event_blocked",
+            messageKey = SceneEventMessageKeys.BLOCKED,
             expiresAt = now + 5000,
             dedupeKey = "blocked",
             confidence = snapshot.connectivity.blockageConfidence,
@@ -162,7 +163,7 @@ class EventGenerator(
             timestamp = now,
             category = EventCategory.PATH_COMPLEX,
             priority = EventPriority.MEDIUM,
-            messageKey = "event_path_complex",
+            messageKey = SceneEventMessageKeys.PATH_COMPLEX,
             expiresAt = now + 5000,
             dedupeKey = "path_complex",
             confidence = snapshot.connectivity.blockageConfidence,
@@ -275,7 +276,7 @@ class EventGenerator(
             timestamp = now,
             category = EventCategory.NARROWING,
             priority = EventPriority.MEDIUM,
-            messageKey = "event_narrowing",
+            messageKey = SceneEventMessageKeys.NARROWING,
             expiresAt = now + 4000,
             dedupeKey = "narrowing",
             confidence = snapshot.connectivity.narrowingConfidence,
@@ -320,11 +321,10 @@ class EventGenerator(
     private fun obstacleMessageKey(
         zone: DirectionZone,
         category: ObstacleCategory,
-    ): String {
-        val zoneKey = "event_obstacle_${zone.name.lowercase()}"
-        val suffix = obstacleCategorySuffix(category) ?: return zoneKey
-        return "${zoneKey}_$suffix"
-    }
+    ): String = SceneEventMessageKeys.obstacle(
+        zonePart = SceneEventMessageKeys.zonePart(zone),
+        suffix = obstacleCategorySuffix(category),
+    )
 
     /**
      * 播报用的类别词，比感知类别更粗。返回 null 表示不带类别后缀（"前方有障碍"）。
@@ -339,9 +339,9 @@ class EventGenerator(
      */
     private fun obstacleCategorySuffix(category: ObstacleCategory): String? {
         return when (category) {
-            ObstacleCategory.PERSON -> "person"
+            ObstacleCategory.PERSON -> SceneEventMessageKeys.SUFFIX_PERSON
             ObstacleCategory.BICYCLE,
-            ObstacleCategory.VEHICLE -> "vehicle"
+            ObstacleCategory.VEHICLE -> SceneEventMessageKeys.SUFFIX_VEHICLE
             ObstacleCategory.STATIC_OBSTACLE,
             ObstacleCategory.UNKNOWN -> null
         }
@@ -398,7 +398,7 @@ class EventGenerator(
             timestamp = now,
             category = EventCategory.INTERSECTION,
             priority = EventPriority.LOW,
-            messageKey = "event_intersection",
+            messageKey = SceneEventMessageKeys.INTERSECTION,
             expiresAt = now + 5000,
             dedupeKey = "intersection"
         )
@@ -409,7 +409,7 @@ class EventGenerator(
             timestamp = now,
             category = EventCategory.TRAFFIC_LIGHT,
             priority = EventPriority.LOW,
-            messageKey = "event_traffic_light",
+            messageKey = SceneEventMessageKeys.TRAFFIC_LIGHT,
             expiresAt = now + 5000,
             dedupeKey = "traffic_light"
         )
@@ -417,9 +417,9 @@ class EventGenerator(
 
     private fun createRoadWarningEvent(roadSafety: RoadSafetyState, now: Long): SceneEvent {
         val messageKey = if (roadSafety.hasVehicleOnRoad) {
-            "event_road_warning_vehicle"
+            SceneEventMessageKeys.ROAD_WARNING_VEHICLE
         } else {
-            "event_road_warning"
+            SceneEventMessageKeys.ROAD_WARNING
         }
 
         return SceneEvent(
@@ -439,11 +439,11 @@ class EventGenerator(
 
     private fun createGroundChangeEvent(change: GroundTypeChange, now: Long): SceneEvent {
         val messageKey = when (change.to) {
-            GroundType.ROAD -> "event_ground_to_road"
-            GroundType.TERRAIN -> "event_ground_to_terrain"
-            GroundType.SIDEWALK -> "event_ground_to_sidewalk"
-            GroundType.INDOOR -> "event_ground_to_indoor"
-            else -> "event_ground_change"
+            GroundType.ROAD -> SceneEventMessageKeys.GROUND_TO_ROAD
+            GroundType.TERRAIN -> SceneEventMessageKeys.GROUND_TO_TERRAIN
+            GroundType.SIDEWALK -> SceneEventMessageKeys.GROUND_TO_SIDEWALK
+            GroundType.INDOOR -> SceneEventMessageKeys.GROUND_TO_INDOOR
+            else -> SceneEventMessageKeys.GROUND_CHANGE
         }
 
         return SceneEvent(

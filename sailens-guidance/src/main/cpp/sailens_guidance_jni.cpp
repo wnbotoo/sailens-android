@@ -49,12 +49,43 @@ constexpr int kOutMaxRunWidth = 9;
 constexpr int kOutMaxRunRow = 10;
 constexpr int kOutMaxRunStart = 11;
 constexpr int kOutMaxRunEnd = 12;
+
+// The part of the score grid that shows the camera frame, in grid pixels. The rest is letterbox
+// padding: the model is fed a square, the camera frame is not, and the padding has no scene in
+// it. Everything Guidance measures -- passable area, bottom band, centre band, runs -- is measured
+// over this region only, so a mask pixel means the same thing as a detection box coordinate.
+struct ContentRegion {
+    int x;
+    int y;
+    int width;
+    int height;
+};
+
+static bool readContentRegion(JNIEnv* env, jintArray region, int gridWidth, int gridHeight, ContentRegion* out) {
+    if (region == nullptr || env->GetArrayLength(region) < 4) {
+        return false;
+    }
+    jint values[4];
+    env->GetIntArrayRegion(region, 0, 4, values);
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+        return false;
+    }
+    const ContentRegion candidate{values[0], values[1], values[2], values[3]};
+    if (candidate.x < 0 || candidate.y < 0 || candidate.width <= 0 || candidate.height <= 0 ||
+        candidate.x + candidate.width > gridWidth || candidate.y + candidate.height > gridHeight) {
+        return false;
+    }
+    *out = candidate;
+    return true;
+}
+
 template <typename ScoreAt>
 static void postprocessSemanticScoresCore(
         ScoreAt scoreAt,
         jint* resultData,
-        int width,
-        int height,
+        int gridWidth,
+        const ContentRegion& region,
         int channels,
         const jboolean* passableData,
         const jboolean* obstacleData,
@@ -71,6 +102,9 @@ static void postprocessSemanticScoresCore(
         jint* groundTypeCountData,
         int groundTypeCount,
         jint* outputData) {
+    // Outputs are content-sized; scores are read from the full grid.
+    const int width = region.width;
+    const int height = region.height;
     const int pixelCount = width * height;
     const int wordCount = (pixelCount + 63) / 64;
 
@@ -104,7 +138,8 @@ static void postprocessSemanticScoresCore(
 
         for (int x = 0; x < width; ++x) {
             const int pixelIndex = y * width + x;
-            const int base = pixelIndex * channels;
+            const int sourcePixel = (region.y + y) * gridWidth + (region.x + x);
+            const int base = sourcePixel * channels;
             int classId = 0;
             auto bestScore = scoreAt(base);
 
@@ -213,7 +248,8 @@ nativePostprocessScores(
         jlongArray obstacleWords,
         jintArray classCounts,
         jintArray groundTypeCounts,
-        jintArray intOutputs) {
+        jintArray intOutputs,
+        jintArray contentRegion) {
     if (scores == nullptr ||
         resultMask == nullptr ||
         passableLookup == nullptr ||
@@ -238,15 +274,20 @@ nativePostprocessScores(
         !isValidTensorLayout(scoreLayout)) {
         return JNI_FALSE;
     }
+    ContentRegion region{};
+    if (!readContentRegion(env, contentRegion, width, height, &region)) {
+        return JNI_FALSE;
+    }
 
     const int pixelCount = width * height;
     const int expectedScoreCount = pixelCount * channels;
-    const int wordCount = (pixelCount + 63) / 64;
+    const int contentPixelCount = region.width * region.height;
+    const int wordCount = (contentPixelCount + 63) / 64;
     const int classCount = env->GetArrayLength(classCounts);
     const int groundTypeCount = env->GetArrayLength(groundTypeCounts);
 
     if (env->GetArrayLength(scores) != expectedScoreCount ||
-        env->GetArrayLength(resultMask) != pixelCount ||
+        env->GetArrayLength(resultMask) != contentPixelCount ||
         env->GetArrayLength(passableWords) < wordCount ||
         env->GetArrayLength(obstacleWords) < wordCount ||
         env->GetArrayLength(passableLookup) < classCount ||
@@ -307,7 +348,7 @@ nativePostprocessScores(
             },
             resultData,
             width,
-            height,
+            region,
             channels,
             passableData,
             obstacleData,
@@ -362,7 +403,8 @@ nativePostprocessInt8Scores(
         jlongArray obstacleWords,
         jintArray classCounts,
         jintArray groundTypeCounts,
-        jintArray intOutputs) {
+        jintArray intOutputs,
+        jintArray contentRegion) {
     if (scores == nullptr ||
         resultMask == nullptr ||
         passableLookup == nullptr ||
@@ -387,15 +429,20 @@ nativePostprocessInt8Scores(
         !isValidTensorLayout(scoreLayout)) {
         return JNI_FALSE;
     }
+    ContentRegion region{};
+    if (!readContentRegion(env, contentRegion, width, height, &region)) {
+        return JNI_FALSE;
+    }
 
     const int pixelCount = width * height;
     const int expectedScoreCount = pixelCount * channels;
-    const int wordCount = (pixelCount + 63) / 64;
+    const int contentPixelCount = region.width * region.height;
+    const int wordCount = (contentPixelCount + 63) / 64;
     const int classCount = env->GetArrayLength(classCounts);
     const int groundTypeCount = env->GetArrayLength(groundTypeCounts);
 
     if (env->GetArrayLength(scores) != expectedScoreCount ||
-        env->GetArrayLength(resultMask) != pixelCount ||
+        env->GetArrayLength(resultMask) != contentPixelCount ||
         env->GetArrayLength(passableWords) < wordCount ||
         env->GetArrayLength(obstacleWords) < wordCount ||
         env->GetArrayLength(passableLookup) < classCount ||
@@ -457,7 +504,7 @@ nativePostprocessInt8Scores(
             },
             resultData,
             width,
-            height,
+            region,
             channels,
             passableData,
             obstacleData,
@@ -517,7 +564,8 @@ nativePostprocessScoresFromHandle(
         jlongArray obstacleWords,
         jintArray classCounts,
         jintArray groundTypeCounts,
-        jintArray intOutputs) {
+        jintArray intOutputs,
+        jintArray contentRegion) {
     if (!sailens::liteRtZeroCopyAvailable()) return JNI_FALSE;
     if (tensorBufferHandle == 0 ||
         resultMask == nullptr ||
@@ -537,21 +585,28 @@ nativePostprocessScoresFromHandle(
         !isValidTensorLayout(scoreLayout)) {
         return JNI_FALSE;
     }
+    ContentRegion region{};
+    if (!readContentRegion(env, contentRegion, width, height, &region)) {
+        return JNI_FALSE;
+    }
 
     // Lock the LiteRT tensor buffer to obtain a CPU-accessible float pointer.
     // kLiteRtTensorBufferLockModeRead = 0; works for CPU, GPU, and NPU outputs.
-    void* hostPtr = lockTensorBufferForRead(tensorBufferHandle);
+    void* hostPtr = lockTensorBufferForRead(
+            tensorBufferHandle,
+            static_cast<size_t>(width) * static_cast<size_t>(height) * static_cast<size_t>(channels) * sizeof(jfloat));
     if (hostPtr == nullptr) {
         return JNI_FALSE;
     }
     const jfloat* scoreData = static_cast<const jfloat*>(hostPtr);
 
     const int pixelCount = width * height;
-    const int wordCount = (pixelCount + 63) / 64;
+    const int contentPixelCount = region.width * region.height;
+    const int wordCount = (contentPixelCount + 63) / 64;
     const int classCount = env->GetArrayLength(classCounts);
     const int groundTypeCount = env->GetArrayLength(groundTypeCounts);
 
-    if (env->GetArrayLength(resultMask) != pixelCount ||
+    if (env->GetArrayLength(resultMask) != contentPixelCount ||
         env->GetArrayLength(passableWords) < wordCount ||
         env->GetArrayLength(obstacleWords) < wordCount ||
         env->GetArrayLength(passableLookup) < classCount ||
@@ -602,7 +657,7 @@ nativePostprocessScoresFromHandle(
             [scoreData, pixelCount, channels, scoreLayout](int index) {
                 return scoreData[semanticScoreOffset(index, pixelCount, channels, scoreLayout)];
             },
-            resultData, width, height, channels,
+            resultData, width, region, channels,
             passableData, obstacleData, roadData, trafficLightData, groundTypeData,
             bottomRatio, centerRatio, navigationRegionRatio,
             passableWordData, obstacleWordData,
@@ -651,7 +706,8 @@ nativePostprocessInt8ScoresFromHandle(
         jlongArray obstacleWords,
         jintArray classCounts,
         jintArray groundTypeCounts,
-        jintArray intOutputs) {
+        jintArray intOutputs,
+        jintArray contentRegion) {
     if (!sailens::liteRtZeroCopyAvailable()) return JNI_FALSE;
     if (tensorBufferHandle == 0 ||
         resultMask == nullptr ||
@@ -671,19 +727,26 @@ nativePostprocessInt8ScoresFromHandle(
         !isValidTensorLayout(scoreLayout)) {
         return JNI_FALSE;
     }
+    ContentRegion region{};
+    if (!readContentRegion(env, contentRegion, width, height, &region)) {
+        return JNI_FALSE;
+    }
 
-    void* hostPtr = lockTensorBufferForRead(tensorBufferHandle);
+    void* hostPtr = lockTensorBufferForRead(
+            tensorBufferHandle,
+            static_cast<size_t>(width) * static_cast<size_t>(height) * static_cast<size_t>(channels) * sizeof(jbyte));
     if (hostPtr == nullptr) {
         return JNI_FALSE;
     }
     const jbyte* scoreData = static_cast<const jbyte*>(hostPtr);
 
     const int pixelCount = width * height;
-    const int wordCount = (pixelCount + 63) / 64;
+    const int contentPixelCount = region.width * region.height;
+    const int wordCount = (contentPixelCount + 63) / 64;
     const int classCount = env->GetArrayLength(classCounts);
     const int groundTypeCount = env->GetArrayLength(groundTypeCounts);
 
-    if (env->GetArrayLength(resultMask) != pixelCount ||
+    if (env->GetArrayLength(resultMask) != contentPixelCount ||
         env->GetArrayLength(passableWords) < wordCount ||
         env->GetArrayLength(obstacleWords) < wordCount ||
         env->GetArrayLength(passableLookup) < classCount ||
@@ -735,7 +798,7 @@ nativePostprocessInt8ScoresFromHandle(
                 return static_cast<int>(
                         scoreData[semanticScoreOffset(index, pixelCount, channels, scoreLayout)]);
             },
-            resultData, width, height, channels,
+            resultData, width, region, channels,
             passableData, obstacleData, roadData, trafficLightData, groundTypeData,
             bottomRatio, centerRatio, navigationRegionRatio,
             passableWordData, obstacleWordData,
@@ -1132,16 +1195,16 @@ nativeExtractConnectivityStats(
 
 const JNINativeMethod kSemanticScorePostprocessorMethods[] = {
         {"nativePostprocessScores",
-         "([F[IIIII[Z[Z[Z[Z[IFFF[J[J[I[I[I)Z",
+         "([F[IIIII[Z[Z[Z[Z[IFFF[J[J[I[I[I[I)Z",
          reinterpret_cast<void*>(nativePostprocessScores)},
         {"nativePostprocessInt8Scores",
-         "([B[IIIII[Z[Z[Z[Z[IFFF[J[J[I[I[I)Z",
+         "([B[IIIII[Z[Z[Z[Z[IFFF[J[J[I[I[I[I)Z",
          reinterpret_cast<void*>(nativePostprocessInt8Scores)},
         {"nativePostprocessScoresFromHandle",
-         "(J[IIIII[Z[Z[Z[Z[IFFF[J[J[I[I[I)Z",
+         "(J[IIIII[Z[Z[Z[Z[IFFF[J[J[I[I[I[I)Z",
          reinterpret_cast<void*>(nativePostprocessScoresFromHandle)},
         {"nativePostprocessInt8ScoresFromHandle",
-         "(J[IIIII[Z[Z[Z[Z[IFFF[J[J[I[I[I)Z",
+         "(J[IIIII[Z[Z[Z[Z[IFFF[J[J[I[I[I[I)Z",
          reinterpret_cast<void*>(nativePostprocessInt8ScoresFromHandle)},
 };
 

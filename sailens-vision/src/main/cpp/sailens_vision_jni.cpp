@@ -489,7 +489,8 @@ nativePostProcessRawFloatFromHandle(
         return nullptr;
     }
 
-    void* hostPtr = lockTensorBufferForRead(tensorBufferHandle);
+    void* hostPtr = lockTensorBufferForRead(
+            tensorBufferHandle, static_cast<size_t>(rawElementCount) * sizeof(jfloat));
     if (hostPtr == nullptr) {
         return nullptr;
     }
@@ -552,7 +553,8 @@ nativePostProcessRawInt8FromHandle(
         return nullptr;
     }
 
-    void* hostPtr = lockTensorBufferForRead(tensorBufferHandle);
+    void* hostPtr = lockTensorBufferForRead(
+            tensorBufferHandle, static_cast<size_t>(rawElementCount) * sizeof(jbyte));
     if (hostPtr == nullptr) {
         return nullptr;
     }

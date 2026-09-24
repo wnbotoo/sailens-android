@@ -19,21 +19,25 @@ class ModelInputPreprocessor(
         outputArray: FloatArray,
     ): InputPreprocessBackend {
         val cacheKey = InputPreprocessCache.Key.from(frame, rotationDegrees, config)
-        preprocessCache?.copyFloatInput(cacheKey, outputArray)?.let { backend ->
+        val cache = preprocessCache
+        cache?.awaitOrClaim(cacheKey) { cache.copyFloatInput(cacheKey, outputArray) }?.let { backend ->
             return backend
         }
-
-        if (preferNativeYuvPreprocessing &&
-            nativeProcessor.preprocessFloat(frame, rotationDegrees, outputArray)
-        ) {
-            val backend = InputPreprocessBackend.NATIVE_YUV
-            preprocessCache?.storeFloatInput(cacheKey, outputArray, backend)
+        try {
+            if (preferNativeYuvPreprocessing &&
+                nativeProcessor.preprocessFloat(frame, rotationDegrees, outputArray)
+            ) {
+                val backend = InputPreprocessBackend.NATIVE_YUV
+                cache?.storeFloatInput(cacheKey, outputArray, backend)
+                return backend
+            }
+            fallbackProcessor.preprocess(frame, rotationDegrees, outputArray)
+            val backend = InputPreprocessBackend.OPENCV_FALLBACK
+            cache?.storeFloatInput(cacheKey, outputArray, backend)
             return backend
+        } finally {
+            cache?.releaseClaim(cacheKey)
         }
-        fallbackProcessor.preprocess(frame, rotationDegrees, outputArray)
-        val backend = InputPreprocessBackend.OPENCV_FALLBACK
-        preprocessCache?.storeFloatInput(cacheKey, outputArray, backend)
-        return backend
     }
 
     fun preprocessInt8(
@@ -42,35 +46,41 @@ class ModelInputPreprocessor(
         outputArray: ByteArray,
     ): InputPreprocessBackend {
         val cacheKey = InputPreprocessCache.Key.from(frame, rotationDegrees, config)
-        preprocessCache?.copyInt8Input(cacheKey, inputQuantization, outputArray)?.let { backend ->
-            return backend
-        }
-
         val expectedSize = config.inputWidth * config.inputHeight * 3
         if (fallbackFloatInput.size != expectedSize) {
             fallbackFloatInput = FloatArray(expectedSize)
         }
-        preprocessCache?.copyFloatInput(cacheKey, fallbackFloatInput)?.let { backend ->
-            quantizeFloatInput(fallbackFloatInput, outputArray)
-            val quantizedBackend = backend.asSharedQuantizedCacheHit()
-            preprocessCache.storeInt8Input(cacheKey, inputQuantization, outputArray, quantizedBackend)
-            return quantizedBackend
-        }
-
-        if (preferNativeYuvPreprocessing &&
-            nativeProcessor.preprocessInt8(frame, rotationDegrees, outputArray)
-        ) {
-            val backend = InputPreprocessBackend.NATIVE_YUV
-            preprocessCache?.storeInt8Input(cacheKey, inputQuantization, outputArray, backend)
+        val cache = preprocessCache
+        cache?.awaitOrClaim(cacheKey) {
+            cache.copyInt8Input(cacheKey, inputQuantization, outputArray)
+                ?: cache.copyFloatInput(cacheKey, fallbackFloatInput)?.let { backend ->
+                    quantizeFloatInput(fallbackFloatInput, outputArray)
+                    val quantizedBackend = backend.asSharedQuantizedCacheHit()
+                    cache.storeInt8Input(cacheKey, inputQuantization, outputArray, quantizedBackend)
+                    quantizedBackend
+                }
+        }?.let { backend ->
             return backend
         }
 
-        fallbackProcessor.preprocess(frame, rotationDegrees, fallbackFloatInput)
-        quantizeFloatInput(fallbackFloatInput, outputArray)
-        val backend = InputPreprocessBackend.OPENCV_FALLBACK
-        preprocessCache?.storeFloatInput(cacheKey, fallbackFloatInput, backend)
-        preprocessCache?.storeInt8Input(cacheKey, inputQuantization, outputArray, backend)
-        return backend
+        try {
+            if (preferNativeYuvPreprocessing &&
+                nativeProcessor.preprocessInt8(frame, rotationDegrees, outputArray)
+            ) {
+                val backend = InputPreprocessBackend.NATIVE_YUV
+                cache?.storeInt8Input(cacheKey, inputQuantization, outputArray, backend)
+                return backend
+            }
+
+            fallbackProcessor.preprocess(frame, rotationDegrees, fallbackFloatInput)
+            quantizeFloatInput(fallbackFloatInput, outputArray)
+            val backend = InputPreprocessBackend.OPENCV_FALLBACK
+            cache?.storeFloatInput(cacheKey, fallbackFloatInput, backend)
+            cache?.storeInt8Input(cacheKey, inputQuantization, outputArray, backend)
+            return backend
+        } finally {
+            cache?.releaseClaim(cacheKey)
+        }
     }
 
     /**

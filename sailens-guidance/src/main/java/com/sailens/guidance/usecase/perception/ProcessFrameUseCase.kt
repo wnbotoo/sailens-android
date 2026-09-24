@@ -19,6 +19,7 @@ import com.sailens.guidance.repository.DepthRepository
 import com.sailens.guidance.repository.ObstacleProvider
 import com.sailens.guidance.repository.PerceptionRepository
 import com.sailens.guidance.util.Timestamp
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 
@@ -92,15 +93,30 @@ class ProcessFrameUseCase(
         val obstacleRun = selectObstacleRun(config, startTime)
 
         val semDeferred = async { getSemanticAnalysis(frame) }
-        val obstacleDeferred = obstacleRun?.let { run -> async { run.provider.detect(frame) } }
+        // det 以异常报错（sem 用 Result）。在这里收成 Result：单帧 det 失败应当和 sem 失败一样被计为
+        // 一帧失败、交给上层按连续失败次数处置，而不是直接冲垮整条 flow。
+        val obstacleDeferred = obstacleRun?.let { run ->
+            async {
+                try {
+                    Result.success(run.provider.detect(frame))
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    Result.failure(error)
+                }
+            }
+        }
 
         val semanticOutput = semDeferred.await().getOrElse {
+            obstacleDeferred?.cancel()
             return@coroutineScope Result.failure(it)
         }
 
         val depthEstimator: (NormalizedRect) -> DistanceLevel = { depthRepository.estimateDistance(it) }
         val trackingOutput = if (obstacleRun != null && obstacleDeferred != null) {
-            val obstacleOutput = obstacleDeferred.await()
+            val obstacleOutput = obstacleDeferred.await().getOrElse {
+                return@coroutineScope Result.failure(it)
+            }
             val completedAt = clock()
             scheduler.markDetectionRun(completedAt)
 

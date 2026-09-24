@@ -1,5 +1,13 @@
 package com.sailens.shell.guidance.screen
 
+import com.sailens.shell.guidance.overlay.overlayRotationDegrees
+import com.sailens.camera.CameraViewModel
+import android.view.Surface
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.foundation.layout.requiredSize
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.BoxScope
 import android.graphics.Paint
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
@@ -296,6 +304,7 @@ private fun PreviewPanel(
         ),
     ) {
         CaptureView(
+            overlayRotationDegrees = rememberOverlayRotationDegrees(),
             segMask = state.segMask,
             overlayMode = state.overlayMode,
             obstacleDetections = state.obstacleDetections,
@@ -558,6 +567,8 @@ private fun GuidanceStatusLabel(
 
 @Composable
 private fun CaptureView(
+    /** Clockwise turn from analysis-frame coordinates to the preview's; see [overlayRotationDegrees]. */
+    overlayRotationDegrees: Int,
     segMask: android.graphics.Bitmap?,
     overlayMode: SceneOverlayMode,
     obstacleDetections: List<ObstacleDetection>,
@@ -577,38 +588,77 @@ private fun CaptureView(
         contentAlignment = Alignment.Center,
     ) {
         CameraViewWithPermission(modifier = Modifier.fillMaxSize(), contentScale = contentScale)
-        if (segMask != null) {
-            Image(
-                bitmap = segMask.asImageBitmap(),
-                contentDescription = null,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .clearAndSetSemantics {},
-                contentScale = contentScale,
-                alpha = 0.6f,
-            )
-        }
-        if (overlayMode == SceneOverlayMode.DETECTION_BOXES && obstacleDetections.isNotEmpty()) {
-            Canvas(modifier = Modifier.fillMaxSize().clearAndSetSemantics {}) {
-                val transform = ViewContentTransform.from(
-                    containerSize = size,
-                    sourceWidth = frameDisplayWidth,
-                    sourceHeight = frameDisplayHeight,
+        AnalysisOverlayFrame(rotationDegrees = overlayRotationDegrees) {
+            if (segMask != null) {
+                Image(
+                    bitmap = segMask.asImageBitmap(),
+                    contentDescription = null,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clearAndSetSemantics {},
                     contentScale = contentScale,
+                    alpha = 0.6f,
                 )
-                obstacleDetections.forEach { detection ->
-                    drawOverlayBox(
-                        transform = transform,
-                        boundingBox = detection.boundingBox,
-                        color = detection.category.overlayColor(),
-                        label = detection.overlayLabel(),
-                        labelPaint = labelPaint,
-                        backgroundPaint = backgroundPaint,
+            }
+            if (overlayMode == SceneOverlayMode.DETECTION_BOXES && obstacleDetections.isNotEmpty()) {
+                Canvas(modifier = Modifier.fillMaxSize().clearAndSetSemantics {}) {
+                    val transform = ViewContentTransform.from(
+                        containerSize = size,
+                        sourceWidth = frameDisplayWidth,
+                        sourceHeight = frameDisplayHeight,
+                        contentScale = contentScale,
                     )
+                    obstacleDetections.forEach { detection ->
+                        drawOverlayBox(
+                            transform = transform,
+                            boundingBox = detection.boundingBox,
+                            color = detection.category.overlayColor(),
+                            label = detection.overlayLabel(),
+                            labelPaint = labelPaint,
+                            backgroundPaint = backgroundPaint,
+                        )
+                    }
                 }
             }
         }
     }
+}
+
+/**
+ * The analysis-frame overlays (mask, boxes) laid out in analysis coordinates and turned onto the
+ * preview. For a quarter turn the frame is laid out with the container's sides swapped, so after
+ * turning it covers the container exactly and the overlay's content scaling matches the preview's.
+ */
+@Composable
+private fun AnalysisOverlayFrame(
+    rotationDegrees: Int,
+    content: @Composable BoxScope.() -> Unit,
+) {
+    BoxWithConstraints(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        val quarterTurn = rotationDegrees % 180 != 0
+        Box(
+            modifier = Modifier
+                .requiredSize(
+                    width = if (quarterTurn) maxHeight else maxWidth,
+                    height = if (quarterTurn) maxWidth else maxHeight,
+                )
+                .graphicsLayer { rotationZ = rotationDegrees.toFloat() },
+            contentAlignment = Alignment.Center,
+            content = content,
+        )
+    }
+}
+
+/** See [overlayRotationDegrees]: analysis orientation from the camera, display orientation from the window. */
+@Composable
+private fun rememberOverlayRotationDegrees(
+    cameraViewModel: CameraViewModel = koinViewModel(),
+): Int {
+    val analysisRotation by cameraViewModel.analysisTargetRotation.collectAsStateWithLifecycle()
+    // Reading the configuration recomposes this when the display rotates.
+    LocalConfiguration.current
+    val displayRotation = LocalView.current.display?.rotation ?: Surface.ROTATION_0
+    return overlayRotationDegrees(analysisRotation, displayRotation)
 }
 
 @Composable

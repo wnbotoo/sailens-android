@@ -8,6 +8,7 @@ import com.sailens.shell.device.HapticManager
 import com.sailens.shell.app.ConfigurationFailureSignal
 import com.sailens.shell.device.GuidanceAnnouncements
 import com.sailens.shell.device.GuidanceHaptic
+import com.sailens.shell.device.GuidanceNoticeText
 import com.sailens.shell.device.SceneEventTextResolver
 import com.sailens.shell.device.ScreenReaderAnnouncer
 import com.sailens.shell.device.SharedEngineOwner
@@ -45,6 +46,7 @@ val shellModule = module {
     single { SceneEventTextResolver(androidContext()) }
     single { SpeechManager(androidContext(), get()) }
     single { GuidanceAnnouncements(textResolver = get()) }
+    single { GuidanceNoticeText(androidContext()) }
     single {
         ConfigurationFailureSignal(
             speechManager = get(),
@@ -122,6 +124,8 @@ val shellModule = module {
             accessibilityStatusProvider = get(),
             textResolver = get(),
             announcements = get(),
+            revokeUndeliveredEvent = get(),
+            noticeText = get(),
         )
     }
     viewModel {

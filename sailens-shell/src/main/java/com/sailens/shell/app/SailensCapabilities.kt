@@ -82,9 +82,14 @@ val SailensCapabilities.offersDescribeAction: Boolean
 object PipelinePreflight {
 
     fun evaluate(spec: SailensAppSpec): SailensCapabilities = SailensCapabilities(
-        guidance = availability(spec.guidance?.verifySemanticModel, configured = spec.guidance != null),
+        guidance = availability(spec.guidance?.let(::guidanceCheck), configured = spec.guidance != null),
         describe = availability(spec.describe?.verifyEngine, configured = spec.describe != null),
     )
+
+    /** The semantic model first -- Guidance cannot run without it -- then the detector, if vouched for. */
+    private fun guidanceCheck(guidance: GuidanceSpec): () -> StaticUnavailableReason? = {
+        guidance.verifySemanticModel() ?: guidance.verifyObstacleModel?.invoke()
+    }
 
     private fun availability(
         verify: (() -> StaticUnavailableReason?)?,

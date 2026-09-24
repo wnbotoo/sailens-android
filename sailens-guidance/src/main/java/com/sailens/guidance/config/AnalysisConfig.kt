@@ -2,6 +2,21 @@ package com.sailens.guidance.config
 
 /**
  * 分析配置
+ *
+ * ## 比例阈值相对的是什么
+ *
+ * 语义 mask 只覆盖相机画面，不含 letterbox 填充（见 `SemanticContentRegion`）。此前 mask 带着
+ * 填充：16:9 的帧放进 640x640，竖屏时左右、横屏时上下各有 140 像素填充，模型把填充判成
+ * building（不可行走、非道路）。裁掉填充后：
+ *
+ * - **横向宽度阈值**（[minRunWidthRatio]、[segmentationCenterRatio]）是**画面长边**的比例
+ *   （[widthFractionOfLongSide] 换算成当前 mask 宽度的比例）。旧 mask 宽度 640 恰好就是长边，
+ *   所以数值不变、横竖屏的旧行为都原样保留；这在物理上也成立——同一条路在横屏画面里占的宽度比例
+ *   本来就更小（水平视场更宽）。
+ * - **面积阈值**（标注"面积等效"）按 16/9 折算：无论横竖屏，16:9 画面都只占旧 mask 的 9/16。
+ * - 纵向比例不受影响。
+ *
+ * 驱动默认关闭提示的阈值（道路警告、地面变化、路口兜底）没有折算，开启前需按实测重调。
  */
 data class AnalysisConfig(
     // 事件输出策略
@@ -17,6 +32,7 @@ data class AnalysisConfig(
 
     // 连通性 - 分层扫描
     val sampleLayerRatios: List<Float> = listOf(0.85f, 0.70f, 0.55f),
+    /** 画面长边的比例（见类注释）。 */
     val minRunWidthRatio: Float = 0.05f,
     val reachRatioThreshold: Float = 0.40f,
     val connectivityBottomRatio: Float = 0.15f,
@@ -66,6 +82,7 @@ data class AnalysisConfig(
 
     // 语义统计区域
     val segmentationBottomRatio: Float = 0.20f,
+    /** 画面长边的比例（见类注释）。 */
     val segmentationCenterRatio: Float = 0.40f,
     val segmentationNavigationRegionRatio: Float = 0.45f,
 
@@ -78,7 +95,19 @@ data class AnalysisConfig(
     val intersectionDebounceFrames: Int = 3,
     val roadRatioSmoothWindow: Int = 5,
     val trafficLightDebounceFrames: Int = 4,
-    val trafficLightMinPixelRatio: Float = 0.0015f,
-    val trafficLightMinRoadRatio: Float = 0.08f,
+    /** 面积等效：原 0.0015 x letterbox mask 面积。 */
+    val trafficLightMinPixelRatio: Float = 0.00267f,
+    /** 面积等效：原 0.08 x letterbox mask 面积（填充不是道路，道路占比按 16/9 放大）。 */
+    val trafficLightMinRoadRatio: Float = 0.142f,
     val rawVehicleOnRoadDebounceFrames: Int = 3,
 )
+
+/**
+ * A horizontal threshold given as a fraction of the frame's long side, as a fraction of this
+ * [width]-wide mask. For a portrait 360x640 mask 0.05 becomes 0.089; for a landscape 640x360
+ * mask it stays 0.05 -- the effective values the letterboxed mask always had.
+ */
+fun widthFractionOfLongSide(fraction: Float, width: Int, height: Int): Float {
+    if (width <= 0) return fraction
+    return (fraction * maxOf(width, height) / width).coerceIn(0f, 1f)
+}

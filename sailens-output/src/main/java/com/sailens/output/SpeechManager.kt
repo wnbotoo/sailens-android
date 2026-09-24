@@ -52,7 +52,6 @@ public class SpeechManager(
     private var initFailureCount = 0
     private var nextInitRetryAtMs = 0L
     private var initTimeoutRunnable: Runnable? = null
-    private var pendingSpeech: PendingSpeech? = null
     private val onReadyCallbacks = mutableListOf<() -> Unit>()
     private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -127,7 +126,6 @@ public class SpeechManager(
                     "TTS automatic initialization suppressed after repeated failures",
                     mapOf("failureCount" to initFailureCount)
                 )
-                clearPendingSpeech("automatic retry limit reached")
                 return
             }
 
@@ -177,47 +175,72 @@ public class SpeechManager(
 
     /**
      * 播报一条已经解析好文案的 [Announcement]。文案由上层决定，这里只负责怎么说出去。
+     *
+     * @return 这条是否真的交给了引擎去念。已过期、引擎还没就绪、或正在念的播报优先级不低于它
+     *   （见 [Announcement.priority]）时为 false，调用方据此决定要不要再给一次。
+     *
+     *   引擎没就绪时**不暂存**：实时提示描述的是正在变化的场景，等引擎起来时它多半已经过时；
+     *   而一条"暂存"的提示随时可能被替换、过期或随初始化失败清空，调用方却已经把它当成送达记进
+     *   冷却，结果是一句从没说出口的话被静音一个冷却周期。拒收让调用方下一帧重新给出最新的那句。
+     *
+     *   只有在主线程调用时返回值才可靠；从其它线程调用会被投递到主线程，并乐观地返回 true。
      */
-    public fun speak(announcement: Announcement) {
-        runOnMain {
-            speakOnMain(announcement)
-        }
+    public fun speak(announcement: Announcement): Boolean {
+        if (Looper.myLooper() == Looper.getMainLooper()) return speakOnMain(announcement)
+        mainHandler.post { speakOnMain(announcement) }
+        return true
     }
 
-    private fun speakOnMain(announcement: Announcement) {
-        if (announcement.isExpired(System.currentTimeMillis())) {
+    private fun speakOnMain(announcement: Announcement): Boolean {
+        if (announcement.isExpired(SystemClock.elapsedRealtime())) {
             logger.debug(
                 TAG,
                 "Dropping expired scene event before speaking",
                 mapOf("key" to announcement.key)
             )
-            return
+            return false
         }
 
         if (!_isReady) {
-            logger.warning(
+            logger.debug(
                 TAG,
-                "TTS speak queued because engine is not ready",
+                "Refusing announcement because the engine is not ready",
                 mapOf("key" to announcement.key)
             )
-            storePendingSpeech(announcement)
             if (!isInitializing) {
                 initializeOnMain(forceRetry = false)
             }
-            return
+            return false
         }
 
-        speakReadyAnnouncement(announcement)
+        return speakReadyAnnouncement(announcement)
     }
 
-    private fun speakReadyAnnouncement(announcement: Announcement) {
-        if (!_isReady) return
-        // 引擎就绪前排队的事件也要再验一次时效：pending 到就绪之间可能又过去了几百毫秒。
-        if (announcement.isExpired(System.currentTimeMillis())) return
+    private fun speakReadyAnnouncement(announcement: Announcement): Boolean {
+        if (!_isReady) return false
+        val now = SystemClock.elapsedRealtime()
+        if (announcement.isExpired(now)) return false
+
+        // 只有**严格更高**的优先级才能打断正在念的播报。否则一条 MEDIUM 的"路况复杂"会在
+        // CRITICAL 的"注意，前方有车"念到一半时把它 FLUSH 掉，而那条 CRITICAL 在冷却期内
+        // 不会再播。同级也不打断：两句都只念半截，用户一句也没听全。
+        val speakingPriority = ledger.highestLivePriority(now)
+        if (speakingPriority != null && announcement.priority <= speakingPriority) {
+            logger.debug(
+                TAG,
+                "Refusing announcement outranked by speech in progress",
+                mapOf(
+                    "key" to announcement.key,
+                    "priority" to announcement.priority,
+                    "speakingPriority" to speakingPriority,
+                )
+            )
+            return false
+        }
 
         val text = announcement.text
-        // 一律 FLUSH。唯一的例外是"辅助已停止/已恢复"这类系统状态提示，它们必须说完，
-        // 但那条路径走的是 speakSystemNotice()，不经过这里。
+        // 能开口就 FLUSH：最新且优先级更高的一句永远比排队的旧句有价值。系统状态提示（"辅助已
+        // 停止"）必须说完，走的是 speakSystemNotice()，不经过这里。
         val queueMode = TextToSpeech.QUEUE_FLUSH
 
         val utteranceId = announcement.id
@@ -240,6 +263,7 @@ public class SpeechManager(
                     "textLength" to text.length,
                 )
             )
+            return false
         } else {
             ledger.flushAndAdd(
                 UtteranceLedger.Entry(
@@ -247,6 +271,7 @@ public class SpeechManager(
                     text = text,
                     owner = null,
                     expiresAtMs = announcement.expiresAtMs,
+                    priority = announcement.priority,
                 )
             )
             logger.debug(
@@ -257,19 +282,24 @@ public class SpeechManager(
                     "queueMode" to queueMode,
                 )
             )
+            return true
         }
     }
 
     /**
-     * 播报一条系统状态提示（辅助中断/恢复、语音不可用等）。
+     * 播报一条系统状态提示（辅助中断/恢复、语音不可用等），或一段不属于实时导航的话（描述、重播、
+     * 设置页试听）。
      *
-     * 与场景事件的区别：它没有时效，也不该被下一条场景提示打断——用户必须完整听到
-     * "辅助已停止"，否则就会继续举着一个不工作的手机往前走。所以这里用 QUEUE_ADD。
+     * 与场景事件的区别：它没有时效，排在已有语音后面（QUEUE_ADD）。
      *
      * @param owner who is queueing this, so they can later [withdraw] it — and only it. Null
      *   for speech that no caller may take back.
+     * @param priority null（默认）表示这句话**可以被**下一条实时导航提示冲掉：描述、重播、试听都
+     *   是这种。给出优先级时，它就和 [Announcement.priority] 在同一个尺度上参与"严格更高才能打断"：
+     *   "辅助已停止"这类状态提示必须说完，否则用户会继续举着一个不工作的手机往前走。受保护的时长
+     *   有上限 [PROTECTED_NOTICE_MAX_MS]：丢一次完成回调不能让它永远压住导航。
      */
-    public fun speakSystemNotice(text: String, owner: SpeechOwner? = null) {
+    public fun speakSystemNotice(text: String, owner: SpeechOwner? = null, priority: Int? = null) {
         runOnMain {
             if (!_isReady) {
                 logger.warning(TAG, "Dropping system notice because TTS is not ready")
@@ -285,7 +315,13 @@ public class SpeechManager(
                 logger.warning(TAG, "TTS system notice failed")
             } else {
                 ledger.add(
-                    UtteranceLedger.Entry(id = utteranceId, text = text, owner = owner, expiresAtMs = null)
+                    UtteranceLedger.Entry(
+                        id = utteranceId,
+                        text = text,
+                        owner = owner,
+                        expiresAtMs = priority?.let { SystemClock.elapsedRealtime() + PROTECTED_NOTICE_MAX_MS },
+                        priority = priority,
+                    )
                 )
             }
         }
@@ -308,7 +344,7 @@ public class SpeechManager(
         runOnMain {
             if (!ledger.has(owner)) return@runOnMain
 
-            val survivors = ledger.withdraw(owner, System.currentTimeMillis())
+            val survivors = ledger.withdraw(owner, SystemClock.elapsedRealtime())
             if (_isReady) tts?.stop()
             if (survivors.isEmpty()) {
                 // stop() does not promise a callback for every dropped utterance.
@@ -427,7 +463,6 @@ public class SpeechManager(
         isInitializing = false
         initFailureCount = 0
         nextInitRetryAtMs = 0L
-        pendingSpeech = null
         onReadyCallbacks.clear()
         initAttempt++
         _state.value = SpeechEngineState.IDLE
@@ -541,7 +576,6 @@ public class SpeechManager(
             )
         )
         notifyReadyCallbacks()
-        speakPendingSpeechIfFresh()
     }
 
     private fun recordInitFailure(
@@ -589,59 +623,11 @@ public class SpeechManager(
             )
         )
 
-        if (automaticRetriesPaused) {
-            clearPendingSpeech("automatic retry limit reached")
-        }
     }
 
     private fun retryDelayForFailure(failureCount: Int): Long {
         val shift = (failureCount - 1).coerceIn(0, 5)
         return minOf(MAX_INIT_RETRY_DELAY_MS, INITIAL_INIT_RETRY_DELAY_MS * (1L shl shift))
-    }
-
-    private fun storePendingSpeech(announcement: Announcement) {
-        val now = SystemClock.elapsedRealtime()
-        val pending = pendingSpeech
-        if (
-            pending == null ||
-            now - pending.enqueuedAtMs > PENDING_SPEECH_MAX_AGE_MS ||
-            announcement.priority >= pending.announcement.priority
-        ) {
-            pendingSpeech = PendingSpeech(announcement = announcement, enqueuedAtMs = now)
-        }
-    }
-
-    private fun speakPendingSpeechIfFresh() {
-        val pending = pendingSpeech ?: return
-        pendingSpeech = null
-
-        val ageMs = SystemClock.elapsedRealtime() - pending.enqueuedAtMs
-        if (ageMs > PENDING_SPEECH_MAX_AGE_MS) {
-            logger.warning(
-                TAG,
-                "Dropping stale pending TTS event",
-                mapOf(
-                    "key" to pending.announcement.key,
-                    "ageMs" to ageMs,
-                )
-            )
-            return
-        }
-
-        speakReadyAnnouncement(pending.announcement)
-    }
-
-    private fun clearPendingSpeech(reason: String) {
-        val pending = pendingSpeech ?: return
-        pendingSpeech = null
-        logger.warning(
-            TAG,
-            "Dropping pending TTS event",
-            mapOf(
-                "key" to pending.announcement.key,
-                "reason" to reason,
-            )
-        )
     }
 
     private fun notifyReadyCallbacks() {
@@ -736,11 +722,6 @@ public class SpeechManager(
         }
     }
 
-    private data class PendingSpeech(
-        val announcement: Announcement,
-        val enqueuedAtMs: Long,
-    )
-
     public companion object {
         public const val DEFAULT_SPEECH_RATE: Float = 1.3f
         public const val MIN_SPEECH_RATE: Float = 0.7f
@@ -753,6 +734,8 @@ public class SpeechManager(
         private const val INITIAL_INIT_RETRY_DELAY_MS = 1_000L
         private const val MAX_INIT_RETRY_DELAY_MS = 30_000L
         private const val MAX_AUTOMATIC_INIT_FAILURES = 5
-        private const val PENDING_SPEECH_MAX_AGE_MS = 3_000L
+
+        /** Longest a prioritized system notice can hold off guidance speech, callbacks or not. */
+        public const val PROTECTED_NOTICE_MAX_MS: Long = 15_000L
     }
 }

@@ -80,6 +80,7 @@ class StartSceneAnalysisUseCase(
         var lastObstacleCount: Int? = null
         var lastRawObstacleDetectionCountOnRun: Int? = null
         var traceSessionStarted = false
+        var consecutiveFrameFailures = 0
         processFrameUseCase.reset()
 
         try {
@@ -139,8 +140,15 @@ class StartSceneAnalysisUseCase(
                         "Failed to process frame ${frame.sequenceNumber}",
                         it,
                     )
+                    // 单帧失败丢掉、试下一帧；连续失败说明管线已经不工作了，结束会话让上层告警，
+                    // 而不是一直"运行"着却什么都不播。
+                    consecutiveFrameFailures++
+                    if (consecutiveFrameFailures >= pipelineBudget.maxConsecutiveFrameFailures) {
+                        throw GuidancePipelineFailedException(consecutiveFrameFailures, it)
+                    }
                     return@mapNotNull null
                 }
+                consecutiveFrameFailures = 0
                 val processFrameCompletedAt = Timestamp.now()
 
                 val analyzeStartedAt = processFrameCompletedAt
@@ -416,6 +424,12 @@ class StartSceneAnalysisUseCase(
         logService.info("Navigation", "$label initialized")
     }
 }
+
+/** The pipeline failed on [consecutiveFailures] frames in a row; [cause] is the last failure. */
+class GuidancePipelineFailedException(
+    val consecutiveFailures: Int,
+    cause: Throwable,
+) : IllegalStateException("Guidance failed on $consecutiveFailures consecutive frames", cause)
 
 private fun obstacleProviderSummary(config: PerceptionConfig): String {
     return if (config.detectionEnabled) config.realtimeObstacleProviderType.name else "NONE"
