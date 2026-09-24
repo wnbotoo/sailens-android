@@ -1,6 +1,7 @@
 package com.sailens.camera
 
 import android.content.Context
+import android.util.Log
 import android.util.Size
 import android.view.OrientationEventListener
 import androidx.camera.core.AspectRatio
@@ -17,6 +18,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import java.util.concurrent.Executors
+
+private const val TAG = "SailensCamera"
 
 public class CameraViewModel(
     private val camera: Camera,
@@ -38,7 +41,11 @@ public class CameraViewModel(
             override fun onOrientationChanged(orientation: Int) {
                 if (orientation == ORIENTATION_UNKNOWN) return
                 val next = AnalysisRotation.targetRotationFor(orientation, imageAnalysis.targetRotation)
-                if (next != imageAnalysis.targetRotation) imageAnalysis.targetRotation = next
+                if (next != imageAnalysis.targetRotation) {
+                    // Rare (a deliberate turn of the phone) and otherwise invisible in traces.
+                    Log.i(TAG, "Analysis target rotation ${imageAnalysis.targetRotation} -> $next (device at $orientation deg)")
+                    imageAnalysis.targetRotation = next
+                }
             }
         }
         orientationListener.enable()
