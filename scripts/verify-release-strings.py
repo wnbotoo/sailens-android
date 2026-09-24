@@ -6,6 +6,10 @@ release build the user hears the raw key read aloud instead -- which is what hap
 strings were looked up by name at runtime and the shrinker, unable to see that, removed them.
 Unit tests cannot see this: it only exists in the shrunk release APK. Run after
 `:app:assembleRelease`.
+
+Usage: verify-release-strings.py [path/to/release.apk]
+(default: this repository's app/build/outputs/apk/release/*.apk; a distribution that consumes
+this repository as a submodule passes its own APK.)
 """
 from __future__ import annotations
 
@@ -42,7 +46,7 @@ def find_aapt2() -> str:
 
 
 def main() -> int:
-    apks = sorted(glob.glob(str(ROOT / "app/build/outputs/apk/release/*.apk")))
+    apks = sys.argv[1:] or sorted(glob.glob(str(ROOT / "app/build/outputs/apk/release/*.apk")))
     if not apks:
         sys.exit("verify-release-strings: no release APK; run :app:assembleRelease first")
     wanted = set(re.findall(r"R\.string\.([a-z_]+)", MAPPING.read_text(encoding="utf-8")))
