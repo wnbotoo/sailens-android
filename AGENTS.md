@@ -58,7 +58,7 @@ pipeline that turns the scene ahead into speech and haptics. This file is the re
 
 ## Project-specific conventions
 - Check `app/SailensRuntimeProfile.kt`, `app/DomainBindingsModule.kt`, `app/SailensEdition.kt`, `sailens-shell/di/ShellModule.kt` and `sailens-guidance/di/GuidanceModule.kt` first; DI is explicit constructor injection via Koin.
-- Constructor defaults in `PerceptionConfig` are conservative (`BASIC`, obstacle provider type `NONE`), but the app's runtime tiers override them to sem + realtime det mode.
+- Constructor defaults in `PerceptionConfig` are conservative (`BASIC`, obstacle provider type `NONE`), but the app's runtime profile overrides them to sem + realtime det mode.
 - There is one runtime profile, `standard`: every model, the VLM included, targets the GPU. The old `ultra` tier (VLM on NPU) was never selected and was removed; add a profile back only when a second hardware path exists.
 - Treat `SailensRuntimeProfile.kt` as the source of truth for runtime backend targets and cadence; physical model files are resolved by `ModelCatalog` / `ModelSourceResolver` from `(ModelType, actual accelerator)`.
 - Runtime hardware label comes from `DeviceHardwareProfileProvider` (`Build.SOC_MANUFACTURER` + `Build.SOC_MODEL`, with board/model fallback), not a hardcoded SoC string.
