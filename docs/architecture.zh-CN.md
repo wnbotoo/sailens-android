@@ -843,7 +843,10 @@ dlsym 外面那层 `std::call_once` 是嫌疑但未证实。cache 是另一回�
    lock_mode)`，旧声明把后两个对调了。
 3. Kotlin `TensorBuffer` 的 JNI handle 指向 C++ `litert::TensorBuffer` 包装对象，不是 C 的
    `LiteRtTensorBuffer`；现在从包装对象首字段取出 C handle，并在加锁前用
-   `LiteRtGetTensorBufferPackedSize` 校验字节数，不符就退回拷贝路径。
+   `LiteRtGetTensorBufferPackedSize` 校验字节数，字节数不符就退回拷贝路径。读首字段是**已知的
+   ABI 依赖**（libLiteRt.so 用 NDK libc++ 构建，其 `unique_ptr` 把指针放在首位），不是契约：
+   布局一旦变化会直接崩溃而不是回退。LiteRT 版本已钉死，升级时 `LiteRtVersionPinTest` 会失败，
+   必须上真机重新验证。
 
 cache 改为"同帧只转换一次"：先到的一方认领并转换，另一方至多等 50 ms 后直接复制
 （`InputPreprocessCache.awaitOrClaim`）。

@@ -28,14 +28,21 @@
 //    The previous declaration here had the last two parameters swapped.
 //
 // 3. The handle. The Kotlin TensorBuffer's JNI handle is a pointer to the C++ litert::TensorBuffer
-//    wrapper, not to the C LiteRtTensorBuffer. The wrapper is a BaseHandle<LiteRtTensorBuffer>:
-//    no virtual functions, first member a unique_ptr whose stored pointer is the C handle
-//    (litert/cc/internal/litert_handle.h, v2.1.5). That layout is an ABI fact of LiteRT's build,
-//    not a contract, so every unwrap is checked: the buffer's packed size must equal the size the
-//    caller expects before it is locked. A mismatch declines the zero-copy path for that call and
-//    the kernel falls back to the copying path.
+//    wrapper, not to the C LiteRtTensorBuffer. The wrapper is a BaseHandle<LiteRtTensorBuffer>
+//    (litert/cc/internal/litert_handle.h, v2.1.5): no virtual functions, and its first member is
+//    a std::unique_ptr<LiteRtTensorBufferT, std::function<...>>. The C handle is read from the
+//    first word of that object.
 //
-// Pinned to LiteRT 2.1.5 (gradle/libs.versions.toml). Upgrading LiteRT means re-checking 2 and 3.
+//    **This is a known ABI dependency, not a contract.** It holds because libLiteRt.so is built
+//    with the NDK's libc++ (its RTTI names are std::__ndk1::...), whose unique_ptr stores the
+//    pointer first (_LIBCPP_COMPRESSED_PAIR(pointer, __ptr_, deleter_type, __deleter_)). The
+//    C++ standard does not promise that layout, and nothing here can detect a wrong one safely:
+//    the packed-size check below dereferences the unwrapped pointer inside LiteRT, so a layout
+//    change would crash rather than fall back. What the check does catch is a *different*
+//    buffer (wrong tensor, wrong element type): its byte count will not match.
+//
+// Pinned to LiteRT 2.1.5 (gradle/libs.versions.toml); LiteRtVersionPinTest fails when that
+// changes. Upgrading LiteRT means re-checking 2 and 3 on a device (architecture.md §12.3).
 //
 // This header is owned by sailens-runtime and included by the vision and Guidance CMake builds.
 // It is a file-level include on purpose: it does not create a Gradle or Kotlin dependency in the
@@ -113,8 +120,10 @@ inline LiteRtTensorBufferHandle unwrapKotlinTensorBuffer(long long kotlinHandle)
 
 /**
  * Locks the buffer behind a Kotlin TensorBuffer handle for reading, after checking that it holds
- * exactly [expectedBytes]. Returns the host address, or nullptr when anything does not check out;
- * on success the caller must call [unlockTensorBuffer] with the same handle.
+ * exactly [expectedBytes]. Returns the host address, or nullptr when the API is unavailable, the
+ * buffer is not the expected size, or the lock fails; on success the caller must call
+ * [unlockTensorBuffer] with the same handle. See note 3: a changed wrapper layout is not among the
+ * cases this can report.
  */
 inline void* lockTensorBufferForRead(long long kotlinHandle, size_t expectedBytes) {
     const LiteRtZeroCopyApi* api = liteRtZeroCopyApi();

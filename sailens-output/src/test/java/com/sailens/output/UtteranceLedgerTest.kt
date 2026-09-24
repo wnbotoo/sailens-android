@@ -169,6 +169,15 @@ class UtteranceLedgerTest {
         assertNull(ledger.highestLivePriority(nowMs = 0))
     }
 
+    @Test
+    fun `a prioritized status notice holds off lower and equal announcements until it expires`() {
+        // "Guidance stopped" queued with a priority: ordinary guidance must not FLUSH it.
+        ledger.add(entry("notice", owner = null, expiresAtMs = 15_000, priority = Int.MAX_VALUE))
+        assertEquals(Int.MAX_VALUE, ledger.highestLivePriority(nowMs = 1_000))
+        // Bounded: a lost done-callback cannot hold guidance off forever.
+        assertNull(ledger.highestLivePriority(nowMs = 15_001))
+    }
+
     private fun entry(id: String, owner: SpeechOwner?, expiresAtMs: Long? = null, priority: Int? = null) =
         UtteranceLedger.Entry(id = id, text = "text of $id", owner = owner, expiresAtMs = expiresAtMs, priority = priority)
 }

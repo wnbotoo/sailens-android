@@ -1,6 +1,7 @@
 package com.sailens.guidance.kernel
 
 import com.sailens.guidance.config.AnalysisConfig
+import com.sailens.guidance.config.widthFractionOfLongSide
 import com.sailens.guidance.model.analysis.ConnectivityStats
 import com.sailens.core.mask.BinaryMask
 import com.sailens.guidance.model.common.DirectionBias
@@ -48,7 +49,7 @@ class NativeConnectivityStatsExtractor(
                 width = width,
                 height = height,
                 sampleLayerRatios = sampleLayerRatios,
-                minRunWidthRatio = config.minRunWidthRatio,
+                minRunWidthRatio = widthFractionOfLongSide(config.minRunWidthRatio, width, height),
                 bottomRatio = config.connectivityBottomRatio,
                 floodWindowTopRatio = config.floodWindowTopRatio,
                 maxFloodNodes = config.maxFloodNodes,

@@ -903,8 +903,11 @@ surfaced):
    `(buffer, void** host_mem_addr, lock_mode)`.
 3. The Kotlin `TensorBuffer` JNI handle points at the C++ `litert::TensorBuffer` wrapper, not the C
    `LiteRtTensorBuffer`. The C handle is now read from the wrapper's first member and checked with
-   `LiteRtGetTensorBufferPackedSize` against the expected byte count before locking; a mismatch
-   falls back to the copying path.
+   `LiteRtGetTensorBufferPackedSize` against the expected byte count before locking; a size
+   mismatch falls back to the copying path. Reading the first member is a **known ABI
+   dependency** (libLiteRt.so is built with the NDK libc++, whose `unique_ptr` stores its pointer
+   first), not a contract: a changed layout would crash rather than fall back. The LiteRT version
+   is pinned and `LiteRtVersionPinTest` fails on upgrade, which must be re-verified on a device.
 
 The cache now converts once per frame: the first caller claims the key and converts, the other
 waits at most 50 ms and copies (`InputPreprocessCache.awaitOrClaim`).

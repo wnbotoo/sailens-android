@@ -8,6 +8,7 @@ import com.sailens.vision.semantic.SemanticScoreSpec
 import com.sailens.vision.semantic.SemanticScores
 import com.sailens.runtime.nativeValue
 import com.sailens.guidance.config.AnalysisConfig
+import com.sailens.guidance.config.widthFractionOfLongSide
 import com.sailens.core.mask.BinaryMask
 import com.sailens.core.mask.BottomStats
 import com.sailens.guidance.model.common.GroundType
@@ -84,7 +85,7 @@ class NavigationScorePostprocessor(
                 trafficLightLookup = lookup.trafficLight,
                 groundTypeLookup = lookup.groundType,
                 bottomRatio = config.segmentationBottomRatio,
-                centerRatio = config.segmentationCenterRatio,
+                centerRatio = widthFractionOfLongSide(config.segmentationCenterRatio, content.width, content.height),
                 navigationRegionRatio = config.segmentationNavigationRegionRatio,
                 passableWords = scratch.passableWords,
                 obstacleWords = scratch.obstacleWords,
@@ -133,7 +134,7 @@ class NavigationScorePostprocessor(
                 trafficLightLookup = lookup.trafficLight,
                 groundTypeLookup = lookup.groundType,
                 bottomRatio = config.segmentationBottomRatio,
-                centerRatio = config.segmentationCenterRatio,
+                centerRatio = widthFractionOfLongSide(config.segmentationCenterRatio, content.width, content.height),
                 navigationRegionRatio = config.segmentationNavigationRegionRatio,
                 passableWords = scratch.passableWords,
                 obstacleWords = scratch.obstacleWords,
@@ -248,7 +249,7 @@ class NavigationScorePostprocessor(
                  trafficLightLookup = lookup.trafficLight,
                  groundTypeLookup = lookup.groundType,
                  bottomRatio = config.segmentationBottomRatio,
-                 centerRatio = config.segmentationCenterRatio,
+                 centerRatio = widthFractionOfLongSide(config.segmentationCenterRatio, content.width, content.height),
                  navigationRegionRatio = config.segmentationNavigationRegionRatio,
                  passableWords = scratch.passableWords,
                  obstacleWords = scratch.obstacleWords,
@@ -291,7 +292,7 @@ class NavigationScorePostprocessor(
                 trafficLightLookup = lookup.trafficLight,
                 groundTypeLookup = lookup.groundType,
                 bottomRatio = config.segmentationBottomRatio,
-                centerRatio = config.segmentationCenterRatio,
+                centerRatio = widthFractionOfLongSide(config.segmentationCenterRatio, content.width, content.height),
                 navigationRegionRatio = config.segmentationNavigationRegionRatio,
                 passableWords = scratch.passableWords,
                 obstacleWords = scratch.obstacleWords,

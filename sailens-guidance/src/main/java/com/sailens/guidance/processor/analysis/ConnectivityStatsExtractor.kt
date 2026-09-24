@@ -1,6 +1,7 @@
 package com.sailens.guidance.processor.analysis
 
 import com.sailens.guidance.config.AnalysisConfig
+import com.sailens.guidance.config.widthFractionOfLongSide
 import com.sailens.guidance.model.analysis.ConnectivityStats
 import com.sailens.core.mask.BinaryMask
 import com.sailens.core.mask.BottomStats
@@ -67,7 +68,7 @@ class KotlinConnectivityStatsExtractor(
             }
 
             val widthRatio = maxRunWidth.toFloat() / mask.width
-            val isValid = widthRatio >= config.minRunWidthRatio
+            val isValid = widthRatio >= widthFractionOfLongSide(config.minRunWidthRatio, mask.width, mask.height)
             if (isValid) validLayers++
 
             layers.add(LayerInfo(row, ratio, maxRunWidth, widthRatio, maxRunCenter, isValid))
@@ -136,7 +137,7 @@ class KotlinConnectivityStatsExtractor(
     }
 
     private fun performFloodFill(mask: BinaryMask, bottomStats: BottomStats): FloodResult {
-        if (bottomStats.maxRunWidth < mask.width * config.minRunWidthRatio) {
+        if (bottomStats.maxRunWidth < mask.width * widthFractionOfLongSide(config.minRunWidthRatio, mask.width, mask.height)) {
             return FloodResult(0f, 0f, 0f)
         }
 

@@ -380,29 +380,23 @@ class SceneAnalysisViewModel(
     }
 
     /**
-     * 把 [event] 送到用户可感知的主通道：开了语音就是语音（读屏或自带 TTS），否则是震动。
-     * 主通道拒收时（正在播的提示优先级不低于它）副通道也不打扰，两者保持同一个节拍。
+     * 把 [event] 送到用户可感知的通道，见 [deliverGuidanceEvent]。
      *
-     * @return 是否送达。两条通道都关着时只剩屏幕卡片，按"已送达"处理——那是用户的选择。
+     * @return 是否至少有一条通道真的接收了它。
      */
-    private fun deliver(event: SceneEvent, state: SceneAnalysisUiState): Boolean {
-        if (state.isSpeechEnabled) {
-            // 两条播报通道互斥。屏幕阅读器在工作时由它来念——这样语速/音量/语言跟随用户
-            // 在 TalkBack 里的既有设置，也避免同一句被念两遍。走 shell 唯一的播报出口：
-            // 描述屏在最上面时，这个屏幕的界面根本没有被组合，自己收的话这句会被静默丢掉。
-            val spoken = if (state.isScreenReaderActive) {
-                screenReaderAnnouncer.announce(textResolver.resolve(event.toSceneEventText()))
-                true
-            } else {
-                speechManager.speak(announcements.announcementFor(event))
-            }
-            if (!spoken) return false
-            if (state.isHapticsEnabled) hapticManager.trigger(event)
-            return true
-        }
-        if (state.isHapticsEnabled) return hapticManager.trigger(event)
-        return true
-    }
+    private fun deliver(event: SceneEvent, state: SceneAnalysisUiState): Boolean = deliverGuidanceEvent(
+        speechEnabled = state.isSpeechEnabled,
+        screenReaderActive = state.isScreenReaderActive,
+        speechEngineReady = speechManager.isReady,
+        hapticsEnabled = state.isHapticsEnabled,
+        // 屏幕阅读器接管时走 shell 唯一的播报出口：描述屏在最上面时，这个屏幕的界面根本没有被
+        // 组合，自己收的话这句会被静默丢掉。语速/音量/语言跟随用户在 TalkBack 里的既有设置。
+        announceToScreenReader = {
+            screenReaderAnnouncer.announce(textResolver.resolve(event.toSceneEventText()))
+        },
+        speak = { speechManager.speak(announcements.announcementFor(event)) },
+        vibrate = { hapticManager.trigger(event) },
+    )
 
     /**
      * Guidance 在运行中失效：分析出错而停止，或长时间没有产出结果。
@@ -422,7 +416,7 @@ class SceneAnalysisViewModel(
         if (state.isScreenReaderActive) {
             screenReaderAnnouncer.announce(text)
         } else {
-            speechManager.speakSystemNotice(text)
+            speechManager.speakSystemNotice(text, priority = notice.speechPriority)
         }
     }
 
@@ -470,7 +464,8 @@ class SceneAnalysisViewModel(
         if (state.isScreenReaderActive) {
             screenReaderAnnouncer.announce(noticeText)
         } else {
-            speechManager.speakSystemNotice(noticeText)
+            // 必须说完：一条普通导航提示不能把"辅助已中断"冲掉。
+            speechManager.speakSystemNotice(noticeText, priority = GuidanceNotice.INTERRUPTED_PRIORITY)
         }
     }
 
