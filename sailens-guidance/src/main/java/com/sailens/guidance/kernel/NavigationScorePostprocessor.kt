@@ -3,6 +3,7 @@ package com.sailens.guidance.kernel
 import com.sailens.runtime.ImageTensorLayout
 import com.sailens.vision.semantic.SemanticPostprocessOutcome
 import com.sailens.vision.semantic.SemanticPostprocessor
+import com.sailens.vision.semantic.SemanticContentRegion
 import com.sailens.vision.semantic.SemanticScoreSpec
 import com.sailens.vision.semantic.SemanticScores
 import com.sailens.runtime.nativeValue
@@ -53,22 +54,22 @@ class NavigationScorePostprocessor(
         height: Int,
         channels: Int,
         scoreLayout: ImageTensorLayout,
+        content: SemanticContentRegion = SemanticContentRegion(0, 0, width, height),
     ): SemanticPostprocessResult? {
         val pixelCount = width * height
         if (width <= 0 ||
             height <= 0 ||
             channels <= 0 ||
             scores.size != pixelCount * channels ||
-            reusableResultMask.size != pixelCount
+            !content.fitsIn(width, height) ||
+            reusableResultMask.size != content.pixelCount
         ) {
             return null
         }
 
         return postprocessPrepared(
             reusableResultMask = reusableResultMask,
-            width = width,
-            height = height,
-            pixelCount = pixelCount,
+            content = content,
         ) { scratch ->
             nativePostprocessScores(
                 scores = scores,
@@ -90,6 +91,7 @@ class NavigationScorePostprocessor(
                 classCounts = scratch.classCounts,
                 groundTypeCounts = scratch.groundTypeCounts,
                 intOutputs = scratch.intOutputs,
+                contentRegion = scratch.contentRegion,
             )
         }
     }
@@ -101,22 +103,22 @@ class NavigationScorePostprocessor(
         height: Int,
         channels: Int,
         scoreLayout: ImageTensorLayout,
+        content: SemanticContentRegion = SemanticContentRegion(0, 0, width, height),
     ): SemanticPostprocessResult? {
         val pixelCount = width * height
         if (width <= 0 ||
             height <= 0 ||
             channels <= 0 ||
             scores.size != pixelCount * channels ||
-            reusableResultMask.size != pixelCount
+            !content.fitsIn(width, height) ||
+            reusableResultMask.size != content.pixelCount
         ) {
             return null
         }
 
         return postprocessPrepared(
             reusableResultMask = reusableResultMask,
-            width = width,
-            height = height,
-            pixelCount = pixelCount,
+            content = content,
         ) { scratch ->
             nativePostprocessInt8Scores(
                 scores = scores,
@@ -138,18 +140,20 @@ class NavigationScorePostprocessor(
                 classCounts = scratch.classCounts,
                 groundTypeCounts = scratch.groundTypeCounts,
                 intOutputs = scratch.intOutputs,
+                contentRegion = scratch.contentRegion,
             )
         }
     }
 
     private fun postprocessPrepared(
         reusableResultMask: IntArray,
-        width: Int,
-        height: Int,
-        pixelCount: Int,
+        content: SemanticContentRegion,
         nativeCall: (SemanticScratch) -> Boolean,
     ): SemanticPostprocessResult? {
         if (!NativeGuidanceLibrary.isAvailable) return null
+        val width = content.width
+        val height = content.height
+        val pixelCount = content.pixelCount
 
         val wordCount = (pixelCount + Long.SIZE_BITS - 1) / Long.SIZE_BITS
         val passableWords = reusablePassableWords.withMinSize(wordCount).also {
@@ -174,6 +178,7 @@ class NavigationScorePostprocessor(
             classCounts = classCounts,
             groundTypeCounts = groundTypeCounts,
             intOutputs = intOutputs,
+            contentRegion = intArrayOf(content.x, content.y, content.width, content.height),
         )
         val nativeSuccess = runCatching {
             nativeCall(scratch)
@@ -186,7 +191,7 @@ class NavigationScorePostprocessor(
             hasLoggedBackend = true
         }
 
-        val mask = SegmentationMask(width, height, reusableResultMask.clone())
+        val mask = SegmentationMask(width, height, reusableResultMask.copyOf(pixelCount))
         return SemanticPostprocessResult(
             mask = mask,
             stats = buildStats(
@@ -207,6 +212,8 @@ class NavigationScorePostprocessor(
         val classCounts: IntArray,
         val groundTypeCounts: IntArray,
         val intOutputs: IntArray,
+        /** x, y, width, height of the camera-frame region of the score grid. */
+        val contentRegion: IntArray,
     )
 
     // Zero-copy variant for FLOAT32 output: skips readFloat() by reading the model
@@ -219,15 +226,14 @@ class NavigationScorePostprocessor(
         height: Int,
         channels: Int,
         scoreLayout: ImageTensorLayout,
+        content: SemanticContentRegion = SemanticContentRegion(0, 0, width, height),
     ): SemanticPostprocessResult? {
         if (tensorBufferHandle == 0L) return null
-        val pixelCount = width * height
-        if (width <= 0 || height <= 0 || channels <= 0 || reusableResultMask.size != pixelCount) return null
+        if (width <= 0 || height <= 0 || channels <= 0) return null
+        if (!content.fitsIn(width, height) || reusableResultMask.size != content.pixelCount) return null
         return postprocessPrepared(
             reusableResultMask = reusableResultMask,
-            width = width,
-            height = height,
-            pixelCount = pixelCount,
+            content = content,
         ) { scratch ->
             nativePostprocessScoresFromHandle(
                  tensorBufferHandle = tensorBufferHandle,
@@ -249,6 +255,7 @@ class NavigationScorePostprocessor(
                  classCounts = scratch.classCounts,
                  groundTypeCounts = scratch.groundTypeCounts,
                  intOutputs = scratch.intOutputs,
+                contentRegion = scratch.contentRegion,
             )
         }
     }
@@ -262,15 +269,14 @@ class NavigationScorePostprocessor(
         height: Int,
         channels: Int,
         scoreLayout: ImageTensorLayout,
+        content: SemanticContentRegion = SemanticContentRegion(0, 0, width, height),
     ): SemanticPostprocessResult? {
         if (tensorBufferHandle == 0L) return null
-        val pixelCount = width * height
-        if (width <= 0 || height <= 0 || channels <= 0 || reusableResultMask.size != pixelCount) return null
+        if (width <= 0 || height <= 0 || channels <= 0) return null
+        if (!content.fitsIn(width, height) || reusableResultMask.size != content.pixelCount) return null
         return postprocessPrepared(
             reusableResultMask = reusableResultMask,
-            width = width,
-            height = height,
-            pixelCount = pixelCount,
+            content = content,
         ) { scratch ->
             nativePostprocessInt8ScoresFromHandle(
                 tensorBufferHandle = tensorBufferHandle,
@@ -292,6 +298,7 @@ class NavigationScorePostprocessor(
                 classCounts = scratch.classCounts,
                 groundTypeCounts = scratch.groundTypeCounts,
                 intOutputs = scratch.intOutputs,
+                contentRegion = scratch.contentRegion,
             )
         }
     }
@@ -317,6 +324,7 @@ class NavigationScorePostprocessor(
                 height = spec.height,
                 channels = spec.channels,
                 scoreLayout = spec.layout,
+                content = spec.content,
             )
             is SemanticScores.Int8Handle -> postprocessInt8ScoresFromHandle(
                 tensorBufferHandle = scores.tensorBufferHandle,
@@ -325,6 +333,7 @@ class NavigationScorePostprocessor(
                 height = spec.height,
                 channels = spec.channels,
                 scoreLayout = spec.layout,
+                content = spec.content,
             )
             is SemanticScores.FloatValues -> postprocessScores(
                 scores = scores.values,
@@ -333,6 +342,7 @@ class NavigationScorePostprocessor(
                 height = spec.height,
                 channels = spec.channels,
                 scoreLayout = spec.layout,
+                content = spec.content,
             )
             is SemanticScores.Int8Values -> postprocessInt8Scores(
                 scores = scores.values,
@@ -341,6 +351,7 @@ class NavigationScorePostprocessor(
                 height = spec.height,
                 channels = spec.channels,
                 scoreLayout = spec.layout,
+                content = spec.content,
             )
         } ?: return null
 
@@ -362,7 +373,7 @@ class NavigationScorePostprocessor(
         classMap: IntArray,
         spec: SemanticScoreSpec,
     ): NavigationSemanticResult = NavigationSemanticResult(
-        mask = SegmentationMask(spec.width, spec.height, classMap.clone()),
+        mask = SegmentationMask(spec.content.width, spec.content.height, classMap.copyOf(spec.content.pixelCount)),
         stats = null,
     )
 
@@ -478,6 +489,7 @@ class NavigationScorePostprocessor(
         classCounts: IntArray,
         groundTypeCounts: IntArray,
         intOutputs: IntArray,
+        contentRegion: IntArray,
     ): Boolean
 
     private external fun nativePostprocessInt8Scores(
@@ -500,6 +512,7 @@ class NavigationScorePostprocessor(
         classCounts: IntArray,
         groundTypeCounts: IntArray,
         intOutputs: IntArray,
+        contentRegion: IntArray,
     ): Boolean
 
     private external fun nativePostprocessScoresFromHandle(
@@ -522,6 +535,7 @@ class NavigationScorePostprocessor(
         classCounts: IntArray,
         groundTypeCounts: IntArray,
         intOutputs: IntArray,
+        contentRegion: IntArray,
     ): Boolean
 
     private external fun nativePostprocessInt8ScoresFromHandle(
@@ -544,7 +558,11 @@ class NavigationScorePostprocessor(
         classCounts: IntArray,
         groundTypeCounts: IntArray,
         intOutputs: IntArray,
+        contentRegion: IntArray,
     ): Boolean
+
+    private fun SemanticContentRegion.fitsIn(gridWidth: Int, gridHeight: Int): Boolean =
+        x >= 0 && y >= 0 && width > 0 && height > 0 && x + width <= gridWidth && y + height <= gridHeight
 
     private fun LongArray.withMinSize(size: Int): LongArray {
         return if (this.size >= size) this else LongArray(size)

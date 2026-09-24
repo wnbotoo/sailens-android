@@ -2,6 +2,7 @@ package com.sailens.camera
 
 import android.content.Context
 import android.util.Size
+import android.view.OrientationEventListener
 import androidx.camera.core.AspectRatio
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
@@ -31,7 +32,21 @@ public class CameraViewModel(
         appContext: Context,
         lifecycleOwner: LifecycleOwner,
     ) {
-        camera.bind(appContext, lifecycleOwner, listOf(previewUseCase, imageAnalysis))
+        // Analysis frames follow how the phone is held, not the display (see AnalysisRotation).
+        // The preview keeps following the display: it is drawn on the screen.
+        val orientationListener = object : OrientationEventListener(appContext) {
+            override fun onOrientationChanged(orientation: Int) {
+                if (orientation == ORIENTATION_UNKNOWN) return
+                val next = AnalysisRotation.targetRotationFor(orientation, imageAnalysis.targetRotation)
+                if (next != imageAnalysis.targetRotation) imageAnalysis.targetRotation = next
+            }
+        }
+        orientationListener.enable()
+        try {
+            camera.bind(appContext, lifecycleOwner, listOf(previewUseCase, imageAnalysis))
+        } finally {
+            orientationListener.disable()
+        }
     }
 
     private val previewUseCase = Preview.Builder()

@@ -5,6 +5,7 @@ import com.sailens.core.frame.ImagePixelFormat
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class InputPreprocessCacheTest {
@@ -42,6 +43,63 @@ class InputPreprocessCacheTest {
 
         assertEquals(InputPreprocessBackend.SHARED_QUANTIZED_NATIVE_YUV, backend)
         assertArrayEquals(byteArrayOf(-128, 0, 127), output)
+    }
+
+    @Test
+    fun `a concurrent consumer of the same frame waits for the producer instead of converting again`() {
+        val cache = InputPreprocessCache()
+        val key = cacheKey(sequenceNumber = 21)
+        val produced = floatArrayOf(0.4f, 0.5f, 0.6f)
+        val claimed = java.util.concurrent.CountDownLatch(1)
+        var conversions = 0
+
+        val producer = Thread {
+            val hit = cache.awaitOrClaim(key) { cache.copyFloatInput(key, FloatArray(3)) }
+            assertNull(hit)
+            claimed.countDown()
+            try {
+                Thread.sleep(20) // converting
+                conversions++
+                cache.storeFloatInput(key, produced, InputPreprocessBackend.NATIVE_YUV)
+            } finally {
+                cache.releaseClaim(key)
+            }
+        }
+        producer.start()
+        claimed.await()
+
+        val output = FloatArray(3)
+        val backend = cache.awaitOrClaim(key, waitMs = 1_000) { cache.copyFloatInput(key, output) }
+        producer.join()
+
+        assertEquals(1, conversions)
+        assertEquals(InputPreprocessBackend.SHARED_NATIVE_YUV, backend)
+        assertArrayEquals(produced, output, 0.0001f)
+    }
+
+    @Test
+    fun `a waiter gives up after the bound and converts on its own`() {
+        val cache = InputPreprocessCache()
+        val key = cacheKey(sequenceNumber = 22)
+        val claimed = java.util.concurrent.CountDownLatch(1)
+        val done = java.util.concurrent.CountDownLatch(1)
+        val stuck = Thread {
+            cache.awaitOrClaim(key) { cache.copyFloatInput(key, FloatArray(3)) }
+            claimed.countDown()
+            done.await()
+            cache.releaseClaim(key)
+        }
+        stuck.start()
+        claimed.await()
+
+        val started = System.nanoTime()
+        val hit = cache.awaitOrClaim(key, waitMs = 30) { cache.copyFloatInput(key, FloatArray(3)) }
+        val waitedMs = (System.nanoTime() - started) / 1_000_000
+
+        done.countDown()
+        stuck.join()
+        assertNull(hit)
+        assertTrue("waited $waitedMs ms", waitedMs in 25..500)
     }
 
     @Test

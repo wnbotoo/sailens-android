@@ -44,7 +44,8 @@ data class PerceptionConfig(
     /** det 结果 TTL：det 未运行期间，跟踪轨迹超过该时长未被新检测确认即过期 */
     val detectionResultTtlMs: Long = 500,
 
-    val minObstacleAreaRatio: Float = 0.005f,
+    /** 语义障碍（BASIC 挡位）的最小面积，占相机画面。竖屏等效：原 0.005 x letterbox mask 面积。 */
+    val minObstacleAreaRatio: Float = 0.0089f,
     val maxObstacles: Int = 10,
     val minObstacleConfidence: Float = 0.4f,
     val navigationCorridorCenterWidth: Float = 0.50f,
@@ -54,7 +55,8 @@ data class PerceptionConfig(
     val semanticObstacleMinCorridorOverlapRatio: Float = 0.12f,
     val staticObstacleMinBottomY: Float = 0.55f,
     val staticObstacleMinCorridorOverlapRatio: Float = 0.20f,
-    val maxBackgroundObstacleAreaRatio: Float = 0.35f,
+    /** 竖屏等效：原 0.35 x letterbox mask 面积（mask 现在只覆盖相机画面，见 AnalysisConfig）。 */
+    val maxBackgroundObstacleAreaRatio: Float = 0.622f,
 
     /** occlusion 抠除：仅对 bbox 底边到达该归一化 Y 以下（足够近）的跟踪障碍生效 */
     val occlusionMinBottomY: Float = 0.55f,

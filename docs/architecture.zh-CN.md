@@ -832,6 +832,27 @@ dlsym 外面那层 `std::call_once` 是嫌疑但未证实。cache 是另一回�
 无论恢复哪一条，都会改变检测后处理和帧预算，属于产品决策，不在本次重构范围内。因此这几条
 应当视为"待恢复的目标"，而不是"已保住的性质"。
 
+**根因与修复（2026-09 发布前 review）。**zero-copy 这对红线其实有三个独立的错，任何一个都足以
+让 handle 路径永远不跑（它们互相遮蔽，所以从没暴露）：
+
+1. `dlsym(RTLD_DEFAULT, ...)` 找不到符号：targetSdk ≥ 23 时 bionic 的 RTLD_DEFAULT 跳过以
+   RTLD_LOCAL 加载的库，而 `System.loadLibrary` 正是 RTLD_LOCAL，三个 native 库又都没有把
+   `libLiteRt.so` 列为 NEEDED（`llvm-readelf -d` 可查）。现改为 `dlopen("libLiteRt.so",
+   RTLD_NOLOAD)` 后对该句柄 dlsym。
+2. `LiteRtLockTensorBuffer` 的声明参数顺序错了：2.1.5 是 `(buffer, void** host_mem_addr,
+   lock_mode)`，旧声明把后两个对调了。
+3. Kotlin `TensorBuffer` 的 JNI handle 指向 C++ `litert::TensorBuffer` 包装对象，不是 C 的
+   `LiteRtTensorBuffer`；现在从包装对象首字段取出 C handle，并在加锁前用
+   `LiteRtGetTensorBufferPackedSize` 校验字节数，不符就退回拷贝路径。
+
+cache 改为"同帧只转换一次"：先到的一方认领并转换，另一方至多等 50 ms 后直接复制
+（`InputPreprocessCache.awaitOrClaim`）。
+
+以上都在主机上验证过（真实 kernel 源码 + 带 2.1.5 签名的假 `libLiteRt.so`，以 RTLD_LOCAL 加载），
+**真机数值尚未复测**：合入前要在目标设备上确认 `sem outputReadTimeMs ≈ 0`、det 报
+`native_bbox_nms_float_handle`、两个模型之一报 `shared_native_yuv`，并确认 handle 路径与数组
+路径的输出一致。
+
 ### 12.4 Session 对比
 
 同一设备、同一路线比较重构前后 trace：

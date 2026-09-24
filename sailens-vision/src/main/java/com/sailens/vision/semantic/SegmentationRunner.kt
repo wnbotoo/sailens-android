@@ -55,8 +55,12 @@ class SegmentationRunner<R>(
         if (inputDataType == ModelInputDataType.INT8 || inputDataType == ModelInputDataType.UINT8) inputElementCount else 0
     )
 
-    // 缓存结果 Mask 数组 (一维数组，存储索引)
+    // 缓存结果 Mask 数组 (一维数组，存储索引)：整个输出网格，只有 generic argmax 回退路径用它
     private val cachedResultMask = IntArray(config.outputWidth * config.outputHeight)
+
+    // 裁掉 letterbox padding 之后的 class map：只覆盖相机画面。尺寸随帧方向变化，按需重分配。
+    private var cachedContentMask = IntArray(0)
+    private var cachedContentSpec: SemanticScoreSpec? = null
 
     private val scoreSpec = SemanticScoreSpec(
         width = config.outputWidth,
@@ -92,6 +96,8 @@ class SegmentationRunner<R>(
 
     fun run(rawFrame: ImageFrame): SegmentationRunResult<R> {
         val startTime = SystemClock.uptimeMillis()
+        val spec = specFor(rawFrame)
+        val contentMask = contentMaskFor(spec.content)
 
         // 1. 预处理: YUV/RGBA frame -> model input tensor layout
         val preprocessBackend = preprocessInput(rawFrame)
@@ -112,13 +118,13 @@ class SegmentationRunner<R>(
             outputBufferHandle == 0L -> null
             outputElementType == TfliteTensorElementType.FLOAT32 -> postprocessor.postprocessScores(
                 scores = SemanticScores.FloatHandle(outputBufferHandle),
-                spec = scoreSpec,
-                reusableClassMap = cachedResultMask,
+                spec = spec,
+                reusableClassMap = contentMask,
             )
             outputElementType == TfliteTensorElementType.INT8 -> postprocessor.postprocessScores(
                 scores = SemanticScores.Int8Handle(outputBufferHandle),
-                spec = scoreSpec,
-                reusableClassMap = cachedResultMask,
+                spec = spec,
+                reusableClassMap = contentMask,
             )
             else -> null
         }
@@ -140,13 +146,13 @@ class SegmentationRunner<R>(
             ?: when (outputScores) {
                 is SemanticOutputScores.FloatScores -> postprocessor.postprocessScores(
                     scores = SemanticScores.FloatValues(outputScores.values),
-                    spec = scoreSpec,
-                    reusableClassMap = cachedResultMask,
+                    spec = spec,
+                    reusableClassMap = contentMask,
                 )
                 is SemanticOutputScores.Int8Scores -> postprocessor.postprocessScores(
                     scores = SemanticScores.Int8Values(outputScores.values),
-                    spec = scoreSpec,
-                    reusableClassMap = cachedResultMask,
+                    spec = spec,
+                    reusableClassMap = contentMask,
                 )
                 // The native score kernels read bytes as signed int8; feeding UINT8 there would
                 // flip sign across the 128 boundary and corrupt argmax. Route UINT8 through the
@@ -158,9 +164,10 @@ class SegmentationRunner<R>(
         val outcome: SemanticPostprocessOutcome<R> = fusedOutcome ?: run {
             val scores = outputScores!!.toFloatArray(outputQuantization)
             val backend = argmaxPostprocessor.argmax(scores, cachedResultMask)
+            cropClassMap(cachedResultMask, config.outputWidth, spec.content, contentMask)
             SemanticPostprocessOutcome(
-                // cachedResultMask 会在下一帧继续复用，fromClassMap 必须做快照
-                value = postprocessor.fromClassMap(cachedResultMask, scoreSpec),
+                // contentMask 会在下一帧继续复用，fromClassMap 必须做快照
+                value = postprocessor.fromClassMap(contentMask, spec),
                 backend = backend,
             )
         }
@@ -179,6 +186,29 @@ class SegmentationRunner<R>(
                 postprocessBackend = outcome.backend,
             ),
         )
+    }
+
+    /**
+     * 本帧的分数规格：整个输出网格 + 相机画面落在其中的区域。letterbox 只取决于帧尺寸与方向，
+     * 相同则复用上一次的结果。
+     */
+    private fun specFor(frame: ImageFrame): SemanticScoreSpec {
+        val content = SemanticContentRegion.forLetterbox(
+            frameWidth = frame.width,
+            frameHeight = frame.height,
+            rotationDegrees = frame.rotationDegrees,
+            inputWidth = config.inputWidth,
+            inputHeight = config.inputHeight,
+            outputWidth = config.outputWidth,
+            outputHeight = config.outputHeight,
+        )
+        cachedContentSpec?.takeIf { it.content == content }?.let { return it }
+        return scoreSpec.copy(content = content).also { cachedContentSpec = it }
+    }
+
+    private fun contentMaskFor(content: SemanticContentRegion): IntArray {
+        if (cachedContentMask.size != content.pixelCount) cachedContentMask = IntArray(content.pixelCount)
+        return cachedContentMask
     }
 
     private fun preprocessInput(rawFrame: ImageFrame): InputPreprocessBackend {

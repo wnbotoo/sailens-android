@@ -2,6 +2,15 @@ package com.sailens.guidance.config
 
 /**
  * 分析配置
+ *
+ * ## 比例阈值是"相机画面"的比例
+ *
+ * 语义 mask 只覆盖相机画面，不含 letterbox 填充（见 `SemanticContentRegion`）。此前 mask 带着
+ * 填充：竖屏 540x960 帧在 640x640 输入里左右各有 140 列填充，画面只占 360/640 = 9/16 的宽度，
+ * 填充被模型判成 building（不可行走、非道路）。裁掉填充后，所有"占 mask 宽度/面积的比例"都按
+ * 16/9 放大，为了保持实测过的竖屏行为不变，以"宽度比例"或"面积比例"表达、且驱动**已开启**
+ * 提示的阈值按 16/9 重新折算（标注"竖屏等效"）。纵向比例不受影响（竖屏上下没有填充）。
+ * 驱动默认关闭提示的阈值（道路警告、地面变化、路口兜底）没有折算，开启前需按实测重调。
  */
 data class AnalysisConfig(
     // 事件输出策略
@@ -17,7 +26,8 @@ data class AnalysisConfig(
 
     // 连通性 - 分层扫描
     val sampleLayerRatios: List<Float> = listOf(0.85f, 0.70f, 0.55f),
-    val minRunWidthRatio: Float = 0.05f,
+    /** 竖屏等效：原 0.05 x mask 宽度 = 画面宽度的 0.089。 */
+    val minRunWidthRatio: Float = 0.089f,
     val reachRatioThreshold: Float = 0.40f,
     val connectivityBottomRatio: Float = 0.15f,
 
@@ -66,7 +76,8 @@ data class AnalysisConfig(
 
     // 语义统计区域
     val segmentationBottomRatio: Float = 0.20f,
-    val segmentationCenterRatio: Float = 0.40f,
+    /** 竖屏等效：原 0.40 x mask 宽度 = 画面宽度的 0.71。 */
+    val segmentationCenterRatio: Float = 0.71f,
     val segmentationNavigationRegionRatio: Float = 0.45f,
 
     // 稳定器参数
@@ -78,7 +89,9 @@ data class AnalysisConfig(
     val intersectionDebounceFrames: Int = 3,
     val roadRatioSmoothWindow: Int = 5,
     val trafficLightDebounceFrames: Int = 4,
-    val trafficLightMinPixelRatio: Float = 0.0015f,
-    val trafficLightMinRoadRatio: Float = 0.08f,
+    /** 竖屏等效：原 0.0015 x mask 面积。 */
+    val trafficLightMinPixelRatio: Float = 0.00267f,
+    /** 竖屏等效：原 0.08 x mask 面积（填充不是道路，道路占比按 16/9 放大）。 */
+    val trafficLightMinRoadRatio: Float = 0.142f,
     val rawVehicleOnRoadDebounceFrames: Int = 3,
 )

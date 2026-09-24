@@ -2,11 +2,61 @@ package com.sailens.runtime
 
 import com.sailens.core.frame.ImageFrame
 
+/**
+ * Same-frame sharing of the YUV-to-tensor conversion between models that want the identical input.
+ *
+ * Guidance starts sem and det on the same frame at the same time, so a plain "look it up, else
+ * compute" cache never hits: both look before either has stored. [awaitOrClaim] makes the
+ * conversion happen once per frame instead: the first caller claims the key and converts; a second
+ * caller with the same key waits (briefly, bounded by [DEFAULT_WAIT_MS]) and copies the result.
+ * Waiting does not cost the second model latency it would not otherwise spend: it would be doing
+ * the same conversion itself for that time.
+ */
 class InputPreprocessCache {
     // Same-frame cache only: entries keep provider-owned reusable buffers and are valid until
     // that provider writes the next frame. Consumers must copy values out through copy*Input().
     private var floatEntry: FloatEntry? = null
     private var int8Entry: Int8Entry? = null
+
+    /** The key someone is converting right now, and who. */
+    private var claimedKey: Key? = null
+    private var claimOwner: Thread? = null
+
+    /**
+     * Returns what [tryCopy] finds for [key] -- waiting up to [waitMs] if another caller is
+     * converting that key right now -- or null, in which case the caller converts it itself and
+     * must call [releaseClaim] afterwards (in a `finally`), whether or not it stored a result.
+     */
+    fun <T : Any> awaitOrClaim(
+        key: Key,
+        waitMs: Long = DEFAULT_WAIT_MS,
+        tryCopy: () -> T?,
+    ): T? = synchronized(this) {
+        tryCopy()?.let { return it }
+        if (claimedKey == key && claimOwner !== Thread.currentThread()) {
+            val deadline = System.nanoTime() + waitMs * 1_000_000L
+            while (claimedKey == key) {
+                val remainingMs = (deadline - System.nanoTime()) / 1_000_000L
+                if (remainingMs <= 0) break
+                (this as Object).wait(remainingMs)
+            }
+            // Either the producer stored it, or it gave up / took too long and this caller
+            // converts on its own without claiming.
+            return tryCopy()
+        }
+        claimedKey = key
+        claimOwner = Thread.currentThread()
+        null
+    }
+
+    /** Ends the calling thread's claim on [key], waking anyone waiting for it. */
+    fun releaseClaim(key: Key) = synchronized(this) {
+        if (claimedKey == key && claimOwner === Thread.currentThread()) {
+            claimedKey = null
+            claimOwner = null
+            (this as Object).notifyAll()
+        }
+    }
 
     @Synchronized
     fun copyFloatInput(
@@ -75,6 +125,11 @@ class InputPreprocessCache {
     fun clear() {
         floatEntry = null
         int8Entry = null
+    }
+
+    companion object {
+        /** Longer than one 640x640 conversion on a phone, short enough never to stall a frame. */
+        const val DEFAULT_WAIT_MS: Long = 50L
     }
 
     data class Key(
