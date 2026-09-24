@@ -74,8 +74,10 @@ class DescribeSceneUseCaseTest {
     }
 
     @Test
-    fun `loads the model on first use only`() = runBlocking {
-        val describer = FakeSceneDescriber(ready = false)
+    fun `asks the engine to load before every request instead of trusting isReady`() = runBlocking {
+        // isReady can be stale by the time it is read: a release queued by the shell may run right
+        // after. Loading is the engine's idempotent job, so the use case always asks.
+        val describer = FakeSceneDescriber(ready = true)
         val useCase = DescribeSceneUseCase(
             sceneDescriber = describer,
             frameSnapshots = FrameSnapshots(frame(sequenceNumber = 1)),
@@ -83,8 +85,9 @@ class DescribeSceneUseCaseTest {
         )
 
         useCase().toList()
+        useCase().toList()
 
-        assertEquals(1, describer.initializeCount)
+        assertEquals(2, describer.initializeCount)
     }
 
     @Test

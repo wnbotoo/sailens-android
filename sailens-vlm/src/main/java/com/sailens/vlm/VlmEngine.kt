@@ -25,10 +25,17 @@ public interface SceneDescriber {
      */
     public val isAvailable: Boolean
 
-    /** True once a model is loaded and [describe] can run. */
+    /**
+     * True once a model is loaded. For diagnostics and UI only: by the time a caller acts on it a
+     * release may already be queued, so it must never gate [initialize] or [describe].
+     */
     public val isReady: Boolean
 
-    /** Loads the VLM. Throws if no model/runtime is available (caller decides if that is fatal). */
+    /**
+     * Loads the VLM if it is not loaded. Idempotent and cheap once loaded, so callers invoke it
+     * before every request instead of checking [isReady]. Throws if no model/runtime is available
+     * (caller decides if that is fatal).
+     */
     public suspend fun initialize()
 
     /**

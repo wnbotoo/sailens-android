@@ -38,12 +38,11 @@ public class DescribeSceneUseCase(
         maxFrameAgeMs: Long = DEFAULT_MAX_FRAME_AGE_MS,
         snapshotTimeoutMs: Long = FrameSnapshotProvider.DEFAULT_SNAPSHOT_TIMEOUT_MS,
     ): Flow<SceneDescriptionChunk> = flow {
-        if (!sceneDescriber.isReady) {
-            // 首次调用才加载模型：VLM 权重比 sem/det 大得多，进程启动时就加载会拖慢冷启动，
-            // 而多数会话根本不会用到它。initialize() 失败时直接抛，调用方负责告知。
-            logService.info(TAG, "Loading VLM on first scene-description request")
-            sceneDescriber.initialize()
-        }
+        // 首次请求才加载模型：VLM 权重比 sem/det 大得多，进程启动时就加载会拖慢冷启动，
+        // 而多数会话根本不会用到它。每次都调用、不先看 isReady：已加载时它几乎零成本，而在外面
+        // 判断 isReady 会被排队中的 release 抢先（见 SceneDescriber.isReady）。放在取帧之前，
+        // 加载耗时不会算进画面的新鲜度。initialize() 失败时直接抛，调用方负责告知。
+        sceneDescriber.initialize()
 
         // 只取当前这一帧，并且只接受足够新的那一张（architecture.md §6.1）。描述一张几秒前的
         // 画面比不回答更糟：用户看不见画面已经过期，会拿旧信息当成眼前的现实。

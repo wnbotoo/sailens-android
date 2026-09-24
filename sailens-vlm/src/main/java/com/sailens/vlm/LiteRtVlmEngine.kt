@@ -48,37 +48,45 @@ public class LiteRtVlmEngine(
 
     override val isAvailable: Boolean get() = runtimeFactory.isAvailable(context)
 
+    /**
+     * Idempotent and cheap once loaded; callers invoke it before every request rather than checking
+     * [isReady] themselves.
+     *
+     * Every readiness check happens on [singleThreadDispatcher], never outside it. A check made
+     * outside can be overtaken: a [release] already queued (the shell releases asynchronously when
+     * the last screen lets go) would close the runtime right after a caller had been told it was
+     * ready, and two concurrent callers could both decide to build, the second tearing down the
+     * first's runtime.
+     */
     override suspend fun initialize() {
-        if (_isReady) return
+        withContext(singleThreadDispatcher) { ensureInitialized() }
+    }
 
-        withContext(singleThreadDispatcher) {
-            // Checked again here, where calls are serialized: two callers can both pass the check
-            // above, and without this the second one would tear down the runtime the first had just
-            // built — possibly under a description already running on it.
-            if (_isReady) return@withContext
-            cleanupInternal()
-            check(runtimeFactory.isAvailable(context)) {
-                "VLM runtime unavailable (no GenAI library/model wired)."
-            }
-            // Same accelerator selection + fallback as the CNN models; only `build` differs (creates
-            // a VlmRuntime instead of a CompiledModel session).
-            val resolved = AcceleratorSelector.select(
-                selection = AcceleratorSelection(
-                    mode = config.acceleratorSelectionMode,
-                    preferredBackend = config.acceleratorBackend,
-                    fallbackOrder = ACCELERATOR_FALLBACK_ORDER,
-                ),
-                logTag = TAG,
-                modelLabel = "VLM",
-                logService = logService,
-            ) { accelerator ->
-                runtimeFactory.create(context, config, accelerator)
-            }
-            runtime = resolved.value
-            backendLabel = resolved.selectionLabel
-            _isReady = true
-            logService?.info(TAG, "VLM engine initialized with ${resolved.accelerator}")
+    /** Engine thread only. */
+    private fun ensureInitialized() {
+        if (_isReady) return
+        cleanupInternal()
+        check(runtimeFactory.isAvailable(context)) {
+            "VLM runtime unavailable (no GenAI library/model wired)."
         }
+        // Same accelerator selection + fallback as the CNN models; only `build` differs (creates
+        // a VlmRuntime instead of a CompiledModel session).
+        val resolved = AcceleratorSelector.select(
+            selection = AcceleratorSelection(
+                mode = config.acceleratorSelectionMode,
+                preferredBackend = config.acceleratorBackend,
+                fallbackOrder = ACCELERATOR_FALLBACK_ORDER,
+            ),
+            logTag = TAG,
+            modelLabel = "VLM",
+            logService = logService,
+        ) { accelerator ->
+            runtimeFactory.create(context, config, accelerator)
+        }
+        runtime = resolved.value
+        backendLabel = resolved.selectionLabel
+        _isReady = true
+        logService?.info(TAG, "VLM engine initialized with ${resolved.accelerator}")
     }
 
     /**
@@ -95,10 +103,12 @@ public class LiteRtVlmEngine(
      */
     override fun describe(request: SceneDescriptionRequest): Flow<SceneDescriptionChunk> = channelFlow {
         withContext(singleThreadDispatcher) {
-            // Read on the engine's own thread, after any initialize/release queued before this
-            // request: a reference taken outside could be a runtime that is closed by the time the
-            // decode starts.
-            val activeRuntime = runtime ?: error("VLM engine not initialized")
+            // On the engine's own thread, after any initialize or release queued before this
+            // request: a release that slipped in between the caller's initialize() and here would
+            // otherwise leave nothing (or a closed runtime) to decode on. A release queued after
+            // this point waits for the decode to finish.
+            ensureInitialized()
+            val activeRuntime = checkNotNull(runtime) { "VLM engine not initialized" }
             val start = SystemClock.uptimeMillis()
             var firstTokenAt = 0L
 
