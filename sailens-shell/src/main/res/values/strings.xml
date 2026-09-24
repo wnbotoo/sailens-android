@@ -281,9 +281,11 @@
     <!-- Input quality. The user cannot notice these failures unaided, so the wording is actionable. -->
     <string name="event_camera_blocked">Camera is covered</string>
     <string name="event_low_light">Too dark to see</string>
-    <!-- The model does not recognise the ground at the user's feet (an indoor floor, or the camera
-         pointed too high), so "path blocked" style alerts are paused. Obstacle alerts continue. -->
-    <string name="event_ground_unrecognized">Can\'t recognise the ground, path alerts paused</string>
+    <!-- The model does not recognise the ground at the user's feet (an indoor floor, the camera
+         pointed too high — or a wall right ahead, which it cannot tell apart), so "path blocked"
+         style alerts are paused. The wording must say the way ahead is unknown, not that it is
+         clear. Obstacle alerts continue. -->
+    <string name="event_ground_unrecognized">Can\'t see the ground, can\'t tell if the way ahead is clear</string>
     <!-- Camera permission rationale. The copy lives here, not in sailens-camera: it is product
          voice, and capture must not depend on the shell. -->
     <string name="permission_camera_title">Camera access needed</string>

@@ -61,10 +61,12 @@ class EventGenerator(
             events.add(createSensorQualityEvent(snapshot.frameQuality, now))
         }
 
-        // 1. 连通性事件的前提是底部是模型认得的地面。不成立时它们只是在复述"模型不认识这种地面"
-        //    （室内地板被判成 building → 一直"前方不通"），所以一律不播；确认后改播一条状态提示，
-        //    让用户知道这项判断停了，而不是把"没提示"当成"能走"。障碍物检测不依赖地面，照常。
-        val pathJudgementReliable = snapshot.groundRecognition.isPathJudgementReliable
+        // 1. 连通性事件的前提是底部是模型认得的地面。**确认**认不出后（持续一段时间，而不是一帧），
+        //    它们只是在复述"模型不认识这种地面"（室内地板被判成 building → 一直"前方不通"），暂停；
+        //    同时播一条状态提示，说清楚"无法判断前方能否通行"，而不是让用户把"没提示"当成"能走"。
+        //    确认之前一律照常播：sem 分不清不认识的地板和贴脸的墙，见 GroundRecognitionAnalyzer。
+        //    障碍物检测不依赖地面，始终照常。
+        val pathJudgementReliable = !snapshot.groundRecognition.pausesPathPrompts
         if (snapshot.groundRecognition == GroundRecognition.UNRECOGNIZED) {
             events.add(createGroundUnrecognizedEvent(now))
         }

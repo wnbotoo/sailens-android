@@ -32,6 +32,15 @@ interface NavigationSemantics {
 
     fun isTrafficLight(classId: Int): Boolean
 
+    /**
+     * A vertical structure that closes a path — a wall, a fence — as opposed to something standing
+     * on the ground ([isObstacle]). Kept apart from [isObstacle] because barriers are not tracked or
+     * announced as objects; the connectivity analysis already reads them as "not passable". What
+     * this adds is the knowledge that the model *recognised* it, so a barrier filling the bottom of
+     * the frame is not mistaken for ground the model cannot name (see GroundRecognitionAnalyzer).
+     */
+    fun isBarrier(classId: Int): Boolean = false
+
     fun toGroundType(classId: Int): GroundType
 
     fun toObstacleCategory(classId: Int): ObstacleCategory

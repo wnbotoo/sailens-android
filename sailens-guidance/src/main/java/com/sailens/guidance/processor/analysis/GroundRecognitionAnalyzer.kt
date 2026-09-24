@@ -17,23 +17,32 @@ import com.sailens.guidance.semantics.NavigationSemantics
  * 而用户正站在地面上——所以这里出现的类别只应该是：
  *
  * - 可行走地面（[NavigationSemantics.isPassable]）或其它地面（草地等，[NavigationSemantics.toGroundType]）；
- * - 挡在脚前的已知障碍物（[NavigationSemantics.isObstacle]，行人、车、杆）。
+ * - 挡在脚前的已知障碍物（[NavigationSemantics.isObstacle]，行人、车、杆）；
+ * - 模型明确认出的挡路结构（[NavigationSemantics.isBarrier]，墙、栅栏）——这是"认得，且走不通"，
+ *   不是"认不出地面"，"前方不通"照常。
  *
- * 其余类别（Cityscapes 下是 building、wall、vegetation、sky……）占比过高，说明模型在用它的类别表
+ * 其余类别（Cityscapes 下是 building、vegetation、sky……）占比过高，说明模型在用它的类别表
  * 硬套一个它没见过的地面。这条判据**不区分室内室外**：镜头抬得太高、朝天，也是同样的"看不到地面"，
  * 连通性同样不可信。
  *
- * ## 已知代价
+ * ## sem 分不清的情况，以及为什么偏向多报
  *
- * 模型分不清"贴脸的墙"和"不认识的地板"——两者都是 building。所以正对一堵近在眼前、已经占满
- * 底部的墙时，"前方不通"也会被暂停。这时墙在远处时连通性已经报过（墙从画面上方压下来，底部
- * 地面还在）；到它占满底部，人已经走到墙根。这是用"室内一直误报"换来的，且被暂停时一定会告诉用户。
+ * 这个模型把近处的室内地板判成 building，也把近处的楼体外墙判成 building。只看 sem，"不认识的
+ * 地板"和"贴脸的墙"是同一个信号；此时连通性给出的正是高置信度的硬阻塞，靠规则区分不开。
+ * 所以取舍偏向安全一侧：
+ *
+ * - 信号出现的头 [AnalysisConfig.groundUnrecognizedEnterMs] 内（[GroundRecognition.UNCERTAIN]）
+ *   **不压任何提示**。开机就对着墙、转身面对墙、墙突然进入视野，都会立刻听到"前方不通"。
+ *   代价是刚进室内时会先误报一次。
+ * - 持续后才确认为 [GroundRecognition.UNRECOGNIZED]，暂停连通性提示，并播一条明确说"无法判断
+ *   前方能否通行"的状态提示——用户知道此时前方可能有墙，而不是以为"没提示 = 能走"。
+ *
+ * 真正区分两者要靠几何（墙是竖直面、地板是水平面），不是 sem 能回答的问题。
  *
  * ## 滞回
  *
- * 进入：本帧比例 ≥ [AnalysisConfig.groundUnrecognizedEnterRatio] 立即进入 [GroundRecognition.UNCERTAIN]
- * （连通性提示立刻停，因为它们就建立在这一帧上），持续 [AnalysisConfig.groundUnrecognizedEnterMs]
- * 才确认为 [GroundRecognition.UNRECOGNIZED]（这时才播状态提示）。
+ * 进入：本帧比例 ≥ [AnalysisConfig.groundUnrecognizedEnterRatio] 进入 [GroundRecognition.UNCERTAIN]，
+ * 持续 [AnalysisConfig.groundUnrecognizedEnterMs] 才确认为 [GroundRecognition.UNRECOGNIZED]。
  * 退出：比例 ≤ [AnalysisConfig.groundUnrecognizedExitRatio] 持续 [AnalysisConfig.groundUnrecognizedExitMs]。
  * 用时间而不是帧数：语义结果在调度间隔内会被复用，帧数不等于模型真的看了几次。
  *
@@ -51,6 +60,7 @@ class GroundRecognitionAnalyzer(
     private val explainsGround = BooleanArray(navigationSemantics.classCount) { classId ->
         navigationSemantics.isPassable(classId) ||
             navigationSemantics.isObstacle(classId) ||
+            navigationSemantics.isBarrier(classId) ||
             navigationSemantics.toGroundType(classId) != GroundType.UNKNOWN
     }
 

@@ -445,7 +445,9 @@ class EventGeneratorTest {
     }
 
     @Test
-    fun `uncertain ground silences path prompts without announcing yet`() {
+    fun `uncertain ground still announces a blocked path at once`() {
+        // A wall right ahead and an unknown floor look the same to the model. Until the state is
+        // confirmed nothing is held back: "path blocked" must not be a frame late for a real wall.
         val generator = EventGenerator(AnalysisConfig(enableNarrowingEvents = true))
 
         val blocked = generator.generate(
@@ -463,8 +465,8 @@ class EventGeneratorTest {
             now = 1_000L,
         )
 
-        assertTrue(blocked.isEmpty())
-        assertTrue(narrowing.isEmpty())
+        assertEquals(listOf("event_blocked"), blocked.map { it.messageKey })
+        assertEquals(listOf("event_narrowing"), narrowing.map { it.messageKey })
     }
 
     @Test

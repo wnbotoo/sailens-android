@@ -41,6 +41,17 @@ class GroundRecognitionAnalyzerTest {
     }
 
     @Test
+    fun `a recognised wall or fence filling the bottom is not unrecognized ground`() {
+        val analyzer = analyzer()
+
+        for (barrier in listOf(CityscapesTaxonomy.WALL, CityscapesTaxonomy.FENCE)) {
+            val result = analyzer.analyze(mask(bottomClass = barrier))
+            assertEquals(GroundRecognition.RECOGNIZED, result.recognition)
+            assertEquals(0f, result.unrecognizedRatio, 0f)
+        }
+    }
+
+    @Test
     fun `terrain underfoot is ground even though it is not passable`() {
         val analyzer = analyzer()
 

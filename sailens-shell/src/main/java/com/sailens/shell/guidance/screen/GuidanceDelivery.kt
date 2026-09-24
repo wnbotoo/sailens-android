@@ -62,3 +62,37 @@ internal fun guidanceWaitsForDescription(
 ): Boolean = descriptionHoldsTheFloor && priority < GUIDANCE_PREEMPTS_DESCRIPTION_AT
 
 internal val GUIDANCE_PREEMPTS_DESCRIPTION_AT: EventPriority = EventPriority.HIGH
+
+/**
+ * Offers the frame's primary Guidance prompt, and keeps the cooldown honest either way.
+ *
+ * DecideEventsUseCase has already recorded the prompt in the cooldown, provisionally. Only a prompt
+ * that reached the user may keep that record, so every path that does not deliver revokes it and the
+ * prompt is offered again on a later frame while its condition still holds:
+ *
+ * 1. A description holds the floor and the prompt is not urgent ([guidanceWaitsForDescription]):
+ *    wait. The description is left alone and nothing is delivered.
+ * 2. Otherwise the description gives way first ([preemptDescription]) — before the prompt is
+ *    spoken, so no clause of it can be left in front of the prompt or behind it.
+ * 3. [deliver] refused (a prompt of equal or higher priority is still being spoken): not delivered.
+ *
+ * @return whether the prompt was delivered.
+ */
+internal inline fun offerGuidancePrompt(
+    priority: EventPriority,
+    descriptionHoldsTheFloor: Boolean,
+    preemptDescription: () -> Unit,
+    deliver: () -> Boolean,
+    revoke: () -> Unit,
+): Boolean {
+    if (guidanceWaitsForDescription(priority, descriptionHoldsTheFloor)) {
+        revoke()
+        return false
+    }
+    preemptDescription()
+    if (!deliver()) {
+        revoke()
+        return false
+    }
+    return true
+}
