@@ -44,6 +44,16 @@ No new Gradle modules. New packages inside existing modules, following the depen
 - **Gravity**: a unit vector `g` in the camera frame pointing down. Derived from the device-frame
   gravity/rotation sensor by the fixed back-camera orientation (`SENSOR_ORIENTATION`) plus the
   analysis rotation.
+- **Local ground frame** `LocalGroundFrame(t)` — the frame every ground grid (M4, M6) and every
+  `TranslationEstimate` is expressed in:
+  - origin: the camera position at `t`, projected onto the ground plane;
+  - up: `−g` (opposite gravity);
+  - forward: the camera optical axis at `t` projected onto the ground plane and normalised — the
+    *camera* forward, not the walking direction;
+  - right: `forward × up` (right-handed).
+  - Degenerate case: when the projected optical axis is shorter than a threshold (camera pointing
+    nearly straight down or up), forward is carried over from the previous frame rotated by the
+    gyro yaw change, and the frame quality is marked reduced.
 - **Time**: Guidance time is `SystemClock.elapsedRealtime()` end to end. `SensorEvent.timestamp` is
   in the elapsed-realtime base. `ImageProxy.imageInfo.timestamp` is in that base only when
   `SENSOR_INFO_TIMESTAMP_SOURCE == REALTIME`. Otherwise the frame is stamped at arrival; the
@@ -111,6 +121,8 @@ data class MotionState(                  // M3o: rotation only
 data class MovementDirectionEstimate(    // where the user walks
     val timestampMs: Long, val headingRad: Float, val confidence: Float, val validUntilMs: Long,
 )
+// Displacement of LocalGroundFrame(toMs)'s origin, expressed in LocalGroundFrame(fromMs) axes (§2).
+// Metric translation does not require or imply a MovementDirectionEstimate.
 data class TranslationEstimate(          // how far the user moved since the previous estimate
     val fromMs: Long, val toMs: Long,
     val deltaForwardM: Float, val deltaRightM: Float, val uncertaintyM: Float, val confidence: Float,
@@ -426,22 +438,26 @@ frames; binding coverage if any native kernel is added.
 ## 10. M4 — Local world model
 
 **V0 (frame-local)**
-- Ego-centric, gravity-aligned ground grid: 0.1 m cells, 6 m forward × 4 m wide (configurable),
-  packed arrays, preallocated.
+- Ground grid in `LocalGroundFrame(t)` of the frame it was built for (§2): 0.1 m cells, 6 m
+  forward × 4 m wide (configurable), packed arrays, preallocated.
 - Rebuilt every update from the current observations only: ground/free from `GroundObservation` (or
   sem passable when no depth); occupied from valid det contact points and above-ground regions;
   drops from below-ground regions; everything else unknown.
 
 **V1 (temporal, restricted)**
-- **While stationary** (`MotionState.isStationary`): cells fuse over time with decay; yaw changes
-  rotate the grid.
+- **While stationary** (`MotionState.isStationary`): cells fuse over time with decay; a yaw change
+  `Δψ` between the two frames' forward axes (about up, measured by the gyro) maps a cell as
+  `p_to = R(−Δψ) · p_from`.
 - **While moving, translation unknown**: only *risk* evidence (occupied, drop) is carried from past
   frames, dilated by `v_max · age` (v_max ≈ 1.5 m/s walking) and dropped after a short hold
   (≈ 0.5 s). Free/ground is never carried across frames: a cell not observed free in the current
   frame is unknown.
 - With a runtime **metric translation** source (M5b translation or M11) the grid may translate and
   fuse free space; that is a separate change with its own review. A movement-direction source alone
-  does not permit it.
+  does not permit it. The update is fixed by the contract: with `Δ = (deltaForwardM, deltaRightM)` in
+  `LocalGroundFrame(from)` and the yaw change `Δψ`, a cell maps as `p_to = R(−Δψ) · (p_from − Δ)`
+  (translate in the previous frame, then rotate into the current one); `uncertaintyM` dilates the
+  carried cells.
 
 **Output**: `LocalWorldModel(timestamp, ageMs, grid, fusionMode, confidence)`; `SceneSnapshot` keeps
 its current fields and may later read corridor summaries from it.
@@ -463,8 +479,12 @@ Two capabilities, judged and implemented separately (contracts in §3):
 reckoning (needs the `ACTIVITY_RECOGNITION` decision); visual motion from consecutive frames (e.g.
 ground-plane flow — M3 gives the plane and scale). Rigid-mount validation is out of scope for now
 (decided 2026-09-25). The record gives two verdicts, *direction* and *translation*, each
-VALIDATED / NOT_VALIDATED with its error statistics against a reference (e.g. walked routes of known
-length and shape).
+VALIDATED / NOT_VALIDATED with its error statistics against a reference. Two conditions for M5a's
+own review: (1) the cadence and resolution a verdict is validated at must equal what M5b will run
+at — a 5 Hz / 640 px result does not validate a 15–30 Hz or full-resolution implementation, and a
+candidate that needs more gets its own motion-evaluation capture instead of reusing M0 data;
+(2) a *translation* verdict needs a time-aligned displacement reference that checks per-interval
+Δforward / Δright, not only the total length of a walked route (which is a coarse sanity check).
 
 **M5b — runtime implementation.** Only for a VALIDATED verdict: implement `MovementDirectionSource`
 and/or `TranslationSource` in `…guidance.motion`, with freshness, confidence and explicit failure

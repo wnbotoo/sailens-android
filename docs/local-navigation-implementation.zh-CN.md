@@ -40,6 +40,14 @@
 - **相机坐标系**：x 向右，y 向下，z 向前，与上面的分析图像坐标系对应。
 - **重力**：相机坐标系下指向下方的单位向量 `g`。由设备坐标系下的重力/旋转传感器，经过后置摄像
   头的固定朝向（`SENSOR_ORIENTATION`）和分析旋转换算得到。
+- **局部地面坐标系** `LocalGroundFrame(t)`——所有地面网格（M4、M6）和所有 `TranslationEstimate` 都用
+  它表达：
+  - 原点：时刻 `t` 的相机位置在地平面上的投影；
+  - 上：`−g`（与重力相反）；
+  - 前：时刻 `t` 的相机光轴投影到地平面后归一化——是*相机*的前方，不是行走方向；
+  - 右：`forward × up`（右手系）。
+  - 退化情况：光轴投影长度小于阈值（相机几乎垂直朝下或朝上）时，前向沿用上一帧的前向并按陀螺仪的偏
+    航变化旋转，同时把该坐标系的质量标为下降。
 - **时间**：Guidance 全程使用 `SystemClock.elapsedRealtime()`。`SensorEvent.timestamp` 就是
   elapsed-realtime 基准。`ImageProxy.imageInfo.timestamp` 只有在
   `SENSOR_INFO_TIMESTAMP_SOURCE == REALTIME` 时才是这个基准。否则按帧到达时间打时间戳；由此产生的
@@ -106,6 +114,8 @@ data class MotionState(                  // M3o：只含旋转
 data class MovementDirectionEstimate(    // 用户往哪走
     val timestampMs: Long, val headingRad: Float, val confidence: Float, val validUntilMs: Long,
 )
+// LocalGroundFrame(toMs) 原点的位移，用 LocalGroundFrame(fromMs) 的坐标轴表达（§2）。
+// 公制平移既不需要、也不意味着有 MovementDirectionEstimate。
 data class TranslationEstimate(          // 自上次估计以来用户移动了多远
     val fromMs: Long, val toMs: Long,
     val deltaForwardM: Float, val deltaRightM: Float, val uncertaintyM: Float, val confidence: Float,
@@ -383,17 +393,21 @@ sem 那种"顺序错了也能悄悄通过"的风险；对应的风险是**输出
 ## 10. M4 — 局部世界模型
 
 **V0（逐帧）**
-- 以自身为中心、重力对齐的地面网格：0.1 m 格子，前方 6 m × 宽 4 m（可配置），紧凑数组，预先分配。
+- 地面网格用其对应帧的 `LocalGroundFrame(t)` 表达（§2）：0.1 m 格子，前方 6 m × 宽 4 m（可配置），紧凑
+  数组，预先分配。
 - 每次更新只用当前观测重建：可走/空地来自 `GroundObservation`（没有深度时来自 sem 可通行区）；占据来
   自有效的 det 接地点和高于地面的区域；落差来自低于地面的区域；其余为未知。
 
 **V1（时间融合，有限制）**
-- **静止时**（`MotionState.isStationary`）：格子随时间融合并衰减；偏航变化时旋转网格。
+- **静止时**（`MotionState.isStationary`）：格子随时间融合并衰减；两帧前向轴之间的偏航变化 `Δψ`（绕
+  上方向，由陀螺仪测得）按 `p_to = R(−Δψ) · p_from` 映射格子。
 - **移动且平移未知时**：只有*风险*证据（有东西、落差）能从过去的帧带过来，按 `v_max · 时长` 膨胀
   （步行 v_max ≈ 1.5 m/s），短暂保持（约 0.5 s）后丢弃。空地/地面绝不跨帧保留：当前帧没有观测到是
   空地的格子就是未知。
 - 运行时有了**公制平移**来源（M5b 的平移或 M11）后，网格才可以平移并融合空地；那是另一个改动，单独评
-  审。只有移动方向来源不行。
+  审。只有移动方向来源不行。更新方式由契约固定：`Δ = (deltaForwardM, deltaRightM)` 在
+  `LocalGroundFrame(from)` 里表达，偏航变化为 `Δψ`，格子按 `p_to = R(−Δψ) · (p_from − Δ)` 映射（先在上一
+  帧里平移，再旋转到当前帧）；`uncertaintyM` 用来膨胀被带过来的格子。
 
 **输出**：`LocalWorldModel(timestamp, ageMs, grid, fusionMode, confidence)`；`SceneSnapshot` 保持现有
 字段，以后可以从中读取走廊摘要。
@@ -414,7 +428,10 @@ sem 那种"顺序错了也能悄悄通过"的风险；对应的风险是**输出
 **M5a — 评估（离线，产出决策记录）。** 用 M0 采集数据评估候选方案：基于计步的航位推算（需要先定
 `ACTIVITY_RECOGNITION` 权限）；从相邻帧估计的视觉运动（例如地面光流——M3 给出了地平面和尺度）。刚性固
 定的验证暂不做（2026-09-25 决定）。决策记录给出*方向*和*平移*两个结论，各自为"已验证 / 未验证"，并附
-与参照（例如已知长度和形状的步行路线）对比的误差统计。
+与参照对比的误差统计。M5a 自己的评审要满足两个条件：(1) 结论所验证的帧率和分辨率必须与 M5b 运行时一致——
+5 Hz / 640 px 的结果不能证明 15–30 Hz 或全分辨率的实现；需要更高采样的候选方案要单独做运动评估采集，不能
+硬套 M0 数据；(2) *平移*结论需要时间对齐的位移参照，能检查每个相邻区间的 Δ前 / Δ右，而不只是整条步行路
+线的总长度（总长度只能作粗略的合理性检查）。
 
 **M5b — 运行时实现。** 只针对"已验证"的结论：在 `…guidance.motion` 里实现 `MovementDirectionSource`
 和/或 `TranslationSource`，带新鲜度、置信度和显式失败（能力状态按 §5），并在真机上对照 M5a 的证据验
