@@ -56,24 +56,33 @@
   - 退化情况：光轴投影长度小于阈值（相机几乎垂直朝下或朝上）时，前向沿用上一帧的前向并按陀螺仪的偏
     航变化旋转，同时把该坐标系的质量标为下降。
 - **时间**：Guidance 全程使用 `SystemClock.elapsedRealtime()`。`SensorEvent.timestamp` 就是
-  elapsed-realtime 基准。`ImageProxy.imageInfo.timestamp` 只有在
-  `SENSOR_INFO_TIMESTAMP_SOURCE == REALTIME` 时才是这个基准。否则按帧到达时间打时间戳；由此产生的
-  对齐误差在 M0a 按设备实测之前是**未知的**，并记入 trace（`timestampSource`）。误差未测或过大时，
-  几何使用方按质量下降处理。
+  elapsed-realtime 基准。`ImageProxy.imageInfo.timestamp` 只有在 Camera2 报告
+  `SENSOR_INFO_TIMESTAMP_SOURCE == REALTIME` 时才是这个基准；为 `UNKNOWN` 时它是单调的，但不保证能和
+  传感器对齐，M3o 会退回到来源侧的接收时间（`receivedElapsedRealtimeNanos`）。"接收时间"是 Sailens 的
+  回退方案，不是 Camera2 的时间戳来源。由此产生的对齐误差在 M0a 按设备实测之前是**未知的**，所选的时
+  间基准记入 trace。误差未测或过大时，几何使用方按质量下降处理。
 
 ## 3. 契约（草图）
 
-```kotlin
-// sailens-camera：随分析器发出的 ImageFrame 一起传递（每个订阅者的拷贝也保留它）。
-data class FrameCaptureInfo(
-    val sensorTimestampNanos: Long,
-    val timestampSource: TimestampSource,          // REALTIME | ARRIVAL
-    val intrinsics: CameraIntrinsics?,             // 分析图像像素单位；未知则为 null
-    val intrinsicsSource: IntrinsicsSource,        // CALIBRATION | FOCAL_LENGTH_ESTIMATE | NONE
-)
+相机相关的事实分阶段处理：M0a 记录原始事实，M3o 负责解析。
 
+```kotlin
+// ---- M0a：原始事实，按来源报告的原样记录（已在 PR #12 实现）----
+// sailens-core，每个 ImageFrame 上：
+//   timestamp                     相机时间戳，基准取决于 SENSOR_INFO_TIMESTAMP_SOURCE
+//   receivedElapsedRealtimeNanos  在来源侧、任何排队之前取得
+//   rotationDegrees
+//   sourceGeometry: FrameSourceGeometry(sensorToBufferTransform /* 3×3，有效像素区 → 缓冲区 */,
+//                                       裁剪框)
+// sailens-camera，每次绑定：CameraCharacteristicsSnapshot（内参标定、畸变、镜头位姿、有效/校正前
+//   有效像素区、像素阵列、物理尺寸、焦距、传感器朝向、时间戳来源 REALTIME | UNKNOWN | NOT_REPORTED）
+
+// ---- M3o：由原始事实逐帧解析 ----
+enum class TimeBasis { CAMERA_REALTIME, SOURCE_RECEIPT }   // SOURCE_RECEIPT：UNKNOWN 时的回退
 data class CameraIntrinsics(val fx: Float, val fy: Float, val cx: Float, val cy: Float,
-                            val width: Int, val height: Int)
+                            val width: Int, val height: Int)   // 分析图像像素；由内参标定经
+                                                               // sensorToBufferTransform + 旋转映射得到
+enum class IntrinsicsSource { CALIBRATION, FOCAL_LENGTH_ESTIMATE, NONE }
 
 // 由 shell 持有的存储注入 Guidance；运行参数预设只提供默认值。
 data class PhoneGeometrySettings(
@@ -192,15 +201,19 @@ M0 拆成两部分（路线图 §7）：**M0a** 是这里描述的现场证据�
 | 文件 | 内容 |
 |---|---|
 | `manifest.json` | `CaptureManifest`：schema 大/小版本、session id、模式（`field_evidence` / `timing_sync`）、开始时的墙钟和 elapsed-realtime 时间、应用版本、git SHA（有的话）、设备、SDK、硬件档位、相机参数、`complete`、`failureReason`、`pinned`、`exportedAtWallMs`、采集计数 |
-| `frames.jsonl` + `frames/` | 每个存下的帧一条 `FrameRecord`：序号、相机时间戳、来源侧接收时间、原始尺寸和旋转、编码（`jpeg` / `luma8`）、文件、存储尺寸 |
+| `frames.jsonl` + `frames/` | 每个存下的帧一条 `FrameRecord`：序号、相机时间戳、来源侧接收时间、原始尺寸和旋转、CameraX 的 `sensorToBufferTransform`（有效像素区 → 原始缓冲区）和裁剪框、编码（`jpeg` / `luma8`）、文件、存储尺寸 |
 | `sensors.jsonl` | `SensorRecord`：传感器（`gravity`、`game_rotation_vector`、`gyroscope`）、事件时间戳、精度、数值 |
 | `anchors.jsonl` | `ClockAnchorRecord`：会话开始、每 30–60 秒、会话结束时各记一对（墙钟毫秒，elapsed-realtime 纳秒） |
 | `markers.jsonl` | `MarkerRecord`："标记漏报"、墙钟和 elapsed 时间、最新帧序号、来源 |
 
 - 创建目录时就写 `manifest.json`，`complete = false`；正常结束后以原子方式（临时文件 + 重命名）改写为
   `complete = true`。应用被杀、崩溃、拔 USB、磁盘满都会留下 `complete = false`，读取器会报告。
-- 每行 JSONL 都有 `type`。读取器忽略未知字段和未知记录类型，拒绝未知的**大**版本；被截断的最后一行跳
-  过并给出警告。
+- 每行 JSONL 都有 `type`；被截断的最后一行跳过并给出警告。
+- **版本规则。** `schemaMajor` 和 `schemaMinor` 必须存在；读取器先从原始 JSON 里读出它们，**再**解码
+  正文；缺版本号或大版本未知都拒绝（报"不支持"，而不是"读不懂"），然后才解码。**小**版本只能新增：可
+  选或带默认值的 manifest 字段、记录类型、已有记录的字段、开放字符串字段的取值（`captureMode` 为此用字
+  符串——M0b 的 `model_regression` 会被旧读取器带着警告读过去）。不能删除或改名必填字段，也不能改变字段
+  的含义或类型；那属于大版本。记录里的封闭枚举不在小版本里扩展。
 - 传感器频率按事件时间戳计算；`SENSOR_DELAY_GAME` 只是请求的档位。
 - 采集自己的计数（`framesOffered`、`framesEncoded`、`framesDroppedByEncoder` 等）与 Guidance 的丢帧计数
   分开，这样才能解释采集为什么缺帧。
@@ -215,7 +228,9 @@ M0 拆成两部分（路线图 §7）：**M0a** 是这里描述的现场证据�
 `CameraCharacteristicsSnapshot`（内参标定、畸变、镜头位姿、有效/校正前有效像素区、像素阵列、物理尺寸、
 焦距、传感器朝向、时间戳来源）。Camera2 interop 只留在 `sailens-camera` 内部（`Camera2CameraInfo` 从
 CameraX 1.7 起被弃用）。快照在每次绑定时读取、解绑时清空，绝不跨绑定缓存（有些逻辑摄像头会随设备状态
-改变 `SENSOR_ORIENTATION`）。分析尺寸取第一帧的实际尺寸，不取请求的分辨率。
+改变 `SENSOR_ORIENTATION`）。分析尺寸取第一帧的实际尺寸，不取请求的分辨率。分析器还会逐帧记录 CameraX
+的 `sensorToBufferTransformMatrix` 和裁剪框（`ImageFrame.sourceGeometry`）：有效像素区到缓冲区的映射事后
+无法仅凭有效像素区、缓冲区尺寸和旋转可靠重建，而 M3o 要靠它把内参映射到已录制采集的分析坐标系里。
 
 **会话接入（PR-B）。** `GuidanceModule` 构建基础的 `TraceService`（文件或空实现），如果绑定了可选的
 `TraceServiceDecorator` 就套上它；debug 的 `shellDebugModule` 绑定一个加上采集的装饰器，release 不绑定。
@@ -253,7 +268,9 @@ CameraX 1.7 起被弃用）。快照在每次绑定时读取、解绑时清空�
 动导出，数据不会离开设备。
 
 **M0a 必须在每台目标设备上测出的数据**：相机时间戳来源；帧与传感器的对齐误差（用对时突发采集，把画面
-旋转和陀螺仪积分做相关）；存储速率；TalkBack 下的音量减键。
+旋转和陀螺仪积分做相关）；存储速率；TalkBack 下的音量减键；默认的 Guidance 会话是否用到会切换物理摄
+像头的逻辑多摄（`LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_ID`）——静态内参描述的是当前激活的物理摄像头，所以
+如果会切换，到时再加逐帧的物理摄像头 id / 动态内参，现在不加。
 
 **运行条件文档**（`docs/guidance-operating-envelope.md`）：手机放置方式和朝向、只支持步行、光线、
 天气、室内/室外、楼梯、过马路、人群密度、耳机、硬件档次、熄屏。版本 A 列为不支持的有：跑步、楼梯/
@@ -324,9 +341,11 @@ trace 调用、manifest 原子地完成。PR-C——标记去抖、导出内容�
 
 ## 7. M3o — 姿态与相机几何
 
-- `sailens-camera` 提供 `FrameCaptureInfo`：时间戳来源；内参优先取 `LENS_INTRINSIC_CALIBRATION`，
-  没有时用 `LENS_INFO_AVAILABLE_FOCAL_LENGTHS` 和 `SENSOR_INFO_PHYSICAL_SIZE` 估算（记录来源），再映射
-  到分析图像像素。
+- 解析 M0a 的原始事实（§3）：时间基准（来源为 `REALTIME` 时用 `CAMERA_REALTIME`，否则
+  `SOURCE_RECEIPT`）；内参优先取 `LENS_INTRINSIC_CALIBRATION`，没有时用
+  `LENS_INFO_AVAILABLE_FOCAL_LENGTHS` 和 `SENSOR_INFO_PHYSICAL_SIZE` 估算（记录来源），再通过该帧的
+  `sensorToBufferTransform` 和旋转映射到分析图像像素。同一套解析也用于已录制的采集数据，所以旧采集仍
+  然可用。
 - `MotionTracker`（只含旋转）：`SENSOR_DELAY_GAME` 下的 game rotation vector + 重力；静止标志沿用现
   有 `DeviceMotionDataSource` 的逻辑；文档写明 `headingRad` 是机身朝向，不是行走方向。
 - 每帧的 `CameraGeometry`：用最近一次传感器采样算出相机坐标下的重力（记录采样时长差），加上内参、

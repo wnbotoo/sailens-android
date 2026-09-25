@@ -15,7 +15,7 @@ class CaptureSessionReaderTest {
 
     private val manifest = CaptureManifest(
         sessionId = "s-1",
-        captureMode = CaptureMode.FIELD_EVIDENCE,
+        captureMode = CaptureModes.FIELD_EVIDENCE,
         startedWallMs = 1_700_000_000_000,
         startedElapsedRealtimeNanos = 9_000_000_000,
         deviceManufacturer = "Acme",
@@ -44,6 +44,8 @@ class CaptureSessionReaderTest {
         file = "frames/000012.jpg",
         width = 640,
         height = 360,
+        sensorToBufferTransform = listOf(0.24f, 0f, 0f, 0f, 0.24f, -60f, 0f, 0f, 1f),
+        cropRect = listOf(0, 0, 960, 540),
     )
     private val sensor = SensorRecord(CaptureSensor.GRAVITY, 9_101_000_000, 3, listOf(0f, 9.8f, 0.1f))
     private val anchor = ClockAnchorRecord(1_700_000_000_010, 9_010_000_000, AnchorReason.START)
@@ -115,6 +117,46 @@ class CaptureSessionReaderTest {
         assertEquals(listOf(frame), read.frames)
         assertTrue(read.warnings.any { "minor" in it })
         assertTrue(read.warnings.any { "unknown type 'depth_tile'" in it })
+    }
+
+    @Test
+    fun `a newer minor version with a capture mode this reader does not know is read, not rejected`() {
+        // M0b adds "model_regression" in a minor bump; an older reader must carry it through.
+        val newer = CaptureSchema.encodeManifest(
+            manifest.copy(schemaMinor = CaptureSchema.MINOR + 1, captureMode = "model_regression"),
+        )
+
+        val read = CaptureSessionReader.read(session(manifestJson = newer)).orThrow()
+
+        assertEquals("model_regression", read.manifest.captureMode)
+        assertTrue(read.warnings.any { "capture mode 'model_regression'" in it })
+    }
+
+    @Test
+    fun `a manifest without explicit version numbers is rejected, not assumed current`() {
+        val unversioned = CaptureSchema.encodeManifest(manifest)
+            .replace(Regex("\"schemaMajor\":\\d+,"), "")
+            .replace(Regex("\"schemaMinor\":\\d+,"), "")
+        val noMinor = CaptureSchema.encodeManifest(manifest).replace(Regex("\"schemaMinor\":\\d+,"), "")
+
+        assertTrue(CaptureSessionReader.read(session(manifestJson = unversioned)) is CaptureReadResult.Rejected)
+        assertTrue(CaptureSessionReader.read(session(manifestJson = noMinor)) is CaptureReadResult.Rejected)
+    }
+
+    @Test
+    fun `a future major version with an incompatible body is refused as unsupported`() {
+        // Nothing of the current body survives; the version gate must decide before decoding it.
+        val future = """{"schemaMajor":${CaptureSchema.MAJOR + 1},"schemaMinor":0,"session":{"id":7}}"""
+
+        val result = CaptureSessionReader.read(session(manifestJson = future))
+
+        assertTrue(result is CaptureReadResult.Rejected)
+        assertTrue((result as CaptureReadResult.Rejected).reason, "not supported" in result.reason)
+    }
+
+    @Test
+    fun `a manifest that is not a JSON object is rejected`() {
+        assertTrue(CaptureSessionReader.read(session(manifestJson = "[1,2]")) is CaptureReadResult.Rejected)
     }
 
     @Test

@@ -5,6 +5,7 @@ import android.graphics.PixelFormat
 import android.os.SystemClock
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
+import com.sailens.core.frame.FrameSourceGeometry
 import com.sailens.core.frame.ImageFrame
 import com.sailens.core.frame.ImagePixelFormat
 import com.sailens.core.frame.Yuv420FrameData
@@ -23,6 +24,7 @@ public class ImageFrameAnalyzer(
     private val frameConverter: ImageFrameConverter = ImageProxyToFrameConverter(),
     private val elapsedRealtimeMs: () -> Long = SystemClock::elapsedRealtime,
     private val elapsedRealtimeNanos: () -> Long = SystemClock::elapsedRealtimeNanos,
+    private val sourceGeometryOf: (ImageProxy) -> FrameSourceGeometry? = ::readSourceGeometry,
 ) : ImageAnalysis.Analyzer, FrameSource, FrameSnapshotProvider {
     private var nextSequenceNumber = 0L
     private val emittedFrames = AtomicLong(0L)
@@ -71,7 +73,10 @@ public class ImageFrameAnalyzer(
                     image = proxy,
                     sequenceNumber = nextSequenceNumber++,
                     planes = buffers,
-                ).copy(receivedElapsedRealtimeNanos = receivedNanos)
+                ).copy(
+                    receivedElapsedRealtimeNanos = receivedNanos,
+                    sourceGeometry = sourceGeometryOf(proxy),
+                )
                 latestFrame.record(frame, buffers)
                 if (due.isEmpty()) {
                     // Converted for a snapshot lease only. Nothing is collecting, so there is no

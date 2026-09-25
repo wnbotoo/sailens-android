@@ -1,7 +1,9 @@
 package com.sailens.guidance.trace.capture
 
 import kotlinx.serialization.SerializationException
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import java.io.File
 
@@ -35,25 +37,41 @@ object CaptureSessionReader {
     fun read(directory: File): CaptureReadResult {
         val manifestFile = File(directory, CaptureSchema.MANIFEST_FILE)
         if (!manifestFile.isFile) return CaptureReadResult.Rejected("no ${CaptureSchema.MANIFEST_FILE}")
+
+        // The version header is read on its own, before the body: a future major version may have a
+        // body this reader cannot decode, and it must be refused as "unsupported", not as "broken".
+        val root = try {
+            CaptureSchema.json.parseToJsonElement(manifestFile.readText()) as? JsonObject
+        } catch (e: SerializationException) {
+            null
+        } ?: return CaptureReadResult.Rejected("manifest is not a JSON object")
+        val major = root.intOrNull(SCHEMA_MAJOR)
+            ?: return CaptureReadResult.Rejected("manifest has no integer $SCHEMA_MAJOR")
+        val minor = root.intOrNull(SCHEMA_MINOR)
+            ?: return CaptureReadResult.Rejected("manifest has no integer $SCHEMA_MINOR")
+        if (major != CaptureSchema.MAJOR) {
+            return CaptureReadResult.Rejected(
+                "schema major $major is not supported (reader supports ${CaptureSchema.MAJOR})",
+            )
+        }
+
         val manifest = try {
-            CaptureSchema.json.decodeFromString(CaptureManifest.serializer(), manifestFile.readText())
+            CaptureSchema.json.decodeFromJsonElement(CaptureManifest.serializer(), root)
         } catch (e: SerializationException) {
             return CaptureReadResult.Rejected("unreadable manifest: ${e.message}")
         } catch (e: IllegalArgumentException) {
             return CaptureReadResult.Rejected("unreadable manifest: ${e.message}")
-        }
-        if (manifest.schemaMajor != CaptureSchema.MAJOR) {
-            return CaptureReadResult.Rejected(
-                "schema major ${manifest.schemaMajor} is not supported (reader supports ${CaptureSchema.MAJOR})",
-            )
         }
 
         val warnings = mutableListOf<String>()
         if (!manifest.complete) {
             warnings += "capture is incomplete" + (manifest.failureReason?.let { ": $it" } ?: "")
         }
-        if (manifest.schemaMinor > CaptureSchema.MINOR) {
-            warnings += "schema minor ${manifest.schemaMinor} is newer than the reader's ${CaptureSchema.MINOR}"
+        if (minor > CaptureSchema.MINOR) {
+            warnings += "schema minor $minor is newer than the reader's ${CaptureSchema.MINOR}"
+        }
+        if (manifest.captureMode !in CaptureModes.KNOWN) {
+            warnings += "capture mode '${manifest.captureMode}' is not known to this reader"
         }
 
         val records = listOf(
@@ -115,6 +133,11 @@ object CaptureSessionReader {
     }
 
     private val KNOWN_TYPES = setOf("frame", "sensor", "clock_anchor", "marker")
+    private const val SCHEMA_MAJOR = "schemaMajor"
+    private const val SCHEMA_MINOR = "schemaMinor"
+
+    private fun JsonObject.intOrNull(key: String): Int? =
+        (this[key] as? JsonPrimitive)?.takeIf { !it.isString }?.intOrNull
 }
 
 /** Throws with the reason when the directory is not a readable capture; for tools and tests. */

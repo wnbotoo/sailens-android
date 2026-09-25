@@ -64,25 +64,36 @@ No new Gradle modules. New packages inside existing modules, following the depen
     nearly straight down or up), forward is carried over from the previous frame rotated by the
     gyro yaw change, and the frame quality is marked reduced.
 - **Time**: Guidance time is `SystemClock.elapsedRealtime()` end to end. `SensorEvent.timestamp` is
-  in the elapsed-realtime base. `ImageProxy.imageInfo.timestamp` is in that base only when
-  `SENSOR_INFO_TIMESTAMP_SOURCE == REALTIME`. Otherwise the frame is stamped at arrival; the
-  resulting alignment error is **unmeasured** until M0a measures it per device, and it is traced
-  (`timestampSource`). Geometry consumers treat an unmeasured or too-large error as reduced
-  quality.
+  in the elapsed-realtime base. `ImageProxy.imageInfo.timestamp` is in that base only when Camera2
+  reports `SENSOR_INFO_TIMESTAMP_SOURCE == REALTIME`; with `UNKNOWN` it is monotonic but not
+  guaranteed to align with sensors, and M3o falls back to the source-side receipt time
+  (`receivedElapsedRealtimeNanos`). "Receipt time" is a Sailens fallback, not a Camera2 source. The
+  resulting alignment error is **unmeasured** until M0a measures it per device, and the chosen basis
+  is traced. Geometry consumers treat an unmeasured or too-large error as reduced quality.
 
 ## 3. Contracts (sketches)
 
-```kotlin
-// sailens-camera: carried on the ImageFrame the analyzer emits (per-subscriber copies keep it).
-data class FrameCaptureInfo(
-    val sensorTimestampNanos: Long,
-    val timestampSource: TimestampSource,          // REALTIME | ARRIVAL
-    val intrinsics: CameraIntrinsics?,             // in analysis-image pixels; null if unknown
-    val intrinsicsSource: IntrinsicsSource,        // CALIBRATION | FOCAL_LENGTH_ESTIMATE | NONE
-)
+Camera facts are staged: M0a records raw facts, M3o resolves them.
 
+```kotlin
+// ---- M0a: raw facts, recorded as the source reported them (implemented in PR #12) ----
+// sailens-core, on every ImageFrame:
+//   timestamp                     camera timestamp, base per SENSOR_INFO_TIMESTAMP_SOURCE
+//   receivedElapsedRealtimeNanos  taken at the source before any queueing
+//   rotationDegrees
+//   sourceGeometry: FrameSourceGeometry(sensorToBufferTransform /* 3×3, active array → buffer */,
+//                                       crop rect)
+// sailens-camera, per binding: CameraCharacteristicsSnapshot (intrinsic calibration, distortion,
+//   lens pose, active / pre-correction arrays, pixel array, physical size, focal lengths,
+//   sensor orientation, timestamp source REALTIME | UNKNOWN | NOT_REPORTED)
+
+// ---- M3o: resolved per frame from the raw facts ----
+enum class TimeBasis { CAMERA_REALTIME, SOURCE_RECEIPT }   // SOURCE_RECEIPT: fallback for UNKNOWN
 data class CameraIntrinsics(val fx: Float, val fy: Float, val cx: Float, val cy: Float,
-                            val width: Int, val height: Int)
+                            val width: Int, val height: Int)   // analysis-image pixels, obtained by
+                                                               // mapping the calibration through
+                                                               // sensorToBufferTransform + rotation
+enum class IntrinsicsSource { CALIBRATION, FOCAL_LENGTH_ESTIMATE, NONE }
 
 // Injected into Guidance from a shell-owned store; the runtime profile only supplies the default.
 data class PhoneGeometrySettings(
@@ -205,7 +216,7 @@ Guidance session, named after the trace session id:
 | File | Content |
 |---|---|
 | `manifest.json` | `CaptureManifest`: schema major/minor, session id, mode (`field_evidence` / `timing_sync`), start wall and elapsed-realtime time, app version, git SHA if available, device, SDK, hardware profile, camera characteristics, `complete`, `failureReason`, `pinned`, `exportedAtWallMs`, capture counters |
-| `frames.jsonl` + `frames/` | `FrameRecord` per stored frame: seq, camera timestamp, source-side receipt time, source size and rotation, encoding (`jpeg` / `luma8`), file, stored size |
+| `frames.jsonl` + `frames/` | `FrameRecord` per stored frame: seq, camera timestamp, source-side receipt time, source size and rotation, CameraX `sensorToBufferTransform` (active array → source buffer) and crop rect, encoding (`jpeg` / `luma8`), file, stored size |
 | `sensors.jsonl` | `SensorRecord`: sensor (`gravity`, `game_rotation_vector`, `gyroscope`), event timestamp, accuracy, values |
 | `anchors.jsonl` | `ClockAnchorRecord`: (wall ms, elapsed-realtime ns) at start, every 30–60 s, and at the end |
 | `markers.jsonl` | `MarkerRecord`: "missed alert", wall and elapsed time, last frame seq, source |
@@ -213,8 +224,15 @@ Guidance session, named after the trace session id:
 - `manifest.json` is written with `complete = false` when the directory is created and rewritten
   atomically (temp file + rename) with `complete = true` after a normal end. A killed app, crash,
   unplugged USB or full disk leaves `complete = false`, which readers report.
-- Every JSONL line has a `type`. Readers ignore unknown fields and unknown record types and refuse
-  an unknown **major** version; a torn last line is skipped with a warning.
+- Every JSONL line has a `type`; a torn last line is skipped with a warning.
+- **Versioning.** `schemaMajor` and `schemaMinor` are required; the reader reads them from the raw
+  JSON **before** decoding the body, refuses a missing version and an unknown major version (as
+  "unsupported", never as "unreadable"), then decodes. A **minor** version may only add: optional or
+  defaulted manifest fields, record types, fields of existing records, and values of open string
+  fields (`captureMode` is a string for this reason — M0b's `model_regression` is carried through by
+  an older reader with a warning). It may not remove or rename a required field or change a field's
+  meaning or type; that is a major version. Closed enums inside records are not extended in a minor
+  version.
 - Sensor cadence is computed from event timestamps; `SENSOR_DELAY_GAME` is only the requested rate.
 - Capture counters (`framesOffered`, `framesEncoded`, `framesDroppedByEncoder`, …) are separate from
   Guidance's dropped frames, so missing capture frames can be explained.
@@ -233,6 +251,10 @@ orientation, timestamp source). Camera2 interop stays inside `sailens-camera`
 (`Camera2CameraInfo` is deprecated from CameraX 1.7). The snapshot is read on every bind and cleared
 on unbind, never cached across bindings (some logical cameras change `SENSOR_ORIENTATION` with device
 state). The analysis size is taken from the first frame, not from the requested resolution.
+Per frame, the analyzer also records CameraX's `sensorToBufferTransformMatrix` and crop rect
+(`ImageFrame.sourceGeometry`): the active-array-to-buffer mapping cannot be reliably rebuilt later
+from the active array, buffer size and rotation alone, and M3o needs it to map intrinsics into the
+analysis frame of recorded captures.
 
 **Session wiring (PR-B).** `GuidanceModule` builds the base `TraceService` (file or no-op) and
 applies an optional `TraceServiceDecorator` if one is bound; the debug `shellDebugModule` binds one
@@ -272,7 +294,10 @@ ZIPs live in `cacheDir`, which is not backed up. Nothing leaves the device excep
 
 **Measurements M0a must produce per target device**: camera timestamp source; frame-to-sensor
 alignment error (timing-sync burst: correlate image rotation with integrated gyro); storage rate;
-Volume Down under TalkBack.
+Volume Down under TalkBack; whether the default Guidance session exposes a logical multi-camera
+that switches physical cameras (`LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_ID`) — static intrinsics
+describe the active physical camera, so if it switches, per-frame physical id / dynamic intrinsics
+are added then, not before.
 
 **Operating envelope doc** (`docs/guidance-operating-envelope.md`): phone placement and orientation,
 walking only, lighting, weather, indoor/outdoor, stairs, road crossings, crowd density, headphones,
@@ -352,9 +377,11 @@ simulator stop/recovery scenarios and a device run against the baseline.
 
 ## 7. M3o — Orientation and camera geometry
 
-- `FrameCaptureInfo` from `sailens-camera`: timestamp source; intrinsics from
-  `LENS_INTRINSIC_CALIBRATION` when present, else estimated from `LENS_INFO_AVAILABLE_FOCAL_LENGTHS`
-  and `SENSOR_INFO_PHYSICAL_SIZE` (source recorded), mapped into analysis-image pixels.
+- Resolves the raw M0a facts (§3): the time basis (`CAMERA_REALTIME` when the source is `REALTIME`,
+  else `SOURCE_RECEIPT`); intrinsics from `LENS_INTRINSIC_CALIBRATION` when present, else estimated
+  from `LENS_INFO_AVAILABLE_FOCAL_LENGTHS` and `SENSOR_INFO_PHYSICAL_SIZE` (source recorded), mapped
+  into analysis-image pixels through the frame's `sensorToBufferTransform` and rotation. The same
+  resolution runs on recorded captures, so old captures stay usable.
 - `MotionTracker` (rotation only): game rotation vector + gravity at `SENSOR_DELAY_GAME`; stationary
   flag from the existing `DeviceMotionDataSource` logic; `headingRad` is device heading and is
   documented as not being walking direction.

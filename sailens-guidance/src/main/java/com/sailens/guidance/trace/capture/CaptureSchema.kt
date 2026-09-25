@@ -19,8 +19,14 @@ import kotlinx.serialization.json.Json
  *   markers.jsonl      MarkerRecord per "missed alert" press
  * ```
  *
- * Every JSONL line is an object with a `type`. Readers ignore unknown fields and unknown record
- * types (a newer minor version may add them) and refuse an unknown major version.
+ * Every JSONL line is an object with a `type`.
+ *
+ * Versioning. The manifest must carry `schemaMajor` and `schemaMinor`; a reader checks the major
+ * version before decoding anything else and refuses one it does not know. A **minor** version may
+ * only add: optional/defaulted manifest fields, record types, fields of existing records, and
+ * values of open string fields such as [CaptureManifest.captureMode]. It may not remove or rename a
+ * required field or change a field's meaning or type -- that is a major version. Closed enums inside
+ * records are not extended in a minor version; a new value there needs a new field or record type.
  *
  * The prompt outcomes and frame traces of the same session live in the trace files and are joined
  * by `sessionId` and frame `sequenceNumber`.
@@ -53,17 +59,22 @@ object CaptureSchema {
         json.encodeToString(CaptureRecord.serializer(), record)
 }
 
-@Serializable
-enum class CaptureMode {
+/**
+ * Capture modes. The manifest stores the mode as an open string so that a mode added in a later
+ * minor version (M0b's `model_regression`) is carried through by an older reader instead of making
+ * the whole manifest unreadable.
+ */
+object CaptureModes {
     /** Reduced frames (5 Hz, 640 px JPEG) + sensors + camera facts: labelling and geometry. */
-    @SerialName("field_evidence") FIELD_EVIDENCE,
+    const val FIELD_EVIDENCE: String = "field_evidence"
 
     /**
      * A short burst of small luma frames at camera rate for measuring frame-to-sensor alignment.
      * Never a performance baseline: it changes the load on the device.
      */
-    @SerialName("timing_sync") TIMING_SYNC,
-    // "model_regression" is reserved for M0b.
+    const val TIMING_SYNC: String = "timing_sync"
+
+    val KNOWN: Set<String> = setOf(FIELD_EVIDENCE, TIMING_SYNC)
 }
 
 @Serializable
@@ -71,7 +82,8 @@ data class CaptureManifest(
     val schemaMajor: Int = CaptureSchema.MAJOR,
     val schemaMinor: Int = CaptureSchema.MINOR,
     val sessionId: String,
-    val captureMode: CaptureMode,
+    /** One of [CaptureModes], or a mode from a newer minor version this reader does not know. */
+    val captureMode: String,
     val startedWallMs: Long,
     val startedElapsedRealtimeNanos: Long,
     val appVersionName: String? = null,
@@ -131,6 +143,10 @@ sealed interface CaptureRecord
  * @param receivedElapsedRealtimeNanos when the analyzer received the frame, taken at the source
  *   before any queueing; 0 when unknown.
  * @param sourceWidth analysis frame size before downscaling, as delivered (not the requested size).
+ * @param sensorToBufferTransform CameraX's `sensorToBufferTransformMatrix` for this frame: 9 values,
+ *   row-major, mapping active-array coordinates to *source* buffer pixels (before downscaling to
+ *   [width] × [height]); null when the source did not report it.
+ * @param cropRect the crop CameraX applied, `[left, top, right, bottom]` in source buffer pixels.
  */
 @Serializable
 @SerialName("frame")
@@ -146,6 +162,8 @@ data class FrameRecord(
     val file: String,
     val width: Int,
     val height: Int,
+    val sensorToBufferTransform: List<Float>? = null,
+    val cropRect: List<Int>? = null,
 ) : CaptureRecord
 
 @Serializable
