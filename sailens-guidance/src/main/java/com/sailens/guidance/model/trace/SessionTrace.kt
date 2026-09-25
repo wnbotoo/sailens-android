@@ -100,13 +100,22 @@ data class OverlayRenderTrace(
  * heard: only the first is offered, and it can still be held back for a description or refused by
  * an output that is busy with higher-priority speech. Labelling false alarms against candidates would
  * label prompts nobody received. This record is written by the output side after delivery is decided,
- * so it lands after its frame's record; join the two on [sourceSequenceNumber].
+ * so it lands after its frame's record; join the two on [sourceSequenceNumber] (the frame record is
+ * always written for a frame that offered a prompt, whatever the trace sampling).
  *
- * Exactly one of [deliveredAt] and [revokedAt] is set. Both are wall-clock milliseconds, the same
- * clock as [FrameTrace.pipelineCompletedAt].
+ * Invariants, enforced on construction so the writer and the parser share them:
+ * - exactly one of [deliveredAt] and [revokedAt] is set; both are wall-clock milliseconds, the same
+ *   clock as [FrameTrace.pipelineCompletedAt];
+ * - delivered: [deliveredVia] names at least one channel from [PromptDeliveryChannels], and there is
+ *   no [revokeReason];
+ * - revoked: [revokeReason] is one of [PromptRevokeReasons], and [deliveredVia] is empty.
  *
- * "Delivered" means an output channel accepted the prompt. Spoken prompts can still be cut short
- * later by a strictly higher-priority one; that is not recorded here.
+ * [deliveredVia] is the evidence of what the user got — heard, felt or only shown. The output
+ * settings are context, not evidence: with speech and haptics both on, a prompt can still reach the
+ * user by vibration alone while the speech engine is starting.
+ *
+ * "Delivered" means the channel accepted the prompt. Spoken prompts can still be cut short later by
+ * a strictly higher-priority one; that is not recorded here.
  */
 data class PromptOutcomeTrace(
     /** Filled in by the trace service from its active session; callers on the output side leave it. */
@@ -120,13 +129,31 @@ data class PromptOutcomeTrace(
     val priority: String,
     val deliveredAt: Long? = null,
     val revokedAt: Long? = null,
-    /** Why it was revoked; null when delivered. See [PromptRevokeReasons]. */
+    /** Why it was revoked; null when delivered. One of [PromptRevokeReasons]. */
     val revokeReason: String? = null,
-    /** The output settings at the time, so a label can tell "heard" from "felt". */
+    /** The channels that accepted it, from [PromptDeliveryChannels]; empty when revoked. */
+    val deliveredVia: List<String> = emptyList(),
+    /** The output settings at the time. Context only; [deliveredVia] says what actually happened. */
     val speechEnabled: Boolean,
     val screenReaderActive: Boolean,
     val hapticsEnabled: Boolean,
-)
+) {
+    init {
+        require((deliveredAt == null) != (revokedAt == null)) {
+            "A prompt outcome is either delivered or revoked: deliveredAt=$deliveredAt revokedAt=$revokedAt"
+        }
+        if (deliveredAt != null) {
+            require(revokeReason == null) { "A delivered prompt has no revoke reason, got '$revokeReason'" }
+            require(deliveredVia.isNotEmpty()) { "A delivered prompt names the channels that accepted it" }
+            require(deliveredVia.all { it in PromptDeliveryChannels.all }) {
+                "Unknown delivery channel in $deliveredVia"
+            }
+        } else {
+            require(revokeReason in PromptRevokeReasons.all) { "Unknown revoke reason '$revokeReason'" }
+            require(deliveredVia.isEmpty()) { "A revoked prompt reached no channel, got $deliveredVia" }
+        }
+    }
+}
 
 /** The closed set of [PromptOutcomeTrace.revokeReason] values. */
 object PromptRevokeReasons {
@@ -135,6 +162,25 @@ object PromptRevokeReasons {
 
     /** Every enabled output refused it (speech busy with an equal or higher priority). */
     const val OUTPUT_REFUSED = "output_refused"
+
+    val all: Set<String> = setOf(WAITING_FOR_DESCRIPTION, OUTPUT_REFUSED)
+}
+
+/** The closed set of [PromptOutcomeTrace.deliveredVia] values. */
+object PromptDeliveryChannels {
+    /** The app's own text-to-speech spoke it. */
+    const val SPEECH = "speech"
+
+    /** Handed to the screen reader (TalkBack), which speaks it in the user's own settings. */
+    const val SCREEN_READER = "screen_reader"
+
+    /** Its vibration rhythm played. */
+    const val HAPTICS = "haptics"
+
+    /** Speech and haptics are both off; the status card is the channel the user chose. */
+    const val STATUS_CARD = "status_card"
+
+    val all: Set<String> = setOf(SPEECH, SCREEN_READER, HAPTICS, STATUS_CARD)
 }
 
 data class SessionTraceSummary(

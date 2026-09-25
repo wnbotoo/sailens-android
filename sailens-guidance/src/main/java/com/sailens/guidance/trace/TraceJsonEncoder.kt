@@ -120,6 +120,7 @@ internal object TraceJsonEncoder {
         outcome.deliveredAt?.let { put("deliveredAt", it) }
         outcome.revokedAt?.let { put("revokedAt", it) }
         outcome.revokeReason?.let { put("revokeReason", it) }
+        put("deliveredVia", JSONArray(outcome.deliveredVia))
         put("speechEnabled", outcome.speechEnabled)
         put("screenReaderActive", outcome.screenReaderActive)
         put("hapticsEnabled", outcome.hapticsEnabled)

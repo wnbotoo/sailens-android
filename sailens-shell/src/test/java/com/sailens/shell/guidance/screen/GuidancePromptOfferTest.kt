@@ -7,6 +7,10 @@ import com.sailens.guidance.model.analysis.SceneSnapshot
 import com.sailens.guidance.model.analysis.WalkPathConnectivity
 import com.sailens.guidance.model.common.EventPriority
 import com.sailens.guidance.model.common.Severity
+import com.sailens.guidance.model.trace.PromptDeliveryChannels.HAPTICS
+import com.sailens.guidance.model.trace.PromptDeliveryChannels.SPEECH
+import com.sailens.guidance.model.trace.PromptOutcomeTrace
+import com.sailens.guidance.model.trace.PromptRevokeReasons
 import com.sailens.guidance.processor.decision.CooldownManager
 import com.sailens.guidance.processor.decision.EventConflictResolver
 import com.sailens.guidance.processor.decision.EventGenerator
@@ -17,7 +21,7 @@ import com.sailens.guidance.usecase.decision.RevokeUndeliveredEventUseCase
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -41,15 +45,28 @@ class GuidancePromptOfferTest {
     private val revoke = RevokeUndeliveredEventUseCase(cooldown)
 
     private val calls = mutableListOf<String>()
+    private val outcomes = mutableListOf<PromptOutcomeTrace>()
+    private var sequence = 0L
+    private val outputs = GuidanceOutputSettings(speechEnabled = true, screenReaderActive = false, hapticsEnabled = true)
 
-    private fun frame(snapshot: SceneSnapshot, describing: Boolean): Boolean? {
+    /** One pipeline frame: decide, then offer the primary prompt and trace what became of it. */
+    private fun frame(
+        snapshot: SceneSnapshot,
+        describing: Boolean,
+        delivery: GuidanceDeliveryResult = GuidanceDeliveryResult(listOf(SPEECH, HAPTICS)),
+    ): Boolean? {
+        sequence++
         val primary = decide(snapshot).firstOrNull() ?: return null
-        return offerGuidancePrompt(
-            priority = primary.priority,
+        return offerAndTraceGuidancePrompt(
+            event = primary,
+            sourceSequenceNumber = sequence,
+            outputs = outputs,
             descriptionHoldsTheFloor = describing,
+            now = { WALL_CLOCK_BASE + now },
             preemptDescription = { calls += "preempt" },
-            deliver = { calls += "deliver:${primary.messageKey}"; true },
-            revoke = { reason -> calls += "revoke:$reason"; revoke(primary) },
+            deliver = { calls += "deliver:${primary.messageKey}"; delivery },
+            revoke = { calls += "revoke"; revoke(primary) },
+            record = { outcomes += it },
         )
     }
 
@@ -63,18 +80,29 @@ class GuidancePromptOfferTest {
         now += 100
         // Offered again on the next frame: the revoke took the provisional cooldown record back.
         assertEquals(false, frame(trafficLight, describing = true))
-        assertEquals(listOf("revoke:waiting_for_description", "revoke:waiting_for_description"), calls)
+        assertEquals(listOf("revoke", "revoke"), calls)
 
         now += 100
         assertEquals(true, frame(trafficLight, describing = false))
-        assertEquals(
-            listOf("revoke:waiting_for_description", "revoke:waiting_for_description", "preempt", "deliver:event_traffic_light"),
-            calls,
-        )
+        assertEquals(listOf("revoke", "revoke", "preempt", "deliver:event_traffic_light"), calls)
 
-        // Delivered for real now, so the cooldown holds it.
+        // Delivered for real now, so the cooldown holds it: no prompt offered, nothing recorded.
         now += 100
         assertEquals(null, frame(trafficLight, describing = false))
+
+        // Exactly one outcome per offered prompt, each joined to the frame that offered it.
+        assertEquals(listOf(1L, 2L, 3L), outcomes.map { it.sourceSequenceNumber })
+        val (firstWait, secondWait, delivered) = outcomes
+        for (wait in listOf(firstWait, secondWait)) {
+            assertEquals(PromptRevokeReasons.WAITING_FOR_DESCRIPTION, wait.revokeReason)
+            assertNull(wait.deliveredAt)
+            assertEquals(emptyList<String>(), wait.deliveredVia)
+        }
+        assertEquals(WALL_CLOCK_BASE + 1_200L, delivered.deliveredAt)
+        assertNull(delivered.revokedAt)
+        assertEquals(listOf(SPEECH, HAPTICS), delivered.deliveredVia)
+        assertEquals("event_traffic_light", delivered.messageKey)
+        assertEquals("low", delivered.priority)
     }
 
     @Test
@@ -83,29 +111,32 @@ class GuidancePromptOfferTest {
 
         assertEquals(true, frame(dark, describing = true))
         assertEquals(listOf("preempt", "deliver:event_low_light"), calls)
+        assertEquals(listOf(SPEECH, HAPTICS), outcomes.single().deliveredVia)
     }
 
     @Test
     fun `a prompt the speech engine refuses is revoked and offered again`() {
         val trafficLight = snapshot(trafficLight = true)
-        var accept = false
-        val reasons = mutableListOf<String>()
-        fun offer(): Boolean {
-            val primary = decide(trafficLight).single()
-            return offerGuidancePrompt(
-                priority = primary.priority,
-                descriptionHoldsTheFloor = false,
-                preemptDescription = {},
-                deliver = { accept },
-                revoke = { reason -> reasons += reason; revoke(primary) },
-            )
-        }
 
-        assertFalse(offer())
+        assertEquals(false, frame(trafficLight, describing = false, delivery = GuidanceDeliveryResult.NOT_DELIVERED))
         now += 100
-        accept = true
-        assertTrue("the refused prompt must not be sitting in the cooldown", offer())
-        assertEquals(listOf("output_refused"), reasons)
+        assertTrue(
+            "the refused prompt must not be sitting in the cooldown",
+            frame(trafficLight, describing = false) == true,
+        )
+
+        assertEquals(PromptRevokeReasons.OUTPUT_REFUSED, outcomes[0].revokeReason)
+        assertEquals(listOf(SPEECH, HAPTICS), outcomes[1].deliveredVia)
+    }
+
+    @Test
+    fun `a prompt felt while the speech engine starts is traced as haptics only`() {
+        // Speech and haptics are both on, as for a spoken prompt; the trace must still say "felt".
+        frame(snapshot(trafficLight = true), describing = false, delivery = GuidanceDeliveryResult(listOf(HAPTICS)))
+
+        val outcome = outcomes.single()
+        assertEquals(listOf(HAPTICS), outcome.deliveredVia)
+        assertTrue(outcome.speechEnabled && outcome.hapticsEnabled)
     }
 
     private fun snapshot(
@@ -146,5 +177,10 @@ class GuidancePromptOfferTest {
         override val isStationary: StateFlow<Boolean> = MutableStateFlow(false)
         override fun startObserving() = Unit
         override fun stopObserving() = Unit
+    }
+
+    private companion object {
+        /** A wall-clock origin, so outcome times are plainly not the monotonic decision clock. */
+        const val WALL_CLOCK_BASE = 1_700_000_000_000L
     }
 }

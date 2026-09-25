@@ -261,22 +261,35 @@ object TraceReplayParser {
         sourceAgeMs = entry.optionalLong("sourceAgeMs") ?: 0,
     )
 
-    private fun parsePromptOutcome(entry: JsonObject, lineIndex: Int) = PromptOutcomeTrace(
-        sessionId = entry.requireString("sessionId", lineIndex),
-        eventId = entry.requireString("eventId", lineIndex),
-        sourceSequenceNumber = entry.requireLong("sourceSequenceNumber", lineIndex),
-        messageKey = entry.requireString("messageKey", lineIndex),
-        category = entry.requireString("category", lineIndex),
-        priority = entry.requireString("priority", lineIndex),
-        deliveredAt = entry.optionalLong("deliveredAt"),
-        revokedAt = entry.optionalLong("revokedAt"),
-        revokeReason = entry.optionalString("revokeReason"),
-        speechEnabled = entry.requireBoolean("speechEnabled", lineIndex),
-        screenReaderActive = entry.requireBoolean("screenReaderActive", lineIndex),
-        hapticsEnabled = entry.requireBoolean("hapticsEnabled", lineIndex),
-    ).also { outcome ->
-        require((outcome.deliveredAt == null) != (outcome.revokedAt == null)) {
-            "Prompt outcome at line ${lineIndex + 1} must have exactly one of deliveredAt and revokedAt"
+    /** The invariants live in [PromptOutcomeTrace] itself; this only adds the line number. */
+    private fun parsePromptOutcome(entry: JsonObject, lineIndex: Int): PromptOutcomeTrace {
+        val sessionId = entry.requireString("sessionId", lineIndex)
+        val eventId = entry.requireString("eventId", lineIndex)
+        val sourceSequenceNumber = entry.requireLong("sourceSequenceNumber", lineIndex)
+        val messageKey = entry.requireString("messageKey", lineIndex)
+        val category = entry.requireString("category", lineIndex)
+        val priority = entry.requireString("priority", lineIndex)
+        val speechEnabled = entry.requireBoolean("speechEnabled", lineIndex)
+        val screenReaderActive = entry.requireBoolean("screenReaderActive", lineIndex)
+        val hapticsEnabled = entry.requireBoolean("hapticsEnabled", lineIndex)
+        return try {
+            PromptOutcomeTrace(
+                sessionId = sessionId,
+                eventId = eventId,
+                sourceSequenceNumber = sourceSequenceNumber,
+                messageKey = messageKey,
+                category = category,
+                priority = priority,
+                deliveredAt = entry.optionalLong("deliveredAt"),
+                revokedAt = entry.optionalLong("revokedAt"),
+                revokeReason = entry.optionalString("revokeReason"),
+                deliveredVia = entry.optionalStringArray("deliveredVia").orEmpty(),
+                speechEnabled = speechEnabled,
+                screenReaderActive = screenReaderActive,
+                hapticsEnabled = hapticsEnabled,
+            )
+        } catch (error: IllegalArgumentException) {
+            throw IllegalArgumentException("Invalid prompt_outcome at line ${lineIndex + 1}: ${error.message}", error)
         }
     }
 

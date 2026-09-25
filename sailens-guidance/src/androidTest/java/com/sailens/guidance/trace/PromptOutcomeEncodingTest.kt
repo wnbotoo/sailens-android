@@ -1,6 +1,7 @@
 package com.sailens.guidance.trace
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.sailens.guidance.model.trace.PromptDeliveryChannels
 import com.sailens.guidance.model.trace.PromptOutcomeTrace
 import com.sailens.guidance.model.trace.PromptRevokeReasons
 import com.sailens.guidance.model.trace.TraceReplayParser
@@ -25,6 +26,7 @@ class PromptOutcomeEncodingTest {
             category = "blocked",
             priority = "critical",
             deliveredAt = 1_700_000_000_100,
+            deliveredVia = listOf(PromptDeliveryChannels.SPEECH, PromptDeliveryChannels.HAPTICS),
             speechEnabled = true,
             screenReaderActive = false,
             hapticsEnabled = true,
@@ -34,6 +36,7 @@ class PromptOutcomeEncodingTest {
             deliveredAt = null,
             revokedAt = 1_700_000_000_150,
             revokeReason = PromptRevokeReasons.OUTPUT_REFUSED,
+            deliveredVia = emptyList(),
             hapticsEnabled = false,
         )
 

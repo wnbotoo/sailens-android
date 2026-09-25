@@ -378,7 +378,10 @@ class StartSceneAnalysisUseCase(
             .onEach { result ->
                 if (traceSessionStarted) {
                     accumulator?.record(result.frameTrace)
-                    if (traceRuntimeConfig.shouldRecordFrame(result.frameTrace.sequenceNumber)) {
+                    // The first event is the prompt the output side offers and records an outcome
+                    // for; that frame is kept whatever the sampling, so the outcome can join to it.
+                    val offeredPrompt = result.sceneResult.events.isNotEmpty()
+                    if (traceRuntimeConfig.shouldRecordFrame(result.frameTrace.sequenceNumber, offeredPrompt)) {
                         traceService.recordFrame(result.frameTrace)
                     }
                 }

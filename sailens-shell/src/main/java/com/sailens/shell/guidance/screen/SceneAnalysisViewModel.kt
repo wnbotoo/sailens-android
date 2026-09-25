@@ -8,7 +8,6 @@ import com.sailens.camera.FrameSource
 import com.sailens.guidance.model.scene.SceneEvent
 import com.sailens.guidance.model.scene.SceneResult
 import com.sailens.core.log.LogService
-import com.sailens.guidance.model.trace.PromptOutcomeTrace
 import com.sailens.guidance.service.TraceService
 import com.sailens.guidance.usecase.decision.RevokeUndeliveredEventUseCase
 import com.sailens.guidance.usecase.scene.StartSceneAnalysisUseCase
@@ -365,27 +364,25 @@ class SceneAnalysisViewModel(
 
         logger.debug(TAG, "Scene events generated, ${primaryEvent.messageKey}", mapOf("count" to events.size))
 
-        // 等描述 / 打断描述 / 送达 / 没送达就撤销冷却——整条规则在 offerGuidancePrompt 里，有单测。
-        // 协调器是整个 shell 共用的那一个，所以打断的就是用户正在听的那一段描述，不管它在哪个屏幕上。
-        val delivered = offerGuidancePrompt(
-            priority = primaryEvent.priority,
+        // 等描述 / 打断描述 / 送达 / 没送达就撤销冷却，并为这条提示写一条 prompt_outcome（实际送达的
+        // 通道或撤回原因）——整条规则在 offerAndTraceGuidancePrompt 里，有单测。协调器是整个 shell
+        // 共用的那一个，所以打断的就是用户正在听的那一段描述，不管它在哪个屏幕上。
+        val delivered = offerAndTraceGuidancePrompt(
+            event = primaryEvent,
+            sourceSequenceNumber = sequenceNumber,
+            outputs = GuidanceOutputSettings(
+                speechEnabled = state.isSpeechEnabled,
+                screenReaderActive = state.isScreenReaderActive,
+                hapticsEnabled = state.isHapticsEnabled,
+            ),
             descriptionHoldsTheFloor = sceneDescriptionCoordinator.holdsTheFloor,
+            now = Timestamp::now,
             preemptDescription = { sceneDescriptionCoordinator.preemptForGuidance(primaryEvent.messageKey) },
             deliver = { deliver(primaryEvent, state) },
-            revoke = { reason ->
-                revokeUndeliveredEvent(primaryEvent)
-                traceService.recordPromptOutcome(
-                    promptOutcome(
-                        primaryEvent, sequenceNumber, state,
-                        revokedAt = Timestamp.now(), revokeReason = reason,
-                    ),
-                )
-            },
+            revoke = { revokeUndeliveredEvent(primaryEvent) },
+            record = traceService::recordPromptOutcome,
         )
         if (!delivered) return
-        traceService.recordPromptOutcome(
-            promptOutcome(primaryEvent, sequenceNumber, state, deliveredAt = Timestamp.now())
-        )
 
         if (state.hasGuidanceOutputChannel()) {
             _uiState.update { it.copy(lastAnnouncedEvent = primaryEvent) }
@@ -393,36 +390,11 @@ class SceneAnalysisViewModel(
     }
 
     /**
-     * 这条提示最终的去向，写进 trace 供误报标注用：标注要对着用户真正收到的提示，而不是帧里的候选。
-     * 时间用墙钟毫秒，和帧 trace 的 pipelineCompletedAt 同一个时钟。
-     */
-    private fun promptOutcome(
-        event: SceneEvent,
-        sequenceNumber: Long,
-        state: SceneAnalysisUiState,
-        deliveredAt: Long? = null,
-        revokedAt: Long? = null,
-        revokeReason: String? = null,
-    ) = PromptOutcomeTrace(
-        eventId = event.id.toString(),
-        sourceSequenceNumber = sequenceNumber,
-        messageKey = event.messageKey,
-        category = event.category.name.lowercase(),
-        priority = event.priority.name.lowercase(),
-        deliveredAt = deliveredAt,
-        revokedAt = revokedAt,
-        revokeReason = revokeReason,
-        speechEnabled = state.isSpeechEnabled,
-        screenReaderActive = state.isScreenReaderActive,
-        hapticsEnabled = state.isHapticsEnabled,
-    )
-
-    /**
      * 把 [event] 送到用户可感知的通道，见 [deliverGuidanceEvent]。
      *
-     * @return 是否至少有一条通道真的接收了它。
+     * @return 真正接收了它的通道；为空表示没送达。
      */
-    private fun deliver(event: SceneEvent, state: SceneAnalysisUiState): Boolean = deliverGuidanceEvent(
+    private fun deliver(event: SceneEvent, state: SceneAnalysisUiState): GuidanceDeliveryResult = deliverGuidanceEvent(
         speechEnabled = state.isSpeechEnabled,
         screenReaderActive = state.isScreenReaderActive,
         speechEngineReady = speechManager.isReady,

@@ -14,7 +14,12 @@ data class TraceRuntimeConfig(
         }
     }
 
-    fun shouldRecordFrame(sequenceNumber: Long): Boolean {
-        return enabled && sequenceNumber % sampleEveryNFrames == 0L
+    /**
+     * Whether to write this frame's record. Sampling thins out ordinary frames, but a frame that
+     * offered the user a prompt is always kept: its `prompt_outcome` record joins to it, and the
+     * frame is the evidence for labelling that prompt.
+     */
+    fun shouldRecordFrame(sequenceNumber: Long, offeredPrompt: Boolean = false): Boolean {
+        return enabled && (offeredPrompt || sequenceNumber % sampleEveryNFrames == 0L)
     }
 }
