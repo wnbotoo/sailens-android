@@ -340,6 +340,8 @@ collect frame stream。
 ~~~kotlin
 interface FrameSource {
     val frames: Flow<ImageFrame>
+    fun frames(minIntervalMs: Long): Flow<ImageFrame>
+    fun releaseFrame(frame: ImageFrame)
 }
 
 interface FrameSnapshotProvider {
@@ -350,9 +352,16 @@ interface FrameSnapshotProvider {
 ~~~
 
 二者由同一个 camera session 实现，而且 **demand 是显式的**。把相机图像转成 ImageFrame 要复制
-每个 plane，所以只有有人要的时候才转——但“有人要”不等于“Guidance 在跑”。stream 订阅和
-snapshot lease 各自都足以构成需求。这正是 Describe 能在导航停着时回答问题、同时又不会
-让相机白转没人读的帧的原因。
+每个 plane，所以只有有人要的时候才转——但“有人要”不等于“Guidance 在跑”。轮到取帧的 stream
+订阅者和 snapshot lease 各自都足以构成需求。这正是 Describe 能在导航停着时回答问题、同时又不会
+让相机白转没人读的帧的原因。只想按间隔采样画面的订阅者用 `frames(minIntervalMs)`：两次采样
+之间的帧不会送给它，如果也没有别人要，这些帧连转换都不做。
+
+**stream 上的帧是借出的，snapshot 是交给调用方的。** plane 副本来自一个小缓冲池，所以转换一帧
+通常复用已有数组，而不是新分配约 1 MB。stream 上的帧在订阅者调用 `releaseFrame` 归还之前一直
+归它所有；只有归还之后、并且其他持有者也都放手了，它的数组才会装下一帧。忘了归还是安全的：
+这些数组只是不再复用而已。落后的订阅者没来得及取的帧，由帧源自己归还。snapshot 则从池里摘出来，
+Describe 拿到的是一张普通的帧，请求要多久就可以留多久。
 
 Describe 必须拒绝过旧 snapshot，绝不能静默描述几秒前的旧画面。这与已有 VLM/ASR
 assistant plan 的安全意图保持一致。

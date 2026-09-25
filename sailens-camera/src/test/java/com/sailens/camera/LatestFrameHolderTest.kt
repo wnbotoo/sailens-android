@@ -22,7 +22,7 @@ class LatestFrameHolderTest {
     // Read from the waiter's thread as well as the test thread.
     @Volatile
     private var now = 1_000L
-    private val holder = LatestFrameHolder { now }
+    private val holder = LatestFrameHolder(elapsedRealtimeMs = { now })
 
     @Test
     fun `returns nothing before any frame is recorded`() {

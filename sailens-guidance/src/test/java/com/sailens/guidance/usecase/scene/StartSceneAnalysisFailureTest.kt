@@ -59,7 +59,7 @@ class StartSceneAnalysisFailureTest {
         val useCase = useCase(repository = ScriptedRepository(List(10) { false }), maxFailures = 3)
 
         try {
-            runBlocking { useCase(frames(10), semanticMaskSnapshot = { false }).toList() }
+            runBlocking { useCase(frames(10), releaseFrame = {}, semanticMaskSnapshot = { false }).toList() }
             fail("the session should have ended")
         } catch (error: GuidancePipelineFailedException) {
             assertEquals(3, error.consecutiveFailures)
@@ -72,7 +72,9 @@ class StartSceneAnalysisFailureTest {
         val script = listOf(false, false, true, false, false, true)
         val useCase = useCase(repository = ScriptedRepository(script), maxFailures = 3)
 
-        val results = runBlocking { useCase(frames(script.size), semanticMaskSnapshot = { false }).toList() }
+        val results = runBlocking {
+            useCase(frames(script.size), releaseFrame = {}, semanticMaskSnapshot = { false }).toList()
+        }
 
         assertEquals(2, results.size)
         assertTrue(results.all { it.sequenceNumber in setOf(3L, 6L) })
@@ -84,10 +86,10 @@ class StartSceneAnalysisFailureTest {
         val script = List(3) { true }
 
         val unasked = runBlocking {
-            useCase(ScriptedRepository(script), maxFailures = 3)(frames(3), semanticMaskSnapshot = { false }).toList()
+            useCase(ScriptedRepository(script), maxFailures = 3)(frames(3), releaseFrame = {}, semanticMaskSnapshot = { false }).toList()
         }
         val asked = runBlocking {
-            useCase(ScriptedRepository(script), maxFailures = 3)(frames(3), semanticMaskSnapshot = { true }).toList()
+            useCase(ScriptedRepository(script), maxFailures = 3)(frames(3), releaseFrame = {}, semanticMaskSnapshot = { true }).toList()
         }
 
         assertTrue(unasked.all { it.segmentationMask == null })
@@ -97,6 +99,46 @@ class StartSceneAnalysisFailureTest {
             assertEquals(4, mask.width)
             assertTrue(mask.classMap.all { it == 0 })
         }
+    }
+
+    @Test
+    fun `every frame goes back to its source once, after it has been processed`() {
+        // ok, fail, ok: a processed frame, a failed one and one more processed frame.
+        val events = mutableListOf<String>()
+        val useCase = useCase(ScriptedRepository(listOf(true, false, true), events), maxFailures = 3)
+
+        runBlocking {
+            useCase(
+                frames(3),
+                releaseFrame = { events += "release ${it.sequenceNumber}" },
+                semanticMaskSnapshot = { false },
+            ).toList()
+        }
+
+        assertEquals(
+            listOf("segment 1", "release 1", "segment 2", "release 2", "segment 3", "release 3"),
+            events,
+        )
+    }
+
+    @Test
+    fun `the frame that ends the session is still given back`() {
+        val released = mutableListOf<Long>()
+        val useCase = useCase(ScriptedRepository(List(5) { false }), maxFailures = 2)
+
+        try {
+            runBlocking {
+                useCase(
+                    frames(5),
+                    releaseFrame = { released += it.sequenceNumber },
+                    semanticMaskSnapshot = { false },
+                ).toList()
+            }
+            fail("the session should have ended")
+        } catch (_: GuidancePipelineFailedException) {
+        }
+
+        assertEquals(listOf(1L, 2L), released)
     }
 
     private fun useCase(repository: PerceptionRepository, maxFailures: Int): StartSceneAnalysisUseCase {
@@ -162,11 +204,15 @@ class StartSceneAnalysisFailureTest {
     }.asFlow()
 
     /** Succeeds or fails per call, in order. */
-    private class ScriptedRepository(private val script: List<Boolean>) : PerceptionRepository {
+    private class ScriptedRepository(
+        private val script: List<Boolean>,
+        private val events: MutableList<String>? = null,
+    ) : PerceptionRepository {
         private var call = 0
         override val isInitialized: Boolean = true
         override suspend fun initialize() = Unit
         override suspend fun segment(frame: ImageFrame): Result<SegmentationOutput> {
+            events?.add("segment ${frame.sequenceNumber}")
             val ok = script.getOrElse(call++) { true }
             if (!ok) return Result.failure(IllegalStateException("GPU delegate lost"))
             return Result.success(
