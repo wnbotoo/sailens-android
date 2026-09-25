@@ -294,6 +294,7 @@ class SceneAnalysisViewModel(
             // collectLatest is often used for high-frequency data, discarding previous incomplete processing
             startSceneAnalysisUseCase(
                 frameSource.frames,
+                releaseFrame = frameSource::releaseFrame,
                 // The class-map overlay is the only reader of the mask outside the pipeline; the
                 // copy it needs is made only while it is showing.
                 semanticMaskSnapshot = { rendersSemanticClassMask() },

@@ -178,7 +178,7 @@ class ImageFrameAnalyzerDemandTest {
     }
 
     private class CountingConverter(private val count: AtomicInteger) : ImageFrameConverter {
-        override fun convert(image: ImageProxy, sequenceNumber: Long): ImageFrame {
+        override fun convert(image: ImageProxy, sequenceNumber: Long, planes: PlaneAllocator): ImageFrame {
             count.incrementAndGet()
             return ImageFrame(
                 width = 4,

@@ -99,6 +99,46 @@ class StartSceneAnalysisFailureTest {
         }
     }
 
+    @Test
+    fun `every frame goes back to its source once, after it has been processed`() {
+        // ok, fail, ok: a processed frame, a failed one and one more processed frame.
+        val events = mutableListOf<String>()
+        val useCase = useCase(ScriptedRepository(listOf(true, false, true), events), maxFailures = 3)
+
+        runBlocking {
+            useCase(
+                frames(3),
+                releaseFrame = { events += "release ${it.sequenceNumber}" },
+                semanticMaskSnapshot = { false },
+            ).toList()
+        }
+
+        assertEquals(
+            listOf("segment 1", "release 1", "segment 2", "release 2", "segment 3", "release 3"),
+            events,
+        )
+    }
+
+    @Test
+    fun `the frame that ends the session is still given back`() {
+        val released = mutableListOf<Long>()
+        val useCase = useCase(ScriptedRepository(List(5) { false }), maxFailures = 2)
+
+        try {
+            runBlocking {
+                useCase(
+                    frames(5),
+                    releaseFrame = { released += it.sequenceNumber },
+                    semanticMaskSnapshot = { false },
+                ).toList()
+            }
+            fail("the session should have ended")
+        } catch (_: GuidancePipelineFailedException) {
+        }
+
+        assertEquals(listOf(1L, 2L), released)
+    }
+
     private fun useCase(repository: PerceptionRepository, maxFailures: Int): StartSceneAnalysisUseCase {
         val perceptionConfig = PerceptionConfig(profile = PerceptionProfile.BASIC)
         val analysisConfig = AnalysisConfig()
@@ -162,11 +202,15 @@ class StartSceneAnalysisFailureTest {
     }.asFlow()
 
     /** Succeeds or fails per call, in order. */
-    private class ScriptedRepository(private val script: List<Boolean>) : PerceptionRepository {
+    private class ScriptedRepository(
+        private val script: List<Boolean>,
+        private val events: MutableList<String>? = null,
+    ) : PerceptionRepository {
         private var call = 0
         override val isInitialized: Boolean = true
         override suspend fun initialize() = Unit
         override suspend fun segment(frame: ImageFrame): Result<SegmentationOutput> {
+            events?.add("segment ${frame.sequenceNumber}")
             val ok = script.getOrElse(call++) { true }
             if (!ok) return Result.failure(IllegalStateException("GPU delegate lost"))
             return Result.success(

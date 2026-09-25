@@ -28,7 +28,7 @@ import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.mapNotNull
+import kotlinx.coroutines.flow.transform
 import kotlinx.coroutines.flow.onEach
 import java.util.UUID
 import kotlin.math.abs
@@ -56,6 +56,10 @@ class StartSceneAnalysisUseCase(
     private val pipelineBudget: PipelinePerformanceBudget,
 ) {
     /**
+     * @param releaseFrame hands each frame back to its source once this pipeline is done reading
+     *   it (the source may then reuse its arrays). Called exactly once per frame received, after
+     *   that frame's processing -- including the model runs, which [ProcessFrameUseCase] waits
+     *   for -- has finished, whether it succeeded, was skipped or threw.
      * @param semanticMaskSnapshot asked once per frame whether the caller wants
      *   [SceneResult.segmentationMask]. The pipeline's own mask is reused once a newer semantic
      *   run replaces it, so what goes out is a copy the caller owns -- made only when asked, and
@@ -64,6 +68,7 @@ class StartSceneAnalysisUseCase(
      */
     suspend operator fun invoke(
         frameFlow: Flow<ImageFrame>,
+        releaseFrame: (ImageFrame) -> Unit = {},
         semanticMaskSnapshot: () -> Boolean,
     ): Flow<SceneResult> = flow {
         // 会话开始时把设置页选中的挡位落成运行配置；必须在 obstacle provider 初始化之前，
@@ -141,7 +146,7 @@ class StartSceneAnalysisUseCase(
 
         emitAll(
             frameFlow
-            .mapNotNull { frame ->
+            .mapNotNullReleasing(releaseFrame) { frame ->
                 val pipelineStart = Timestamp.now()
 
                 // 处理帧
@@ -158,7 +163,7 @@ class StartSceneAnalysisUseCase(
                     if (consecutiveFrameFailures >= pipelineBudget.maxConsecutiveFrameFailures) {
                         throw GuidancePipelineFailedException(consecutiveFrameFailures, it)
                     }
-                    return@mapNotNull null
+                    return@mapNotNullReleasing null
                 }
                 consecutiveFrameFailures = 0
                 val processFrameCompletedAt = Timestamp.now()
@@ -317,7 +322,7 @@ class StartSceneAnalysisUseCase(
                 )
                 val runtimeStats = runtimeWindow.record(frameTrace, pipelineBudget)
 
-                return@mapNotNull PipelineFrameResult(
+                return@mapNotNullReleasing PipelineFrameResult(
                     sceneResult = SceneResult(
                         sequenceNumber = frame.sequenceNumber,
                         pipelineCompletedAt = decideCompletedAt,
@@ -470,6 +475,23 @@ internal class SegmentationMaskSnapshots {
             snapshot = it
         }
     }
+}
+
+/**
+ * [mapNotNull][kotlinx.coroutines.flow.mapNotNull] that gives every frame back through [release]
+ * as soon as [process] is done with it, before the result goes downstream: nothing downstream
+ * holds the frame, so its arrays can be reused while the result is still being consumed.
+ */
+private fun <R : Any> Flow<ImageFrame>.mapNotNullReleasing(
+    release: (ImageFrame) -> Unit,
+    process: suspend (ImageFrame) -> R?,
+): Flow<R> = transform { frame ->
+    val result = try {
+        process(frame)
+    } finally {
+        release(frame)
+    }
+    if (result != null) emit(result)
 }
 
 private fun obstacleProviderSummary(config: PerceptionConfig): String {
