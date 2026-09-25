@@ -4,8 +4,9 @@
 
 > Status: **draft**. The recording tool is M0 field capture (see
 > [`local-navigation-implementation.md`](local-navigation-implementation.md) §4), which is still being
-> built; steps marked **[M0 TBD]** are filled in once its UI and export are settled. Everything else can
-> be used to prepare now. **Do not start the real recording before M0 is ready**: trace-only data, with
+> built. Steps marked **[M0 proposal]** follow the "capture operation" table in the implementation doc
+> §4; they may change in M0 review and must be checked once it is implemented. Everything else can be
+> used to prepare now. **Do not start the real recording before M0 is ready**: trace-only data, with
 > no frames or sensors, can later be used neither for threshold calibration nor for geometry or replay,
 > and would have to be recorded again.
 
@@ -20,7 +21,8 @@ One recording serves four purposes, so record every segment as described here:
 | **Ground geometry calibration** (M3) | frames + gravity/rotation/gyro + camera intrinsics, time-aligned |
 | **Replay / simulation regression** (M2) | as above, plus full frames around events (M0 "model regression recording") |
 
-M0 captures in two modes, chosen per segment **[M0 TBD: where the switch is]**:
+M0 captures in two modes, chosen with the capture switch in **debug settings**, which has three
+positions: off / field evidence / field evidence + model regression **[M0 proposal]**:
 
 - **Field evidence capture**: 5 Hz JPEG at 640 px on the long side + sensors. For labelling and
   calibration; not an exact replay of perception. **This manual assumes it by default.**
@@ -34,8 +36,11 @@ M0 captures in two modes, chosen per segment **[M0 TBD: where the switch is]**:
 - **At crossings, attention stays on the road.** Keep recording if you like, but never slow down or
   change how you cross for the recording; stop if it is not safe.
 - Captures contain **faces and places**. They stay on the phone and your own computer; **never commit
-  them to a repository or upload them**. Delete segments you no longer need in the debug UI
-  **[M0 TBD: delete entry]**.
+  them to a repository or upload them**. Delete segments you no longer need in the debug capture list
+  **[M0 proposal]**.
+- **Captures are cleaned up automatically**: deleted 7 days after recording, with a 2 GB total cap;
+  exported or "keep"-marked sessions are not deleted **[M0 proposal]**. So **export on the day you
+  record** (section 8), or mark sessions as keep in the capture list.
 - Record indoors only where you are allowed to (your home, areas your workplace permits).
 
 ## 3. Pre-recording checklist (every outing)
@@ -59,9 +64,12 @@ M0 captures in two modes, chosen per segment **[M0 TBD: where the switch is]**:
    - Perception profile: **Standard** (sem + det).
    - TalkBack off (unless the segment tests the screen reader).
    - Debug panel on. It shows "Ground: … (unrecognised N%)", so the #5 gate state is visible live.
-5. Battery above 60%, free storage above 5 GB **[M0 TBD: adjust to the measured data rate]**. The phone
-   heats up; rest about every 20 minutes, since thermal throttling makes the data unrepresentative.
-6. Bring a **scene card** (section 7) and fill in one row per segment.
+5. Battery above 60%, free storage above 5 GB (field evidence capture is estimated at about 0.7 GB/hour;
+   updated once M0 is measured **[M0 proposal]**). The phone heats up; rest about every 20 minutes, since
+   thermal throttling makes the data unrepresentative.
+6. The **capture switch** is set for the segment: usually "field evidence"; for scenes marked
+   "regression" in section 5, "field evidence + model regression" **[M0 proposal]**.
+7. Bring a **scene card** (section 7) and fill in one row per segment.
 
 ## 4. How to hold the phone
 
@@ -99,21 +107,25 @@ regression recording is also turned on.
 
 ## 6. Recording one segment
 
-1. Go to the start; fill in the first half of the scene-card row (class, place type, light).
-2. Start capture **[M0 TBD: how]**.
-3. Tap "Start guidance" in the app.
-4. **Sync mark: cover the camera fully with your palm for 3 s**, until you hear "Camera is covered", then
+Capture starts and stops with the Guidance session; there is no separate start/stop button
+**[M0 proposal]**. So **one "Start guidance → Stop guidance" is one segment**.
+
+1. Go to the start, check the capture switch is in the position this segment needs, and fill in the
+   first half of the scene-card row (class, place type, light).
+2. Tap "Start guidance" in the app (capture starts with it).
+3. **Sync mark: cover the camera fully with your palm for 3 s**, until you hear "Camera is covered", then
    uncover. It leaves an `event_camera_blocked` in the trace and dark frames in the capture — the
-   segment's start, afterwards.
-5. Walk the scene. **If you notice a miss** (an obvious hazard with no prompt), immediately
-   **[M0 TBD: marker button, writes a timestamped marker]**; until M0 has one, note roughly which minute
-   and what, in the scene card's notes.
-6. Before finishing, cover the camera for 3 s again as the end mark.
-7. Tap "Stop guidance", then stop capture **[M0 TBD: how]**.
-8. Complete the scene-card row (duration, anything unusual).
+   segment's start, afterwards; the reader also splits segments on it.
+4. Walk the scene. **If you notice a miss** (an obvious hazard with no prompt), **press volume down once**
+   (a short buzz confirms), or tap the large marker button on screen **[M0 proposal]**. It writes a
+   marker with the time and frame number, which labelling uses to find misses. No need to look at the
+   screen; keep your eyes on the path.
+5. Before finishing, cover the camera for 3 s again as the end mark.
+6. Tap "Stop guidance" (capture stops with it).
+7. Complete the scene-card row (duration, anything unusual).
 
 Do not switch apps or lock the screen during a segment; if it gets interrupted, stop and start a new
-segment.
+segment. Volume down is only intercepted while capture is on; otherwise it changes the volume as usual.
 
 ## 7. Scene card
 
@@ -128,7 +140,9 @@ One row per segment, on paper or in a notes app, typed up afterwards:
 - **Trace**: Settings → Diagnostics → Trace reports → pick the session → "Share JSONL", to your computer.
   Or with adb: `files/traces/trace_<sessionId>.jsonl` (debug builds: `adb shell run-as
   com.sailens.reference`).
-- **Capture** (frames, sensors, intrinsics): **[M0 TBD: export]**.
+- **Capture** (frames, sensors, intrinsics, markers): debug capture list → pick the session → system
+  share, one zip per session; debug builds can also `adb pull` from `files/captures/`
+  **[M0 proposal]**. Exported sessions are not cleaned up automatically.
 - Keep each segment's trace and capture in one folder named after the scene-card segment number.
 
 ## 9. Labelling
@@ -146,8 +160,10 @@ was judged blocked, the tracked obstacles and the dominant classes.
 
 ### 9.2 Label each row
 
-Compare with the frames a few seconds around the prompt **[M0 TBD: how to view frames by time]**, and
-fill in `label`:
+Compare with the frames a few seconds around the prompt, and fill in `label`. Frames are viewed on the
+computer: a script that comes with the M0 reader tiles the frames ±N seconds around each
+`prompt_outcome` (and each miss marker) into one contact sheet; there is no in-app viewer
+**[M0 proposal]**.
 
 | Label | Meaning |
 |---|---|
@@ -160,8 +176,9 @@ fill in `label`:
 ### 9.3 Misses
 
 Keep a second sheet, `<segment>_misses.csv`, one row per miss: `segment, rough time (seconds into the
-segment), what was missed, estimated distance, note`. Misses come from field marks (step 5) and from
-reviewing the frames. A miss is: an obstacle within about 2 m on the route, a path that really is
+segment), what was missed, estimated distance, note`. Misses come from the volume-down markers (section
+6, step 4; every marker gets a row, filled in once confirmed, or `accidental` if pressed by mistake) and
+from reviewing the frames. A miss is: an obstacle within about 2 m on the route, a path that really is
 blocked, or a step or kerb — with no prompt before you reached it.
 
 ### 9.4 Label consistency
