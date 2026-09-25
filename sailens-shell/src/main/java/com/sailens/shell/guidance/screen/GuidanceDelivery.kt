@@ -107,7 +107,8 @@ internal val GUIDANCE_PREEMPTS_DESCRIPTION_AT: EventPriority = EventPriority.HIG
  *    wait. The description is left alone and nothing is delivered.
  * 2. Otherwise the description gives way first ([preemptDescription]) — before the prompt is
  *    spoken, so no clause of it can be left in front of the prompt or behind it.
- * 3. [deliver] refused (a prompt of equal or higher priority is still being spoken): not delivered.
+ * 3. No enabled output channel accepted it (see [deliverGuidanceEvent]: speech outranked or still
+ *    starting, the motor refusing, ...): not delivered, revoked as [PromptRevokeReasons.OUTPUT_REFUSED].
  *
  * @param revoke called with the reason, one of [PromptRevokeReasons], so the trace can say why.
  * @return the channels that accepted it; empty when it was not delivered.

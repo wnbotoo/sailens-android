@@ -160,7 +160,11 @@ object PromptRevokeReasons {
     /** Not urgent, and a scene description held the floor; offered again later. */
     const val WAITING_FOR_DESCRIPTION = "waiting_for_description"
 
-    /** Every enabled output refused it (speech busy with an equal or higher priority). */
+    /**
+     * No enabled output channel accepted it: for example speech busy with an equal or higher
+     * priority, the speech engine still starting with no other channel taking it, or the vibration
+     * motor refusing a haptics-only prompt.
+     */
     const val OUTPUT_REFUSED = "output_refused"
 
     val all: Set<String> = setOf(WAITING_FOR_DESCRIPTION, OUTPUT_REFUSED)
