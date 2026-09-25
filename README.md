@@ -122,6 +122,7 @@ Every document below has a Chinese version alongside it (`*.zh-CN.md`), linked f
 | [`docs/vlm-asr-assistant-plan.md`](docs/vlm-asr-assistant-plan.md) | [中文](docs/vlm-asr-assistant-plan.zh-CN.md) | Planned VLM / ASR assistant path |
 | [`docs/background-guidance-plan.md`](docs/background-guidance-plan.md) | [中文](docs/background-guidance-plan.zh-CN.md) | Planned camera foreground service (screen-off guidance) |
 | [`docs/guidance-validation-roadmap.md`](docs/guidance-validation-roadmap.md) | [中文](docs/guidance-validation-roadmap.zh-CN.md) | Deferred device validation and spatial earcon gates |
+| [`docs/field-recording-manual.md`](docs/field-recording-manual.md) | [中文](docs/field-recording-manual.zh-CN.md) | Stage 2 field recording: scenes, procedure, labelling (draft) |
 
 `AGENTS.md` is the repo guide for coding agents (English only — it is read by tools, not people).
 

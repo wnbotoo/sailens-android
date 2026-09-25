@@ -114,6 +114,7 @@ zero-pipeline 屏，并指向这里。官方发行版声明导航为必需，因
 | [`docs/vlm-asr-assistant-plan.zh-CN.md`](docs/vlm-asr-assistant-plan.zh-CN.md) | [English](docs/vlm-asr-assistant-plan.md) | 规划中的 VLM / ASR 助手路径 |
 | [`docs/background-guidance-plan.zh-CN.md`](docs/background-guidance-plan.zh-CN.md) | [English](docs/background-guidance-plan.md) | 规划中的相机前台服务（息屏继续导航） |
 | [`docs/guidance-validation-roadmap.zh-CN.md`](docs/guidance-validation-roadmap.zh-CN.md) | [English](docs/guidance-validation-roadmap.md) | 延期的真机提示验证与空间化 earcon 门槛 |
+| [`docs/field-recording-manual.zh-CN.md`](docs/field-recording-manual.zh-CN.md) | [English](docs/field-recording-manual.md) | 阶段 2 现场录制：场景、流程、标注（草稿） |
 
 `AGENTS.md` 是给编码 agent 的仓库指南（仅英文——它是给工具读的，不是给人读的）。
 
