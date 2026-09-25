@@ -122,6 +122,8 @@ Every document below has a Chinese version alongside it (`*.zh-CN.md`), linked f
 | [`docs/vlm-asr-assistant-plan.md`](docs/vlm-asr-assistant-plan.md) | [中文](docs/vlm-asr-assistant-plan.zh-CN.md) | Planned VLM / ASR assistant path |
 | [`docs/background-guidance-plan.md`](docs/background-guidance-plan.md) | [中文](docs/background-guidance-plan.zh-CN.md) | Planned camera foreground service (screen-off guidance) |
 | [`docs/guidance-validation-roadmap.md`](docs/guidance-validation-roadmap.md) | [中文](docs/guidance-validation-roadmap.zh-CN.md) | Deferred device validation and spatial earcon gates |
+| [`docs/local-navigation-roadmap.md`](docs/local-navigation-roadmap.md) | [中文](docs/local-navigation-roadmap.zh-CN.md) | Proposed: local navigation milestones absorbing Project Guideline |
+| [`docs/local-navigation-implementation.md`](docs/local-navigation-implementation.md) | [中文](docs/local-navigation-implementation.zh-CN.md) | Proposed: contracts, placement and tests per milestone |
 
 `AGENTS.md` is the repo guide for coding agents (English only — it is read by tools, not people).
 
