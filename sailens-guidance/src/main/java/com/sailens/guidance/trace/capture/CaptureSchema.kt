@@ -94,6 +94,8 @@ data class CaptureManifest(
     val sdkInt: Int,
     val targetHardwareProfile: String? = null,
     val camera: CaptureCameraRecord? = null,
+    /** Sensors that registered for this session ("gravity", ...); a missing one is not a failure. */
+    val sensorsAvailable: List<String> = emptyList(),
     /** False until the session ended normally; a crash, kill or full disk leaves it false. */
     val complete: Boolean = false,
     val failureReason: String? = null,
@@ -103,13 +105,20 @@ data class CaptureManifest(
     val stats: CaptureStats = CaptureStats(),
 )
 
-/** Capture's own counters, kept apart from Guidance's dropped frames on purpose. */
+/**
+ * Capture's own counters, kept apart from Guidance's dropped frames on purpose. A gap in the
+ * recorded frames or sensor samples must be explainable: dropped by capture (counted here) versus
+ * never delivered by the device (not counted anywhere, visible only as a timestamp gap).
+ */
 @Serializable
 data class CaptureStats(
     val framesOffered: Long = 0,
     val framesEncoded: Long = 0,
     val framesDroppedByEncoder: Long = 0,
+    /** Sensor events successfully written to `sensors.jsonl`. */
     val sensorEvents: Long = 0,
+    /** Sensor events the capture received but dropped because its queue was full. */
+    val sensorEventsDropped: Long = 0,
     val markers: Long = 0,
 )
 
@@ -164,7 +173,15 @@ data class FrameRecord(
     val height: Int,
     val sensorToBufferTransform: List<Float>? = null,
     val cropRect: List<Int>? = null,
-) : CaptureRecord
+) : CaptureRecord {
+    init {
+        // Checked on write and on read: a reader skips a record that fails here, with a warning.
+        require(sensorToBufferTransform == null || sensorToBufferTransform.size == 9) {
+            "sensorToBufferTransform must have 9 values, got ${sensorToBufferTransform?.size}"
+        }
+        require(cropRect == null || cropRect.size == 4) { "cropRect must have 4 values, got ${cropRect?.size}" }
+    }
+}
 
 @Serializable
 enum class FrameEncoding {
@@ -219,8 +236,11 @@ data class MarkerRecord(
     val kind: MarkerKind,
     val wallMs: Long,
     val elapsedRealtimeNanos: Long,
-    /** The newest frame sequence number the capture had seen when the marker was pressed. */
-    val lastFrameSeq: Long? = null,
+    /**
+     * The newest frame the capture had *stored* (its image exists) when the marker was pressed; a
+     * newer frame may have been seen and dropped. The marker's own times are the exact reference.
+     */
+    val lastStoredFrameSeq: Long? = null,
     val source: MarkerSource,
 ) : CaptureRecord
 

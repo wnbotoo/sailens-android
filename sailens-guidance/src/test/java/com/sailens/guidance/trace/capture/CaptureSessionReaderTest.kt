@@ -50,7 +50,7 @@ class CaptureSessionReaderTest {
     private val sensor = SensorRecord(CaptureSensor.GRAVITY, 9_101_000_000, 3, listOf(0f, 9.8f, 0.1f))
     private val anchor = ClockAnchorRecord(1_700_000_000_010, 9_010_000_000, AnchorReason.START)
     private val marker = MarkerRecord(
-        MarkerKind.MISSED_ALERT, 1_700_000_005_000, 14_000_000_000, lastFrameSeq = 12, source = MarkerSource.VOLUME_DOWN,
+        MarkerKind.MISSED_ALERT, 1_700_000_005_000, 14_000_000_000, lastStoredFrameSeq = 12, source = MarkerSource.VOLUME_DOWN,
     )
 
     private fun session(
@@ -152,6 +152,16 @@ class CaptureSessionReaderTest {
 
         assertTrue(result is CaptureReadResult.Rejected)
         assertTrue((result as CaptureReadResult.Rejected).reason, "not supported" in result.reason)
+    }
+
+    @Test
+    fun `a frame record with malformed geometry is skipped with a warning`() {
+        val bad = CaptureSchema.encodeRecord(frame).replace("\"cropRect\":[0,0,960,540]", "\"cropRect\":[0,0,960]")
+
+        val read = CaptureSessionReader.read(session(frames = listOf(bad, CaptureSchema.encodeRecord(frame)))).orThrow()
+
+        assertEquals(listOf(frame), read.frames)
+        assertTrue(read.warnings.any { "${CaptureSchema.FRAMES_FILE}:1" in it })
     }
 
     @Test

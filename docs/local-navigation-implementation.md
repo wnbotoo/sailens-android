@@ -215,11 +215,11 @@ Guidance session, named after the trace session id:
 
 | File | Content |
 |---|---|
-| `manifest.json` | `CaptureManifest`: schema major/minor, session id, mode (`field_evidence` / `timing_sync`), start wall and elapsed-realtime time, app version, git SHA if available, device, SDK, hardware profile, camera characteristics, `complete`, `failureReason`, `pinned`, `exportedAtWallMs`, capture counters |
+| `manifest.json` | `CaptureManifest`: schema major/minor, session id, mode (`field_evidence` / `timing_sync`), start wall and elapsed-realtime time, app version, git SHA if available, device, SDK, hardware profile, camera characteristics (filled in on the first frame if the camera bound after the session started), sensors that registered (`sensorsAvailable`), `complete`, `failureReason`, `pinned`, `exportedAtWallMs`, capture counters |
 | `frames.jsonl` + `frames/` | `FrameRecord` per stored frame: seq, camera timestamp, source-side receipt time, source size and rotation, CameraX `sensorToBufferTransform` (active array → source buffer) and crop rect, encoding (`jpeg` / `luma8`), file, stored size |
 | `sensors.jsonl` | `SensorRecord`: sensor (`gravity`, `game_rotation_vector`, `gyroscope`), event timestamp, accuracy, values |
 | `anchors.jsonl` | `ClockAnchorRecord`: (wall ms, elapsed-realtime ns) at start, every 30–60 s, and at the end |
-| `markers.jsonl` | `MarkerRecord`: "missed alert", wall and elapsed time, last frame seq, source |
+| `markers.jsonl` | `MarkerRecord`: "missed alert", wall and elapsed time (the exact reference), last *stored* frame seq (its image exists), source |
 
 - `manifest.json` is written with `complete = false` when the directory is created and rewritten
   atomically (temp file + rename) with `complete = true` after a normal end. A killed app, crash,
@@ -234,8 +234,10 @@ Guidance session, named after the trace session id:
   meaning or type; that is a major version. Closed enums inside records are not extended in a minor
   version.
 - Sensor cadence is computed from event timestamps; `SENSOR_DELAY_GAME` is only the requested rate.
-- Capture counters (`framesOffered`, `framesEncoded`, `framesDroppedByEncoder`, …) are separate from
-  Guidance's dropped frames, so missing capture frames can be explained.
+- Capture counters are separate from Guidance's dropped frames, so a gap can be explained:
+  `framesOffered` = `framesEncoded` + `framesDroppedByEncoder`; `sensorEvents` (persisted) +
+  `sensorEventsDropped` (capture queue full) = samples the capture received. A timestamp gap not
+  covered by a drop count means the device delivered nothing.
 
 **Timing.** Frame timing is taken at the source: `ImageFrameAnalyzer.analyze()` stamps
 `receivedElapsedRealtimeNanos` before any demand check, conversion or queueing, and the camera's own
@@ -285,7 +287,7 @@ JPEG encode (640 px long side, quality 80, pixels not rotated; `rotationDegrees`
 | Export | ZIP built into `cacheDir/capture_exports/` (free space checked first) and shared via FileProvider `<cache-path>`; `files/captures/` itself is never exposed; stale exports cleared on next launch / list open. `adb` + `run-as` documented as the bulk fallback |
 | Viewing frames around a prompt | On the PC: reader + script rendering ±N s around a `prompt_outcome` or marker as a contact sheet |
 | Storage | Estimated ≈ 0.7–1 GB/hour; measured in M0a and written back into the manual |
-| Retention | Deleted 7 days after recording unless exported or pinned; 2 GB cap, oldest unpinned first |
+| Retention | Runs at debug app start (whether or not capture is on), before a capture starts, when the capture list opens, and every 30 s during a capture. A session older than 7 days, not exported or pinned, is deleted at the next of these. The 2 GB cap is enforced during capture: older unpinned sessions go first, and if the active capture alone would exceed it, it ends as incomplete with `failureReason = storage_limit_reached` (checked after every frame) instead of writing until the disk is full |
 | **"Missed alert" marker** | Volume Down while capture is active: only `ACTION_DOWN` with `repeatCount == 0` counts, the key is consumed only then, and a short vibration confirms after the marker is queued. Plus a large on-screen button. Works eyes-free in a foreground Guidance session; no promise for a locked screen or background (there is no background Guidance yet). TalkBack behaviour verified on device |
 
 **Privacy.** Captures contain faces and places (accepted). They are excluded from Auto Backup
