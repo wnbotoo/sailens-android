@@ -155,6 +155,16 @@ class CaptureSessionReaderTest {
     }
 
     @Test
+    fun `a frame record with malformed geometry is skipped with a warning`() {
+        val bad = CaptureSchema.encodeRecord(frame).replace("\"cropRect\":[0,0,960,540]", "\"cropRect\":[0,0,960]")
+
+        val read = CaptureSessionReader.read(session(frames = listOf(bad, CaptureSchema.encodeRecord(frame)))).orThrow()
+
+        assertEquals(listOf(frame), read.frames)
+        assertTrue(read.warnings.any { "${CaptureSchema.FRAMES_FILE}:1" in it })
+    }
+
+    @Test
     fun `a manifest that is not a JSON object is rejected`() {
         assertTrue(CaptureSessionReader.read(session(manifestJson = "[1,2]")) is CaptureReadResult.Rejected)
     }

@@ -200,7 +200,7 @@ M0 拆成两部分（路线图 §7）：**M0a** 是这里描述的现场证据�
 
 | 文件 | 内容 |
 |---|---|
-| `manifest.json` | `CaptureManifest`：schema 大/小版本、session id、模式（`field_evidence` / `timing_sync`）、开始时的墙钟和 elapsed-realtime 时间、应用版本、git SHA（有的话）、设备、SDK、硬件档位、相机参数、`complete`、`failureReason`、`pinned`、`exportedAtWallMs`、采集计数 |
+| `manifest.json` | `CaptureManifest`：schema 大/小版本、session id、模式（`field_evidence` / `timing_sync`）、开始时的墙钟和 elapsed-realtime 时间、应用版本、git SHA（有的话）、设备、SDK、硬件档位、相机参数（若相机在会话开始后才绑定，则在第一帧时补上）、已注册的传感器（`sensorsAvailable`）、`complete`、`failureReason`、`pinned`、`exportedAtWallMs`、采集计数 |
 | `frames.jsonl` + `frames/` | 每个存下的帧一条 `FrameRecord`：序号、相机时间戳、来源侧接收时间、原始尺寸和旋转、CameraX 的 `sensorToBufferTransform`（有效像素区 → 原始缓冲区）和裁剪框、编码（`jpeg` / `luma8`）、文件、存储尺寸 |
 | `sensors.jsonl` | `SensorRecord`：传感器（`gravity`、`game_rotation_vector`、`gyroscope`）、事件时间戳、精度、数值 |
 | `anchors.jsonl` | `ClockAnchorRecord`：会话开始、每 30–60 秒、会话结束时各记一对（墙钟毫秒，elapsed-realtime 纳秒） |

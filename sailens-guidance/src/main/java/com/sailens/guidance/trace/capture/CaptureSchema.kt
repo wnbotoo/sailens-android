@@ -94,6 +94,8 @@ data class CaptureManifest(
     val sdkInt: Int,
     val targetHardwareProfile: String? = null,
     val camera: CaptureCameraRecord? = null,
+    /** Sensors that registered for this session ("gravity", ...); a missing one is not a failure. */
+    val sensorsAvailable: List<String> = emptyList(),
     /** False until the session ended normally; a crash, kill or full disk leaves it false. */
     val complete: Boolean = false,
     val failureReason: String? = null,
@@ -164,7 +166,15 @@ data class FrameRecord(
     val height: Int,
     val sensorToBufferTransform: List<Float>? = null,
     val cropRect: List<Int>? = null,
-) : CaptureRecord
+) : CaptureRecord {
+    init {
+        // Checked on write and on read: a reader skips a record that fails here, with a warning.
+        require(sensorToBufferTransform == null || sensorToBufferTransform.size == 9) {
+            "sensorToBufferTransform must have 9 values, got ${sensorToBufferTransform?.size}"
+        }
+        require(cropRect == null || cropRect.size == 4) { "cropRect must have 4 values, got ${cropRect?.size}" }
+    }
+}
 
 @Serializable
 enum class FrameEncoding {

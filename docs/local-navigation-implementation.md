@@ -215,7 +215,7 @@ Guidance session, named after the trace session id:
 
 | File | Content |
 |---|---|
-| `manifest.json` | `CaptureManifest`: schema major/minor, session id, mode (`field_evidence` / `timing_sync`), start wall and elapsed-realtime time, app version, git SHA if available, device, SDK, hardware profile, camera characteristics, `complete`, `failureReason`, `pinned`, `exportedAtWallMs`, capture counters |
+| `manifest.json` | `CaptureManifest`: schema major/minor, session id, mode (`field_evidence` / `timing_sync`), start wall and elapsed-realtime time, app version, git SHA if available, device, SDK, hardware profile, camera characteristics (filled in on the first frame if the camera bound after the session started), sensors that registered (`sensorsAvailable`), `complete`, `failureReason`, `pinned`, `exportedAtWallMs`, capture counters |
 | `frames.jsonl` + `frames/` | `FrameRecord` per stored frame: seq, camera timestamp, source-side receipt time, source size and rotation, CameraX `sensorToBufferTransform` (active array → source buffer) and crop rect, encoding (`jpeg` / `luma8`), file, stored size |
 | `sensors.jsonl` | `SensorRecord`: sensor (`gravity`, `game_rotation_vector`, `gyroscope`), event timestamp, accuracy, values |
 | `anchors.jsonl` | `ClockAnchorRecord`: (wall ms, elapsed-realtime ns) at start, every 30–60 s, and at the end |
