@@ -49,7 +49,7 @@ class GuidancePromptOfferTest {
             descriptionHoldsTheFloor = describing,
             preemptDescription = { calls += "preempt" },
             deliver = { calls += "deliver:${primary.messageKey}"; true },
-            revoke = { calls += "revoke"; revoke(primary) },
+            revoke = { reason -> calls += "revoke:$reason"; revoke(primary) },
         )
     }
 
@@ -63,11 +63,14 @@ class GuidancePromptOfferTest {
         now += 100
         // Offered again on the next frame: the revoke took the provisional cooldown record back.
         assertEquals(false, frame(trafficLight, describing = true))
-        assertEquals(listOf("revoke", "revoke"), calls)
+        assertEquals(listOf("revoke:waiting_for_description", "revoke:waiting_for_description"), calls)
 
         now += 100
         assertEquals(true, frame(trafficLight, describing = false))
-        assertEquals(listOf("revoke", "revoke", "preempt", "deliver:event_traffic_light"), calls)
+        assertEquals(
+            listOf("revoke:waiting_for_description", "revoke:waiting_for_description", "preempt", "deliver:event_traffic_light"),
+            calls,
+        )
 
         // Delivered for real now, so the cooldown holds it.
         now += 100
@@ -86,6 +89,7 @@ class GuidancePromptOfferTest {
     fun `a prompt the speech engine refuses is revoked and offered again`() {
         val trafficLight = snapshot(trafficLight = true)
         var accept = false
+        val reasons = mutableListOf<String>()
         fun offer(): Boolean {
             val primary = decide(trafficLight).single()
             return offerGuidancePrompt(
@@ -93,7 +97,7 @@ class GuidancePromptOfferTest {
                 descriptionHoldsTheFloor = false,
                 preemptDescription = {},
                 deliver = { accept },
-                revoke = { revoke(primary) },
+                revoke = { reason -> reasons += reason; revoke(primary) },
             )
         }
 
@@ -101,6 +105,7 @@ class GuidancePromptOfferTest {
         now += 100
         accept = true
         assertTrue("the refused prompt must not be sitting in the cooldown", offer())
+        assertEquals(listOf("output_refused"), reasons)
     }
 
     private fun snapshot(

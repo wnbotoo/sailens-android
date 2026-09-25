@@ -1,6 +1,7 @@
 package com.sailens.guidance.trace
 
 import com.sailens.guidance.model.trace.FrameTrace
+import com.sailens.guidance.model.trace.PromptOutcomeTrace
 import com.sailens.guidance.model.trace.SessionTraceMetadata
 import com.sailens.guidance.model.trace.SessionTraceSummary
 import org.json.JSONArray
@@ -106,6 +107,22 @@ internal object TraceJsonEncoder {
         put("sourceSequenceNumber", sourceSequenceNumber)
         put("sourcePipelineCompletedAt", sourcePipelineCompletedAt)
         put("sourceAgeMs", sourceAgeMs)
+    }
+
+    fun encodePromptOutcome(outcome: PromptOutcomeTrace): JSONObject = JSONObject().apply {
+        put("type", "prompt_outcome")
+        put("sessionId", outcome.sessionId)
+        put("eventId", outcome.eventId)
+        put("sourceSequenceNumber", outcome.sourceSequenceNumber)
+        put("messageKey", outcome.messageKey)
+        put("category", outcome.category)
+        put("priority", outcome.priority)
+        outcome.deliveredAt?.let { put("deliveredAt", it) }
+        outcome.revokedAt?.let { put("revokedAt", it) }
+        outcome.revokeReason?.let { put("revokeReason", it) }
+        put("speechEnabled", outcome.speechEnabled)
+        put("screenReaderActive", outcome.screenReaderActive)
+        put("hapticsEnabled", outcome.hapticsEnabled)
     }
 
     fun encodeSessionSummary(summary: SessionTraceSummary): JSONObject = JSONObject().apply {

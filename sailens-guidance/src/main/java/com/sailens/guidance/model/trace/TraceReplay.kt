@@ -15,6 +15,8 @@ data class TraceReplaySession(
     val metadata: SessionTraceMetadata?,
     val frames: List<FrameTrace>,
     val overlayRenders: List<OverlayRenderTrace>,
+    /** What became of each offered prompt; empty for traces recorded before these were written. */
+    val promptOutcomes: List<PromptOutcomeTrace> = emptyList(),
     val errors: List<TraceReplayError>,
     val summary: SessionTraceSummary?,
 )
@@ -133,6 +135,7 @@ object TraceReplayParser {
         var summary: SessionTraceSummary? = null
         val frames = mutableListOf<FrameTrace>()
         val overlayRenders = mutableListOf<OverlayRenderTrace>()
+        val promptOutcomes = mutableListOf<PromptOutcomeTrace>()
         val errors = mutableListOf<TraceReplayError>()
 
         lines.forEachIndexed { index, rawLine ->
@@ -144,6 +147,7 @@ object TraceReplayParser {
                 SESSION_START_TYPE -> metadata = parseMetadata(entry, index)
                 FRAME_TYPE -> frames += parseFrame(entry, index)
                 OVERLAY_RENDER_TYPE -> overlayRenders += parseOverlayRender(entry, index)
+                PROMPT_OUTCOME_TYPE -> promptOutcomes += parsePromptOutcome(entry, index)
                 SESSION_SUMMARY_TYPE -> summary = parseSummary(entry, index)
                 ERROR_TYPE -> errors += parseError(entry, index)
                 else -> throw IllegalArgumentException("Unsupported trace entry type '$type' at line ${index + 1}")
@@ -154,6 +158,7 @@ object TraceReplayParser {
             metadata = metadata,
             frames = frames,
             overlayRenders = overlayRenders,
+            promptOutcomes = promptOutcomes,
             errors = errors,
             summary = summary,
         )
@@ -256,6 +261,25 @@ object TraceReplayParser {
         sourceAgeMs = entry.optionalLong("sourceAgeMs") ?: 0,
     )
 
+    private fun parsePromptOutcome(entry: JsonObject, lineIndex: Int) = PromptOutcomeTrace(
+        sessionId = entry.requireString("sessionId", lineIndex),
+        eventId = entry.requireString("eventId", lineIndex),
+        sourceSequenceNumber = entry.requireLong("sourceSequenceNumber", lineIndex),
+        messageKey = entry.requireString("messageKey", lineIndex),
+        category = entry.requireString("category", lineIndex),
+        priority = entry.requireString("priority", lineIndex),
+        deliveredAt = entry.optionalLong("deliveredAt"),
+        revokedAt = entry.optionalLong("revokedAt"),
+        revokeReason = entry.optionalString("revokeReason"),
+        speechEnabled = entry.requireBoolean("speechEnabled", lineIndex),
+        screenReaderActive = entry.requireBoolean("screenReaderActive", lineIndex),
+        hapticsEnabled = entry.requireBoolean("hapticsEnabled", lineIndex),
+    ).also { outcome ->
+        require((outcome.deliveredAt == null) != (outcome.revokedAt == null)) {
+            "Prompt outcome at line ${lineIndex + 1} must have exactly one of deliveredAt and revokedAt"
+        }
+    }
+
     private fun parseSummary(entry: JsonObject, lineIndex: Int) = SessionTraceSummary(
         sessionId = entry.requireString("sessionId", lineIndex),
         startedAt = entry.requireLong("startedAt", lineIndex),
@@ -340,6 +364,7 @@ object TraceReplayParser {
     private const val SESSION_START_TYPE = "session_start"
     private const val FRAME_TYPE = "frame"
     private const val OVERLAY_RENDER_TYPE = "overlay_render"
+    private const val PROMPT_OUTCOME_TYPE = "prompt_outcome"
     private const val SESSION_SUMMARY_TYPE = "session_summary"
     private const val ERROR_TYPE = "error"
 }

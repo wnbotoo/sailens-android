@@ -1,6 +1,7 @@
 package com.sailens.shell.guidance.screen
 
 import com.sailens.guidance.model.common.EventPriority
+import com.sailens.guidance.model.trace.PromptRevokeReasons
 
 /**
  * Offers one Guidance prompt to the output channels the user has enabled and reports whether it
@@ -76,6 +77,7 @@ internal val GUIDANCE_PREEMPTS_DESCRIPTION_AT: EventPriority = EventPriority.HIG
  *    spoken, so no clause of it can be left in front of the prompt or behind it.
  * 3. [deliver] refused (a prompt of equal or higher priority is still being spoken): not delivered.
  *
+ * @param revoke called with the reason, one of [PromptRevokeReasons], so the trace can say why.
  * @return whether the prompt was delivered.
  */
 internal inline fun offerGuidancePrompt(
@@ -83,15 +85,15 @@ internal inline fun offerGuidancePrompt(
     descriptionHoldsTheFloor: Boolean,
     preemptDescription: () -> Unit,
     deliver: () -> Boolean,
-    revoke: () -> Unit,
+    revoke: (reason: String) -> Unit,
 ): Boolean {
     if (guidanceWaitsForDescription(priority, descriptionHoldsTheFloor)) {
-        revoke()
+        revoke(PromptRevokeReasons.WAITING_FOR_DESCRIPTION)
         return false
     }
     preemptDescription()
     if (!deliver()) {
-        revoke()
+        revoke(PromptRevokeReasons.OUTPUT_REFUSED)
         return false
     }
     return true

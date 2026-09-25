@@ -11,6 +11,10 @@ Trace 是 JSONL 文件，每一行是一个事件：
 - `session_start`：一次导航会话开始。
 - `frame`：一帧完整 pipeline 结果。
 - `overlay_render`：UI 层完成一次 mask overlay 渲染。
+- `prompt_outcome`：一帧交给用户的那一条提示最终的去向——`deliveredAt`（已送达），或 `revokedAt`
+  加 `revokeReason`（`waiting_for_description` 等描述说完、`output_refused` 输出通道拒收），以及当时的
+  输出设置。以 `eventId` 为键，用 `sourceSequenceNumber` 关联到对应的帧，写在该帧之后。`frame` 记录里的
+  `messageKeys` 是冷却后的候选，不是用户收到的提示——标注误报要对照 `prompt_outcome`。
 - `session_summary`：会话结束后的聚合摘要。
 - `error`：pipeline 或 trace 中出现异常。
 

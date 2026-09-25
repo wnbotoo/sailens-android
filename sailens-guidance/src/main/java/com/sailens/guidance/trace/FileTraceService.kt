@@ -3,6 +3,7 @@ package com.sailens.guidance.trace
 import android.content.Context
 import com.sailens.guidance.config.TraceRuntimeConfig
 import com.sailens.guidance.model.trace.FrameTrace
+import com.sailens.guidance.model.trace.PromptOutcomeTrace
 import com.sailens.guidance.model.trace.SessionTraceMetadata
 import com.sailens.guidance.model.trace.SessionTraceSummary
 import com.sailens.core.log.LogService
@@ -77,6 +78,11 @@ class FileTraceService(
                 sourceAgeMs = sourceAgeMs,
             )
         )
+    }
+
+    override fun recordPromptOutcome(outcome: PromptOutcomeTrace) {
+        val sessionId = activeSessionId ?: return
+        enqueue(TraceQueueEntry.PromptOutcome(outcome.copy(sessionId = sessionId)))
     }
 
     override fun recordError(sessionId: String, stage: String, throwable: Throwable) {
@@ -192,6 +198,12 @@ class FileTraceService(
                 sourcePipelineCompletedAt = sourcePipelineCompletedAt,
                 sourceAgeMs = sourceAgeMs,
             )
+        }
+
+        data class PromptOutcome(
+            val outcome: PromptOutcomeTrace,
+        ) : TraceQueueEntry {
+            override fun encode(): JSONObject = TraceJsonEncoder.encodePromptOutcome(outcome)
         }
 
         data class Error(

@@ -8,10 +8,12 @@ import com.sailens.camera.FrameSource
 import com.sailens.guidance.model.scene.SceneEvent
 import com.sailens.guidance.model.scene.SceneResult
 import com.sailens.core.log.LogService
+import com.sailens.guidance.model.trace.PromptOutcomeTrace
 import com.sailens.guidance.service.TraceService
 import com.sailens.guidance.usecase.decision.RevokeUndeliveredEventUseCase
 import com.sailens.guidance.usecase.scene.StartSceneAnalysisUseCase
 import com.sailens.guidance.usecase.scene.StopSceneAnalysisUseCase
+import com.sailens.guidance.util.Timestamp
 import com.sailens.shell.diagnostics.GuidanceDiagnosticsStore
 import com.sailens.output.AccessibilityStatusProvider
 import com.sailens.shell.device.GuidanceHaptic
@@ -349,12 +351,12 @@ class SceneAnalysisViewModel(
                         )
                     )
                 }
-                onSceneEvents(events)
+                onSceneEvents(events, result.sequenceNumber)
             }
         }
     }
 
-    private fun onSceneEvents(events: List<SceneEvent>) {
+    private fun onSceneEvents(events: List<SceneEvent>, sequenceNumber: Long) {
         if (events.isEmpty()) return
         // Guidance 为这一条（且只为这一条）记了冷却，见 DecideEventsUseCase。
         val primaryEvent = events.first()
@@ -370,14 +372,50 @@ class SceneAnalysisViewModel(
             descriptionHoldsTheFloor = sceneDescriptionCoordinator.holdsTheFloor,
             preemptDescription = { sceneDescriptionCoordinator.preemptForGuidance(primaryEvent.messageKey) },
             deliver = { deliver(primaryEvent, state) },
-            revoke = { revokeUndeliveredEvent(primaryEvent) },
+            revoke = { reason ->
+                revokeUndeliveredEvent(primaryEvent)
+                traceService.recordPromptOutcome(
+                    promptOutcome(
+                        primaryEvent, sequenceNumber, state,
+                        revokedAt = Timestamp.now(), revokeReason = reason,
+                    ),
+                )
+            },
         )
         if (!delivered) return
+        traceService.recordPromptOutcome(
+            promptOutcome(primaryEvent, sequenceNumber, state, deliveredAt = Timestamp.now())
+        )
 
         if (state.hasGuidanceOutputChannel()) {
             _uiState.update { it.copy(lastAnnouncedEvent = primaryEvent) }
         }
     }
+
+    /**
+     * 这条提示最终的去向，写进 trace 供误报标注用：标注要对着用户真正收到的提示，而不是帧里的候选。
+     * 时间用墙钟毫秒，和帧 trace 的 pipelineCompletedAt 同一个时钟。
+     */
+    private fun promptOutcome(
+        event: SceneEvent,
+        sequenceNumber: Long,
+        state: SceneAnalysisUiState,
+        deliveredAt: Long? = null,
+        revokedAt: Long? = null,
+        revokeReason: String? = null,
+    ) = PromptOutcomeTrace(
+        eventId = event.id.toString(),
+        sourceSequenceNumber = sequenceNumber,
+        messageKey = event.messageKey,
+        category = event.category.name.lowercase(),
+        priority = event.priority.name.lowercase(),
+        deliveredAt = deliveredAt,
+        revokedAt = revokedAt,
+        revokeReason = revokeReason,
+        speechEnabled = state.isSpeechEnabled,
+        screenReaderActive = state.isScreenReaderActive,
+        hapticsEnabled = state.isHapticsEnabled,
+    )
 
     /**
      * 把 [event] 送到用户可感知的通道，见 [deliverGuidanceEvent]。

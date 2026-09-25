@@ -93,6 +93,50 @@ data class OverlayRenderTrace(
     val sourceAgeMs: Long = 0,
 )
 
+/**
+ * What became of the one prompt a frame offered the user: delivered, or revoked and why.
+ *
+ * [FrameTrace.messageKeys] lists the frame's candidates after cooldown, which is not what the user
+ * heard: only the first is offered, and it can still be held back for a description or refused by
+ * an output that is busy with higher-priority speech. Labelling false alarms against candidates would
+ * label prompts nobody received. This record is written by the output side after delivery is decided,
+ * so it lands after its frame's record; join the two on [sourceSequenceNumber].
+ *
+ * Exactly one of [deliveredAt] and [revokedAt] is set. Both are wall-clock milliseconds, the same
+ * clock as [FrameTrace.pipelineCompletedAt].
+ *
+ * "Delivered" means an output channel accepted the prompt. Spoken prompts can still be cut short
+ * later by a strictly higher-priority one; that is not recorded here.
+ */
+data class PromptOutcomeTrace(
+    /** Filled in by the trace service from its active session; callers on the output side leave it. */
+    val sessionId: String = "",
+    /** [com.sailens.guidance.model.scene.SceneEvent.id]. */
+    val eventId: String,
+    /** The frame that offered it ([FrameTrace.sequenceNumber]). */
+    val sourceSequenceNumber: Long,
+    val messageKey: String,
+    val category: String,
+    val priority: String,
+    val deliveredAt: Long? = null,
+    val revokedAt: Long? = null,
+    /** Why it was revoked; null when delivered. See [PromptRevokeReasons]. */
+    val revokeReason: String? = null,
+    /** The output settings at the time, so a label can tell "heard" from "felt". */
+    val speechEnabled: Boolean,
+    val screenReaderActive: Boolean,
+    val hapticsEnabled: Boolean,
+)
+
+/** The closed set of [PromptOutcomeTrace.revokeReason] values. */
+object PromptRevokeReasons {
+    /** Not urgent, and a scene description held the floor; offered again later. */
+    const val WAITING_FOR_DESCRIPTION = "waiting_for_description"
+
+    /** Every enabled output refused it (speech busy with an equal or higher priority). */
+    const val OUTPUT_REFUSED = "output_refused"
+}
+
 data class SessionTraceSummary(
     val sessionId: String,
     val startedAt: Long,
