@@ -22,14 +22,25 @@ import kotlinx.coroutines.flow.mapNotNull
  */
 internal class LatestFrameHolder(
     private val elapsedRealtimeMs: () -> Long,
+    /** Test seam: runs between reading the slot and claiming the frame read. */
+    private val beforeClaim: () -> Unit = {},
 ) {
     private val latest = MutableStateFlow<TimedFrame?>(null)
+
+    /**
+     * Guards replacing the slot against claiming from it. A reference count alone cannot say
+     * whether a buffer still belongs to the frame a reader saw: once the slot lets go, the buffer
+     * can be recycled and reopened for a later frame, and its count is positive again.
+     */
+    private val slotLock = Any()
 
     /** Single writer: the camera analysis thread. */
     fun record(frame: ImageFrame, buffers: FrameBuffers? = null) {
         buffers?.retain()
-        val previous = latest.value
-        latest.value = TimedFrame(frame, buffers, elapsedRealtimeMs())
+        val previous = synchronized(slotLock) {
+            latest.value.also { latest.value = TimedFrame(frame, buffers, elapsedRealtimeMs()) }
+        }
+        // Outside the lock: a claim can no longer see the previous frame as current.
         previous?.buffers?.release()
     }
 
@@ -42,8 +53,7 @@ internal class LatestFrameHolder(
             val timed = latest.value ?: return null
             if (!timed.isFresh(maxAgeMs)) return null
             timed.takeForCaller()?.let { return it }
-            // Replaced and recycled between the read and the claim. The slot only lets go of a
-            // frame after a newer one is in it, so the next read sees that one.
+            // Replaced between the read and the claim; the slot now holds a newer frame.
         }
     }
 
@@ -60,11 +70,20 @@ internal class LatestFrameHolder(
         return age in 0..maxAgeMs
     }
 
-    /** The frame, detached from the pool so it stays intact; null if it was already recycled. */
+    /**
+     * The frame, detached from the pool so it stays intact; null if it is no longer the one in
+     * the slot. While it is, the slot's own reference keeps its buffer from being recycled -- that
+     * reference is only released after a replacement, which cannot happen inside [slotLock].
+     */
     private fun TimedFrame.takeForCaller(): ImageFrame? {
+        beforeClaim()
+        // Not pooled: nothing will ever write into these arrays again.
         val pooled = buffers ?: return frame
-        if (!pooled.tryRetain()) return null
-        pooled.detach()
+        synchronized(slotLock) {
+            if (latest.value !== this) return null
+            pooled.retain()
+            pooled.detach()
+        }
         pooled.release()
         return frame
     }

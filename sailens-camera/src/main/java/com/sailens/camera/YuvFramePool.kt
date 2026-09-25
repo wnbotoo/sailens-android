@@ -53,22 +53,14 @@ internal class FrameBuffers(private val pool: YuvFramePool) : PlaneAllocator {
         check(references.compareAndSet(0, 1)) { "Opened a frame buffer that is still referenced" }
     }
 
-    /** Adds a holder. Only legal while the caller already holds a reference. */
+    /**
+     * Adds a holder. Only legal while a reference is known to be held that cannot be released
+     * meanwhile: the caller's own, or one pinned under a lock. A positive count by itself proves
+     * nothing about ownership: a recycled buffer reopened for a later frame has one too.
+     */
     fun retain() {
         val before = references.getAndIncrement()
         check(before > 0) { "Retained a frame buffer that had already been released" }
-    }
-
-    /**
-     * Adds a holder unless the buffer has already been released by everyone: the caller does not
-     * hold a reference and is racing the last release.
-     */
-    fun tryRetain(): Boolean {
-        while (true) {
-            val current = references.get()
-            if (current <= 0) return false
-            if (references.compareAndSet(current, current + 1)) return true
-        }
     }
 
     fun release() {
