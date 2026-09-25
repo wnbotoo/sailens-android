@@ -35,7 +35,8 @@ COLUMNS = [
     "message_key",
     "category",
     "priority",
-    "channels",
+    "delivered_via",
+    "output_settings",
     "frame_sequence",
     "ground_recognition",
     "unrecognized_ground_ratio",
@@ -60,13 +61,25 @@ def read_records(path):
                 raise SystemExit(f"{path}:{line_number}: not JSON ({error})")
 
 
-def channels(outcome):
-    names = []
-    if outcome.get("speechEnabled"):
-        names.append("screen_reader" if outcome.get("screenReaderActive") else "speech")
-    if outcome.get("hapticsEnabled"):
-        names.append("haptics")
-    return "+".join(names) or "card_only"
+def delivered_via(outcome):
+    """The channels that actually accepted the prompt (`deliveredVia`), e.g. "speech+haptics".
+
+    This is the evidence of heard vs felt. The output *settings* are not: with speech and haptics
+    both on, a prompt can still reach the user by vibration alone while the speech engine starts.
+    """
+    return "+".join(outcome.get("deliveredVia", []))
+
+
+def settings(outcome):
+    """The output settings at the time, for context only."""
+    names = [
+        name for name, key in (
+            ("speech", "speechEnabled"),
+            ("screen_reader", "screenReaderActive"),
+            ("haptics", "hapticsEnabled"),
+        ) if outcome.get(key)
+    ]
+    return "+".join(names) or "none"
 
 
 def rows_for(path, include_revoked):
@@ -106,7 +119,8 @@ def rows_for(path, include_revoked):
             "message_key": outcome["messageKey"],
             "category": outcome["category"],
             "priority": outcome["priority"],
-            "channels": channels(outcome),
+            "delivered_via": delivered_via(outcome),
+            "output_settings": settings(outcome),
             "frame_sequence": outcome["sourceSequenceNumber"],
             "ground_recognition": frame.get("groundRecognition", ""),
             "unrecognized_ground_ratio": (

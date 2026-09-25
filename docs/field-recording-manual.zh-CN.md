@@ -137,8 +137,10 @@ py scripts/export_prompt_labels.py <段号文件夹>/trace_*.jsonl -o 段号.csv
 ```
 
 每一行是一条**用户真正收到的提示**（trace 里的 `prompt_outcome`，已送达的那些）。被撤回的提示用户
-没听到，不可能是误报，默认不列；想看的话加 `--include-revoked`。表里附带了那一帧的地面识别状态、
-是否判为阻塞、跟踪到的障碍物和主要类别，方便对照。
+没听到，不可能是误报，默认不列；想看的话加 `--include-revoked`。`delivered_via` 说明它是怎么到达
+用户的（`speech` 语音、`screen_reader` 读屏、`haptics` 震动、`status_card` 状态卡片）：只有 `haptics`
+的提示是"感到"而不是"听到"，即使当时语音是开着的。`output_settings` 只作背景。表里还附带了那一帧的
+地面识别状态、是否判为阻塞、跟踪到的障碍物和主要类别，方便对照。
 
 ### 9.2 逐条打标签
 

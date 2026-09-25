@@ -1,0 +1,156 @@
+--- indoors pg: frames 324, floor-visible 78, cpu 65 ms
+  h_true 1.157(n78)  ground linearity relres 0.051(n78)
+  P1  IoU 0.242(n78) prec 0.327(n78) rec 0.506(n78) | no-floor frames: pred frac 0.477(n246) gt frac 0.157(n246)
+  P1  sign above(>0.2m) closer 0.439(n297)  sign below(<-0.15m) farther 0.061(n268) frames w/ below 268
+  P1g imu0: IoU 0.228(n78) prec 0.377(n78) rec 0.393(n78) | no-floor pred frac 0.262(n172)
+  P1g imu2: IoU 0.234(n78) prec 0.370(n78) rec 0.412(n78) | no-floor pred frac 0.263(n172)
+  P2 imu0 h-0.15: absrel ground 0.166(n78) obs 0.235(n71) | obs prec 0.748(n64) rec 0.324(n75) | corridor n76 within25%=0.17 too-far=0.25 missed=0.24
+  P2 imu0 h+0.00: absrel ground 0.073(n78) obs 0.263(n71) | obs prec 0.717(n65) rec 0.406(n75) | corridor n76 within25%=0.24 too-far=0.26 missed=0.24
+  P2 imu0 h+0.15: absrel ground 0.178(n78) obs 0.436(n71) | obs prec 0.619(n66) rec 0.420(n75) | corridor n76 within25%=0.22 too-far=0.28 missed=0.28
+  P2 imu2 h-0.15: absrel ground 0.174(n78) obs 0.240(n70) | obs prec 0.757(n64) rec 0.372(n75) | corridor n76 within25%=0.21 too-far=0.26 missed=0.21
+  P2 imu2 h+0.00: absrel ground 0.076(n78) obs 0.288(n70) | obs prec 0.722(n66) rec 0.462(n75) | corridor n76 within25%=0.22 too-far=0.29 missed=0.20
+  P2 imu2 h+0.15: absrel ground 0.200(n78) obs 0.463(n70) | obs prec 0.676(n67) rec 0.523(n75) | corridor n76 within25%=0.20 too-far=0.37 missed=0.20
+  P2 imu5 h-0.15: absrel ground 0.198(n78) obs 0.283(n72) | obs prec 0.768(n61) rec 0.263(n75) | corridor n76 within25%=0.21 too-far=0.22 missed=0.25
+  P2 imu5 h+0.00: absrel ground 0.134(n78) obs 0.353(n72) | obs prec 0.715(n67) rec 0.339(n75) | corridor n76 within25%=0.21 too-far=0.29 missed=0.25
+  P2 imu5 h+0.15: absrel ground 0.237(n78) obs 0.490(n72) | obs prec 0.652(n67) rec 0.382(n75) | corridor n76 within25%=0.25 too-far=0.33 missed=0.25
+--- indoors dav2s: frames 324, floor-visible 75, cpu 278 ms
+  h_true 1.155(n75)  ground linearity relres 0.038(n75)
+  P1  IoU 0.183(n75) prec 0.258(n75) rec 0.450(n75) | no-floor frames: pred frac 0.493(n249) gt frac 0.161(n249)
+  P1  sign above(>0.2m) closer 0.360(n303)  sign below(<-0.15m) farther 0.082(n269) frames w/ below 269
+  P1g imu0: IoU 0.328(n75) prec 0.628(n75) rec 0.468(n75) | no-floor pred frac 0.165(n181)
+  P1g imu2: IoU 0.288(n75) prec 0.552(n75) rec 0.388(n75) | no-floor pred frac 0.165(n182)
+  P2 imu0 h-0.15: absrel ground 0.150(n75) obs 0.152(n72) | obs prec 0.998(n69) rec 0.716(n73) | corridor n73 within25%=0.36 too-far=0.38 missed=0.14
+  P2 imu0 h+0.00: absrel ground 0.023(n75) obs 0.114(n72) | obs prec 0.982(n71) rec 0.815(n73) | corridor n73 within25%=0.29 too-far=0.48 missed=0.12
+  P2 imu0 h+0.15: absrel ground 0.153(n75) obs 0.214(n72) | obs prec 0.936(n71) rec 0.844(n73) | corridor n73 within25%=0.18 too-far=0.60 missed=0.11
+  P2 imu2 h-0.15: absrel ground 0.149(n75) obs 0.173(n72) | obs prec 0.996(n69) rec 0.548(n73) | corridor n73 within25%=0.36 too-far=0.34 missed=0.15
+  P2 imu2 h+0.00: absrel ground 0.053(n75) obs 0.128(n72) | obs prec 0.979(n72) rec 0.623(n73) | corridor n73 within25%=0.26 too-far=0.44 missed=0.14
+  P2 imu2 h+0.15: absrel ground 0.187(n75) obs 0.273(n72) | obs prec 0.920(n72) rec 0.731(n73) | corridor n73 within25%=0.14 too-far=0.60 missed=0.11
+  P2 imu5 h-0.15: absrel ground 0.181(n75) obs 0.224(n73) | obs prec 0.951(n68) rec 0.539(n73) | corridor n73 within25%=0.29 too-far=0.30 missed=0.21
+  P2 imu5 h+0.00: absrel ground 0.100(n75) obs 0.184(n73) | obs prec 0.886(n68) rec 0.637(n73) | corridor n73 within25%=0.22 too-far=0.42 missed=0.18
+  P2 imu5 h+0.15: absrel ground 0.225(n75) obs 0.333(n73) | obs prec 0.815(n70) rec 0.684(n73) | corridor n73 within25%=0.16 too-far=0.51 missed=0.18
+--- outdoor pg: frames 445, floor-visible 146, cpu 25 ms
+  h_true 2.422(n146)  ground linearity relres 0.018(n146)
+  P1  IoU 0.585(n146) prec 0.687(n146) rec 0.815(n146) | no-floor frames: pred frac 0.515(n299) gt frac 0.049(n299)
+  P1  sign above(>0.2m) closer 0.333(n328)  sign below(<-0.15m) farther 0.108(n115) frames w/ below 115
+  P1g imu0: IoU 0.497(n146) prec 0.704(n146) rec 0.699(n146) | no-floor pred frac 0.215(n267)
+  P1g imu2: IoU 0.473(n146) prec 0.699(n146) rec 0.682(n146) | no-floor pred frac 0.217(n265)
+  P2 imu0 h-0.15: absrel ground 0.151(n144) obs 0.258(n124) | obs prec 1.000(n102) rec 0.321(n124) | corridor n113 within25%=0.09 too-far=0.14 missed=0.73
+  P2 imu0 h+0.00: absrel ground 0.018(n144) obs 0.470(n124) | obs prec 1.000(n105) rec 0.340(n124) | corridor n113 within25%=0.07 too-far=0.11 missed=0.81
+  P2 imu0 h+0.15: absrel ground 0.150(n144) obs 0.691(n124) | obs prec 0.996(n109) rec 0.392(n124) | corridor n113 within25%=0.06 too-far=0.11 missed=0.81
+  P2 imu2 h-0.15: absrel ground 0.156(n144) obs 0.276(n124) | obs prec 1.000(n104) rec 0.307(n124) | corridor n113 within25%=0.12 too-far=0.13 missed=0.73
+  P2 imu2 h+0.00: absrel ground 0.055(n144) obs 0.475(n124) | obs prec 1.000(n108) rec 0.336(n124) | corridor n113 within25%=0.08 too-far=0.11 missed=0.80
+  P2 imu2 h+0.15: absrel ground 0.153(n144) obs 0.696(n124) | obs prec 0.997(n112) rec 0.388(n124) | corridor n113 within25%=0.08 too-far=0.11 missed=0.81
+  P2 imu5 h-0.15: absrel ground 0.181(n144) obs 0.314(n123) | obs prec 0.991(n104) rec 0.280(n124) | corridor n113 within25%=0.10 too-far=0.14 missed=0.73
+  P2 imu5 h+0.00: absrel ground 0.130(n144) obs 0.517(n123) | obs prec 0.976(n108) rec 0.300(n124) | corridor n113 within25%=0.10 too-far=0.08 missed=0.81
+  P2 imu5 h+0.15: absrel ground 0.187(n144) obs 0.731(n123) | obs prec 0.906(n111) rec 0.345(n124) | corridor n113 within25%=0.08 too-far=0.11 missed=0.81
+--- outdoor dav2s: frames 445, floor-visible 143, cpu 288 ms
+  h_true 2.420(n143)  ground linearity relres 0.005(n143)
+  P1  IoU 0.680(n143) prec 0.692(n143) rec 0.987(n143) | no-floor frames: pred frac 0.489(n302) gt frac 0.050(n302)
+  P1  sign above(>0.2m) closer 0.462(n351)  sign below(<-0.15m) farther 0.114(n134) frames w/ below 134
+  P1g imu0: IoU 0.660(n143) prec 0.699(n143) rec 0.970(n143) | no-floor pred frac 0.230(n271)
+  P1g imu2: IoU 0.581(n143) prec 0.718(n143) rec 0.894(n143) | no-floor pred frac 0.220(n273)
+  P2 imu0 h-0.15: absrel ground 0.150(n141) obs 0.202(n128) | obs prec 1.000(n105) rec 0.483(n128) | corridor n111 within25%=0.16 too-far=0.17 missed=0.65
+  P2 imu0 h+0.00: absrel ground 0.009(n141) obs 0.404(n128) | obs prec 1.000(n110) rec 0.520(n128) | corridor n111 within25%=0.14 too-far=0.14 missed=0.70
+  P2 imu0 h+0.15: absrel ground 0.151(n141) obs 0.614(n128) | obs prec 1.000(n111) rec 0.528(n128) | corridor n111 within25%=0.08 too-far=0.14 missed=0.76
+  P2 imu2 h-0.15: absrel ground 0.149(n141) obs 0.222(n128) | obs prec 1.000(n110) rec 0.447(n128) | corridor n111 within25%=0.16 too-far=0.17 missed=0.65
+  P2 imu2 h+0.00: absrel ground 0.057(n141) obs 0.417(n128) | obs prec 1.000(n113) rec 0.490(n128) | corridor n111 within25%=0.14 too-far=0.16 missed=0.68
+  P2 imu2 h+0.15: absrel ground 0.156(n141) obs 0.629(n128) | obs prec 1.000(n117) rec 0.510(n128) | corridor n111 within25%=0.11 too-far=0.14 missed=0.74
+  P2 imu5 h-0.15: absrel ground 0.190(n141) obs 0.275(n128) | obs prec 1.000(n110) rec 0.374(n128) | corridor n111 within25%=0.13 too-far=0.18 missed=0.64
+  P2 imu5 h+0.00: absrel ground 0.117(n141) obs 0.417(n128) | obs prec 0.991(n117) rec 0.408(n128) | corridor n111 within25%=0.13 too-far=0.14 missed=0.69
+  P2 imu5 h+0.15: absrel ground 0.112(n141) obs 0.629(n128) | obs prec 0.954(n121) rec 0.459(n128) | corridor n111 within25%=0.09 too-far=0.14 missed=0.73
+--- RES indoors 518x686_wi8: frames 109, floor-visible 20, cpu 376 ms
+  h_true 1.262(n20)  ground linearity relres 0.039(n20)
+  P1  IoU 0.272(n20) prec 0.333(n20) rec 0.599(n20) | no-floor frames: pred frac 0.526(n89) gt frac 0.159(n89)
+  P1  sign above(>0.2m) closer 0.317(n101)  sign below(<-0.15m) farther 0.049(n93) frames w/ below 93
+  P1g imu0: IoU 0.265(n20) prec 0.457(n20) rec 0.390(n20) | no-floor pred frac 0.158(n68)
+  P1g imu2: IoU 0.261(n20) prec 0.534(n20) rec 0.374(n20) | no-floor pred frac 0.151(n67)
+  P2 imu0 h-0.15: absrel ground 0.150(n20) obs 0.154(n19) | obs prec 0.980(n15) rec 0.343(n19) | corridor n19 within25%=0.26 too-far=0.32 missed=0.32
+  P2 imu0 h+0.00: absrel ground 0.033(n20) obs 0.286(n19) | obs prec 0.968(n16) rec 0.400(n19) | corridor n19 within25%=0.16 too-far=0.58 missed=0.16
+  P2 imu0 h+0.15: absrel ground 0.159(n20) obs 0.464(n19) | obs prec 0.920(n19) rec 0.542(n19) | corridor n19 within25%=0.16 too-far=0.63 missed=0.11
+  P2 imu2 h-0.15: absrel ground 0.148(n20) obs 0.179(n19) | obs prec 0.989(n17) rec 0.322(n19) | corridor n19 within25%=0.26 too-far=0.32 missed=0.32
+  P2 imu2 h+0.00: absrel ground 0.059(n20) obs 0.282(n19) | obs prec 0.908(n19) rec 0.423(n19) | corridor n19 within25%=0.21 too-far=0.47 missed=0.21
+  P2 imu2 h+0.15: absrel ground 0.184(n20) obs 0.450(n19) | obs prec 0.840(n19) rec 0.542(n19) | corridor n19 within25%=0.16 too-far=0.68 missed=0.05
+--- RES indoors 392x518: frames 109, floor-visible 20, cpu 253 ms
+  h_true 1.262(n20)  ground linearity relres 0.038(n20)
+  P1  IoU 0.271(n20) prec 0.347(n20) rec 0.635(n20) | no-floor frames: pred frac 0.527(n89) gt frac 0.159(n89)
+  P1  sign above(>0.2m) closer 0.336(n101)  sign below(<-0.15m) farther 0.030(n93) frames w/ below 93
+  P1g imu0: IoU 0.277(n20) prec 0.497(n20) rec 0.429(n20) | no-floor pred frac 0.159(n68)
+  P1g imu2: IoU 0.272(n20) prec 0.495(n20) rec 0.428(n20) | no-floor pred frac 0.154(n69)
+  P2 imu0 h-0.15: absrel ground 0.152(n20) obs 0.150(n19) | obs prec 0.989(n16) rec 0.307(n19) | corridor n19 within25%=0.26 too-far=0.37 missed=0.26
+  P2 imu0 h+0.00: absrel ground 0.041(n20) obs 0.213(n19) | obs prec 0.911(n18) rec 0.382(n19) | corridor n19 within25%=0.11 too-far=0.68 missed=0.11
+  P2 imu0 h+0.15: absrel ground 0.170(n20) obs 0.394(n19) | obs prec 0.855(n19) rec 0.459(n19) | corridor n19 within25%=0.05 too-far=0.79 missed=0.05
+  P2 imu2 h-0.15: absrel ground 0.147(n20) obs 0.158(n19) | obs prec 0.992(n18) rec 0.282(n19) | corridor n19 within25%=0.26 too-far=0.42 missed=0.21
+  P2 imu2 h+0.00: absrel ground 0.075(n20) obs 0.247(n19) | obs prec 0.863(n19) rec 0.409(n19) | corridor n19 within25%=0.16 too-far=0.68 missed=0.05
+  P2 imu2 h+0.15: absrel ground 0.183(n20) obs 0.434(n19) | obs prec 0.816(n19) rec 0.515(n19) | corridor n19 within25%=0.05 too-far=0.79 missed=0.05
+--- RES indoors 266x350: frames 109, floor-visible 21, cpu 119 ms
+  h_true 1.297(n21)  ground linearity relres 0.052(n21)
+  P1  IoU 0.282(n21) prec 0.327(n21) rec 0.603(n21) | no-floor frames: pred frac 0.532(n88) gt frac 0.157(n88)
+  P1  sign above(>0.2m) closer 0.361(n101)  sign below(<-0.15m) farther 0.072(n93) frames w/ below 93
+  P1g imu0: IoU 0.222(n21) prec 0.375(n21) rec 0.382(n21) | no-floor pred frac 0.180(n67)
+  P1g imu2: IoU 0.204(n21) prec 0.367(n21) rec 0.349(n21) | no-floor pred frac 0.186(n68)
+  P2 imu0 h-0.15: absrel ground 0.152(n21) obs 0.171(n20) | obs prec 0.957(n17) rec 0.218(n20) | corridor n20 within25%=0.15 too-far=0.40 missed=0.30
+  P2 imu0 h+0.00: absrel ground 0.059(n21) obs 0.234(n20) | obs prec 0.778(n18) rec 0.407(n20) | corridor n20 within25%=0.15 too-far=0.50 missed=0.20
+  P2 imu0 h+0.15: absrel ground 0.170(n21) obs 0.405(n20) | obs prec 0.759(n20) rec 0.523(n20) | corridor n20 within25%=0.10 too-far=0.60 missed=0.15
+  P2 imu2 h-0.15: absrel ground 0.193(n21) obs 0.234(n20) | obs prec 0.988(n17) rec 0.344(n20) | corridor n20 within25%=0.25 too-far=0.30 missed=0.30
+  P2 imu2 h+0.00: absrel ground 0.067(n21) obs 0.316(n20) | obs prec 0.897(n18) rec 0.444(n20) | corridor n20 within25%=0.20 too-far=0.45 missed=0.20
+  P2 imu2 h+0.15: absrel ground 0.181(n21) obs 0.475(n20) | obs prec 0.745(n19) rec 0.506(n20) | corridor n20 within25%=0.05 too-far=0.70 missed=0.10
+--- RES indoors pg: frames 109, floor-visible 25, cpu 23 ms
+  h_true 1.378(n25)  ground linearity relres 0.048(n25)
+  P1  IoU 0.232(n25) prec 0.319(n25) rec 0.519(n25) | no-floor frames: pred frac 0.515(n84) gt frac 0.149(n84)
+  P1  sign above(>0.2m) closer 0.383(n98)  sign below(<-0.15m) farther 0.069(n92) frames w/ below 92
+  P1g imu0: IoU 0.233(n25) prec 0.313(n25) rec 0.382(n25) | no-floor pred frac 0.267(n60)
+  P1g imu2: IoU 0.215(n25) prec 0.304(n25) rec 0.393(n25) | no-floor pred frac 0.261(n63)
+  P2 imu0 h-0.15: absrel ground 0.166(n25) obs 0.311(n23) | obs prec 0.447(n17) rec 0.123(n24) | corridor n24 within25%=0.25 too-far=0.12 missed=0.33
+  P2 imu0 h+0.00: absrel ground 0.089(n25) obs 0.421(n23) | obs prec 0.430(n18) rec 0.192(n24) | corridor n24 within25%=0.25 too-far=0.29 missed=0.29
+  P2 imu0 h+0.15: absrel ground 0.176(n25) obs 0.536(n23) | obs prec 0.428(n19) rec 0.221(n24) | corridor n24 within25%=0.21 too-far=0.29 missed=0.33
+  P2 imu2 h-0.15: absrel ground 0.184(n25) obs 0.301(n23) | obs prec 0.446(n17) rec 0.128(n24) | corridor n24 within25%=0.29 too-far=0.04 missed=0.42
+  P2 imu2 h+0.00: absrel ground 0.096(n25) obs 0.373(n23) | obs prec 0.423(n18) rec 0.167(n24) | corridor n24 within25%=0.21 too-far=0.25 missed=0.33
+  P2 imu2 h+0.15: absrel ground 0.177(n25) obs 0.514(n23) | obs prec 0.422(n18) rec 0.196(n24) | corridor n24 within25%=0.21 too-far=0.29 missed=0.33
+--- RES outdoor 518x686_wi8: frames 149, floor-visible 52, cpu 264 ms
+  h_true 2.412(n52)  ground linearity relres 0.004(n52)
+  P1  IoU 0.683(n52) prec 0.688(n52) rec 0.988(n52) | no-floor frames: pred frac 0.499(n97) gt frac 0.063(n97)
+  P1  sign above(>0.2m) closer 0.379(n123)  sign below(<-0.15m) farther 0.068(n45) frames w/ below 45
+  P1g imu0: IoU 0.668(n52) prec 0.782(n52) rec 0.973(n52) | no-floor pred frac 0.253(n88)
+  P1g imu2: IoU 0.563(n52) prec 0.768(n52) rec 0.856(n52) | no-floor pred frac 0.251(n87)
+  P2 imu0 h-0.15: absrel ground 0.150(n52) obs 0.182(n47) | obs prec 1.000(n34) rec 0.444(n47) | corridor n38 within25%=0.18 too-far=0.24 missed=0.58
+  P2 imu0 h+0.00: absrel ground 0.007(n52) obs 0.375(n47) | obs prec 1.000(n36) rec 0.457(n47) | corridor n38 within25%=0.18 too-far=0.16 missed=0.66
+  P2 imu0 h+0.15: absrel ground 0.150(n52) obs 0.582(n47) | obs prec 0.999(n37) rec 0.484(n47) | corridor n38 within25%=0.13 too-far=0.13 missed=0.74
+  P2 imu2 h-0.15: absrel ground 0.151(n52) obs 0.186(n47) | obs prec 1.000(n37) rec 0.341(n47) | corridor n38 within25%=0.18 too-far=0.26 missed=0.55
+  P2 imu2 h+0.00: absrel ground 0.047(n52) obs 0.329(n47) | obs prec 1.000(n37) rec 0.352(n47) | corridor n38 within25%=0.18 too-far=0.16 missed=0.66
+  P2 imu2 h+0.15: absrel ground 0.149(n52) obs 0.529(n47) | obs prec 0.997(n38) rec 0.363(n47) | corridor n38 within25%=0.16 too-far=0.13 missed=0.71
+--- RES outdoor 392x518: frames 149, floor-visible 52, cpu 185 ms
+  h_true 2.412(n52)  ground linearity relres 0.005(n52)
+  P1  IoU 0.684(n52) prec 0.690(n52) rec 0.968(n52) | no-floor frames: pred frac 0.513(n97) gt frac 0.063(n97)
+  P1  sign above(>0.2m) closer 0.347(n123)  sign below(<-0.15m) farther 0.045(n45) frames w/ below 45
+  P1g imu0: IoU 0.608(n52) prec 0.725(n52) rec 0.941(n52) | no-floor pred frac 0.247(n88)
+  P1g imu2: IoU 0.651(n52) prec 0.732(n52) rec 0.876(n52) | no-floor pred frac 0.261(n82)
+  P2 imu0 h-0.15: absrel ground 0.150(n51) obs 0.200(n47) | obs prec 0.999(n36) rec 0.356(n47) | corridor n38 within25%=0.13 too-far=0.24 missed=0.61
+  P2 imu0 h+0.00: absrel ground 0.008(n51) obs 0.382(n47) | obs prec 0.996(n37) rec 0.368(n47) | corridor n38 within25%=0.16 too-far=0.21 missed=0.63
+  P2 imu0 h+0.15: absrel ground 0.150(n51) obs 0.589(n47) | obs prec 0.997(n38) rec 0.382(n47) | corridor n38 within25%=0.11 too-far=0.16 missed=0.74
+  P2 imu2 h-0.15: absrel ground 0.146(n51) obs 0.189(n47) | obs prec 1.000(n37) rec 0.343(n47) | corridor n38 within25%=0.13 too-far=0.24 missed=0.61
+  P2 imu2 h+0.00: absrel ground 0.044(n51) obs 0.330(n47) | obs prec 0.991(n38) rec 0.361(n47) | corridor n38 within25%=0.16 too-far=0.24 missed=0.61
+  P2 imu2 h+0.15: absrel ground 0.156(n51) obs 0.530(n47) | obs prec 0.969(n39) rec 0.374(n47) | corridor n38 within25%=0.08 too-far=0.16 missed=0.76
+--- RES outdoor 266x350: frames 149, floor-visible 51, cpu 93 ms
+  h_true 2.415(n51)  ground linearity relres 0.007(n51)
+  P1  IoU 0.686(n51) prec 0.691(n51) rec 0.971(n51) | no-floor frames: pred frac 0.570(n98) gt frac 0.063(n98)
+  P1  sign above(>0.2m) closer 0.321(n123)  sign below(<-0.15m) farther 0.045(n45) frames w/ below 45
+  P1g imu0: IoU 0.621(n51) prec 0.692(n51) rec 0.948(n51) | no-floor pred frac 0.268(n89)
+  P1g imu2: IoU 0.628(n51) prec 0.746(n51) rec 0.904(n51) | no-floor pred frac 0.262(n89)
+  P2 imu0 h-0.15: absrel ground 0.150(n50) obs 0.198(n46) | obs prec 1.000(n34) rec 0.312(n46) | corridor n37 within25%=0.16 too-far=0.22 missed=0.62
+  P2 imu0 h+0.00: absrel ground 0.010(n50) obs 0.403(n46) | obs prec 1.000(n34) rec 0.367(n46) | corridor n37 within25%=0.16 too-far=0.14 missed=0.70
+  P2 imu0 h+0.15: absrel ground 0.150(n50) obs 0.613(n46) | obs prec 0.999(n34) rec 0.385(n46) | corridor n37 within25%=0.08 too-far=0.14 missed=0.78
+  P2 imu2 h-0.15: absrel ground 0.157(n51) obs 0.183(n46) | obs prec 1.000(n35) rec 0.374(n46) | corridor n37 within25%=0.16 too-far=0.22 missed=0.59
+  P2 imu2 h+0.00: absrel ground 0.050(n51) obs 0.345(n46) | obs prec 0.999(n36) rec 0.386(n46) | corridor n37 within25%=0.16 too-far=0.14 missed=0.70
+  P2 imu2 h+0.15: absrel ground 0.141(n51) obs 0.547(n46) | obs prec 0.995(n36) rec 0.398(n46) | corridor n37 within25%=0.11 too-far=0.14 missed=0.76
+--- RES outdoor pg: frames 149, floor-visible 52, cpu 14 ms
+  h_true 2.412(n52)  ground linearity relres 0.017(n52)
+  P1  IoU 0.627(n52) prec 0.764(n52) rec 0.827(n52) | no-floor frames: pred frac 0.536(n97) gt frac 0.055(n97)
+  P1  sign above(>0.2m) closer 0.371(n117)  sign below(<-0.15m) farther 0.070(n41) frames w/ below 41
+  P1g imu0: IoU 0.516(n52) prec 0.738(n52) rec 0.709(n52) | no-floor pred frac 0.233(n87)
+  P1g imu2: IoU 0.473(n52) prec 0.789(n52) rec 0.670(n52) | no-floor pred frac 0.236(n85)
+  P2 imu0 h-0.15: absrel ground 0.151(n52) obs 0.228(n45) | obs prec 0.998(n33) rec 0.279(n45) | corridor n37 within25%=0.14 too-far=0.11 missed=0.73
+  P2 imu0 h+0.00: absrel ground 0.016(n52) obs 0.413(n45) | obs prec 0.993(n35) rec 0.321(n45) | corridor n37 within25%=0.14 too-far=0.14 missed=0.73
+  P2 imu0 h+0.15: absrel ground 0.149(n52) obs 0.625(n45) | obs prec 0.972(n37) rec 0.364(n45) | corridor n37 within25%=0.11 too-far=0.14 missed=0.76
+  P2 imu2 h-0.15: absrel ground 0.154(n52) obs 0.208(n45) | obs prec 0.996(n35) rec 0.312(n45) | corridor n37 within25%=0.11 too-far=0.16 missed=0.70
+  P2 imu2 h+0.00: absrel ground 0.055(n52) obs 0.421(n45) | obs prec 0.958(n36) rec 0.328(n45) | corridor n37 within25%=0.14 too-far=0.14 missed=0.73
+  P2 imu2 h+0.15: absrel ground 0.149(n52) obs 0.634(n45) | obs prec 0.909(n39) rec 0.348(n45) | corridor n37 within25%=0.11 too-far=0.14 missed=0.76

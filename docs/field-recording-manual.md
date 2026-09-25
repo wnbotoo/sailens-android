@@ -155,8 +155,10 @@ py scripts/export_prompt_labels.py <segment folder>/trace_*.jsonl -o <segment>.c
 
 Each row is a prompt the user **actually received** (a delivered `prompt_outcome` in the trace). Revoked
 prompts were never heard, so they cannot be false alarms and are left out by default; add
-`--include-revoked` to see them. Each row also carries that frame's ground-recognition state, whether it
-was judged blocked, the tracked obstacles and the dominant classes.
+`--include-revoked` to see them. `delivered_via` says how it reached the user (`speech`,
+`screen_reader`, `haptics`, `status_card`): a prompt with only `haptics` was felt, not heard, even with
+voice on. `output_settings` is context only. Each row also carries that frame's ground-recognition
+state, whether it was judged blocked, the tracked obstacles and the dominant classes.
 
 ### 9.2 Label each row
 
