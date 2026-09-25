@@ -204,7 +204,7 @@ M0 拆成两部分（路线图 §7）：**M0a** 是这里描述的现场证据�
 | `frames.jsonl` + `frames/` | 每个存下的帧一条 `FrameRecord`：序号、相机时间戳、来源侧接收时间、原始尺寸和旋转、CameraX 的 `sensorToBufferTransform`（有效像素区 → 原始缓冲区）和裁剪框、编码（`jpeg` / `luma8`）、文件、存储尺寸 |
 | `sensors.jsonl` | `SensorRecord`：传感器（`gravity`、`game_rotation_vector`、`gyroscope`）、事件时间戳、精度、数值 |
 | `anchors.jsonl` | `ClockAnchorRecord`：会话开始、每 30–60 秒、会话结束时各记一对（墙钟毫秒，elapsed-realtime 纳秒） |
-| `markers.jsonl` | `MarkerRecord`："标记漏报"、墙钟和 elapsed 时间、最新帧序号、来源 |
+| `markers.jsonl` | `MarkerRecord`："标记漏报"、墙钟和 elapsed 时间（精确参照）、最新*已存储*帧的序号（其图片一定存在）、来源 |
 
 - 创建目录时就写 `manifest.json`，`complete = false`；正常结束后以原子方式（临时文件 + 重命名）改写为
   `complete = true`。应用被杀、崩溃、拔 USB、磁盘满都会留下 `complete = false`，读取器会报告。
@@ -215,8 +215,9 @@ M0 拆成两部分（路线图 §7）：**M0a** 是这里描述的现场证据�
   符串——M0b 的 `model_regression` 会被旧读取器带着警告读过去）。不能删除或改名必填字段，也不能改变字段
   的含义或类型；那属于大版本。记录里的封闭枚举不在小版本里扩展。
 - 传感器频率按事件时间戳计算；`SENSOR_DELAY_GAME` 只是请求的档位。
-- 采集自己的计数（`framesOffered`、`framesEncoded`、`framesDroppedByEncoder` 等）与 Guidance 的丢帧计数
-  分开，这样才能解释采集为什么缺帧。
+- 采集自己的计数与 Guidance 的丢帧计数分开，这样缺口才能解释：`framesOffered` = `framesEncoded` +
+  `framesDroppedByEncoder`；`sensorEvents`（已写入）+ `sensorEventsDropped`（采集队列满而丢弃）= 采集收到
+  的样本数。没有被丢弃计数覆盖的时间戳缺口，说明是设备本身没有给样本。
 
 **计时。** 帧的计时在来源侧取：`ImageFrameAnalyzer.analyze()` 在任何需求判断、转换或排队之前记下
 `receivedElapsedRealtimeNanos`；相机自己的 `ImageFrame.timestamp` 含义不变。采集两个都记。以哪个为准
@@ -260,7 +261,7 @@ CameraX 1.7 起被弃用）。快照在每次绑定时读取、解绑时清空�
 | 导出 | 先检查剩余空间，在 `cacheDir/capture_exports/` 里打 ZIP，通过 FileProvider 的 `<cache-path>` 分享；`files/captures/` 本身绝不暴露；旧的导出文件在下次启动 / 打开列表时清理。`adb` + `run-as` 写进文档，作为批量导出的备选 |
 | 查看某条提示前后的帧 | 在电脑上：读取器 + 脚本，把某条 `prompt_outcome` 或标记前后 ±N 秒的帧拼成缩略图 |
 | 存储 | 估计约 0.7–1 GB/小时；M0a 实测后写回手册 |
-| 保留 | 录制 7 天后自动删除，已导出或标记保留的除外；总量上限 2 GB，先删最旧的未保留会话 |
+| 保留 | 在以下时机运行：debug 应用启动时（无论采集是否打开）、采集开始前、打开采集列表时、采集期间每 30 秒。超过 7 天且未导出、未标记保留的会话，在下一个时机被删除。2 GB 上限在采集期间强制执行：先删较旧的未保留会话；如果仅当前采集就会超限，就以 `failureReason = storage_limit_reached` 结束为不完整（每帧之后检查），而不是一直写到磁盘满 |
 | **"标记漏报"** | 采集进行中按音量减键：只认 `ACTION_DOWN` 且 `repeatCount == 0`，只在这时消费按键；标记入队后才短震确认。另有屏幕大按钮。前台 Guidance 会话中不用看屏幕即可操作；不承诺锁屏或后台可用（目前还没有后台 Guidance）。TalkBack 下的表现要在真机上验证 |
 
 **隐私。** 采集数据含人脸和地点（已确认可以接受）。它们被排除在 Auto Backup（`backup_rules.xml`）以及

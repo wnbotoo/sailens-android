@@ -37,6 +37,7 @@ class FieldCaptureControllerTest {
         enabled: () -> Boolean = { true },
         encoder: JpegEncoder = JpegEncoder { image, _ -> ByteArray(image.width) },
         config: FieldCaptureConfig = FieldCaptureConfig(),
+        retention: CaptureRetention = CaptureRetention(tmp.root),
     ) = FieldCaptureController(
         root = tmp.root,
         isEnabled = enabled,
@@ -48,7 +49,88 @@ class FieldCaptureControllerTest {
         deviceInfo = TEST_DEVICE,
         log = log,
         config = config,
+        retention = retention,
     )
+
+    /** A finished, unpinned session on disk, started [ageMs] before the fake clock's now. */
+    private fun oldSession(id: String, ageMs: Long, imageBytes: Int) {
+        CaptureSessionWriter(
+            File(tmp.root, id),
+            com.sailens.guidance.trace.capture.CaptureManifest(
+                sessionId = id,
+                captureMode = com.sailens.guidance.trace.capture.CaptureModes.FIELD_EVIDENCE,
+                startedWallMs = clock.wallMs() - ageMs,
+                startedElapsedRealtimeNanos = 0,
+                deviceManufacturer = "Acme",
+                deviceModel = "Phone",
+                sdkInt = 35,
+                complete = true,
+            ),
+        ).use { it.writeFrameImage("000001.jpg", ByteArray(imageBytes)) }
+    }
+
+    @Test
+    fun `expired captures are deleted at start-up even with the switch off`() = runBlocking {
+        oldSession("expired", ageMs = CaptureRetention.DEFAULT_MAX_AGE_MS + 1, imageBytes = 10)
+        oldSession("fresh", ageMs = 1_000, imageBytes = 10)
+
+        controller(enabled = { false }).runMaintenance().join()
+
+        assertEquals(listOf("fresh"), tmp.root.list()!!.toList())
+    }
+
+    @Test
+    fun `the storage cap is enforced during a capture, older sessions first, then the capture ends`() = runBlocking {
+        oldSession("old", ageMs = 60_000, imageBytes = 1_000)
+        val capture = controller(
+            encoder = JpegEncoder { _, _ -> ByteArray(400) },
+            retention = CaptureRetention(tmp.root, maxTotalBytes = 3_000),
+        )
+        capture.onSessionStarted("s1", null)!!.join()
+
+        var seq = 0L
+        awaitTrue("the capture to hit the cap") {
+            frames.emit(yuvFrame(++seq))
+            Thread.sleep(5)
+            log.warnings.any { FieldCaptureController.STORAGE_LIMIT_REACHED in it }
+        }
+        capture.onSessionFinished().join()
+
+        assertFalse("the older unpinned session is evicted before the capture is ended", File(tmp.root, "old").exists())
+        val manifest = read("s1").manifest
+        assertFalse(manifest.complete)
+        assertEquals(FieldCaptureController.STORAGE_LIMIT_REACHED, manifest.failureReason)
+        val onDisk = File(tmp.root, "s1").walk().filter { it.isFile }.sumOf { it.length() }
+        assertTrue("stopped near the cap, not at a full disk: $onDisk", onDisk < 3_000 + 1_500)
+    }
+
+    @Test
+    fun `sensor samples the capture drops are persisted, so gaps can be explained`() = runBlocking {
+        val encoding = CountDownLatch(1)
+        val unblock = CountDownLatch(1)
+        val capture = controller(
+            encoder = JpegEncoder { image, _ ->
+                encoding.countDown()
+                unblock.await(5, TimeUnit.SECONDS)
+                ByteArray(image.width)
+            },
+            config = FieldCaptureConfig(sensorQueueCapacity = 2),
+        )
+        capture.onSessionStarted("s1", null)!!.join()
+        awaitTrue("sensors registered") { sensors.onRecord != null }
+
+        frames.emit(yuvFrame(1))
+        assertTrue("the writer thread is busy encoding", encoding.await(5, TimeUnit.SECONDS))
+        repeat(50) { sensors.emit(it.toLong()) }
+        unblock.countDown()
+        capture.onSessionFinished().join()
+
+        val session = read("s1")
+        val stats = session.manifest.stats
+        assertEquals(stats.sensorEvents, session.sensors.size.toLong())
+        assertTrue("some samples were dropped: $stats", stats.sensorEventsDropped > 0)
+        assertEquals("persisted + dropped explains every sample received", 50L, stats.sensorEvents + stats.sensorEventsDropped)
+    }
 
     private fun read(sessionId: String) = CaptureSessionReader.read(File(tmp.root, sessionId)).orThrow()
 

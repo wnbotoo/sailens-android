@@ -33,6 +33,10 @@ internal class CaptureSessionWriter(
     var manifest: CaptureManifest = initialManifest
         private set
 
+    /** Approximate size of this session on disk (records are ASCII JSON, so chars ≈ bytes). */
+    var bytesWritten: Long = 0
+        private set
+
     private val streams = mutableMapOf<String, BufferedWriter>()
     private var closed = false
 
@@ -48,8 +52,10 @@ internal class CaptureSessionWriter(
         val writer = streams.getOrPut(fileFor(record)) {
             File(directory, fileFor(record)).bufferedWriter(bufferSize = STREAM_BUFFER_BYTES)
         }
-        writer.write(CaptureSchema.encodeRecord(record))
+        val line = CaptureSchema.encodeRecord(record)
+        writer.write(line)
         writer.write("\n")
+        bytesWritten += line.length + 1
     }
 
     /** Writes an image under `frames/`; returns its path relative to the session directory. */
@@ -57,6 +63,7 @@ internal class CaptureSessionWriter(
         check(!closed) { "writer is closed" }
         val relative = "${CaptureSchema.FRAMES_DIR}/$fileName"
         File(directory, relative).writeBytes(bytes)
+        bytesWritten += bytes.size
         return relative
     }
 

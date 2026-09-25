@@ -5,9 +5,14 @@ import com.sailens.guidance.trace.capture.CaptureSchema
 import java.io.File
 
 /**
- * Keeps the capture directory bounded (decided 2026-09-25): a session is deleted [maxAgeMs] after it
+ * Keeps the capture directory bounded (decided 2026-09-25): a session expires [maxAgeMs] after it
  * was recorded unless it was exported or pinned, and the total is kept under [maxTotalBytes] by
- * deleting the oldest sessions that are not pinned. The active session is never touched.
+ * deleting the oldest sessions that are not pinned. The active session is never deleted here; the
+ * capture engine ends it instead when it alone would exceed the cap.
+ *
+ * Retention runs at maintenance opportunities (debug app start, before a capture, when the capture
+ * list opens, periodically during a capture), so an expired session is deleted at the next one --
+ * whether or not capture is switched on.
  *
  * A directory whose manifest cannot be read is judged by its modification time and treated as not
  * pinned, so a broken capture cannot pin space forever.
@@ -15,11 +20,14 @@ import java.io.File
 internal class CaptureRetention(
     private val root: File,
     private val maxAgeMs: Long = DEFAULT_MAX_AGE_MS,
-    private val maxTotalBytes: Long = DEFAULT_MAX_TOTAL_BYTES,
+    val maxTotalBytes: Long = DEFAULT_MAX_TOTAL_BYTES,
 ) {
 
-    /** Returns the session ids it deleted. */
-    fun prune(nowWallMs: Long, activeSessionId: String? = null): List<String> {
+    /**
+     * @param activeBytes the active session's current size, counted towards the cap.
+     * @return what it deleted and how many bytes the other (non-active) sessions still hold.
+     */
+    fun prune(nowWallMs: Long, activeSessionId: String? = null, activeBytes: Long = 0): Result {
         val sessions = root.listFiles { file -> file.isDirectory }.orEmpty()
             .filter { it.name != activeSessionId }
             .map { describe(it) }
@@ -30,22 +38,21 @@ internal class CaptureRetention(
             .forEach { if (it.directory.deleteRecursively()) deleted += it.directory.name }
 
         val remaining = sessions.filter { it.directory.name !in deleted }
-        var total = remaining.sumOf { it.bytes } + activeBytes(activeSessionId)
+        var others = remaining.sumOf { it.bytes }
         remaining
             .filter { !it.pinned }
             .sortedBy { it.startedWallMs }
             .forEach { session ->
-                if (total <= maxTotalBytes) return@forEach
+                if (others + activeBytes <= maxTotalBytes) return@forEach
                 if (session.directory.deleteRecursively()) {
                     deleted += session.directory.name
-                    total -= session.bytes
+                    others -= session.bytes
                 }
             }
-        return deleted
+        return Result(deleted = deleted, otherSessionsBytes = others)
     }
 
-    private fun activeBytes(activeSessionId: String?): Long =
-        activeSessionId?.let { sizeOf(File(root, it)) } ?: 0L
+    data class Result(val deleted: List<String>, val otherSessionsBytes: Long)
 
     private fun describe(directory: File): SessionOnDisk {
         val manifest = readManifest(directory)

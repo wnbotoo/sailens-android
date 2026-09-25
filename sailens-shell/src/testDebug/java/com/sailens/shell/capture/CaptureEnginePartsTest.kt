@@ -103,7 +103,7 @@ class CaptureEnginePartsTest {
         session("recent", now - 1 * day)
         session("active", now - 9 * day)
 
-        val deleted = CaptureRetention(tmp.root).prune(now, activeSessionId = "active")
+        val deleted = CaptureRetention(tmp.root).prune(now, activeSessionId = "active").deleted
 
         assertEquals(listOf("old"), deleted)
         assertEquals(setOf("old-pinned", "old-exported", "recent", "active"), tmp.root.list()!!.toSet())
@@ -118,7 +118,7 @@ class CaptureEnginePartsTest {
 
         val manifestBytes = File(tmp.root, "a").walk().filter { it.isFile }.sumOf { it.length() } - 1_000
         val cap = 2 * (1_000 + manifestBytes) + 10
-        val deleted = CaptureRetention(tmp.root, maxAgeMs = Long.MAX_VALUE, maxTotalBytes = cap).prune(nowWallMs = 5)
+        val deleted = CaptureRetention(tmp.root, maxAgeMs = Long.MAX_VALUE, maxTotalBytes = cap).prune(nowWallMs = 5).deleted
 
         assertEquals(listOf("a", "c"), deleted)
         assertEquals(setOf("b", "d"), tmp.root.list()!!.toSet())
@@ -130,7 +130,7 @@ class CaptureEnginePartsTest {
         File(broken, "manifest.json").writeText("{ not json")
         broken.setLastModified(0)
 
-        val deleted = CaptureRetention(tmp.root, maxAgeMs = 1_000).prune(nowWallMs = 1_000_000)
+        val deleted = CaptureRetention(tmp.root, maxAgeMs = 1_000).prune(nowWallMs = 1_000_000).deleted
 
         assertEquals(listOf("broken"), deleted)
     }

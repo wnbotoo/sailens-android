@@ -30,7 +30,8 @@ val shellDebugModule: Module = module {
     }
 
     single { FieldCaptureSettingsStore(androidContext()) }
-    single {
+    // Created at app start so retention runs then, even when capture is switched off.
+    single(createdAtStart = true) {
         val settings = get<FieldCaptureSettingsStore>()
         FieldCaptureController(
             root = File(androidContext().filesDir, CAPTURES_DIR),

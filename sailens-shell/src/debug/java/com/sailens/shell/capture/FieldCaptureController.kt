@@ -102,6 +102,7 @@ internal class FieldCaptureController(
         Executors.newSingleThreadExecutor { runnable -> Thread(runnable, "field-capture") }
             .asCoroutineDispatcher(),
     private val frameDispatcher: CoroutineDispatcher = Dispatchers.Default,
+    private val retention: CaptureRetention = CaptureRetention(root),
 ) {
     private val scope = CoroutineScope(
         SupervisorJob() + writerDispatcher + CoroutineExceptionHandler { _, throwable ->
@@ -111,6 +112,18 @@ internal class FieldCaptureController(
 
     /** Confined to [writerDispatcher]. */
     private var active: ActiveCapture? = null
+
+    /** Bytes held by the sessions other than the active one, as of the last retention pass. */
+    private var otherSessionsBytes = 0L
+
+    init {
+        // A maintenance opportunity at start-up, whether or not capture is switched on, so expired
+        // captures do not stay on the device just because nobody records any more.
+        scope.launch { maintain() }
+    }
+
+    /** Runs retention now (e.g. when the capture list opens). Never throws. */
+    fun runMaintenance(): Job = scope.launch { maintain() }
 
     /** Called when a trace session starts. Never throws, never blocks. */
     fun onSessionStarted(sessionId: String, targetHardwareProfile: String?): Job? {
@@ -140,7 +153,7 @@ internal class FieldCaptureController(
                         kind = MarkerKind.MISSED_ALERT,
                         wallMs = clock.wallMs(),
                         elapsedRealtimeNanos = clock.elapsedRealtimeNanos(),
-                        lastFrameSeq = capture.lastFrameSeq,
+                        lastStoredFrameSeq = capture.lastStoredFrameSeq,
                         source = source,
                     ),
                 )
@@ -159,8 +172,7 @@ internal class FieldCaptureController(
         // as incomplete rather than silently mixed with the new one.
         active?.let { fail(it, "superseded by session $sessionId") }
 
-        runCatching { CaptureRetention(root).prune(clock.wallMs(), activeSessionId = sessionId) }
-            .onFailure { log.warning(TAG, "Capture retention failed", throwable = it) }
+        maintain(activeSessionId = sessionId, activeBytes = 0)
 
         val manifest = CaptureManifest(
             sessionId = sessionId,
@@ -198,7 +210,10 @@ internal class FieldCaptureController(
             for (record in capture.sensorQueue) capture.guarded("sensor") { writeSensor(capture, record) }
         }
         capture.frameWriterJob = scope.launch {
-            for (frame in capture.encodeQueue) capture.guarded("frame") { writeFrame(capture, frame) }
+            for (frame in capture.encodeQueue) {
+                capture.guarded("frame") { writeFrame(capture, frame) }
+                enforceStorageLimit(capture)
+            }
         }
         capture.anchorJob = scope.launch {
             while (isActive) {
@@ -208,10 +223,39 @@ internal class FieldCaptureController(
                     writer.flush()
                     writer.updateManifest { it.copy(stats = capture.stats()) }
                 }
+                maintain()
+                enforceStorageLimit(capture)
             }
         }
         capture.frameJob = scope.launch(frameDispatcher) { collectFrames(capture) }
     }
+
+    /**
+     * Retention pass. The active session is never deleted, only counted; its size comes from the
+     * writer so that no directory walk is needed per frame.
+     */
+    private fun maintain(
+        activeSessionId: String? = active?.writer?.directory?.name,
+        activeBytes: Long = active?.writer?.bytesWritten ?: 0,
+    ) {
+        runCatching { retention.prune(clock.wallMs(), activeSessionId, activeBytes) }
+            .onSuccess { otherSessionsBytes = it.otherSessionsBytes }
+            .onFailure { log.warning(TAG, "Capture retention failed", throwable = it) }
+    }
+
+    /**
+     * The 2 GB cap is real, not a between-sessions tidy-up: when the active capture would take the
+     * total over it, older unpinned sessions go first, and if that is not enough the capture ends
+     * as incomplete with [STORAGE_LIMIT_REACHED] instead of writing until the disk is full.
+     */
+    private suspend fun enforceStorageLimit(capture: ActiveCapture) {
+        if (capture.failed || !overLimit(capture)) return
+        maintain()
+        if (overLimit(capture)) fail(capture, STORAGE_LIMIT_REACHED)
+    }
+
+    private fun overLimit(capture: ActiveCapture) =
+        otherSessionsBytes + capture.writer.bytesWritten > retention.maxTotalBytes
 
     private suspend fun end() {
         val capture = active ?: return
@@ -286,7 +330,7 @@ internal class FieldCaptureController(
             ),
         )
         capture.encoded.incrementAndGet()
-        capture.lastFrameSeq = pending.seq
+        capture.lastStoredFrameSeq = pending.seq
     }
 
     // ---- frame thread --------------------------------------------------------------------------
@@ -347,7 +391,7 @@ internal class FieldCaptureController(
         val sensorEvents = AtomicLong()
         val sensorDropped = AtomicLong()
         val markers = AtomicLong()
-        @Volatile var lastFrameSeq: Long? = null
+        @Volatile var lastStoredFrameSeq: Long? = null
         var failed = false
         var frameJob: Job? = null
         var sensorWriterJob: Job? = null
@@ -370,6 +414,7 @@ internal class FieldCaptureController(
             framesEncoded = encoded.get(),
             framesDroppedByEncoder = droppedByEncoder.get(),
             sensorEvents = sensorEvents.get(),
+            sensorEventsDropped = sensorDropped.get(),
             markers = markers.get(),
         )
 
@@ -386,8 +431,11 @@ internal class FieldCaptureController(
         }
     }
 
-    private companion object {
-        const val TAG = "FieldCapture"
+    companion object {
+        private const val TAG = "FieldCapture"
+
+        /** `failureReason` of a capture ended because the capture directory reached its cap. */
+        const val STORAGE_LIMIT_REACHED: String = "storage_limit_reached"
     }
 }
 

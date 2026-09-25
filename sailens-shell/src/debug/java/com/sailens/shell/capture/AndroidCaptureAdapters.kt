@@ -72,17 +72,22 @@ internal class AndroidCaptureSensorSource(context: Context) : CaptureSensorSourc
 
             override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
         }
-        val registered = SENSORS.mapNotNull { (type, name) ->
-            val sensor = sensorManager.getDefaultSensor(type) ?: return@mapNotNull null
-            if (sensorManager.registerListener(eventListener, sensor, SensorManager.SENSOR_DELAY_GAME, handler)) {
-                name.serialName
-            } else {
-                null
-            }
-        }
+        // Owned before registering, so a failure part-way is cleaned up by stop().
         thread = handlerThread
         listener = eventListener
-        return registered
+        return try {
+            SENSORS.mapNotNull { (type, name) ->
+                val sensor = sensorManager.getDefaultSensor(type) ?: return@mapNotNull null
+                if (sensorManager.registerListener(eventListener, sensor, SensorManager.SENSOR_DELAY_GAME, handler)) {
+                    name.serialName
+                } else {
+                    null
+                }
+            }
+        } catch (e: RuntimeException) {
+            stop()
+            throw e
+        }
     }
 
     override fun stop() {

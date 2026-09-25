@@ -105,13 +105,20 @@ data class CaptureManifest(
     val stats: CaptureStats = CaptureStats(),
 )
 
-/** Capture's own counters, kept apart from Guidance's dropped frames on purpose. */
+/**
+ * Capture's own counters, kept apart from Guidance's dropped frames on purpose. A gap in the
+ * recorded frames or sensor samples must be explainable: dropped by capture (counted here) versus
+ * never delivered by the device (not counted anywhere, visible only as a timestamp gap).
+ */
 @Serializable
 data class CaptureStats(
     val framesOffered: Long = 0,
     val framesEncoded: Long = 0,
     val framesDroppedByEncoder: Long = 0,
+    /** Sensor events successfully written to `sensors.jsonl`. */
     val sensorEvents: Long = 0,
+    /** Sensor events the capture received but dropped because its queue was full. */
+    val sensorEventsDropped: Long = 0,
     val markers: Long = 0,
 )
 
@@ -229,8 +236,11 @@ data class MarkerRecord(
     val kind: MarkerKind,
     val wallMs: Long,
     val elapsedRealtimeNanos: Long,
-    /** The newest frame sequence number the capture had seen when the marker was pressed. */
-    val lastFrameSeq: Long? = null,
+    /**
+     * The newest frame the capture had *stored* (its image exists) when the marker was pressed; a
+     * newer frame may have been seen and dropped. The marker's own times are the exact reference.
+     */
+    val lastStoredFrameSeq: Long? = null,
     val source: MarkerSource,
 ) : CaptureRecord
 
