@@ -11,7 +11,9 @@ import com.sailens.vision.semantic.SemanticScores
 import com.sailens.vision.taxonomy.TaxonomyId
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Test
 
 /**
@@ -80,6 +82,22 @@ class NavigationScorePostprocessorSeamTest {
     @Test
     fun `fromClassMap reports no stats so the analyzer recomputes them in Kotlin`() {
         assertNull(postprocessor().fromClassMap(IntArray(4), spec).stats)
+    }
+
+    @Test
+    fun `fromClassMap reuses a mask array only after its lease is closed`() {
+        val subject = postprocessor()
+        val first = subject.fromClassMap(intArrayOf(1, 0, 1, 1), spec)
+        val second = subject.fromClassMap(intArrayOf(0, 0, 0, 1), spec)
+
+        assertNotSame("both are held, so they cannot share storage", first.mask.classMap, second.mask.classMap)
+        assertArrayEquals(intArrayOf(1, 0, 1, 1), first.mask.classMap)
+
+        checkNotNull(first.maskLease).close()
+        val third = subject.fromClassMap(intArrayOf(1, 1, 1, 1), spec)
+
+        assertSame("a closed lease's array carries the next mask", first.mask.classMap, third.mask.classMap)
+        assertArrayEquals("the mask still held is untouched", intArrayOf(0, 0, 0, 1), second.mask.classMap)
     }
 
     private companion object {

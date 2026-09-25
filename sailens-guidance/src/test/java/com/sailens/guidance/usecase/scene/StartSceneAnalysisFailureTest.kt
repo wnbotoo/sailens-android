@@ -78,6 +78,27 @@ class StartSceneAnalysisFailureTest {
         assertTrue(results.all { it.sequenceNumber in setOf(3L, 6L) })
     }
 
+    // Not a failure case, but this is where a whole session can be run end to end.
+    @Test
+    fun `the semantic mask leaves the pipeline only when asked for`() {
+        val script = List(3) { true }
+
+        val unasked = runBlocking {
+            useCase(ScriptedRepository(script), maxFailures = 3)(frames(3)).toList()
+        }
+        val asked = runBlocking {
+            useCase(ScriptedRepository(script), maxFailures = 3)(frames(3), semanticMaskSnapshot = { true }).toList()
+        }
+
+        assertTrue(unasked.all { it.segmentationMask == null })
+        assertEquals(3, asked.size)
+        asked.forEach { result ->
+            val mask = checkNotNull(result.segmentationMask)
+            assertEquals(4, mask.width)
+            assertTrue(mask.classMap.all { it == 0 })
+        }
+    }
+
     private fun useCase(repository: PerceptionRepository, maxFailures: Int): StartSceneAnalysisUseCase {
         val perceptionConfig = PerceptionConfig(profile = PerceptionProfile.BASIC)
         val analysisConfig = AnalysisConfig()

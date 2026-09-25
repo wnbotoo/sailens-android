@@ -15,30 +15,40 @@ import com.sailens.guidance.model.common.GroundType
 import com.sailens.guidance.semantics.NavigationSemantics
 import com.sailens.guidance.model.perception.SegmentationAnalysisStats
 import com.sailens.guidance.model.perception.SegmentationMask
+import com.sailens.guidance.model.perception.SegmentationMaskLease
+import com.sailens.guidance.model.perception.SegmentationMaskPool
 import com.sailens.core.log.LogService
 
 private const val TAG = "NativeSemanticPost"
 
+/** @property maskLease owns [mask]'s class map; see [SegmentationMaskLease]. */
 data class SemanticPostprocessResult(
-    val mask: SegmentationMask,
+    val maskLease: SegmentationMaskLease,
     val stats: SegmentationAnalysisStats,
-)
+) {
+    val mask: SegmentationMask get() = maskLease.mask
+}
 
 /**
  * What Guidance gets back from one semantic frame.
  *
  * [stats] is null when the fused native pass did not run and the class map came from a plain
  * argmax; SegmentationAnalyzer then extracts the same statistics in Kotlin.
+ *
+ * [maskLease] owns [mask]'s class map. Whoever keeps the mask closes the lease once nothing will
+ * read it again, and the array is then reused for a later frame.
  */
 data class NavigationSemanticResult(
     val mask: SegmentationMask,
     val stats: SegmentationAnalysisStats?,
+    val maskLease: SegmentationMaskLease? = null,
 )
 
 class NavigationScorePostprocessor(
     private val config: AnalysisConfig,
     navigationSemantics: NavigationSemantics,
     private val logService: LogService,
+    private val maskPool: SegmentationMaskPool = SegmentationMaskPool(),
 ) : SemanticPostprocessor<NavigationSemanticResult> {
     private val lookup = SemanticClassLookup.from(navigationSemantics)
     private var hasLoggedBackend = false
@@ -50,7 +60,6 @@ class NavigationScorePostprocessor(
 
     fun postprocessScores(
         scores: FloatArray,
-        reusableResultMask: IntArray,
         width: Int,
         height: Int,
         channels: Int,
@@ -62,19 +71,17 @@ class NavigationScorePostprocessor(
             height <= 0 ||
             channels <= 0 ||
             scores.size != pixelCount * channels ||
-            !content.fitsIn(width, height) ||
-            reusableResultMask.size != content.pixelCount
+            !content.fitsIn(width, height)
         ) {
             return null
         }
 
         return postprocessPrepared(
-            reusableResultMask = reusableResultMask,
             content = content,
         ) { scratch ->
             nativePostprocessScores(
                 scores = scores,
-                resultMask = reusableResultMask,
+                resultMask = scratch.classMap,
                 width = width,
                 height = height,
                 channels = channels,
@@ -99,7 +106,6 @@ class NavigationScorePostprocessor(
 
     fun postprocessInt8Scores(
         scores: ByteArray,
-        reusableResultMask: IntArray,
         width: Int,
         height: Int,
         channels: Int,
@@ -111,19 +117,17 @@ class NavigationScorePostprocessor(
             height <= 0 ||
             channels <= 0 ||
             scores.size != pixelCount * channels ||
-            !content.fitsIn(width, height) ||
-            reusableResultMask.size != content.pixelCount
+            !content.fitsIn(width, height)
         ) {
             return null
         }
 
         return postprocessPrepared(
-            reusableResultMask = reusableResultMask,
             content = content,
         ) { scratch ->
             nativePostprocessInt8Scores(
                 scores = scores,
-                resultMask = reusableResultMask,
+                resultMask = scratch.classMap,
                 width = width,
                 height = height,
                 channels = channels,
@@ -147,7 +151,6 @@ class NavigationScorePostprocessor(
     }
 
     private fun postprocessPrepared(
-        reusableResultMask: IntArray,
         content: SemanticContentRegion,
         nativeCall: (SemanticScratch) -> Boolean,
     ): SemanticPostprocessResult? {
@@ -173,7 +176,11 @@ class NavigationScorePostprocessor(
             reusableIntOutputs = it
         }
 
+        // The kernel writes the class map straight into a pooled array; the lease hands its
+        // ownership to whoever keeps the result.
+        val maskLease = maskPool.lease(width, height)
         val scratch = SemanticScratch(
+            classMap = maskLease.mask.classMap,
             passableWords = passableWords,
             obstacleWords = obstacleWords,
             classCounts = classCounts,
@@ -185,16 +192,19 @@ class NavigationScorePostprocessor(
             nativeCall(scratch)
         }.getOrDefault(false)
 
-        if (!nativeSuccess) return null
+        if (!nativeSuccess) {
+            // Nobody has seen this mask, and a partial write in it is worthless.
+            maskLease.close()
+            return null
+        }
 
         if (!hasLoggedBackend) {
             logService.info(TAG, "Semantic score postprocess backend: native")
             hasLoggedBackend = true
         }
 
-        val mask = SegmentationMask(width, height, reusableResultMask.copyOf(pixelCount))
         return SemanticPostprocessResult(
-            mask = mask,
+            maskLease = maskLease,
             stats = buildStats(
                 width = width,
                 height = height,
@@ -208,6 +218,8 @@ class NavigationScorePostprocessor(
     }
 
     private data class SemanticScratch(
+        /** Receives the argmax class ids of the content region. */
+        val classMap: IntArray,
         val passableWords: LongArray,
         val obstacleWords: LongArray,
         val classCounts: IntArray,
@@ -222,7 +234,6 @@ class NavigationScorePostprocessor(
     // to postprocessScores() at the call site if this returns null.
     fun postprocessScoresFromHandle(
         tensorBufferHandle: Long,
-        reusableResultMask: IntArray,
         width: Int,
         height: Int,
         channels: Int,
@@ -231,14 +242,13 @@ class NavigationScorePostprocessor(
     ): SemanticPostprocessResult? {
         if (tensorBufferHandle == 0L) return null
         if (width <= 0 || height <= 0 || channels <= 0) return null
-        if (!content.fitsIn(width, height) || reusableResultMask.size != content.pixelCount) return null
+        if (!content.fitsIn(width, height)) return null
         return postprocessPrepared(
-            reusableResultMask = reusableResultMask,
             content = content,
         ) { scratch ->
             nativePostprocessScoresFromHandle(
                  tensorBufferHandle = tensorBufferHandle,
-                 resultMask = reusableResultMask,
+                 resultMask = scratch.classMap,
                  width = width,
                  height = height,
                  channels = channels,
@@ -265,7 +275,6 @@ class NavigationScorePostprocessor(
     // the locked buffer is interpreted as int8_t*, matching full-integer-quant models.
     fun postprocessInt8ScoresFromHandle(
         tensorBufferHandle: Long,
-        reusableResultMask: IntArray,
         width: Int,
         height: Int,
         channels: Int,
@@ -274,14 +283,13 @@ class NavigationScorePostprocessor(
     ): SemanticPostprocessResult? {
         if (tensorBufferHandle == 0L) return null
         if (width <= 0 || height <= 0 || channels <= 0) return null
-        if (!content.fitsIn(width, height) || reusableResultMask.size != content.pixelCount) return null
+        if (!content.fitsIn(width, height)) return null
         return postprocessPrepared(
-            reusableResultMask = reusableResultMask,
             content = content,
         ) { scratch ->
             nativePostprocessInt8ScoresFromHandle(
                 tensorBufferHandle = tensorBufferHandle,
-                resultMask = reusableResultMask,
+                resultMask = scratch.classMap,
                 width = width,
                 height = height,
                 channels = channels,
@@ -311,6 +319,9 @@ class NavigationScorePostprocessor(
      *
      * Returning null declines the frame; the runner then computes a plain argmax and calls
      * [fromClassMap].
+     *
+     * [reusableClassMap] is not used: the kernel writes the class map into a pooled array whose
+     * ownership travels with the result, so it never has to be copied out of the runner's buffer.
      */
     override fun postprocessScores(
         scores: SemanticScores,
@@ -320,7 +331,6 @@ class NavigationScorePostprocessor(
         val result = when (scores) {
             is SemanticScores.FloatHandle -> postprocessScoresFromHandle(
                 tensorBufferHandle = scores.tensorBufferHandle,
-                reusableResultMask = reusableClassMap,
                 width = spec.width,
                 height = spec.height,
                 channels = spec.channels,
@@ -329,7 +339,6 @@ class NavigationScorePostprocessor(
             )
             is SemanticScores.Int8Handle -> postprocessInt8ScoresFromHandle(
                 tensorBufferHandle = scores.tensorBufferHandle,
-                reusableResultMask = reusableClassMap,
                 width = spec.width,
                 height = spec.height,
                 channels = spec.channels,
@@ -338,7 +347,6 @@ class NavigationScorePostprocessor(
             )
             is SemanticScores.FloatValues -> postprocessScores(
                 scores = scores.values,
-                reusableResultMask = reusableClassMap,
                 width = spec.width,
                 height = spec.height,
                 channels = spec.channels,
@@ -347,7 +355,6 @@ class NavigationScorePostprocessor(
             )
             is SemanticScores.Int8Values -> postprocessInt8Scores(
                 scores = scores.values,
-                reusableResultMask = reusableClassMap,
                 width = spec.width,
                 height = spec.height,
                 channels = spec.channels,
@@ -361,7 +368,7 @@ class NavigationScorePostprocessor(
             is SemanticScores.FloatHandle, is SemanticScores.FloatValues -> BACKEND_NATIVE_SCORE
         }
         return SemanticPostprocessOutcome(
-            value = NavigationSemanticResult(mask = result.mask, stats = result.stats),
+            value = NavigationSemanticResult(mask = result.mask, stats = result.stats, maskLease = result.maskLease),
             backend = backend,
         )
     }
@@ -369,14 +376,23 @@ class NavigationScorePostprocessor(
     /**
      * Fallback wrap: the runner already did a plain argmax, so there are no navigation statistics
      * for this frame and SegmentationAnalyzer will extract them from the mask in Kotlin instead.
+     *
+     * The runner reuses [classMap] on the next frame, so it is copied -- into a pooled array rather
+     * than a new one.
      */
     override fun fromClassMap(
         classMap: IntArray,
         spec: SemanticScoreSpec,
-    ): NavigationSemanticResult = NavigationSemanticResult(
-        mask = SegmentationMask(spec.content.width, spec.content.height, classMap.copyOf(spec.content.pixelCount)),
-        stats = null,
-    )
+    ): NavigationSemanticResult {
+        val maskLease = maskPool.lease(spec.content.width, spec.content.height)
+        classMap.copyInto(maskLease.mask.classMap, endIndex = spec.content.pixelCount)
+        return NavigationSemanticResult(mask = maskLease.mask, stats = null, maskLease = maskLease)
+    }
+
+    /** Lets go of idle mask arrays once Guidance's models are released. */
+    fun releaseBuffers() {
+        maskPool.trim()
+    }
 
     private fun buildStats(
         width: Int,

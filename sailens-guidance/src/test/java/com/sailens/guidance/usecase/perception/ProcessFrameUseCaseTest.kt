@@ -16,17 +16,23 @@ import com.sailens.guidance.model.perception.ObstacleDetection
 import com.sailens.core.frame.ImageFrame
 import com.sailens.core.frame.ImagePixelFormat
 import com.sailens.guidance.model.perception.ObstacleModelOutput
+import com.sailens.guidance.model.perception.SegmentationAnalysis
+import com.sailens.guidance.model.perception.SegmentationAnalysisStats
 import com.sailens.guidance.model.perception.SegmentationMask
+import com.sailens.guidance.model.perception.SegmentationMaskPool
 import com.sailens.guidance.model.perception.SegmentationOutput
 import com.sailens.guidance.processor.perception.ObstacleExtractor
 import com.sailens.guidance.processor.perception.ObstacleTracker
 import com.sailens.guidance.processor.perception.PerceptionProfileManager
+import com.sailens.guidance.processor.perception.SegmentationAnalysisProcessor
 import com.sailens.guidance.processor.perception.SegmentationAnalyzer
 import com.sailens.guidance.repository.DepthRepository
 import com.sailens.guidance.repository.ObstacleProvider
 import com.sailens.guidance.repository.PerceptionRepository
 import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -217,11 +223,104 @@ class ProcessFrameUseCaseTest {
         override fun release() = Unit
     }
 
+    @Test
+    fun `two mask arrays alternate however many semantic runs there are`() {
+        val clock = FakeClock()
+        val repository = PooledPerceptionRepository()
+        val useCase = createUseCase(PerceptionProfile.BASIC, clock, perceptionRepository = repository, semanticTargetFps = 10)
+
+        runBlocking {
+            repeat(20) { index ->
+                clock.nowMs = 1_000L + index * 101L
+                val analysis = useCase(createFrame(sequenceNumber = index + 1L)).getOrThrow().analysis
+                assertArrayEquals(stampFor(run = index), analysis.segmentation.classMap)
+            }
+        }
+
+        assertEquals(20, repository.runs)
+        assertEquals("the cached mask plus the one being written", 2L, repository.pool.arraysAllocated)
+    }
+
+    @Test
+    fun `frames reusing the cached analysis read the mask their semantic run wrote`() {
+        val clock = FakeClock()
+        val repository = PooledPerceptionRepository()
+        val useCase = createUseCase(PerceptionProfile.BASIC, clock, perceptionRepository = repository, semanticTargetFps = 10)
+
+        runBlocking {
+            // A semantic run every 100 ms, a cached frame half-way between each pair.
+            repeat(6) { run ->
+                clock.nowMs = 1_000L + run * 101L
+                val fresh = useCase(createFrame(sequenceNumber = run * 2L + 1)).getOrThrow().analysis
+                clock.nowMs += 50L
+                val cached = useCase(createFrame(sequenceNumber = run * 2L + 2)).getOrThrow().analysis
+
+                assertSame(fresh, cached)
+                assertArrayEquals("run $run, read from the cache", stampFor(run), cached.segmentation.classMap)
+            }
+        }
+    }
+
+    @Test
+    fun `when analysis fails after a run the cached mask stays intact and the run's array is reused`() {
+        // The semantic run is marked done before the analysis, so the frames after a failed
+        // analysis keep reading the previous cached mask. The failed run's array must not be that
+        // one, and the next run must take the failed run's array rather than the cached one.
+        val clock = FakeClock()
+        val repository = PooledPerceptionRepository()
+        val analyzer = FailingOnceAnalyzer(SegmentationAnalyzer(AnalysisConfig(), FakeSemanticClassMapper()), failOnCall = 2)
+        val useCase = createUseCase(
+            PerceptionProfile.BASIC,
+            clock,
+            perceptionRepository = repository,
+            semanticTargetFps = 10,
+            segmentationAnalyzer = analyzer,
+        )
+
+        runBlocking {
+            clock.nowMs = 1_000L
+            val first = useCase(createFrame(sequenceNumber = 1)).getOrThrow().analysis
+            clock.nowMs = 1_101L
+            assertTrue(runCatching { useCase(createFrame(sequenceNumber = 2)) }.isFailure)
+            clock.nowMs = 1_150L
+            val cached = useCase(createFrame(sequenceNumber = 3)).getOrThrow().analysis
+            clock.nowMs = 1_202L
+            val next = useCase(createFrame(sequenceNumber = 4)).getOrThrow().analysis
+
+            assertSame(first, cached)
+            assertArrayEquals(stampFor(run = 0), cached.segmentation.classMap)
+            assertArrayEquals(stampFor(run = 2), next.segmentation.classMap)
+        }
+        assertEquals(2L, repository.pool.arraysAllocated)
+    }
+
+    @Test
+    fun `reset drops the cached mask without handing it out again`() {
+        // Reset can race a pipeline that is still finishing its last frame, so the dropped mask
+        // must never be written by a later run.
+        val clock = FakeClock()
+        val repository = PooledPerceptionRepository()
+        val useCase = createUseCase(PerceptionProfile.BASIC, clock, perceptionRepository = repository, semanticTargetFps = 10)
+
+        runBlocking {
+            clock.nowMs = 1_000L
+            val beforeReset = useCase(createFrame(sequenceNumber = 1)).getOrThrow().analysis.segmentation
+            useCase.reset()
+            repeat(4) { index ->
+                clock.nowMs = 1_101L + index * 101L
+                useCase(createFrame(sequenceNumber = index + 2L)).getOrThrow()
+            }
+
+            assertArrayEquals(stampFor(run = 0), beforeReset.classMap)
+        }
+    }
+
     private fun createUseCase(
         profile: PerceptionProfile,
         clock: FakeClock,
         realtimeObstacleProvider: ObstacleProvider = FakeObstacleProvider(),
-        perceptionRepository: FakePerceptionRepository = FakePerceptionRepository(),
+        perceptionRepository: PerceptionRepository = FakePerceptionRepository(),
+        segmentationAnalyzer: SegmentationAnalysisProcessor? = null,
         semanticTargetFps: Int = 0,
         detectionTargetFps: Int = 10,
         detectionResultTtlMs: Long = 500,
@@ -246,7 +345,7 @@ class ProcessFrameUseCaseTest {
             depthRepository = object : DepthRepository {
                 override fun estimateDistance(boundingBox: NormalizedRect): DistanceLevel = distanceLevel
             },
-            segmentationAnalyzer = SegmentationAnalyzer(AnalysisConfig(), navigationSemantics),
+            segmentationAnalyzer = segmentationAnalyzer ?: SegmentationAnalyzer(AnalysisConfig(), navigationSemantics),
             obstacleExtractor = ObstacleExtractor(config, navigationSemantics),
             obstacleTracker = ObstacleTracker(config),
             clock = { clock.nowMs },
@@ -291,6 +390,49 @@ class ProcessFrameUseCaseTest {
         }
 
         override suspend fun release() = Unit
+    }
+
+    /**
+     * Masks from a real [SegmentationMaskPool], each run stamped with its own pattern, the way
+     * the native postprocessor hands them over.
+     */
+    private class PooledPerceptionRepository : PerceptionRepository {
+        val pool = SegmentationMaskPool()
+        var runs: Int = 0
+
+        override val isInitialized: Boolean = true
+
+        override suspend fun initialize() = Unit
+
+        override suspend fun segment(frame: ImageFrame): Result<SegmentationOutput> {
+            val lease = pool.lease(width = 4, height = 4)
+            stampFor(runs++).copyInto(lease.mask.classMap)
+            return Result.success(
+                SegmentationOutput(
+                    mask = lease.mask,
+                    preprocessTimeMs = 1,
+                    inferenceTimeMs = 1,
+                    postprocessTimeMs = 1,
+                    maskLease = lease,
+                )
+            )
+        }
+
+        override suspend fun release() = Unit
+    }
+
+    private class FailingOnceAnalyzer(
+        private val delegate: SegmentationAnalysisProcessor,
+        private val failOnCall: Int,
+    ) : SegmentationAnalysisProcessor {
+        private var calls = 0
+
+        override fun analyze(segmentation: SegmentationMask, stats: SegmentationAnalysisStats?): SegmentationAnalysis {
+            if (++calls == failOnCall) throw IllegalStateException("analysis failed")
+            return delegate.analyze(segmentation, stats)
+        }
+
+        override fun reset() = delegate.reset()
     }
 
     private class FakeObstacleProvider(
@@ -339,3 +481,6 @@ class ProcessFrameUseCaseTest {
 
     }
 }
+
+/** A class map for 4x4 that differs for every run (two classes, alternating in runs of `run + 1`). */
+private fun stampFor(run: Int): IntArray = IntArray(16) { (it / (run + 1)) % 2 }

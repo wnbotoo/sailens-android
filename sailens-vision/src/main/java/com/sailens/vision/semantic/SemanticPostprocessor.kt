@@ -135,9 +135,9 @@ data class SemanticPostprocessOutcome<out R>(
 interface SemanticPostprocessor<R> {
     /**
      * @param reusableClassMap the runner's per-frame class-map buffer, sized to
-     *   `spec.content`. An implementation that succeeds must leave the argmax class ids of the
-     *   content region in it, and must copy the array if its result outlives the call — the runner
-     *   reuses it on the next frame.
+     *   `spec.content`, offered as scratch. The runner does not read it after a successful call, so
+     *   an implementation may write its class map there or into storage it owns instead. Whatever
+     *   it keeps must not be this array: the runner reuses it on the next frame.
      * @return null to decline this frame and let the runner fall back to generic argmax.
      */
     fun postprocessScores(
@@ -183,6 +183,11 @@ class SemanticClassMap(
  * It declines every fused path, so the runner always falls through to its generic argmax. A
  * product that only wants "which class is at this pixel" uses this and takes no dependency on any
  * navigation logic.
+ *
+ * It copies the class map into a fresh array on purpose. A [SemanticClassMap] is a plain value
+ * handed to callers this library knows nothing about, so it must stay valid however long they keep
+ * it; lending out a reused buffer would make every one of them responsible for not holding on. A
+ * caller that needs to avoid the allocation owns its storage the way Guidance's postprocessor does.
  */
 object ClassMapPostprocessor : SemanticPostprocessor<SemanticClassMap> {
     override fun postprocessScores(

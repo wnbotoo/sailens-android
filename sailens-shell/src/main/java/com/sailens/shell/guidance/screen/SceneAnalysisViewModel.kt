@@ -292,7 +292,12 @@ class SceneAnalysisViewModel(
             startStallWatch()
 
             // collectLatest is often used for high-frequency data, discarding previous incomplete processing
-            startSceneAnalysisUseCase(frameSource.frames).onStart {
+            startSceneAnalysisUseCase(
+                frameSource.frames,
+                // The class-map overlay is the only reader of the mask outside the pipeline; the
+                // copy it needs is made only while it is showing.
+                semanticMaskSnapshot = { rendersSemanticClassMask() },
+            ).onStart {
                 _uiState.update {
                     it.copy(isInitializing = false, isRunning = true, isLoading = false)
                 }
@@ -693,6 +698,11 @@ class SceneAnalysisViewModel(
             SceneOverlayMode.DETECTION_BOXES -> null
         }
     }
+
+    /** Read from the pipeline thread, once per frame. */
+    private fun rendersSemanticClassMask(): Boolean =
+        _uiState.value.overlayMode == SceneOverlayMode.SEMANTIC_CLASS_MASK &&
+            sceneOverlayConfig.isModeEnabled(SceneOverlayMode.SEMANTIC_CLASS_MASK)
 
     private fun SceneOverlayMode.rendersBitmap(): Boolean {
         return when (this) {
