@@ -14,6 +14,14 @@ A trace is a JSONL file; each line is one event:
 - `session_start` — a navigation session began.
 - `frame` — one full pipeline result for a frame.
 - `overlay_render` — the UI finished one mask overlay render.
+- `prompt_outcome` — what became of the one prompt a frame offered the user: `deliveredAt` with
+  `deliveredVia` (the channels that accepted it: `speech`, `screen_reader`, `haptics`,
+  `status_card`), or `revokedAt` with a `revokeReason` (`waiting_for_description`,
+  `output_refused`). The output settings at the time are recorded too, as context only: only
+  `deliveredVia` says whether a prompt was heard or just felt. Keyed by `eventId`, joined to its frame
+  by `sourceSequenceNumber`; written after that frame, and that frame is always recorded whatever the
+  sampling. A `frame` record's `messageKeys` are candidates after cooldown, not what the user
+  received — label false alarms against `prompt_outcome`.
 - `session_summary` — the aggregate summary after a session ends.
 - `error` — an exception in the pipeline or in tracing.
 

@@ -12,6 +12,7 @@ import com.sailens.guidance.service.TraceService
 import com.sailens.guidance.usecase.decision.RevokeUndeliveredEventUseCase
 import com.sailens.guidance.usecase.scene.StartSceneAnalysisUseCase
 import com.sailens.guidance.usecase.scene.StopSceneAnalysisUseCase
+import com.sailens.guidance.util.Timestamp
 import com.sailens.shell.diagnostics.GuidanceDiagnosticsStore
 import com.sailens.output.AccessibilityStatusProvider
 import com.sailens.shell.device.GuidanceHaptic
@@ -349,12 +350,12 @@ class SceneAnalysisViewModel(
                         )
                     )
                 }
-                onSceneEvents(events)
+                onSceneEvents(events, result.sequenceNumber)
             }
         }
     }
 
-    private fun onSceneEvents(events: List<SceneEvent>) {
+    private fun onSceneEvents(events: List<SceneEvent>, sequenceNumber: Long) {
         if (events.isEmpty()) return
         // Guidance 为这一条（且只为这一条）记了冷却，见 DecideEventsUseCase。
         val primaryEvent = events.first()
@@ -363,14 +364,23 @@ class SceneAnalysisViewModel(
 
         logger.debug(TAG, "Scene events generated, ${primaryEvent.messageKey}", mapOf("count" to events.size))
 
-        // 等描述 / 打断描述 / 送达 / 没送达就撤销冷却——整条规则在 offerGuidancePrompt 里，有单测。
-        // 协调器是整个 shell 共用的那一个，所以打断的就是用户正在听的那一段描述，不管它在哪个屏幕上。
-        val delivered = offerGuidancePrompt(
-            priority = primaryEvent.priority,
+        // 等描述 / 打断描述 / 送达 / 没送达就撤销冷却，并为这条提示写一条 prompt_outcome（实际送达的
+        // 通道或撤回原因）——整条规则在 offerAndTraceGuidancePrompt 里，有单测。协调器是整个 shell
+        // 共用的那一个，所以打断的就是用户正在听的那一段描述，不管它在哪个屏幕上。
+        val delivered = offerAndTraceGuidancePrompt(
+            event = primaryEvent,
+            sourceSequenceNumber = sequenceNumber,
+            outputs = GuidanceOutputSettings(
+                speechEnabled = state.isSpeechEnabled,
+                screenReaderActive = state.isScreenReaderActive,
+                hapticsEnabled = state.isHapticsEnabled,
+            ),
             descriptionHoldsTheFloor = sceneDescriptionCoordinator.holdsTheFloor,
+            now = Timestamp::now,
             preemptDescription = { sceneDescriptionCoordinator.preemptForGuidance(primaryEvent.messageKey) },
             deliver = { deliver(primaryEvent, state) },
             revoke = { revokeUndeliveredEvent(primaryEvent) },
+            record = traceService::recordPromptOutcome,
         )
         if (!delivered) return
 
@@ -382,9 +392,9 @@ class SceneAnalysisViewModel(
     /**
      * 把 [event] 送到用户可感知的通道，见 [deliverGuidanceEvent]。
      *
-     * @return 是否至少有一条通道真的接收了它。
+     * @return 真正接收了它的通道；为空表示没送达。
      */
-    private fun deliver(event: SceneEvent, state: SceneAnalysisUiState): Boolean = deliverGuidanceEvent(
+    private fun deliver(event: SceneEvent, state: SceneAnalysisUiState): GuidanceDeliveryResult = deliverGuidanceEvent(
         speechEnabled = state.isSpeechEnabled,
         screenReaderActive = state.isScreenReaderActive,
         speechEngineReady = speechManager.isReady,

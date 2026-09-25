@@ -1,6 +1,7 @@
 package com.sailens.guidance.trace
 
 import com.sailens.guidance.model.trace.FrameTrace
+import com.sailens.guidance.model.trace.PromptOutcomeTrace
 import com.sailens.guidance.model.trace.SessionTraceMetadata
 import com.sailens.guidance.model.trace.SessionTraceSummary
 import com.sailens.guidance.service.TraceService
@@ -19,6 +20,8 @@ object NoOpTraceService : TraceService {
         sourcePipelineCompletedAt: Long,
         sourceAgeMs: Long,
     ) = Unit
+
+    override fun recordPromptOutcome(outcome: PromptOutcomeTrace) = Unit
 
     override fun recordError(sessionId: String, stage: String, throwable: Throwable) = Unit
 

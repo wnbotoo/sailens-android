@@ -80,6 +80,7 @@ File format:
   - `session_start`
   - many `frame`
   - optional `overlay_render`
+  - optional `prompt_outcome` (one per offered prompt)
   - optional `error`
   - `session_summary`
 
