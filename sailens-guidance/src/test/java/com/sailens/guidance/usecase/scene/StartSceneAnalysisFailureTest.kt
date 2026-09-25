@@ -59,7 +59,7 @@ class StartSceneAnalysisFailureTest {
         val useCase = useCase(repository = ScriptedRepository(List(10) { false }), maxFailures = 3)
 
         try {
-            runBlocking { useCase(frames(10)).toList() }
+            runBlocking { useCase(frames(10), semanticMaskSnapshot = { false }).toList() }
             fail("the session should have ended")
         } catch (error: GuidancePipelineFailedException) {
             assertEquals(3, error.consecutiveFailures)
@@ -72,7 +72,7 @@ class StartSceneAnalysisFailureTest {
         val script = listOf(false, false, true, false, false, true)
         val useCase = useCase(repository = ScriptedRepository(script), maxFailures = 3)
 
-        val results = runBlocking { useCase(frames(script.size)).toList() }
+        val results = runBlocking { useCase(frames(script.size), semanticMaskSnapshot = { false }).toList() }
 
         assertEquals(2, results.size)
         assertTrue(results.all { it.sequenceNumber in setOf(3L, 6L) })
@@ -84,7 +84,7 @@ class StartSceneAnalysisFailureTest {
         val script = List(3) { true }
 
         val unasked = runBlocking {
-            useCase(ScriptedRepository(script), maxFailures = 3)(frames(3)).toList()
+            useCase(ScriptedRepository(script), maxFailures = 3)(frames(3), semanticMaskSnapshot = { false }).toList()
         }
         val asked = runBlocking {
             useCase(ScriptedRepository(script), maxFailures = 3)(frames(3), semanticMaskSnapshot = { true }).toList()

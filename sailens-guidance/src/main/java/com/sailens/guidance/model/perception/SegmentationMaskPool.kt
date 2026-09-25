@@ -17,12 +17,13 @@ import java.util.concurrent.atomic.AtomicLong
 class SegmentationMaskLease internal constructor(
     val mask: SegmentationMask,
     private val pool: SegmentationMaskPool,
+    private val generation: Long,
 ) : AutoCloseable {
     private val closed = AtomicBoolean(false)
 
     /** Idempotent. The mask must not be read after this. */
     override fun close() {
-        if (closed.compareAndSet(false, true)) pool.recycle(mask.classMap)
+        if (closed.compareAndSet(false, true)) pool.recycle(mask.classMap, generation)
     }
 }
 
@@ -38,6 +39,9 @@ class SegmentationMaskPool(private val maxIdle: Int = DEFAULT_MAX_IDLE) {
     private val idle = ArrayDeque<IntArray>()
     private val allocated = AtomicLong(0L)
 
+    /** Bumped by [trim]; guarded by [idle]. A lease from an earlier generation is not taken back. */
+    private var generation = 0L
+
     /** Class-map arrays created so far. Stops growing once the pool has warmed up. */
     val arraysAllocated: Long get() = allocated.get()
 
@@ -47,23 +51,29 @@ class SegmentationMaskPool(private val maxIdle: Int = DEFAULT_MAX_IDLE) {
      */
     fun lease(width: Int, height: Int): SegmentationMaskLease {
         val pixelCount = width * height
-        val reused = synchronized(idle) {
+        val (reused, leaseGeneration) = synchronized(idle) {
             // The content region changes with orientation; arrays of another size are of no use.
             idle.removeAll { it.size != pixelCount }
-            idle.removeLastOrNull()
+            idle.removeLastOrNull() to generation
         }
         val classMap = reused ?: IntArray(pixelCount).also { allocated.incrementAndGet() }
-        return SegmentationMaskLease(SegmentationMask(width, height, classMap), this)
+        return SegmentationMaskLease(SegmentationMask(width, height, classMap), this, leaseGeneration)
     }
 
-    /** Drops idle arrays, for when no semantic run will happen for a while. */
+    /**
+     * Empties the pool and keeps it empty of everything leased so far: a lease still open now is
+     * not taken back when it closes later. For when no semantic run will happen for a while.
+     */
     fun trim() {
-        synchronized(idle) { idle.clear() }
+        synchronized(idle) {
+            idle.clear()
+            generation++
+        }
     }
 
-    internal fun recycle(classMap: IntArray) {
+    internal fun recycle(classMap: IntArray, leaseGeneration: Long) {
         synchronized(idle) {
-            if (idle.size < maxIdle) idle.addLast(classMap)
+            if (leaseGeneration == generation && idle.size < maxIdle) idle.addLast(classMap)
         }
     }
 

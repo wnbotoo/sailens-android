@@ -59,11 +59,12 @@ class StartSceneAnalysisUseCase(
      * @param semanticMaskSnapshot asked once per frame whether the caller wants
      *   [SceneResult.segmentationMask]. The pipeline's own mask is reused once a newer semantic
      *   run replaces it, so what goes out is a copy the caller owns -- made only when asked, and
-     *   shared by the frames that reuse one semantic run.
+     *   shared by the frames that reuse one semantic run. Deliberately without a default: a caller
+     *   that used to get the mask must not silently start getting null.
      */
     suspend operator fun invoke(
         frameFlow: Flow<ImageFrame>,
-        semanticMaskSnapshot: () -> Boolean = { false },
+        semanticMaskSnapshot: () -> Boolean,
     ): Flow<SceneResult> = flow {
         // 会话开始时把设置页选中的挡位落成运行配置；必须在 obstacle provider 初始化之前，
         // 且先于首帧处理（ProcessFrameUseCase 逐帧读取 activeConfig）

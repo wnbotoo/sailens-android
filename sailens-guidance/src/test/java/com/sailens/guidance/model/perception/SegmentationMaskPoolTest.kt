@@ -78,6 +78,26 @@ class SegmentationMaskPoolTest {
     }
 
     @Test
+    fun `after a trim the pool stays empty even when an older lease closes`() {
+        val pool = SegmentationMaskPool()
+        val idleBefore = pool.lease(4, 4)
+        val stillHeld = pool.lease(4, 4)
+        idleBefore.close()
+
+        pool.trim()
+        stillHeld.close()
+        val afterTrim = pool.lease(4, 4)
+
+        assertNotSame(idleBefore.mask.classMap, afterTrim.mask.classMap)
+        assertNotSame(stillHeld.mask.classMap, afterTrim.mask.classMap)
+        assertEquals(3L, pool.arraysAllocated)
+
+        // Leases taken after the trim are pooled as usual.
+        afterTrim.close()
+        assertSame(afterTrim.mask.classMap, pool.lease(4, 4).mask.classMap)
+    }
+
+    @Test
     fun `a snapshot for the UI is a copy that survives the source being rewritten`() {
         val pool = SegmentationMaskPool()
         val snapshots = SegmentationMaskSnapshots()

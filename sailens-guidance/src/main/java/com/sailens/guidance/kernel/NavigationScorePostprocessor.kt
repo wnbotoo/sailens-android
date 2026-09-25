@@ -389,7 +389,10 @@ class NavigationScorePostprocessor(
         return NavigationSemanticResult(mask = maskLease.mask, stats = null, maskLease = maskLease)
     }
 
-    /** Lets go of idle mask arrays once Guidance's models are released. */
+    /**
+     * Empties the mask pool once Guidance's models are released. A mask still leased (a cached
+     * analysis that was never replaced) is not taken back when its lease closes later.
+     */
     fun releaseBuffers() {
         maskPool.trim()
     }
