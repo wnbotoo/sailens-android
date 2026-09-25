@@ -10,6 +10,7 @@ import com.sailens.guidance.model.trace.SessionTraceAccumulator
 import com.sailens.guidance.model.trace.SessionTraceMetadata
 import com.sailens.core.frame.ImageFrame
 import com.sailens.guidance.model.scene.SceneDebugInfo
+import com.sailens.guidance.model.perception.SegmentationMask
 import com.sailens.guidance.model.scene.SceneResult
 import com.sailens.guidance.processor.analysis.FrameQualityAnalyzer
 import com.sailens.guidance.repository.ObstacleProvider
@@ -54,7 +55,17 @@ class StartSceneAnalysisUseCase(
     private val traceRuntimeConfig: TraceRuntimeConfig,
     private val pipelineBudget: PipelinePerformanceBudget,
 ) {
-    suspend operator fun invoke(frameFlow: Flow<ImageFrame>): Flow<SceneResult> = flow {
+    /**
+     * @param semanticMaskSnapshot asked once per frame whether the caller wants
+     *   [SceneResult.segmentationMask]. The pipeline's own mask is reused once a newer semantic
+     *   run replaces it, so what goes out is a copy the caller owns -- made only when asked, and
+     *   shared by the frames that reuse one semantic run. Deliberately without a default: a caller
+     *   that used to get the mask must not silently start getting null.
+     */
+    suspend operator fun invoke(
+        frameFlow: Flow<ImageFrame>,
+        semanticMaskSnapshot: () -> Boolean,
+    ): Flow<SceneResult> = flow {
         // 会话开始时把设置页选中的挡位落成运行配置；必须在 obstacle provider 初始化之前，
         // 且先于首帧处理（ProcessFrameUseCase 逐帧读取 activeConfig）
         val perceptionConfig = profileManager.activateSelected()
@@ -81,6 +92,7 @@ class StartSceneAnalysisUseCase(
         var lastRawObstacleDetectionCountOnRun: Int? = null
         var traceSessionStarted = false
         var consecutiveFrameFailures = 0
+        val maskSnapshots = SegmentationMaskSnapshots()
         processFrameUseCase.reset()
 
         try {
@@ -312,7 +324,11 @@ class StartSceneAnalysisUseCase(
                         frameDisplayWidth = frame.displayWidth(),
                         frameDisplayHeight = frame.displayHeight(),
                         passableMask = perceptionResult.passableMask,
-                        segmentationMask = perceptionResult.analysis.segmentation,
+                        segmentationMask = if (semanticMaskSnapshot()) {
+                            maskSnapshots.of(perceptionResult.analysis.segmentation)
+                        } else {
+                            null
+                        },
                         obstacles = perceptionResult.obstacles,
                         obstacleDetections = perceptionResult.obstacleDetections,
                         debugInfo = SceneDebugInfo(
@@ -437,6 +453,24 @@ class GuidancePipelineFailedException(
     val consecutiveFailures: Int,
     cause: Throwable,
 ) : IllegalStateException("Guidance failed on $consecutiveFailures consecutive frames", cause)
+
+/**
+ * Caller-owned copies of the pipeline's semantic mask. Frames that reuse one semantic run share
+ * its copy, so an overlay that shows the mask costs one copy per run, not one per frame.
+ */
+internal class SegmentationMaskSnapshots {
+    // Compared by identity only, never read: its array may already carry a later run.
+    private var source: SegmentationMask? = null
+    private var snapshot: SegmentationMask? = null
+
+    fun of(mask: SegmentationMask): SegmentationMask {
+        snapshot?.takeIf { mask === source }?.let { return it }
+        return SegmentationMask(mask.width, mask.height, mask.classMap.copyOf()).also {
+            source = mask
+            snapshot = it
+        }
+    }
+}
 
 private fun obstacleProviderSummary(config: PerceptionConfig): String {
     return if (config.detectionEnabled) config.realtimeObstacleProviderType.name else "NONE"

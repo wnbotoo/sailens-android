@@ -22,7 +22,7 @@ import com.sailens.vision.semantic.SemanticModelConfig
  */
 class SemanticPerceptionRepository(
     context: Context,
-    scorePostprocessor: NavigationScorePostprocessor,
+    private val scorePostprocessor: NavigationScorePostprocessor,
     modelConfig: SemanticModelConfig = SemanticModelConfig(),
     modelSourceResolver: ModelSourceResolver = CatalogModelSourceResolver,
     preprocessCache: InputPreprocessCache? = null,
@@ -58,10 +58,12 @@ class SemanticPerceptionRepository(
                 outputReadTimeMs = run.outputReadTimeMs,
                 analysisStats = run.value.stats,
                 runtimeInfo = run.runtimeInfo,
+                maskLease = run.value.maskLease,
             )
         }
 
     override suspend fun release() {
         segmenter.release()
+        scorePostprocessor.releaseBuffers()
     }
 }

@@ -71,6 +71,7 @@ pipeline that turns the scene ahead into speech and haptics. This file is the re
 - Speech and haptics only interrupt for strictly higher priority, and the cooldown records only what was delivered (`DecideEventsUseCase` + `RevokeUndeliveredEventUseCase`). Guidance time is `SystemClock.elapsedRealtime()` end to end.
 - The semantic mask covers the camera frame only (letterbox padding cropped by `SemanticContentRegion`), so mask pixels and detection boxes share one coordinate space. Ratio thresholds are fractions of the camera frame.
 - `BinaryMask` is `BitSet`-based and used in hot loops; avoid allocation-heavy patterns in analysis code.
+- The semantic class map (`SegmentationMask`) comes from a pool and is owned by a `SegmentationMaskLease`. `ProcessFrameUseCase`'s cached analysis is its only holder beyond the frame, and closes the lease when a newer analysis replaces it; after that the array carries a later run. So never keep `analysis.segmentation` past the frame being processed: `SceneResult.segmentationMask` is a copy, made only when the caller asks (`semanticMaskSnapshot`).
 
 ## Integrations and assets
 - CameraX (`camera-core/camera2/camera-lifecycle/camera-compose`) in `:sailens-camera`.
