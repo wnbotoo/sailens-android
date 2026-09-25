@@ -64,25 +64,36 @@ No new Gradle modules. New packages inside existing modules, following the depen
     nearly straight down or up), forward is carried over from the previous frame rotated by the
     gyro yaw change, and the frame quality is marked reduced.
 - **Time**: Guidance time is `SystemClock.elapsedRealtime()` end to end. `SensorEvent.timestamp` is
-  in the elapsed-realtime base. `ImageProxy.imageInfo.timestamp` is in that base only when
-  `SENSOR_INFO_TIMESTAMP_SOURCE == REALTIME`. Otherwise the frame is stamped at arrival; the
-  resulting alignment error is **unmeasured** until M0 measures it per device, and it is traced
-  (`timestampSource`). Geometry consumers treat an unmeasured or too-large error as reduced
-  quality.
+  in the elapsed-realtime base. `ImageProxy.imageInfo.timestamp` is in that base only when Camera2
+  reports `SENSOR_INFO_TIMESTAMP_SOURCE == REALTIME`; with `UNKNOWN` it is monotonic but not
+  guaranteed to align with sensors, and M3o falls back to the source-side receipt time
+  (`receivedElapsedRealtimeNanos`). "Receipt time" is a Sailens fallback, not a Camera2 source. The
+  resulting alignment error is **unmeasured** until M0a measures it per device, and the chosen basis
+  is traced. Geometry consumers treat an unmeasured or too-large error as reduced quality.
 
 ## 3. Contracts (sketches)
 
-```kotlin
-// sailens-camera: carried on the ImageFrame the analyzer emits (per-subscriber copies keep it).
-data class FrameCaptureInfo(
-    val sensorTimestampNanos: Long,
-    val timestampSource: TimestampSource,          // REALTIME | ARRIVAL
-    val intrinsics: CameraIntrinsics?,             // in analysis-image pixels; null if unknown
-    val intrinsicsSource: IntrinsicsSource,        // CALIBRATION | FOCAL_LENGTH_ESTIMATE | NONE
-)
+Camera facts are staged: M0a records raw facts, M3o resolves them.
 
+```kotlin
+// ---- M0a: raw facts, recorded as the source reported them (implemented in PR #12) ----
+// sailens-core, on every ImageFrame:
+//   timestamp                     camera timestamp, base per SENSOR_INFO_TIMESTAMP_SOURCE
+//   receivedElapsedRealtimeNanos  taken at the source before any queueing
+//   rotationDegrees
+//   sourceGeometry: FrameSourceGeometry(sensorToBufferTransform /* 3×3, active array → buffer */,
+//                                       crop rect)
+// sailens-camera, per binding: CameraCharacteristicsSnapshot (intrinsic calibration, distortion,
+//   lens pose, active / pre-correction arrays, pixel array, physical size, focal lengths,
+//   sensor orientation, timestamp source REALTIME | UNKNOWN | NOT_REPORTED)
+
+// ---- M3o: resolved per frame from the raw facts ----
+enum class TimeBasis { CAMERA_REALTIME, SOURCE_RECEIPT }   // SOURCE_RECEIPT: fallback for UNKNOWN
 data class CameraIntrinsics(val fx: Float, val fy: Float, val cx: Float, val cy: Float,
-                            val width: Int, val height: Int)
+                            val width: Int, val height: Int)   // analysis-image pixels, obtained by
+                                                               // mapping the calibration through
+                                                               // sensorToBufferTransform + rotation
+enum class IntrinsicsSource { CALIBRATION, FOCAL_LENGTH_ESTIMATE, NONE }
 
 // Injected into Guidance from a shell-owned store; the runtime profile only supplies the default.
 data class PhoneGeometrySettings(
@@ -174,78 +185,130 @@ sealed interface GuidanceSafetyState { /* Initializing, Guiding, Degraded(reason
 
 `BinaryMask` stays the representation for per-pixel results (BitSet, no per-pixel objects).
 
-## 4. M0 — Baseline and field capture
+## 4. M0a — Field evidence capture; M0b — model-regression record
 
-**Split of ownership to avoid duplicate work**: the Stage 2 workstream owns the baseline freeze,
-the trace "delivered / revoked" fields and the recording handbook; the capture below is owned here.
-The delivery fields land first (small), then capture, after the P3 camera-frame-pool PR.
+M0 is split (roadmap §7): **M0a** is the field evidence capture described here; **M0b** (per-frame
+perception outputs for exact replay) is designed in its own review and must land before the first
+behaviour change. Nothing below promises exact replay.
 
-**Trace delivery fields** (implemented in PR #8, `feat/trace-prompt-outcomes`; the PR is the
-source of truth). `FrameTrace.messageKeys` stay the candidates after cooldown. A new `prompt_outcome`
-record per offered prompt carries `eventId` (key), `sourceSequenceNumber` (joins to the frame),
-`messageKey`, `category`, `priority`, exactly one of `deliveredAt` / `revokedAt`, `revokeReason`
-(`waiting_for_description` | `output_refused`) and the output settings at the time. Timestamps are
-wall-clock ms, the same clock as `pipelineCompletedAt`. Not recorded: a delivered utterance later
-cut off by a higher-priority one.
+**Delivery, three PRs**
 
-**Clock anchoring.** Trace uses wall-clock ms; sensor samples and (with a `REALTIME` source) frames
-use elapsed-realtime nanos. The capture writer records a `(wallMs, elapsedRealtimeNanos)` anchor
-pair at session start (and on resume) so both can be placed on one timeline; frames join the trace
-by `sequenceNumber`.
+| PR | Scope |
+|---|---|
+| A — contracts / foundation | This section; capture schema and `manifest.json`; JVM reader; source-side frame timing (`ImageFrame.receivedElapsedRealtimeNanos`); camera characteristics snapshot API in `sailens-camera`; backup/device-transfer exclusion of `captures/`; unit tests |
+| B — capture engine | `TraceService` decorator hook; frame, sensor, anchor and marker writers; bounded queues; retention; mode setting; failure isolation; writer tests |
+| C — field tooling | Capture list (pin / delete / export); ZIP share; Volume-Down marker and on-screen button; timing-sync burst; Python tools (contact sheet, alignment, storage) |
 
-**Two capture semantics.**
+**Trace delivery fields** (PR #8, merged). `FrameTrace.messageKeys` stay the candidates after
+cooldown. A `prompt_outcome` record per offered prompt carries `eventId`, `sourceSequenceNumber`
+(always joinable: a frame that offered a prompt always has its frame record, whatever the sampling),
+`messageKey`, `category`, `priority`, exactly one of `deliveredAt` / `revokedAt`, and:
+`deliveredVia` — the channels that actually carried it, a closed set `speech` | `screen_reader` |
+`haptics` | `status_card`; this is the evidence that the user heard or felt it — or `revokeReason`
+(`waiting_for_description` | `output_refused`). The output settings are background only. These
+invariants are enforced when `PromptOutcomeTrace` is constructed, on both the writing and the
+parsing side. Capture tooling reuses that type; it does not define the fields again. Not recorded: a
+delivered utterance later cut off by a higher-priority one.
 
-| | Field evidence capture | Model-regression record |
-|---|---|---|
-| Purpose | Labelling, #5 threshold calibration, geometry calibration, simulator seeds | Replaying the decision path exactly after a pipeline change |
-| Frames | 5 Hz, 640 px long side, JPEG | None continuously; full analysis-resolution frames only in a window around flagged events |
-| Also stored | Gravity / game rotation vector / gyro at `SENSOR_DELAY_GAME`, `FrameCaptureInfo`, trace | Per-frame perception outputs (sem class mask or passable mask, detections, frame quality) + `CameraGeometry` |
-| Not valid for | Re-running sem/det and expecting identical outputs (scaling + JPEG change model input) | Anything needing continuous video |
+**Capture format** (`sailens-guidance` `…trace.capture`, `CaptureSchema`). One directory per
+Guidance session, named after the trace session id:
 
-**Capture writer (debug builds only).**
-- Uses the rate-limited subscription from the camera-frame-pool PR (#10):
-  `FrameSource.frames(minIntervalMs = 200)`, so frames it does not need are never delivered to it.
-  Stream frames are borrowed (architecture §6.1 as amended by #10): every frame it receives is
-  released through `FrameSource.releaseFrame` (idempotent). Each subscriber gets its own
-  `ImageFrame.copy()`, so `FrameCaptureInfo` placed on `ImageFrame` travels with it; M3o extends
-  `ImageFrameConverter.convert` (which gains a `PlaneAllocator` parameter in #10) to fill it.
-- One directory per session under app-internal `files/captures/`, JSONL + image files; exported
-  manually; listed and deletable in the debug UI; excluded from release builds. Captures contain
-  faces and places (accepted) and never leave the device automatically.
-- Retention: a session is deleted 7 days after recording unless it was exported or pinned; total
-  size is capped at 2 GB, oldest unpinned sessions removed first. (Field evidence at 5 Hz / 640 px
-  is roughly 0.7 GB per hour.)
-- Reader in `…guidance.trace.capture` yields a time-ordered stream of frames, sensor samples and
-  perception records on the JVM, used by the simulator (M2) and geometry replay tests.
+| File | Content |
+|---|---|
+| `manifest.json` | `CaptureManifest`: schema major/minor, session id, mode (`field_evidence` / `timing_sync`), start wall and elapsed-realtime time, app version, git SHA if available, device, SDK, hardware profile, camera characteristics, `complete`, `failureReason`, `pinned`, `exportedAtWallMs`, capture counters |
+| `frames.jsonl` + `frames/` | `FrameRecord` per stored frame: seq, camera timestamp, source-side receipt time, source size and rotation, CameraX `sensorToBufferTransform` (active array → source buffer) and crop rect, encoding (`jpeg` / `luma8`), file, stored size |
+| `sensors.jsonl` | `SensorRecord`: sensor (`gravity`, `game_rotation_vector`, `gyroscope`), event timestamp, accuracy, values |
+| `anchors.jsonl` | `ClockAnchorRecord`: (wall ms, elapsed-realtime ns) at start, every 30–60 s, and at the end |
+| `markers.jsonl` | `MarkerRecord`: "missed alert", wall and elapsed time, last frame seq, source |
 
-**Capture controls** (debug builds; these fill the placeholders in the field recording manual,
-PR #9):
+- `manifest.json` is written with `complete = false` when the directory is created and rewritten
+  atomically (temp file + rename) with `complete = true` after a normal end. A killed app, crash,
+  unplugged USB or full disk leaves `complete = false`, which readers report.
+- Every JSONL line has a `type`; a torn last line is skipped with a warning.
+- **Versioning.** `schemaMajor` and `schemaMinor` are required; the reader reads them from the raw
+  JSON **before** decoding the body, refuses a missing version and an unknown major version (as
+  "unsupported", never as "unreadable"), then decodes. A **minor** version may only add: optional or
+  defaulted manifest fields, record types, fields of existing records, and values of open string
+  fields (`captureMode` is a string for this reason — M0b's `model_regression` is carried through by
+  an older reader with a warning). It may not remove or rename a required field or change a field's
+  meaning or type; that is a major version. Closed enums inside records are not extended in a minor
+  version.
+- Sensor cadence is computed from event timestamps; `SENSOR_DELAY_GAME` is only the requested rate.
+- Capture counters (`framesOffered`, `framesEncoded`, `framesDroppedByEncoder`, …) are separate from
+  Guidance's dropped frames, so missing capture frames can be explained.
+
+**Timing.** Frame timing is taken at the source: `ImageFrameAnalyzer.analyze()` stamps
+`receivedElapsedRealtimeNanos` before any demand check, conversion or queueing, and the camera's own
+`ImageFrame.timestamp` keeps its meaning. The capture records both. Which one is canonical is M3o's
+decision, based on `SENSOR_INFO_TIMESTAMP_SOURCE` (only `REALTIME` is comparable with sensor events;
+`UNKNOWN` is monotonic but not guaranteed to align with the gyroscope). The trace uses wall-clock ms;
+the anchors put both on one timeline, and periodic anchors reveal a wall clock changed mid-session.
+
+**Camera facts.** `sailens-camera` exposes `CameraCharacteristicsProvider.currentSnapshot()`
+returning a plain-value `CameraCharacteristicsSnapshot` (intrinsic calibration, distortion, lens
+pose, active and pre-correction arrays, pixel array, physical size, focal lengths, sensor
+orientation, timestamp source). Camera2 interop stays inside `sailens-camera`
+(`Camera2CameraInfo` is deprecated from CameraX 1.7). The snapshot is read on every bind and cleared
+on unbind, never cached across bindings (some logical cameras change `SENSOR_ORIENTATION` with device
+state). The analysis size is taken from the first frame, not from the requested resolution.
+Per frame, the analyzer also records CameraX's `sensorToBufferTransformMatrix` and crop rect
+(`ImageFrame.sourceGeometry`): the active-array-to-buffer mapping cannot be reliably rebuilt later
+from the active array, buffer size and rotation alone, and M3o needs it to map intrinsics into the
+analysis frame of recorded captures.
+
+**Session wiring (PR-B).** `GuidanceModule` builds the base `TraceService` (file or no-op) and
+applies an optional `TraceServiceDecorator` if one is bound; the debug `shellDebugModule` binds one
+that adds capture, release binds none. This avoids a Koin override that would have to resolve the
+service it replaces. Rules:
+- capture failure never fails Guidance: disk full, sensor registration failure or a crashed encoder
+  marks the capture failed/incomplete and nothing is thrown out of `TraceService` calls;
+- capture start/stop never blocks a `TraceService` call;
+- the capture mode is read once at session start;
+- field capture exists only in debug builds with tracing enabled (`TraceRuntimeConfig.enabled`);
+  decoupling it from trace would be a separate session observer, not part of M0a.
+
+**Frame writer (PR-B).** `FrameSource.frames(minIntervalMs = 200)` → downscale-copy to NV21 →
+`releaseFrame` immediately → a bounded queue (capacity 1–2, drop the oldest pending) → background
+JPEG encode (640 px long side, quality 80, pixels not rotated; `rotationDegrees` recorded).
+
+**Timing-sync burst (PR-C).** Mode `timing_sync`: about 15 s at camera rate, small luma frames
+(`luma8`, 320–480 px long side, no JPEG), exact per-frame timestamps, gyroscope at
+`SENSOR_DELAY_GAME`. Used only to measure frame/sensor alignment; never a performance baseline.
+
+**Controls (PR-C, debug builds; these fill the placeholders of the recording manual, PR #9)**
 
 | Need | Design |
 |---|---|
-| Mode switch | Debug settings: "Field capture" off / field evidence / field evidence + model-regression record |
-| Start / stop | While the mode is on, capture follows the Guidance session (starts and stops with it); no separate button to forget |
-| Delete, pin | Debug capture list: per session size, duration, pinned flag; delete and pin actions |
-| Export | Share sheet with one zip per session; the path under `files/captures/` is also documented for `adb pull` on debug builds |
-| Viewing frames around a prompt | On the PC: the reader plus a small script that renders the frames within ±N seconds of a `prompt_outcome` or marker as a contact sheet; no in-app viewer |
-| Storage | Estimated ≈ 0.7 GB/hour for field evidence; measured in M0 and written back into the manual |
-| **"Missed alert" marker** | Volume-down press while capturing (works eyes-free and with the screen locked to the app; a short vibration confirms), plus a large on-screen button. Writes a `marker` record with wall-clock ms, elapsed-realtime nanos and the latest frame `sequenceNumber`. Volume-down is consumed only while capture is on, so normal volume control is unaffected otherwise |
+| Mode switch | Debug settings: field capture off / on |
+| Start / stop | Follows the Guidance session while the mode is on; no separate button |
+| Delete, pin | Capture list: per session size, duration, complete/pinned flags; delete and pin |
+| Export | ZIP built into `cacheDir/capture_exports/` (free space checked first) and shared via FileProvider `<cache-path>`; `files/captures/` itself is never exposed; stale exports cleared on next launch / list open. `adb` + `run-as` documented as the bulk fallback |
+| Viewing frames around a prompt | On the PC: reader + script rendering ±N s around a `prompt_outcome` or marker as a contact sheet |
+| Storage | Estimated ≈ 0.7–1 GB/hour; measured in M0a and written back into the manual |
+| Retention | Deleted 7 days after recording unless exported or pinned; 2 GB cap, oldest unpinned first |
+| **"Missed alert" marker** | Volume Down while capture is active: only `ACTION_DOWN` with `repeatCount == 0` counts, the key is consumed only then, and a short vibration confirms after the marker is queued. Plus a large on-screen button. Works eyes-free in a foreground Guidance session; no promise for a locked screen or background (there is no background Guidance yet). TalkBack behaviour verified on device |
 
-The manual's sync convention (cover the lens for 3 s at the start and end of each segment) shows up
-as an `event_camera_blocked` prompt outcome in the trace and a run of dark frames in the capture;
-the reader can split segments on it.
+**Privacy.** Captures contain faces and places (accepted). They are excluded from Auto Backup
+(`backup_rules.xml`) and from cloud backup and device transfer (`data_extraction_rules.xml`); export
+ZIPs live in `cacheDir`, which is not backed up. Nothing leaves the device except by explicit export.
 
-**Measurements M0 must produce per target device**: camera timestamp source; frame-to-sensor
-alignment error (e.g. by rotating the phone against a static scene and correlating image motion
-with gyro); intrinsics source.
+**Measurements M0a must produce per target device**: camera timestamp source; frame-to-sensor
+alignment error (timing-sync burst: correlate image rotation with integrated gyro); storage rate;
+Volume Down under TalkBack; whether the default Guidance session exposes a logical multi-camera
+that switches physical cameras (`LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_ID`) — static intrinsics
+describe the active physical camera, so if it switches, per-frame physical id / dynamic intrinsics
+are added then, not before.
 
 **Operating envelope doc** (`docs/guidance-operating-envelope.md`): phone placement and orientation,
 walking only, lighting, weather, indoor/outdoor, stairs, road crossings, crowd density, headphones,
 hardware classes, screen-off. Release A lists as unsupported: running, stair/drop guidance,
 road-crossing guidance, directional steering, and any placement M3a has not been validated for.
 
-**Tests**: reader round-trip on a synthetic capture; timestamp ordering; the writer releases every
-frame it receives.
+**Tests**: PR-A — schema round-trip, typed lines, unknown major rejected, unknown minor fields and
+types tolerated, torn line and incomplete manifest reported, source-side timing taken before
+conversion. PR-B — writer releases every frame it receives, bounded queue drops oldest, a failing
+writer does not fail the trace calls, manifest completed atomically. PR-C — marker debouncing,
+export excludes nothing it should include and exposes nothing outside the export.
 
 ## 5. M1 — Qualification and safety state (exact reproduction); M1b — stop pre-emption
 
@@ -310,13 +373,15 @@ simulator stop/recovery scenarios and a device run against the baseline.
   segmentation flicker, false detection for one frame, stale frame burst, camera covered, phone
   tilt up / down with a fixed obstacle (for M3a), partially occluded person (for M3a validity),
   recovery after stop (for M1b), walking user with a vanished obstacle (for M4).
-- Later: a capture adapter feeds M0 model-regression records through the same harness.
+- Later: a capture adapter feeds M0b model-regression records through the same harness.
 
 ## 7. M3o — Orientation and camera geometry
 
-- `FrameCaptureInfo` from `sailens-camera`: timestamp source; intrinsics from
-  `LENS_INTRINSIC_CALIBRATION` when present, else estimated from `LENS_INFO_AVAILABLE_FOCAL_LENGTHS`
-  and `SENSOR_INFO_PHYSICAL_SIZE` (source recorded), mapped into analysis-image pixels.
+- Resolves the raw M0a facts (§3): the time basis (`CAMERA_REALTIME` when the source is `REALTIME`,
+  else `SOURCE_RECEIPT`); intrinsics from `LENS_INTRINSIC_CALIBRATION` when present, else estimated
+  from `LENS_INFO_AVAILABLE_FOCAL_LENGTHS` and `SENSOR_INFO_PHYSICAL_SIZE` (source recorded), mapped
+  into analysis-image pixels through the frame's `sensorToBufferTransform` and rotation. The same
+  resolution runs on recorded captures, so old captures stay usable.
 - `MotionTracker` (rotation only): game rotation vector + gravity at `SENSOR_DELAY_GAME`; stationary
   flag from the existing `DeviceMotionDataSource` logic; `headingRad` is device heading and is
   documented as not being walking direction.
@@ -487,14 +552,14 @@ Two capabilities, judged and implemented separately (contracts in §3):
 | Consumer | Production steering gate (M7–M9) | Rolling free space / occupancy (M4 V1+, M6) |
 | Contract | `MovementDirectionEstimate` (heading, confidence, validity) | `TranslationEstimate` (Δforward, Δright, uncertainty, confidence) |
 
-**M5a — evaluation (offline, decision record).** Candidates assessed on M0 captures: step-based dead
+**M5a — evaluation (offline, decision record).** Candidates assessed on M0a captures: step-based dead
 reckoning (needs the `ACTIVITY_RECOGNITION` decision); visual motion from consecutive frames (e.g.
 ground-plane flow — M3 gives the plane and scale). Rigid-mount validation is out of scope for now
 (decided 2026-09-25). The record gives two verdicts, *direction* and *translation*, each
 VALIDATED / NOT_VALIDATED with its error statistics against a reference. Two conditions for M5a's
 own review: (1) the cadence and resolution a verdict is validated at must equal what M5b will run
 at — a 5 Hz / 640 px result does not validate a 15–30 Hz or full-resolution implementation, and a
-candidate that needs more gets its own motion-evaluation capture instead of reusing M0 data;
+candidate that needs more gets its own motion-evaluation capture instead of reusing M0a data;
 (2) a *translation* verdict needs a time-aligned displacement reference that checks per-interval
 Δforward / Δright, not only the total length of a walked route (which is a coarse sanity check).
 
@@ -540,7 +605,7 @@ without M5b does not satisfy any gate.
 | A | Pure Kotlin unit tests (maths, state machines, freshness, fusion tables) | JVM, CI |
 | B | Native kernel tests + binding coverage | device (androidTest) |
 | C | Simulator scenarios with golden outputs | JVM, CI |
-| D | Capture replay (M0 records) before/after | JVM, local |
+| D | Capture replay (M0b records) before/after | JVM, local |
 | E | Device: latency, thermal, battery, sensors, timestamp alignment, audio route | SM8450 + SM8850 |
 | F | Target-user validation for any output vocabulary | per guidance-validation-roadmap |
 

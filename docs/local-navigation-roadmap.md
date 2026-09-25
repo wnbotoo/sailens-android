@@ -170,33 +170,52 @@ Consequences written into the milestones:
 Each milestone: goal → depends on → deliverables → exit criteria. Dependencies only point backwards.
 
 ```
-M0 ─┬─ M1 ── M1b
-    ├─ M2 ───┘
-    └─ M3o ── M3a
-          └── M3b ── M4 ── M6 ── M7 ── M8 ── M9
-          └── M5a ── M5b          (M5b direction → steering gate; M5b translation → M4/M6 rolling)
-    M10 after M6–M8 stabilise;  M11 last (can supply both capabilities)
+M0a ─┬─ M1 ──────── M1b ◄── M0b
+     ├─ M2 ─────────┘
+     └─ M3o ── M3a (code; enabling needs M0b)
+           └── M3b ── M4 ── M6 ── M7 ── M8 ── M9
+           └── M5a ── M5b          (M5b direction → steering gate; M5b translation → M4/M6 rolling)
+     M10 after M6–M8 stabilise;  M11 last (can supply both capabilities)
 ```
 
-### M0 — Baseline and field capture (shared with Stage 2)
-- **Depends on**: the P3 camera-frame-pool PR (same code area).
+M0 is split in two (decided 2026-09-25). **M0a finishing is not M0 finishing**: M0b is a hard gate
+in front of the first behaviour change.
+
+| Needs M0a | Needs M0b |
+|---|---|
+| M1, M2, M3o; M3a code (default off); M3b; any other work that does not change what users hear or feel | M1b; enabling M3a; Stage 3 sem downsampling; any other behaviour-changing perception or navigation change |
+
+### M0a — Field evidence capture (shared with Stage 2)
+- **Depends on**: the P3 camera-frame-pool PR (#10, merged).
 - **Goal**: one recording effort that serves false-positive labelling (Stage 2), #5 threshold
   calibration, geometry calibration and simulator scenarios.
-- **Deliverables**: frozen baseline commit; trace records what was *delivered* or *revoked*, not
-  just candidates; two capture semantics (implementation §4):
-  - **field evidence capture** — frames at reduced rate and size (5 Hz, 640 px JPEG) + gravity /
-    rotation / gyro samples + intrinsics + trace, for labelling and geometry; it is **not** an exact
-    perception replay (scaling and JPEG change model input);
-  - **model-regression record** — per-frame perception outputs (and, only around flagged events,
-    full analysis-resolution frames), for replaying the decision path exactly;
-  a JVM reader; the recording handbook updated to use it; `docs/guidance-operating-envelope.md`.
-- **Exit**: a capture from the target device replays through the JVM reader with frames, sensor
-  samples and intrinsics aligned; the camera timestamp source and the frame/sensor alignment error
-  are measured on each target device; baseline metrics computed.
+- **Deliverables**: trace records what was *delivered* or *revoked* (#8, merged); a debug-only field
+  evidence capture — frames at reduced rate and size (5 Hz, 640 px JPEG) + gravity / rotation / gyro
+  samples + camera characteristics + clock anchors + "missed alert" markers, under a versioned
+  manifest — which is **not** an exact perception replay (scaling and JPEG change model input); a
+  timing-sync burst for measuring frame/sensor alignment; a JVM reader; export; the recording
+  handbook updated to use it; `docs/guidance-operating-envelope.md`. Delivered as three PRs:
+  contracts/foundation, capture engine, field tooling (implementation §4).
+- **Exit**: a capture from the target device reads back through the JVM reader with frames, sensor
+  samples and camera facts aligned; the camera timestamp source and the frame/sensor alignment error
+  are measured on each target device; captures are excluded from backup and device transfer.
 - **User-visible**: no (debug builds only).
 
+### M0b — Model-regression record
+- **Depends on**: M0a.
+- **Goal**: replay the decision path exactly, so a behaviour change can be compared frame by frame.
+- **Deliverables**: per-frame perception outputs (sem class or passable mask, detections, frame
+  quality) and, only around flagged events, full analysis-resolution frames; a `model_regression`
+  capture mode in the same manifest (schema minor bump); reader support; the replay harness that
+  feeds them to the decision path.
+- **Exit**: replaying a record on the JVM reproduces the recorded events exactly.
+- **User-visible**: no. Must land before the first behaviour-changing milestone (table above).
+
+The baseline commit for Stage 2 is the commit the baseline recordings are made on (after M0a), not
+an earlier one.
+
 ### M1 — Guidance qualification and safety state (contracts, exact reproduction)
-- **Depends on**: M0 baseline.
+- **Depends on**: M0a.
 - **Goal**: "may Guidance still guide?" becomes a first-class state instead of scattered alarms.
 - **Deliverables**: `GuidanceQualification` in `sailens-guidance`; `GuidanceSafetyState` composed in
   `sailens-shell` with stall detection and output health, with an explicit mapping table
@@ -207,21 +226,21 @@ M0 ─┬─ M1 ── M1b
 - **Exit**: unit tests for every transition; device alarm timeline identical to the baseline.
 
 ### M1b — Stop pre-empts queued events (behaviour change)
-- **Depends on**: M1, M2.
+- **Depends on**: M1, M2, M0b.
 - **Goal**: the new invariant — entering a stop-class state revokes queued normal events and blocks
   new ones until re-qualified with hysteresis.
 - **Exit**: simulator scenarios for stop/recovery; device run reviewed against the baseline.
 - **User-visible**: yes (fewer stale prompts after a stop).
 
 ### M2 — Deterministic simulator
-- **Depends on**: M0 (reader, for later capture-driven scenarios); M1 states when present.
+- **Depends on**: M0a (reader, for later capture-driven scenarios); M1 states when present.
 - **Goal**: synthesize edge cases (dropouts, flicker, tilt, stale frames, blockage, recovery) and
   run the real decision path deterministically.
 - **Exit**: scenarios run in CI and reproduce today's behaviour as golden output (including the M1
   state timeline).
 
 ### M3o — Orientation and camera geometry (foundation)
-- **Depends on**: M0 (timestamp source measured), P3 frame pool.
+- **Depends on**: M0a (timestamp source and alignment measured), P3 frame pool.
 - **Goal**: per-frame gravity in the camera frame, intrinsics in analysis-image pixels, and a
   rotation-only `MotionState` (heading, yaw rate, stationary, orientation quality; translation
   unknown). This is what M3a, M3b and M4 consume; nothing here depends on a later milestone.
@@ -238,9 +257,9 @@ M0 ─┬─ M1 ── M1b
   push an obstacle into FAR where `EventGenerator` would drop it; phone height from a user/device
   geometry setting (placement preset, optionally refined by body height), not from the runtime
   profile.
-- **Enable gate** (the code can land earlier, default off): a preset or body-height calibration is
-  set; simulator tilt
-  scenarios pass; capture replay and device evidence reviewed against the baseline.
+- **Enable gate** (the code can land earlier, default off): M0b exists; a preset or body-height
+  calibration is set; simulator tilt scenarios pass; M0b replay and device evidence reviewed against
+  the baseline.
 - **User-visible**: only after the enable gate.
 
 ### M3b — Ground geometry from learned depth
@@ -273,10 +292,10 @@ M0 ─┬─ M1 ── M1b
 - **User-visible**: no.
 
 ### M5a — Movement sources: evaluation
-- **Depends on**: M3o, M0 captures.
+- **Depends on**: M3o, M0a captures.
 - **Goal**: evaluate non-ARCore candidates — step-based dead reckoning (needs the permission
   decision) and visual motion from consecutive frames (e.g. ground-plane flow using M3's plane) —
-  offline on M0 captures. Rigid-mount validation is out of scope for now (decided 2026-09-25).
+  offline on M0a captures. Rigid-mount validation is out of scope for now (decided 2026-09-25).
 - **Output**: a decision record with **two separate verdicts**, each VALIDATED / NOT_VALIDATED with
   its evidence: *movement direction* (`MovementDirectionEstimate`) and *metric translation*
   (`TranslationEstimate`).
@@ -328,8 +347,8 @@ behaviour (M1b) can ship earlier; it is not a control signal.
   privacy disclosure, and whether metric pose beats the calibrated-height model in field data.
 
 ### Suggested release grouping (no deadlines)
-- **Release A**: M0, M1, M2, M3o, M3a code (M3a default off unless its enable gate is met), M1b if
-  ready.
+- **Release A**: M0a, M1, M2, M3o, M3a code (default off); M0b before M1b or M3a enabling if either
+  ships in this release.
 - **Release B**: M3b, M4, M6 (frame-local / stationary), M5a decision (M5b if a verdict is VALIDATED) — still no
   steering.
 - **Release C**: M7–M9 as experiments. Production steering only through its gate.
@@ -353,11 +372,11 @@ no thermal status ≥ SEVERE within 15 minutes.
 | Work | Relation | Order |
 |---|---|---|
 | P3 perf: sem mask ownership (mask pool) | Independent | Proceed now |
-| P3 perf: camera frame pool | Touches `FrameSource`/`ImageFrameAnalyzer`, the same area M0/M3o extend | Land **before** M0 capture; M0 uses its rate-limited subscription |
-| Stage 2+3: baseline, recording handbook, false-positive metrics | Is M0's baseline half; recordings must use the M0 capture or they will have to be redone | Freeze baseline + trace delivery fields now; **record after capture exists** |
+| P3 perf: camera frame pool | Touches `FrameSource`/`ImageFrameAnalyzer`, the same area M0a/M3o extend | Landed (#10) **before** M0a capture; M0a uses its rate-limited subscription |
+| Stage 2+3: baseline, recording handbook, false-positive metrics | Records with the M0a capture or they will have to be redone | Trace delivery fields landed (#8); **record after M0a exists**; the baseline commit is the one recorded on |
 | P3 GPU arbitration | VLM integration is postponed; the depth model is the next GPU tenant | Folded into M3b |
 | P3 sem downsampling | Changes behaviour | After baseline, as already planned |
-| #5 ground-recognition threshold calibration | Needs field data | Uses M0 captures; no separate calibration run |
+| #5 ground-recognition threshold calibration | Needs field data | Uses M0a captures; no separate calibration run |
 | Connectivity perspective divergence | Affects anything consuming connectivity geometry | Decide before M6 |
 
 ## 10. Non-goals
@@ -370,7 +389,7 @@ steering outside its gate; committing model weights.
 
 Adopted (PR #7 review):
 
-- M0 capture at 5 Hz / 640 px JPEG is field evidence, not exact replay; exact replay uses recorded
+- M0a capture at 5 Hz / 640 px JPEG is field evidence, not exact replay; exact replay uses recorded
   perception outputs plus event-window full frames.
 - Phone height: 1.3 m is only a seed; enabling M3a requires a calibration (the form was decided
   below: placement presets, optionally refined by body height).

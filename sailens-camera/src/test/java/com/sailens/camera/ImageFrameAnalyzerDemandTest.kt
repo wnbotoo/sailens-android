@@ -4,6 +4,7 @@ import android.graphics.Rect
 import android.media.Image
 import androidx.camera.core.ImageInfo
 import androidx.camera.core.ImageProxy
+import com.sailens.core.frame.FrameSourceGeometry
 import com.sailens.core.frame.ImageFrame
 import com.sailens.core.frame.ImagePixelFormat
 import kotlinx.coroutines.flow.launchIn
@@ -43,6 +44,7 @@ class ImageFrameAnalyzerDemandTest {
     private val analyzer = ImageFrameAnalyzer(
         frameConverter = CountingConverter(converted),
         elapsedRealtimeMs = { now },
+        elapsedRealtimeNanos = { now * 1_000_000 },
     )
 
     private val cameraRunning = AtomicBoolean(false)
@@ -167,6 +169,45 @@ class ImageFrameAnalyzerDemandTest {
                 Thread.sleep(5)
             }
         }
+    }
+
+    @Test
+    fun `a frame carries the time the analyzer received it, taken before conversion`() {
+        var nowNanos = 5_000_000L
+        val slowConverter = object : ImageFrameConverter {
+            override fun convert(image: ImageProxy, sequenceNumber: Long, planes: PlaneAllocator): ImageFrame {
+                nowNanos += 40_000_000L // conversion takes time; the receipt time must not include it
+                return CountingConverter(AtomicInteger()).convert(image, sequenceNumber, planes)
+            }
+        }
+        val geometry = FrameSourceGeometry(
+            sensorToBufferTransform = listOf(0.24f, 0f, 0f, 0f, 0.24f, -60f, 0f, 0f, 1f),
+            cropLeft = 0, cropTop = 0, cropRight = 960, cropBottom = 540,
+        )
+        val timed = ImageFrameAnalyzer(
+            frameConverter = slowConverter,
+            elapsedRealtimeMs = { now },
+            elapsedRealtimeNanos = { nowNanos },
+            sourceGeometryOf = { geometry },
+        )
+
+        timed.openSnapshotLease().use { timed.analyze(FakeImageProxy()) }
+
+        val frame = timed.currentFrame(maxAgeMs = 10_000)
+        assertEquals(5_000_000L, frame?.receivedElapsedRealtimeNanos)
+        // The camera's own timestamp keeps its meaning.
+        assertEquals(0L, frame?.timestamp)
+        assertEquals(geometry, frame?.sourceGeometry)
+    }
+
+    @Test
+    fun `a source that cannot report its geometry still delivers the frame`() {
+        // FakeImageProxy throws from imageInfo, as a device without the data might.
+        analyzer.openSnapshotLease().use { analyzer.analyze(FakeImageProxy()) }
+
+        val frame = analyzer.currentFrame(maxAgeMs = 10_000)
+        assertNotNull(frame)
+        assertNull(frame?.sourceGeometry)
     }
 
     private fun awaitTrue(what: String, deadlineMs: Long = 2_000, condition: () -> Boolean) {
