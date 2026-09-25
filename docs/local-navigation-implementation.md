@@ -50,7 +50,16 @@ No new Gradle modules. New packages inside existing modules, following the depen
   - up: `−g` (opposite gravity);
   - forward: the camera optical axis at `t` projected onto the ground plane and normalised — the
     *camera* forward, not the walking direction;
-  - right: `forward × up` (right-handed).
+  - right: `forward × up` — the user's physical right.
+  - This is a 2D navigation frame. Planar coordinates are `(forward, right)`; the tuple
+    `(forward, right, up)` is **not** right-handed (`forward × right` points down) and is not claimed
+    to be.
+  - **Yaw sign**: a positive `Δψ` means the current forward axis is rotated toward `+right` relative
+    to the previous one (`Δψ > 0` ⇒ the phone turned right). Android gyro / rotation-vector angles
+    follow the right-hand rule about their own axes; they are converted to this sign before entering
+    the contract (about `up = −g`, the right-hand rule gives the *opposite* sign).
+  - **Rotation matrix** in `[forward, right]` order: `R(θ) = [[cos θ, −sin θ], [sin θ, cos θ]]`;
+    a positive `θ` rotates from forward toward right.
   - Degenerate case: when the projected optical axis is shorter than a threshold (camera pointing
     nearly straight down or up), forward is carried over from the previous frame rotated by the
     gyro yaw change, and the frame quality is marked reduced.
@@ -463,7 +472,10 @@ frames; binding coverage if any native kernel is added.
 its current fields and may later read corridor summaries from it.
 
 **Tests**: simulator flicker/dropout scenarios; moving-user scenario proving no cell is free from a
-past observation; stationary scenario proving fusion reduces flicker.
+past observation; stationary scenario proving fusion reduces flicker. Two sign-locking tests (kept
+for any later native kernel as well): the phone turns right 90° with a stationary landmark ahead →
+the landmark is on the left in the new frame (`(d, 0) → (0, −d)`); the user translates right 1 m
+with no yaw → a stationary landmark shifts 1 m to the left.
 
 ## 11. M5a / M5b — Movement sources
 
