@@ -17,7 +17,7 @@ No new Gradle modules. New packages inside existing modules, following the depen
 | Concern | Module | Package (proposal) | Why there |
 |---|---|---|---|
 | Frame capture metadata (sensor timestamp base, intrinsics) | `sailens-camera` | `com.sailens.camera` | Only the camera module talks to CameraX/Camera2 |
-| Gravity / rotation sensors, `MotionTracker` | `sailens-guidance` | `…guidance.motion` (absorbs `sensors/`) | Navigation meaning; no UI |
+| Orientation sensors, `MotionTracker` | `sailens-guidance` | `…guidance.motion` (absorbs `sensors/`) | Navigation meaning; no UI |
 | Camera geometry maths (rays, ground plane, contact distance) | `sailens-guidance` | `…guidance.geometry` | Guidance-specific use of generic maths |
 | Depth model runner | `sailens-vision` | `…vision.depth` | Model output with no navigation meaning, like sem/det |
 | Depth `ModelType`, catalog entry, preprocessing | `sailens-runtime` | existing | Model sources and preprocessing live here |
@@ -25,6 +25,7 @@ No new Gradle modules. New packages inside existing modules, following the depen
 | Local world model | `sailens-guidance` | `…guidance.world` | |
 | Qualification (may Guidance guide?) | `sailens-guidance` | `…guidance.safety` | Knows perception/geometry/motion health only |
 | Safety state (adds stall + output health) | `sailens-shell` | `…shell.guidance.safety` | Only the shell sees both Guidance and output |
+| Phone geometry settings (height, placement, calibration) | `sailens-shell` (store) → injected into Guidance | `…shell.settings` | A user/device setting, not a runtime preset |
 | Simulator | `sailens-guidance` test fixtures | `…guidance.simulation` (test source set) | JVM, deterministic |
 | Field capture writer | `sailens-shell` debug source set | `…shell.debug.capture` | Debug-only, like trace UI |
 | Field capture format + reader | `sailens-guidance` | `…guidance.trace.capture` | JVM-readable for replay and simulator |
@@ -45,13 +46,15 @@ No new Gradle modules. New packages inside existing modules, following the depen
   analysis rotation.
 - **Time**: Guidance time is `SystemClock.elapsedRealtime()` end to end. `SensorEvent.timestamp` is
   in the elapsed-realtime base. `ImageProxy.imageInfo.timestamp` is in that base only when
-  `SENSOR_INFO_TIMESTAMP_SOURCE == REALTIME`; otherwise the frame is stamped at arrival and the
-  alignment error is bounded and traced (`timestampSource`).
+  `SENSOR_INFO_TIMESTAMP_SOURCE == REALTIME`. Otherwise the frame is stamped at arrival; the
+  resulting alignment error is **unmeasured** until M0 measures it per device, and it is traced
+  (`timestampSource`). Geometry consumers treat an unmeasured or too-large error as reduced
+  quality.
 
 ## 3. Contracts (sketches)
 
 ```kotlin
-// sailens-camera: attached to every ImageFrame the analyzer emits (or carried alongside).
+// sailens-camera: carried on the ImageFrame the analyzer emits (per-subscriber copies keep it).
 data class FrameCaptureInfo(
     val sensorTimestampNanos: Long,
     val timestampSource: TimestampSource,          // REALTIME | ARRIVAL
@@ -62,20 +65,27 @@ data class FrameCaptureInfo(
 data class CameraIntrinsics(val fx: Float, val fy: Float, val cx: Float, val cy: Float,
                             val width: Int, val height: Int)
 
+// Injected into Guidance from a shell-owned store; the runtime profile only supplies the default.
+data class PhoneGeometrySettings(
+    val heightMeters: Float,                       // seed 1.3
+    val source: HeightSource,                      // DEFAULT_SEED | PRESET(placement) | CALIBRATED
+    val placement: Placement?,                     // e.g. CHEST_LANYARD, HANDHELD_CHEST, WAIST
+)
+
 // sailens-guidance.geometry
 data class CameraGeometry(               // one per frame
     val frameTimestampMs: Long,
     val intrinsics: CameraIntrinsics,
     val gravityInCamera: Vec3,           // unit, down
     val gravityAgeMs: Long,              // distance between frame time and nearest sensor sample
-    val phoneHeightMeters: Float,        // assumed; default 1.3
+    val phone: PhoneGeometrySettings,
     val quality: GeometryQuality,        // OK | DEGRADED(reason) | UNAVAILABLE(reason)
 )
 
 data class GroundContactDistance(
-    val meters: Float?,                  // null: contact at/above horizon or truncated
-    val lowerBoundMeters: Float?, val upperBoundMeters: Float?,
-    val source: DistanceSource,          // GROUND_CONTACT | IMAGE_POSITION_FALLBACK
+    val validity: GroundContactValidity, // VALID | CLIPPED | OCCLUDED | NEAR_HORIZON | IMPLAUSIBLE_BOX
+    val lowerBoundMeters: Float?,        // nearest the obstacle can be
+    val upperBoundMeters: Float?,
 )
 
 data class GroundObservation(            // M3b, from a depth frame
@@ -89,15 +99,24 @@ data class GroundObservation(            // M3b, from a depth frame
     val confidence: Float,
 )
 
+data class MotionState(                  // M3o: rotation only
+    val timestampMs: Long,
+    val headingRad: Float,               // device heading, NOT walking direction
+    val yawRateRadPerS: Float,
+    val isStationary: Boolean,
+    val orientationQuality: Quality,
+    val translation: TranslationKnowledge = TranslationKnowledge.UNKNOWN,
+)
+
 // sailens-guidance.safety
 sealed interface GuidanceQualification {
     data object Qualified : GuidanceQualification
     data class Degraded(val reasons: Set<DegradeReason>) : GuidanceQualification
     data class Unqualified(val reason: StopReason) : GuidanceQualification
 }
-// sailens-shell: GuidanceQualification + stall detector + output health
-sealed interface GuidanceSafetyState { /* Initializing, Guiding, Degraded, StopRequired(reason),
-                                          Interrupted(reason) */ }
+// sailens-shell: GuidanceQualification + stall detector + output health (mapping in §5)
+sealed interface GuidanceSafetyState { /* Initializing, Guiding, Degraded(reasons),
+                                          StopRequired(reason), Interrupted(reason) */ }
 ```
 
 `BinaryMask` stays the representation for per-pixel results (BitSet, no per-pixel objects).
@@ -106,103 +125,164 @@ sealed interface GuidanceSafetyState { /* Initializing, Guiding, Degraded, StopR
 
 **Split of ownership to avoid duplicate work**: the Stage 2 workstream owns the baseline freeze,
 the trace "delivered / revoked" fields and the recording handbook; the capture below is owned here.
-The delivery fields land first (small), then capture.
+The delivery fields land first (small), then capture, after the P3 camera-frame-pool PR.
 
-**Trace delivery fields.** `FrameTrace.messageKeys` today are candidates after cooldown. Add per
-event: `deliveredAt` / `revokedAt` / `revokeReason` as reported by the output coordinator, written
-as a separate trace record keyed by event id (delivery happens after the frame trace is written).
+**Trace delivery fields** (implemented in PR #8, `feat/trace-prompt-outcomes`; the PR is the
+source of truth). `FrameTrace.messageKeys` stay the candidates after cooldown. A new `prompt_outcome`
+record per offered prompt carries `eventId` (key), `sourceSequenceNumber` (joins to the frame),
+`messageKey`, `category`, `priority`, exactly one of `deliveredAt` / `revokedAt`, `revokeReason`
+(`waiting_for_description` | `output_refused`) and the output settings at the time. Timestamps are
+wall-clock ms, the same clock as `pipelineCompletedAt`. Not recorded: a delivered utterance later
+cut off by a higher-priority one.
 
-**Field capture (debug builds only).**
-- Subscribes to `FrameSource` as an ordinary subscriber (demand-driven, so it cannot force frames
-  when Guidance is stopped unless capture is explicitly on). Must respect the frame-pool release
-  contract from the P3 camera-frame-pool PR.
-- Stores: frames downsampled to 640 px long side, JPEG, at 5 Hz (configurable), with sequence
-  number and timestamps; every sensor sample of gravity, game rotation vector and gyroscope at
-  `SENSOR_DELAY_GAME`; `FrameCaptureInfo` once per change; the regular trace session. One directory
-  per session under app-internal `files/captures/`, JSONL + JPEG files; exported manually.
-- Reader in `…guidance.trace.capture` yields a time-ordered stream of frames and sensor samples on
-  the JVM, used by the simulator (M2) and by geometry replay tests (M3).
-- Privacy: captures contain faces and places; they never leave the device automatically, are listed
-  and deletable in the debug UI, and are excluded from release builds.
+**Clock anchoring.** Trace uses wall-clock ms; sensor samples and (with a `REALTIME` source) frames
+use elapsed-realtime nanos. The capture writer records a `(wallMs, elapsedRealtimeNanos)` anchor
+pair at session start (and on resume) so both can be placed on one timeline; frames join the trace
+by `sequenceNumber`.
+
+**Two capture semantics.**
+
+| | Field evidence capture | Model-regression record |
+|---|---|---|
+| Purpose | Labelling, #5 threshold calibration, geometry calibration, simulator seeds | Replaying the decision path exactly after a pipeline change |
+| Frames | 5 Hz, 640 px long side, JPEG | None continuously; full analysis-resolution frames only in a window around flagged events |
+| Also stored | Gravity / game rotation vector / gyro at `SENSOR_DELAY_GAME`, `FrameCaptureInfo`, trace | Per-frame perception outputs (sem class mask or passable mask, detections, frame quality) + `CameraGeometry` |
+| Not valid for | Re-running sem/det and expecting identical outputs (scaling + JPEG change model input) | Anything needing continuous video |
+
+**Capture writer (debug builds only).**
+- Uses the rate-limited frame subscription from the P3 camera-frame-pool PR (e.g.
+  `frames(minIntervalMs = 200)`), so frames it does not need are never delivered to it; every frame
+  it receives is released through `FrameSource.releaseFrame`.
+- One directory per session under app-internal `files/captures/`, JSONL + image files; exported
+  manually; listed and deletable in the debug UI; excluded from release builds. Captures contain
+  faces and places and never leave the device automatically.
+- Reader in `…guidance.trace.capture` yields a time-ordered stream of frames, sensor samples and
+  perception records on the JVM, used by the simulator (M2) and geometry replay tests.
+
+**Measurements M0 must produce per target device**: camera timestamp source; frame-to-sensor
+alignment error (e.g. by rotating the phone against a static scene and correlating image motion
+with gyro); intrinsics source.
 
 **Operating envelope doc** (`docs/guidance-operating-envelope.md`): phone placement and orientation,
 walking only, lighting, weather, indoor/outdoor, stairs, road crossings, crowd density, headphones,
-hardware classes, screen-off. Anything not validated is listed as unsupported.
+hardware classes, screen-off. Release A lists as unsupported: running, stair/drop guidance,
+road-crossing guidance, directional steering, and any placement M3a has not been validated for.
 
-**Tests**: reader round-trip on a synthetic capture; timestamp ordering; capture writer releases
-every frame it receives (pool contract).
+**Tests**: reader round-trip on a synthetic capture; timestamp ordering; the writer releases every
+frame it receives.
 
-## 5. M1 — Qualification and safety state
+## 5. M1 — Qualification and safety state (exact reproduction); M1b — stop pre-emption
 
-**Guidance side (`GuidanceQualification`)**, computed once per pipeline result from:
-frame age (now − frame timestamp) vs a budget; `FrameQuality` (covered / dark / blur);
-perception failures (consecutive frame failures already counted against
-`PipelinePerformanceBudget.maxConsecutiveFrameFailures`); ground-recognition state from #5;
-later geometry and motion quality. `Unqualified` reasons: `FRAME_STALE`, `CAMERA_UNUSABLE`,
-`PERCEPTION_FAILED`, later `ORIENTATION_LOST`, `NO_SAFE_PATH`.
+**Guidance side (`GuidanceQualification`)**, computed once per pipeline result from: frame age
+(now − frame timestamp) vs a budget; `FrameQuality` (`OBSTRUCTED` / `TOO_DARK`); perception failures
+(consecutive failures already counted against `PipelinePerformanceBudget.maxConsecutiveFrameFailures`);
+ground-recognition state from #5; later geometry and orientation quality. Unqualified reasons:
+`FRAME_STALE`, `CAMERA_UNUSABLE`, `PERCEPTION_FAILED`; later `ORIENTATION_LOST`, `NO_SAFE_PATH`.
 
-**Shell side (`GuidanceSafetyState`)** composes qualification with `GuidanceStallDetector`
-(no results at all) and output health (speech unavailable, audio route). It is the single input to
-the alarm/haptic policy that today lives across `SceneAnalysisViewModel` and `GuidanceHaptic`.
+**Shell side (`GuidanceSafetyState`)** composes qualification with `GuidanceStallDetector` and output
+health. Mapping (the rule: output problems degrade *delivery*, not the judgement of the way):
 
-**Rules**
-- `StopRequired` / `Interrupted` pre-empt every normal event; queued normal events are revoked.
-- Leaving `StopRequired` needs N consecutive qualified results (hysteresis), not one.
-- Every transition is traced with reason and timestamp.
+| Condition | Safety state | Note |
+|---|---|---|
+| Qualified, all outputs OK | `Guiding` | |
+| Qualification `Degraded` (e.g. ground not recognised) | `Degraded(perception)` | Today: path prompts paused, obstacles still announced |
+| TTS unavailable, haptics available | `Degraded(output: speech)` | Guidance keeps judging; haptic vocabulary carries alarms (today's `SPEECH_UNAVAILABLE`) |
+| Audio route lost, haptics available | `Degraded(output: audio)` | |
+| Qualification `Unqualified` (camera unusable, stale frames, perception failed) | `StopRequired(reason)` | Guidance may not give navigation output |
+| No results at all for the stall window (`GuidanceStallDetector`) | `StopRequired(PERCEPTION_STALLED)` | |
+| No reliable output channel left (speech and haptics unavailable) | `Interrupted(NO_OUTPUT_CHANNEL)` | The user cannot be told anything; the UI shows it, the session keeps trying to recover |
+| Lifecycle interruption (today's `INTERRUPTED`) | `Interrupted(reason)` | |
 
-**No behaviour change in M1**: the mapping reproduces today's alarms exactly; the proof is a
-before/after comparison of alarm timelines on simulator scenarios and one device run.
+**M1 behaviour**: none. It reproduces today's alarms and today's `SENSOR_QUALITY` suppression in
+`EventConflictResolver` exactly. It does **not** add queue revocation. Proof: unit tests for the
+mapping and transitions, and a device alarm timeline identical to the baseline.
 
-**Tests**: exhaustive `when` over states; transition table tests; "normal event cannot be delivered
-while StopRequired"; "stale result cannot re-qualify".
+**M1b (behaviour change, after M2)**: entering `StopRequired` / `Interrupted` revokes queued normal
+events and blocks new ones; leaving needs N consecutive qualified results (hysteresis). Proven with
+simulator stop/recovery scenarios and a device run against the baseline.
+
+**Tests**: exhaustive `when` over states; mapping table as a parameterised test; transition tests;
+(M1b) "normal event cannot be delivered while StopRequired", "stale result cannot re-qualify".
 
 ## 6. M2 — Simulator
 
 - A scenario is a script over a fake clock: synthetic perception results (masks, detections,
   frame quality), sensor timeline (gravity, rotation), failures (dropped frames, stale frames,
-  model failure), and expected outputs (qualification states, events, later control signals).
+  model failure), and expected outputs (qualification and safety states, events, later control).
 - Runs the real `AnalyzeSceneUseCase` → `DecideEventsUseCase` path plus new components with fakes
   only at the model boundary. Deterministic: fixed seeds, injected clock (already injectable).
 - Golden outputs are checked in; a golden change must be explained in the PR.
 - First set: straight clear path, centre / left / right obstacle, narrowing, full blockage,
   segmentation flicker, false detection for one frame, stale frame burst, camera covered, phone
-  tilt up / down with a fixed obstacle (for M3a), recovery after stop.
-- Later: a capture adapter feeds M0 recordings through the same harness.
+  tilt up / down with a fixed obstacle (for M3a), partially occluded person (for M3a validity),
+  recovery after stop (for M1b), walking user with a vanished obstacle (for M4).
+- Later: a capture adapter feeds M0 model-regression records through the same harness.
 
-## 7. M3a — Ground-contact distance
+## 7. M3o — Orientation and camera geometry
 
-**Inputs**: `CameraGeometry` for the frame; a box in analysis-image coordinates.
+- `FrameCaptureInfo` from `sailens-camera`: timestamp source; intrinsics from
+  `LENS_INTRINSIC_CALIBRATION` when present, else estimated from `LENS_INFO_AVAILABLE_FOCAL_LENGTHS`
+  and `SENSOR_INFO_PHYSICAL_SIZE` (source recorded), mapped into analysis-image pixels.
+- `MotionTracker` (rotation only): game rotation vector + gravity at `SENSOR_DELAY_GAME`; stationary
+  flag from the existing `DeviceMotionDataSource` logic; `headingRad` is device heading and is
+  documented as not being walking direction.
+- `CameraGeometry` per frame: gravity in the camera frame from the nearest sensor sample (age
+  recorded), intrinsics, phone settings, quality. Quality drops when gravity is older than a bound,
+  the alignment error is unmeasured/too large, or intrinsics are missing.
+- Orientation unavailable → qualification `Degraded(ORIENTATION)`; every consumer falls back.
+- **Tests**: rotation/axis conventions on synthetic sensor data for each analysis rotation; intrinsics
+  mapping through crop and rotation.
 
-**Algorithm**
-1. Contact pixel `p` = bottom centre of the box. If the box touches the bottom image edge, the
-   contact point is below the frame: report `meters = null` with `upperBound` = distance of the
-   bottom edge (the obstacle is at least that near) → NEAR.
+## 8. M3a — Ground-contact distance
+
+**Inputs**: `CameraGeometry`; a box in analysis-image coordinates; the frame's other detections and
+sem mask (for the validity check).
+
+**Distance interval**
+1. Contact pixel `p` = bottom centre of the box.
 2. Ray `r = K⁻¹ [u, v, 1]`, `q = g · r` (how far the ray points below the horizon).
-3. If `q ≤ q_min` (at or above the horizon, or grazing), the ground is not hit: no distance;
-   fall back to the image-position estimate and trace it.
-4. Ground point `X = (h / q) · r`; horizontal distance `d = |X − (g · X) g|`.
-5. Bounds from `h ± Δh` (±0.15 · h) and gravity error (±2°); `DistanceLevel` uses the upper bound
-   for NEAR/MEDIUM decisions (errs toward "nearer"), thresholds 1.5 m / 4.0 m as used by
-   `DefaultDepthRepository` today.
+3. Ground point `X = (h / q) · r`; horizontal distance `d = |X − (g · X) g|`.
+4. Interval `[lower, upper]` from `h ± Δh` (±15% for a seed height; tighter once calibrated) and
+   gravity error (±2°).
 
-**Integration**: `DepthRepository.estimateDistance` gains the frame's `CameraGeometry`; the
-`DefaultDepthRepository` path chooses ground contact when geometry quality is OK, otherwise the
-current `ImagePositionDepthEstimator`. `DetectedObstacle` carries metres + source for trace; events
-still speak in NEAR/MEDIUM/FAR (no metric wording to users).
+**Ground-contact validity** — any of these makes the contact invalid, and an invalid contact never
+replaces today's estimate:
+- `CLIPPED`: the box touches the bottom image edge (true contact below the frame). The obstacle is
+  at least as near as the bottom edge; this can only raise risk.
+- `OCCLUDED`: the box bottom overlaps another detection that is nearer (lower in the image), or the
+  pixels just below the contact are not ground/passable in the sem mask (legs hidden by a railing,
+  car, bench).
+- `NEAR_HORIZON`: `q ≤ q_min` — distance is ill-conditioned.
+- `IMPLAUSIBLE_BOX`: box aspect/size inconsistent with the class at the computed distance (e.g. a
+  person box too short for its distance — typical of a detector cutting the box early).
 
-**Known limits**: a contact point hidden behind another object reads too far; sloped ground biases
-distance; very low phone height (e.g. phone at waist) is covered by the setting.
+**Risk-conservative fusion (phase 1)**:
+`newLevel = level(lowerBound)` using the 1.5 m / 4.0 m thresholds; the level used =
+`nearerOf(todayLevel, newLevel)` when valid, `todayLevel` otherwise. The new estimator can only keep
+or raise risk, so an obstacle today's code would announce is never pushed into FAR and dropped by
+`EventGenerator.shouldAnnounceObstacle`. Replacing today's heuristic outright (allowing the new
+estimate to *lower* risk) is a later, separate decision based on field evidence.
 
-**Config**: `GroundContactDistanceConfig(enabled = false, phoneHeightMeters = 1.3f, …)` in
-`SailensRuntimeProfile`; the setting is user-editable in the shell.
+**Phone height**: `PhoneGeometrySettings` from a shell-owned store (the runtime profile supplies the
+1.3 m seed only). Enabling M3a requires a height with source `PRESET` or `CALIBRATED`; the seed alone
+never changes distance levels.
 
-**Trace**: per obstacle `distanceMeters`, `distanceSource`, bounds; per frame `gravityAgeMs`,
-`pitchDegrees`, `geometryQuality`, `timestampSource`, `intrinsicsSource`.
+**Integration**: `DepthRepository.estimateDistance` gains the frame's `CameraGeometry` and the
+validity context; `DetectedObstacle` carries the interval, validity and chosen source for trace;
+events still speak in NEAR/MEDIUM/FAR (no metric wording to users).
 
-**Tests**: pure maths on synthetic cameras (known pitch/height → known distance); simulator tilt
-scenarios (same obstacle, pitch −30°…+10°, class must not flip); fallback when gravity is stale.
+**Config**: `GroundContactDistanceConfig(enabled = false, …)`; thresholds (`q_min`, occlusion
+margins, per-class plausibility) are profile values.
 
-## 8. M3b — Ground geometry from depth
+**Trace**: per obstacle `lowerBoundM`, `upperBoundM`, `contactValidity`, `levelToday`, `levelNew`,
+`levelUsed`; per frame `gravityAgeMs`, `pitchDegrees`, `geometryQuality`, `timestampSource`,
+`intrinsicsSource`, `heightSource`.
+
+**Tests**: pure maths on synthetic cameras (known pitch/height → known distance); fusion table
+(new estimate may raise, may not lower); validity cases; simulator tilt scenarios (same obstacle,
+pitch −30°…+10°, the used level never becomes less near than today's); occluded-person scenario.
+
+## 9. M3b — Ground geometry from depth
 
 **Model contract** (`docs/models.md` gets a section): input RGB, ImageNet normalisation, fixed
 shape; output relative disparity (larger = nearer), one channel. Layout NCHW or NHWC resolved from
@@ -241,45 +321,60 @@ sem/det first, depth pre-emptible.
 steps, step height within tolerance; device test comparing output with the PC reference on stored
 frames; binding coverage if any native kernel is added.
 
-## 9. M4 — Local world model
+## 10. M4 — Local world model
 
+**V0 (frame-local)**
 - Ego-centric, gravity-aligned ground grid: 0.1 m cells, 6 m forward × 4 m wide (configurable),
   packed arrays, preallocated.
-- Per update, rasterise: ground/free from `GroundObservation` or sem passable (when no depth);
-  occupied from det contact points and above-ground regions; drops from below-ground regions.
-- Each cell stores value, confidence and last-observed time; decay with τ ≈ 0.7 s; cells older
-  than 3τ are unknown, never free.
-- Between updates, rotate the grid by the yaw change from `MotionState` (M5). Translation is not
-  fused (unknown without VIO), which is why the decay window is short.
-- Output: `LocalWorldModel(timestamp, ageMs, grid, confidence)`; `SceneSnapshot` keeps its current
-  fields and may later read corridor summaries from it.
+- Rebuilt every update from the current observations only: ground/free from `GroundObservation` (or
+  sem passable when no depth); occupied from valid det contact points and above-ground regions;
+  drops from below-ground regions; everything else unknown.
 
-## 10. M5 — Motion tracker
+**V1 (temporal, restricted)**
+- **While stationary** (`MotionState.isStationary`): cells fuse over time with decay; yaw changes
+  rotate the grid.
+- **While moving, translation unknown**: only *risk* evidence (occupied, drop) is carried from past
+  frames, dilated by `v_max · age` (v_max ≈ 1.5 m/s walking) and dropped after a short hold
+  (≈ 0.5 s). Free/ground is never carried across frames: a cell not observed free in the current
+  frame is unknown.
+- With a validated translation source (M5/M11) the grid may translate and fuse free space; that is a
+  separate change with its own review.
 
-- `MotionTracker` interface → `MotionState(timestamp, headingRad, yawRate, isStationary,
-  orientationQuality, translation = UNKNOWN)`.
-- First implementation: game rotation vector (+ gravity) at `SENSOR_DELAY_GAME`; stationary flag
-  from the existing `DeviceMotionDataSource` logic.
-- Orientation unavailable or noisy beyond a bound → qualification `Degraded(ORIENTATION)`, and
-  anything depending on gravity (M3a, M3b, M4) falls back.
-- Step detection: a separate decision record; not implemented without it.
+**Output**: `LocalWorldModel(timestamp, ageMs, grid, fusionMode, confidence)`; `SceneSnapshot` keeps
+its current fields and may later read corridor summaries from it.
 
-## 11. M6–M10 (outline; detailed in their own reviews)
+**Tests**: simulator flicker/dropout scenarios; moving-user scenario proving no cell is free from a
+past observation; stationary scenario proving fusion reduces flicker.
 
-- **M6** rolling occupancy and corridor clearance over M4; decide the connectivity perspective
-  divergence first. Native candidates: rasterisation, distance transform — only with profiling.
+## 11. M5 — Movement-direction source (evaluation)
+
+Produces a decision record, not production code. Candidates, each assessed with field data from M0
+captures: rigid mount with a known forward axis (chest harness / lanyard) validated against walking
+direction; step-based dead reckoning (needs the `ACTIVITY_RECOGNITION` decision); visual motion from
+consecutive frames (e.g. ground-plane flow, since M3 gives the plane). Outcome feeds the production
+steering gate and M6 rolling occupancy.
+
+## 12. M6–M11 (outline; detailed in their own reviews)
+
+- **M6** occupancy and corridor clearance over M4 (frame-local / stationary unless M5/M11 give
+  translation); decide the connectivity perspective divergence first. Native candidates:
+  rasterisation, distance transform — only with profiling.
 - **M7** planner in Kotlin; `GuidanceControlSignal(timestamp, validUntil, mode HOLD|STEER|STOP,
   headingCorrection (normalised), confidence, stopReason)`; debug output only.
 - **M8** validation scenarios for oscillation, flip-flop, stale control, recovery.
-- **M9** earcons per `guidance-validation-roadmap.md` Phase C (`AudioTrack`, runtime PCM).
+- **M9** earcons per `guidance-validation-roadmap.md` Phase C (`AudioTrack`, runtime PCM), as an
+  experiment; production steering only through the roadmap's gate.
 - **M10** native kernels: `RegisterNatives` only, coarse-grained calls (one per frame), primitive
   arrays / direct buffers in, numbers out, no product state in C++, explicit failure. A fallback
   that is not proven equivalent degrades Guidance instead of silently changing semantics.
+- **M11** ARCore evaluation as a camera-architecture proposal.
 
-## 12. Cross-cutting rules
+## 13. Cross-cutting rules
 
 - **Freshness**: every observation, world model and control signal carries a timestamp and a
   validity window; consumers check it. Nothing stale produces a new prompt or direction.
+- **Raise before lower**: a new estimator may keep or raise risk relative to today's behaviour;
+  letting it lower risk is a separate evidence-backed decision.
 - **Fallbacks are explicit and traced**; a fallback that changes navigation meaning must be proven
   equivalent or degrade qualification.
 - **Performance**: no per-pixel objects, no `List<Point>` in hot paths; reuse buffers (follow the
@@ -289,20 +384,21 @@ frames; binding coverage if any native kernel is added.
 - **Strings**: any new event key goes through `SceneEventMessageKeys` / `SceneEventStrings` in both
   languages.
 
-## 13. Verification layers
+## 14. Verification layers
 
 | Layer | What | Where |
 |---|---|---|
-| A | Pure Kotlin unit tests (maths, state machines, freshness) | JVM, CI |
+| A | Pure Kotlin unit tests (maths, state machines, freshness, fusion tables) | JVM, CI |
 | B | Native kernel tests + binding coverage | device (androidTest) |
 | C | Simulator scenarios with golden outputs | JVM, CI |
-| D | Capture replay (M0 recordings) before/after | JVM, local |
-| E | Device: latency, thermal, battery, sensors, audio route | SM8450 + SM8850 |
+| D | Capture replay (M0 records) before/after | JVM, local |
+| E | Device: latency, thermal, battery, sensors, timestamp alignment, audio route | SM8450 + SM8850 |
 | F | Target-user validation for any output vocabulary | per guidance-validation-roadmap |
 
-## 14. Licensing
+## 15. Licensing
 
 No PG code is copied; if that ever changes, keep its copyright/licence headers and update NOTICE.
-No model weights, sound assets or datasets enter this repository. The depth model is BYO; the
-official distribution decides whether to ship Depth Anything V2 Small (Apache-2.0; its training data
-includes datasets with research-use terms — a distribution-level review item, not a platform one).
+No model weights, sound assets or datasets enter this repository; the experiment scripts under
+`scripts/experiments/geometry_probe/` are Sailens code. The depth model is BYO; the official
+distribution decides whether to ship Depth Anything V2 Small (Apache-2.0; its training data includes
+datasets with research-use terms — a distribution-level review item, not a platform one).
