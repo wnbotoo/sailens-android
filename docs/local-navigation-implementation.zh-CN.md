@@ -1,0 +1,282 @@
+[English](local-navigation-implementation.md) | **简体中文**
+
+# 局部导航实施方案
+
+> 状态：**提案，先评审**。与 [`local-navigation-roadmap.zh-CN.md`](local-navigation-roadmap.zh-CN.md)
+> 配套：路线图讲*为什么*和*顺序*，本文按里程碑讲*怎么做*：契约、放在哪里、算法、回退、trace 字段
+> 和测试。类型草图只是示意，名字和字段在各里程碑的评审中确定。实施某个里程碑前要重新读当前代
+> 码——代码和本文不一致时，以代码为准，并修正本文。
+
+## 1. 放在哪里
+
+不新增 Gradle 模块。在现有模块里加包，遵守 [`architecture.zh-CN.md`](architecture.zh-CN.md) §4.2 的
+依赖方向。
+
+| 关注点 | 模块 | 包（提案） | 理由 |
+|---|---|---|---|
+| 帧采集元数据（传感器时间戳基准、内参） | `sailens-camera` | `com.sailens.camera` | 只有相机模块接触 CameraX/Camera2 |
+| 重力/旋转传感器、`MotionTracker` | `sailens-guidance` | `…guidance.motion`（吸收 `sensors/`） | 属于导航含义；无 UI |
+| 相机几何数学（射线、地平面、接地距离） | `sailens-guidance` | `…guidance.geometry` | Guidance 专用的通用数学 |
+| 深度模型 runner | `sailens-vision` | `…vision.depth` | 模型输出本身不含导航含义，和 sem/det 一样 |
+| 深度 `ModelType`、catalog 条目、预处理 | `sailens-runtime` | 现有包 | 模型来源和预处理都在这里 |
+| 地面拟合、地面观测 | `sailens-guidance` | `…guidance.geometry` | 属于导航含义 |
+| 局部世界模型 | `sailens-guidance` | `…guidance.world` | |
+| 资格（Guidance 能否指引） | `sailens-guidance` | `…guidance.safety` | 只知道感知/几何/运动的健康状况 |
+| 安全状态（再加上卡死和输出健康） | `sailens-shell` | `…shell.guidance.safety` | 只有 shell 同时看得到 Guidance 和输出 |
+| 仿真器 | `sailens-guidance` 测试夹具 | `…guidance.simulation`（测试源集） | JVM，确定性 |
+| 现场采集写入器 | `sailens-shell` debug 源集 | `…shell.debug.capture` | 仅 debug，和 trace UI 一样 |
+| 现场采集格式 + 读取器 | `sailens-guidance` | `…guidance.trace.capture` | 能在 JVM 上读，供回放和仿真使用 |
+| 规划器、控制信号（M7） | `sailens-guidance` | `…guidance.planning`、`…guidance.control` | |
+
+`sailens-core` 不新增任何东西，除非某个类型确实被 Guidance 以下的两个模块共用（候选：如果
+`sailens-vision` 做深度裁剪映射需要，就加一个小的 `CameraIntrinsics` 值类型）。
+
+## 2. 坐标系与时间（所有里程碑通用）
+
+- **分析图像坐标系**：竖直方向正确的分析图像，语义掩码和检测框已经共用这个坐标空间（letterbox
+  由 `SemanticContentRegion` 裁掉）。所有新的几何计算都在这个坐标系里做。内参必须从传感器有效像
+  素阵列，经过 CameraX 的裁剪和分析旋转（`AnalysisRotation`），映射到这个坐标系。
+- **相机坐标系**：x 向右，y 向下，z 向前，与上面的分析图像坐标系对应。
+- **重力**：相机坐标系下指向下方的单位向量 `g`。由设备坐标系下的重力/旋转传感器，经过后置摄像
+  头的固定朝向（`SENSOR_ORIENTATION`）和分析旋转换算得到。
+- **时间**：Guidance 全程使用 `SystemClock.elapsedRealtime()`。`SensorEvent.timestamp` 就是
+  elapsed-realtime 基准。`ImageProxy.imageInfo.timestamp` 只有在
+  `SENSOR_INFO_TIMESTAMP_SOURCE == REALTIME` 时才是这个基准；否则按帧到达时间打时间戳，对齐误差有
+  界，并记入 trace（`timestampSource`）。
+
+## 3. 契约（草图）
+
+```kotlin
+// sailens-camera：附在分析器发出的每个 ImageFrame 上（或随帧一起传递）。
+data class FrameCaptureInfo(
+    val sensorTimestampNanos: Long,
+    val timestampSource: TimestampSource,          // REALTIME | ARRIVAL
+    val intrinsics: CameraIntrinsics?,             // 分析图像像素单位；未知则为 null
+    val intrinsicsSource: IntrinsicsSource,        // CALIBRATION | FOCAL_LENGTH_ESTIMATE | NONE
+)
+
+data class CameraIntrinsics(val fx: Float, val fy: Float, val cx: Float, val cy: Float,
+                            val width: Int, val height: Int)
+
+// sailens-guidance.geometry
+data class CameraGeometry(               // 每帧一个
+    val frameTimestampMs: Long,
+    val intrinsics: CameraIntrinsics,
+    val gravityInCamera: Vec3,           // 单位向量，向下
+    val gravityAgeMs: Long,              // 帧时间与最近一次传感器采样的间隔
+    val phoneHeightMeters: Float,        // 假设值；默认 1.3
+    val quality: GeometryQuality,        // OK | DEGRADED(reason) | UNAVAILABLE(reason)
+)
+
+data class GroundContactDistance(
+    val meters: Float?,                  // null：接地点在地平线上或被截断
+    val lowerBoundMeters: Float?, val upperBoundMeters: Float?,
+    val source: DistanceSource,          // GROUND_CONTACT | IMAGE_POSITION_FALLBACK
+)
+
+data class GroundObservation(            // M3b，来自一帧深度
+    val frameTimestampMs: Long,
+    val groundMask: BinaryMask,          // 分析图像坐标系，和语义掩码同一空间
+    val aboveGroundMask: BinaryMask,
+    val belowGroundMask: BinaryMask,
+    val disparityScale: Float, val disparityShift: Float,   // 拟合出的 A、t
+    val inlierRatio: Float,
+    val planeAgreesWithGravity: Boolean,
+    val confidence: Float,
+)
+
+// sailens-guidance.safety
+sealed interface GuidanceQualification {
+    data object Qualified : GuidanceQualification
+    data class Degraded(val reasons: Set<DegradeReason>) : GuidanceQualification
+    data class Unqualified(val reason: StopReason) : GuidanceQualification
+}
+// sailens-shell：GuidanceQualification + 卡死检测 + 输出健康
+sealed interface GuidanceSafetyState { /* Initializing, Guiding, Degraded, StopRequired(reason),
+                                          Interrupted(reason) */ }
+```
+
+逐像素结果继续用 `BinaryMask` 表示（BitSet，没有逐像素对象）。
+
+## 4. M0 — 基线与现场采集
+
+**分工，避免重复劳动**：阶段 2 工作流负责冻结基线、trace 的"送达/撤回"字段和录制手册；下面的采
+集由这边负责。先合送达字段（改动小），再做采集。
+
+**trace 送达字段。** 现在的 `FrameTrace.messageKeys` 是冷却后的候选。按事件新增输出协调器上报
+的 `deliveredAt` / `revokedAt` / `revokeReason`，作为以事件 id 为键的独立 trace 记录写入（送达发
+生在帧 trace 写完之后）。
+
+**现场采集（仅 debug 版）。**
+- 作为普通订阅者订阅 `FrameSource`（按需驱动，所以 Guidance 停止时除非显式打开采集，否则不会强
+  行产生帧）。必须遵守 P3 相机帧池 PR 定下的归还约定。
+- 存储：降采样到长边 640 px 的 JPEG 帧，5 Hz（可配置），带序号和时间戳；重力、game rotation
+  vector 和陀螺仪在 `SENSOR_DELAY_GAME` 下的每个采样；`FrameCaptureInfo`（变化时记一次）；常规的
+  trace 会话。每个会话一个目录，放在应用内部 `files/captures/` 下，JSONL + JPEG 文件；手动导出。
+- `…guidance.trace.capture` 里的读取器在 JVM 上按时间顺序输出帧和传感器采样，供仿真器（M2）和几
+  何回放测试（M3）使用。
+- 隐私：采集数据里有人脸和地点；不会自动离开设备，可在调试 UI 里列出和删除，release 版不包含。
+
+**运行条件文档**（`docs/guidance-operating-envelope.md`）：手机放置方式和朝向、只支持步行、光线、
+天气、室内/室外、楼梯、过马路、人群密度、耳机、硬件档次、熄屏。没有验证过的一律列为不支持。
+
+**测试**：在合成采集数据上做读取器往返测试；时间戳顺序；采集写入器归还它收到的每一帧（帧池约定）。
+
+## 5. M1 — 资格与安全状态
+
+**Guidance 侧（`GuidanceQualification`）**，每个流水线结果算一次，依据：帧龄（当前时间 − 帧时间
+戳）与预算的比较；`FrameQuality`（遮挡/过暗/模糊）；感知失败（已按
+`PipelinePerformanceBudget.maxConsecutiveFrameFailures` 统计的连续失败帧）；#5 的地面识别状态；以
+后再加几何和运动质量。`Unqualified` 的原因：`FRAME_STALE`、`CAMERA_UNUSABLE`、`PERCEPTION_FAILED`，
+以后加 `ORIENTATION_LOST`、`NO_SAFE_PATH`。
+
+**shell 侧（`GuidanceSafetyState`）** 把资格和 `GuidanceStallDetector`（完全没有结果）、输出健康（语
+音不可用、音频路由）合成起来。它成为告警/震动策略的唯一输入；这套策略现在分散在
+`SceneAnalysisViewModel` 和 `GuidanceHaptic` 里。
+
+**规则**
+- `StopRequired` / `Interrupted` 压住一切普通事件；已排队的普通事件被撤回。
+- 离开 `StopRequired` 需要连续 N 个合格结果（滞回），不是一个。
+- 每次状态转换都带原因和时间戳记入 trace。
+
+**M1 不改行为**：映射要完全复现今天的告警；证明方式是在仿真场景和一次真机运行上对比前后的告警
+时间线。
+
+**测试**：状态上的穷举 `when`；转换表测试；"StopRequired 期间普通事件不能送达"；"过期结果不能恢
+复资格"。
+
+## 6. M2 — 仿真器
+
+- 场景是一段在假时钟上运行的脚本：合成的感知结果（掩码、检测、帧质量）、传感器时间线（重力、旋
+  转）、故障（丢帧、过期帧、模型失败），以及期望输出（资格状态、事件，以后还有控制信号）。
+- 跑真实的 `AnalyzeSceneUseCase` → `DecideEventsUseCase` 路径加新组件，只在模型边界用 fake。确定
+  性：固定随机种子，注入时钟（时钟已经可以注入）。
+- 基准输出提交进仓库；基准有变化时必须在 PR 里说明原因。
+- 第一批：直路无障碍、正前/左/右障碍、变窄、完全阻塞、分割闪烁、单帧误检、连续过期帧、镜头被
+  挡、固定障碍物下手机上抬/下压（给 M3a 用）、停止后的恢复。
+- 以后：加一个采集适配器，把 M0 的录制数据送进同一套框架。
+
+## 7. M3a — 接地点距离
+
+**输入**：该帧的 `CameraGeometry`；分析图像坐标下的一个框。
+
+**算法**
+1. 接地像素 `p` = 框底边中点。如果框碰到图像底边，接地点在画面之外：报 `meters = null`，
+   `upperBound` = 图像底边对应的距离（障碍物至少这么近）→ 近。
+2. 射线 `r = K⁻¹ [u, v, 1]`，`q = g · r`（射线指向地平线以下的程度）。
+3. 若 `q ≤ q_min`（在地平线上或几乎平行），射线碰不到地面：不给距离，退回按图像位置估计，并记入
+   trace。
+4. 地面点 `X = (h / q) · r`；水平距离 `d = |X − (g · X) g|`。
+5. 误差范围来自 `h ± Δh`（±0.15 · h）和重力误差（±2°）；`DistanceLevel` 做近/中判断时用上界（宁可
+   判得更近），阈值沿用 `DefaultDepthRepository` 现有的 1.5 m / 4.0 m。
+
+**接入**：`DepthRepository.estimateDistance` 增加该帧的 `CameraGeometry` 参数；`DefaultDepthRepository`
+在几何质量为 OK 时用接地点距离，否则用现有的 `ImagePositionDepthEstimator`。`DetectedObstacle` 带
+上米数和来源供 trace 使用；对用户的事件仍然只说近/中/远（不向用户报具体米数）。
+
+**已知局限**：接地点被别的物体挡住时距离偏远；坡地会让距离有偏差；手机拿得很低（比如在腰部）由
+设置项覆盖。
+
+**配置**：`SailensRuntimeProfile` 里的 `GroundContactDistanceConfig(enabled = false, phoneHeightMeters =
+1.3f, …)`；shell 里提供用户可改的设置项。
+
+**trace**：每个障碍物的 `distanceMeters`、`distanceSource`、上下界；每帧的 `gravityAgeMs`、
+`pitchDegrees`、`geometryQuality`、`timestampSource`、`intrinsicsSource`。
+
+**测试**：在合成相机上测纯数学（已知俯仰/高度 → 已知距离）；仿真器俯仰场景（同一障碍物，俯仰
+−30°…+10°，分级不能翻转）；重力过期时的回退。
+
+## 8. M3b — 基于深度的地面几何
+
+**模型契约**（`docs/models.md` 增加一节）：输入 RGB，ImageNet 归一化，固定形状；输出相对视差（越
+大越近），单通道。NCHW 或 NHWC 按张量形状自动识别，和 sem/det 一样。没有类别顺序，所以不存在
+sem 那种"顺序错了也能悄悄通过"的风险；对应的风险是**输出反了**（给的是深度不是视差）——预检无法
+静态发现，所以前几帧会检查：在与重力一致的地面拟合上，视差是否朝图像底部增大；否则把观测标为
+无效。
+
+**能力模型**：深度是 Guidance 的一个可选子能力。没有模型 → 地面几何 `Unavailable`，Guidance 照常运
+行。有模型但运行时失败 → 资格 `Degraded`，绝不悄悄变成"没有障碍物"。
+
+**runner**（`sailens-vision.depth`）：LiteRT 会话，默认 GPU fp32（fp16 要先在真机上证明可用），在可
+用时通过零拷贝 handle 路径读输出。
+
+**地面拟合**（`sailens-guidance.geometry`，先用 Kotlin）：
+1. 在视差图下部按粗网格采样（约 6000 个点）。
+2. 每个采样点算 `q = g · r`，用 RANSAC 拟合 `视差 = A·q + t`，内点阈值为相对误差 4%。
+3. 用内点重新拟合；地面掩码 = 在阈值内且在地平线以下（`q > 0`）的像素。
+4. 按带符号的相对残差（3 倍阈值）得到高于/低于地面的掩码。
+5. 像素离地的公制高度（用于台阶）= `h − Z · q`，其中 `Z = A·h / (d − t)`。
+6. 置信度来自内点比例、自由 3 自由度平面拟合与重力约束拟合是否一致，以及最近几帧深度的拟合是否
+   稳定。
+
+**调度**：通过 `PerceptionScheduler` 以 2–5 Hz 运行，缓存允许时共用该帧的预处理。过期观测（超过 2
+个深度周期）不使用。
+
+**GPU 争用**：深度是继 sem、det 之后的新 GPU 使用者；architecture §6.9 里的资源协调器在这里设计
+（取代单独的 P3 GPU 仲裁任务）。优先级：sem/det 优先，深度可被抢占。
+
+**trace**：`depthMs`、`depthBackend`、`groundInlierRatio`、`groundConfidence`、`aboveGroundRatio`、
+`belowGroundRatio`、`planeAgreesWithGravity`。
+
+**测试**：用合成视差（平面、台阶、墙、噪声）做 JVM 测试——地面掩码、台阶符号、台阶高度在容差内；
+真机测试用存下的帧和 PC 参考输出对比；如果加了 native 计算核，还要有绑定覆盖。
+
+## 9. M4 — 局部世界模型
+
+- 以自身为中心、重力对齐的地面网格：0.1 m 格子，前方 6 m × 宽 4 m（可配置），紧凑数组，预先分配。
+- 每次更新时栅格化：可走/空地来自 `GroundObservation`，没有深度时来自 sem 可通行区；占据来自 det 接
+  地点和高于地面的区域；落差来自低于地面的区域。
+- 每个格子存值、置信度和最后观测时间；按 τ ≈ 0.7 s 衰减；超过 3τ 的格子变成未知，绝不变成空地。
+- 两次更新之间，按 `MotionState`（M5）给出的偏航变化旋转网格。不融合平移（没有 VIO 时未知），这
+  正是衰减窗口要短的原因。
+- 输出：`LocalWorldModel(timestamp, ageMs, grid, confidence)`；`SceneSnapshot` 保持现有字段，以后可
+  以从中读取走廊摘要。
+
+## 10. M5 — 运动跟踪
+
+- `MotionTracker` 接口 → `MotionState(timestamp, headingRad, yawRate, isStationary, orientationQuality,
+  translation = UNKNOWN)`。
+- 第一版实现：`SENSOR_DELAY_GAME` 下的 game rotation vector（+ 重力）；静止标志沿用现有
+  `DeviceMotionDataSource` 的逻辑。
+- 姿态不可用或噪声超出界限 → 资格 `Degraded(ORIENTATION)`，所有依赖重力的东西（M3a、M3b、M4）
+  都回退。
+- 计步：单独写决策记录；没有决策记录就不实现。
+
+## 11. M6–M10（概要；各自评审时再细化）
+
+- **M6** 在 M4 上做滚动占据和走廊可通行宽度；先定下 connectivity 透视分歧。native 候选：栅格化、
+  距离变换——都要有 profiling 依据。
+- **M7** Kotlin 规划器；`GuidanceControlSignal(timestamp, validUntil, mode HOLD|STEER|STOP,
+  headingCorrection（归一化）, confidence, stopReason)`；只做调试输出。
+- **M8** 针对振荡、来回翻转、过期控制、恢复的验证场景。
+- **M9** 按 `guidance-validation-roadmap.zh-CN.md` C 阶段做 earcon（`AudioTrack`、运行时生成 PCM）。
+- **M10** native 计算核：只用 `RegisterNatives`，调用粒度要粗（每帧每个计算核一次），输入原始数组 /
+  direct buffer，输出数值，C++ 里不放产品状态，失败要显式返回。没有证明等价的回退要让 Guidance 降
+  级，不能悄悄改变语义。
+
+## 12. 通用规则
+
+- **新鲜度**：每个观测、世界模型和控制信号都带时间戳和有效期；使用方要检查。过期的东西不能产生
+  新的提示或方向。
+- **回退要显式并记入 trace**；会改变导航含义的回退必须证明等价，否则让资格降级。
+- **性能**：热路径里不要逐像素对象、不要 `List<Point>`；复用缓冲区（遵守 P3 mask/帧池的所有权规
+  则）；每个计算核每帧一次 JNI 调用。
+- **对称**：有状态的新组件实现 `reset()`，并接到 `StopSceneAnalysisUseCase` 上。
+- **文案**：任何新的事件 key 都走 `SceneEventMessageKeys` / `SceneEventStrings`，中英文都要有。
+
+## 13. 验证层次
+
+| 层 | 内容 | 在哪里跑 |
+|---|---|---|
+| A | 纯 Kotlin 单测（数学、状态机、新鲜度） | JVM，CI |
+| B | native 计算核测试 + 绑定覆盖 | 真机（androidTest） |
+| C | 带基准输出的仿真场景 | JVM，CI |
+| D | 采集回放（M0 录制数据）前后对比 | JVM，本地 |
+| E | 真机：耗时、温控、耗电、传感器、音频路由 | SM8450 + SM8850 |
+| F | 任何输出词汇都要经过目标用户验证 | 按 guidance-validation-roadmap |
+
+## 14. 许可
+
+不复制 PG 代码；如果以后要复制，保留它的版权/许可头并更新 NOTICE。模型权重、声音素材和数据集都
+不进本仓库。深度模型由用户自带；官方发行版决定是否打包 Depth Anything V2 Small（Apache-2.0；它的
+训练数据包含带研究用途条款的数据集——这是发行版层面的审查事项，不是平台层面的）。
