@@ -116,6 +116,7 @@ zero-pipeline 屏，并指向这里。官方发行版声明导航为必需，因
 | [`docs/guidance-validation-roadmap.zh-CN.md`](docs/guidance-validation-roadmap.zh-CN.md) | [English](docs/guidance-validation-roadmap.md) | 延期的真机提示验证与空间化 earcon 门槛 |
 | [`docs/local-navigation-roadmap.zh-CN.md`](docs/local-navigation-roadmap.zh-CN.md) | [English](docs/local-navigation-roadmap.md) | 提案：吸收 Project Guideline 的局部导航里程碑 |
 | [`docs/local-navigation-implementation.zh-CN.md`](docs/local-navigation-implementation.zh-CN.md) | [English](docs/local-navigation-implementation.md) | 提案：各里程碑的契约、代码位置与测试 |
+| [`docs/field-recording-manual.zh-CN.md`](docs/field-recording-manual.zh-CN.md) | [English](docs/field-recording-manual.md) | 阶段 2 现场录制：场景、流程、标注（草稿） |
 
 `AGENTS.md` 是给编码 agent 的仓库指南（仅英文——它是给工具读的，不是给人读的）。
 

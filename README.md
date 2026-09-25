@@ -124,6 +124,7 @@ Every document below has a Chinese version alongside it (`*.zh-CN.md`), linked f
 | [`docs/guidance-validation-roadmap.md`](docs/guidance-validation-roadmap.md) | [中文](docs/guidance-validation-roadmap.zh-CN.md) | Deferred device validation and spatial earcon gates |
 | [`docs/local-navigation-roadmap.md`](docs/local-navigation-roadmap.md) | [中文](docs/local-navigation-roadmap.zh-CN.md) | Proposed: local navigation milestones absorbing Project Guideline |
 | [`docs/local-navigation-implementation.md`](docs/local-navigation-implementation.md) | [中文](docs/local-navigation-implementation.zh-CN.md) | Proposed: contracts, placement and tests per milestone |
+| [`docs/field-recording-manual.md`](docs/field-recording-manual.md) | [中文](docs/field-recording-manual.zh-CN.md) | Stage 2 field recording: scenes, procedure, labelling (draft) |
 
 `AGENTS.md` is the repo guide for coding agents (English only — it is read by tools, not people).
 
