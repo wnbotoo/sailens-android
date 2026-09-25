@@ -155,9 +155,29 @@ by `sequenceNumber`.
   it receives is released through `FrameSource.releaseFrame`.
 - One directory per session under app-internal `files/captures/`, JSONL + image files; exported
   manually; listed and deletable in the debug UI; excluded from release builds. Captures contain
-  faces and places and never leave the device automatically.
+  faces and places (accepted) and never leave the device automatically.
+- Retention: a session is deleted 7 days after recording unless it was exported or pinned; total
+  size is capped at 2 GB, oldest unpinned sessions removed first. (Field evidence at 5 Hz / 640 px
+  is roughly 0.7 GB per hour.)
 - Reader in `…guidance.trace.capture` yields a time-ordered stream of frames, sensor samples and
   perception records on the JVM, used by the simulator (M2) and geometry replay tests.
+
+**Capture controls** (debug builds; these fill the placeholders in the field recording manual,
+PR #9):
+
+| Need | Design |
+|---|---|
+| Mode switch | Debug settings: "Field capture" off / field evidence / field evidence + model-regression record |
+| Start / stop | While the mode is on, capture follows the Guidance session (starts and stops with it); no separate button to forget |
+| Delete, pin | Debug capture list: per session size, duration, pinned flag; delete and pin actions |
+| Export | Share sheet with one zip per session; the path under `files/captures/` is also documented for `adb pull` on debug builds |
+| Viewing frames around a prompt | On the PC: the reader plus a small script that renders the frames within ±N seconds of a `prompt_outcome` or marker as a contact sheet; no in-app viewer |
+| Storage | Estimated ≈ 0.7 GB/hour for field evidence; measured in M0 and written back into the manual |
+| **"Missed alert" marker** | Volume-down press while capturing (works eyes-free and with the screen locked to the app; a short vibration confirms), plus a large on-screen button. Writes a `marker` record with wall-clock ms, elapsed-realtime nanos and the latest frame `sequenceNumber`. Volume-down is consumed only while capture is on, so normal volume control is unaffected otherwise |
+
+The manual's sync convention (cover the lens for 3 s at the start and end of each segment) shows up
+as an `event_camera_blocked` prompt outcome in the trace and a run of dark frames in the capture;
+the reader can split segments on it.
 
 **Measurements M0 must produce per target device**: camera timestamp source; frame-to-sensor
 alignment error (e.g. by rotating the phone against a static scene and correlating image motion
@@ -264,8 +284,11 @@ or raise risk, so an obstacle today's code would announce is never pushed into F
 estimate to *lower* risk) is a later, separate decision based on field evidence.
 
 **Phone height**: `PhoneGeometrySettings` from a shell-owned store (the runtime profile supplies the
-1.3 m seed only). Enabling M3a requires a height with source `PRESET` or `CALIBRATED`; the seed alone
-never changes distance levels.
+1.3 m seed only). Calibration is by **placement preset** (chest lanyard, handheld at chest, waist),
+each with a default height; optionally the user enters body height and the preset's ratio gives the
+phone height (source `CALIBRATED`; ratios are proposals to be checked against captures). No guided
+distance calibration. Enabling M3a requires a height with source `PRESET` or `CALIBRATED`; the seed
+alone never changes distance levels.
 
 **Integration**: `DepthRepository.estimateDistance` gains the frame's `CameraGeometry` and the
 validity context; `DetectedObstacle` carries the interval, validity and chosen source for trace;
@@ -349,10 +372,10 @@ past observation; stationary scenario proving fusion reduces flicker.
 ## 11. M5 — Movement-direction source (evaluation)
 
 Produces a decision record, not production code. Candidates, each assessed with field data from M0
-captures: rigid mount with a known forward axis (chest harness / lanyard) validated against walking
-direction; step-based dead reckoning (needs the `ACTIVITY_RECOGNITION` decision); visual motion from
-consecutive frames (e.g. ground-plane flow, since M3 gives the plane). Outcome feeds the production
-steering gate and M6 rolling occupancy.
+captures: step-based dead reckoning (needs the `ACTIVITY_RECOGNITION` decision); visual motion from
+consecutive frames (e.g. ground-plane flow, since M3 gives the plane). Rigid-mount validation is out
+of scope for now (decided 2026-09-25). Outcome feeds the production steering gate and M6 rolling
+occupancy.
 
 ## 12. M6–M11 (outline; detailed in their own reviews)
 

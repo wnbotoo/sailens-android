@@ -255,10 +255,10 @@ M0 ─┬─ M1 ── M1b
 
 ### M5 — Movement-direction source (evaluation)
 - **Depends on**: M3o.
-- **Goal**: decide whether any non-ARCore source can give a validated walking direction: rigid mount
-  (chest/lanyard) where the camera forward axis is the walking direction; step-based dead reckoning
-  (needs the permission decision); visual motion from consecutive frames. Output: a decision record
-  with field evidence, or "none validated".
+- **Goal**: decide whether any non-ARCore source can give a validated walking direction: step-based
+  dead reckoning (needs the permission decision) or visual motion from consecutive frames. Rigid-mount
+  validation is out of scope for now (decided 2026-09-25). Output: a decision record with field
+  evidence, or "none validated".
 - **User-visible**: no.
 
 ### M6 — Occupancy and clearance
@@ -345,10 +345,13 @@ Adopted (PR #7 review):
 - Release A operating envelope declares unsupported: running, stair/drop guidance, road-crossing
   guidance, directional steering, and any phone placement M3a has not been validated for.
 
-Still open:
+Decided afterwards (2026-09-25):
 
-1. Calibration form: guided (stand at a marked distance from a wall/object) vs presets (chest
-   lanyard / handheld chest height / waist), or both.
-2. Whether captures may contain faces (they stay on device; export is manual) and how long they are
-   kept.
-3. Which rigid-mount placement, if any, is worth validating for the steering gate (M5).
+- **Calibration = placement presets** (chest lanyard / handheld at chest / waist), each with a
+  default height. Optional low-effort refinement: the user enters body height and the preset's ratio
+  gives phone height. A guided distance calibration is not planned — it asks a blind user to know a
+  distance to a wall, which is the thing we are trying to measure.
+- **Captures may contain faces.** Retention: deleted automatically 7 days after recording unless
+  exported or pinned in the debug UI; total cap 2 GB, oldest removed first.
+- **No rigid-mount validation for now.** M5 evaluates step-based and visual movement direction only;
+  production steering therefore waits for M5 to validate a source or for M11.
