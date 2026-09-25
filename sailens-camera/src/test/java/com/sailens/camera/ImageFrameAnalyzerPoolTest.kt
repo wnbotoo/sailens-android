@@ -51,6 +51,7 @@ class ImageFrameAnalyzerPoolTest {
     private val analyzer = ImageFrameAnalyzer(
         frameConverter = StampingConverter { converted++ },
         elapsedRealtimeMs = { now },
+        elapsedRealtimeNanos = { now * 1_000_000 },
     )
     private val scope = CoroutineScope(Job() + Dispatchers.Unconfined)
 

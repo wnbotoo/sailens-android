@@ -58,7 +58,7 @@
 - **时间**：Guidance 全程使用 `SystemClock.elapsedRealtime()`。`SensorEvent.timestamp` 就是
   elapsed-realtime 基准。`ImageProxy.imageInfo.timestamp` 只有在
   `SENSOR_INFO_TIMESTAMP_SOURCE == REALTIME` 时才是这个基准。否则按帧到达时间打时间戳；由此产生的
-  对齐误差在 M0 按设备实测之前是**未知的**，并记入 trace（`timestampSource`）。误差未测或过大时，
+  对齐误差在 M0a 按设备实测之前是**未知的**，并记入 trace（`timestampSource`）。误差未测或过大时，
   几何使用方按质量下降处理。
 
 ## 3. 契约（草图）
@@ -165,67 +165,103 @@ sealed interface GuidanceSafetyState { /* Initializing, Guiding, Degraded(reason
 
 逐像素结果继续用 `BinaryMask` 表示（BitSet，没有逐像素对象）。
 
-## 4. M0 — 基线与现场采集
+## 4. M0a — 现场证据采集；M0b — 模型回归记录
 
-**分工，避免重复劳动**：阶段 2 工作流负责冻结基线、trace 的"送达/撤回"字段和录制手册；下面的采
-集由这边负责。先合送达字段（改动小），再在 P3 相机帧池 PR 之后做采集。
+M0 拆成两部分（路线图 §7）：**M0a** 是这里描述的现场证据采集；**M0b**（用于精确回放的逐帧感知输出）
+在它自己的评审里设计，必须在第一个行为改动之前合入。本节不承诺精确回放。
 
-**trace 送达字段**（已在 PR #8、分支 `feat/trace-prompt-outcomes` 实现；以该 PR 为准）。
-`FrameTrace.messageKeys` 仍是冷却后的候选。每条交出的提示新增一条 `prompt_outcome` 记录，包含
-`eventId`（键）、`sourceSequenceNumber`（与帧关联）、`messageKey`、`category`、`priority`、
-`deliveredAt` / `revokedAt` 二者恰有其一、`revokeReason`（`waiting_for_description` |
-`output_refused`），以及当时的输出设置。时间戳是墙钟毫秒，与 `pipelineCompletedAt` 同一时钟。不记
-录：已送达的语音后来被更高优先级打断。
+**交付，分三个 PR**
 
-**对时锚点。** trace 用墙钟毫秒；传感器采样（以及时间戳来源为 `REALTIME` 时的帧）用
-elapsed-realtime 纳秒。采集写入器在会话开始时（以及恢复时）记一对 `(wallMs, elapsedRealtimeNanos)`
-锚点，让两者能放在同一条时间线上；帧通过 `sequenceNumber` 与 trace 关联。
+| PR | 范围 |
+|---|---|
+| A — 契约 / 基础 | 本节；采集 schema 和 `manifest.json`；JVM 读取器；来源侧的帧计时（`ImageFrame.receivedElapsedRealtimeNanos`）；`sailens-camera` 的相机参数快照 API；`captures/` 不进入备份和设备迁移；单测 |
+| B — 采集引擎 | `TraceService` 装饰钩子；帧、传感器、锚点、标记写入器；有界队列；保留策略；模式设置；失败隔离；写入器测试 |
+| C — 现场工具 | 采集列表（保留 / 删除 / 导出）；分享 ZIP；音量减键标记和屏幕按钮；对时突发采集；Python 工具（缩略图、对齐、存储） |
 
-**两种采集语义。**
+**trace 送达字段**（PR #8，已合入）。`FrameTrace.messageKeys` 仍是冷却后的候选。每条交出的提示有一条
+`prompt_outcome` 记录，包含 `eventId`、`sourceSequenceNumber`（一定能关联：交出过提示的帧无论采样设置
+如何都会写帧记录）、`messageKey`、`category`、`priority`、`deliveredAt` / `revokedAt` 恰有其一，以及：
+`deliveredVia`——实际承载提示的通道，闭集为 `speech` | `screen_reader` | `haptics` | `status_card`，这
+才是用户听到或感到的证据——或者 `revokeReason`（`waiting_for_description` | `output_refused`）。输出设置
+只作背景。这些不变量在构造 `PromptOutcomeTrace` 时强制检查，写入端和解析端共用。采集工具复用这个类
+型，不另写一份字段定义。不记录：已送达的语音后来被更高优先级打断。
 
-| | 现场证据采集 | 模型回归记录 |
-|---|---|---|
-| 用途 | 标注、#5 阈值校准、几何标定、仿真场景素材 | 流水线改动后精确回放决策路径 |
-| 画面 | 5 Hz、长边 640 px、JPEG | 平时不存；只在标记事件前后的窗口里存完整分析分辨率帧 |
-| 另外存 | `SENSOR_DELAY_GAME` 下的重力 / game rotation vector / 陀螺仪、`FrameCaptureInfo`、trace | 逐帧感知输出（sem 类别掩码或可通行掩码、检测结果、帧质量）+ `CameraGeometry` |
-| 不能用于 | 重跑 sem/det 并期望输出完全一致（缩放 + JPEG 会改变模型输入） | 任何需要连续画面的用途 |
+**采集格式**（`sailens-guidance` 的 `…trace.capture`，`CaptureSchema`）。每个 Guidance 会话一个目录，
+以 trace 的 session id 命名：
 
-**采集写入器（仅 debug 版）。**
-- 使用相机帧池 PR（#10）提供的限速订阅：`FrameSource.frames(minIntervalMs = 200)`，不需要的帧根本不会
-  送到它这里。流上的帧是借出的（见 #10 修订后的 architecture §6.1）：收到的每一帧都通过
-  `FrameSource.releaseFrame` 归还（幂等）。每个订阅者拿到各自的 `ImageFrame.copy()`，所以放在
-  `ImageFrame` 上的 `FrameCaptureInfo` 会随之带过去；M3o 在 `ImageFrameConverter.convert`（#10 给它加了
-  `PlaneAllocator` 参数）里填写它。
-- 每个会话一个目录，放在应用内部 `files/captures/` 下，JSONL + 图像文件；手动导出；可在调试 UI
-  里列出和删除；release 版不包含。采集数据里有人脸和地点（已确认可以接受），不会自动离开设备。
-- 保留期限：会话录制 7 天后自动删除，已导出或标记保留的除外；总量上限 2 GB，超出时先删最旧的未标记
-  会话。（现场证据按 5 Hz / 640 px 算，一小时约 0.7 GB。）
-- `…guidance.trace.capture` 里的读取器在 JVM 上按时间顺序输出帧、传感器采样和感知记录，供仿真器
-  （M2）和几何回放测试使用。
+| 文件 | 内容 |
+|---|---|
+| `manifest.json` | `CaptureManifest`：schema 大/小版本、session id、模式（`field_evidence` / `timing_sync`）、开始时的墙钟和 elapsed-realtime 时间、应用版本、git SHA（有的话）、设备、SDK、硬件档位、相机参数、`complete`、`failureReason`、`pinned`、`exportedAtWallMs`、采集计数 |
+| `frames.jsonl` + `frames/` | 每个存下的帧一条 `FrameRecord`：序号、相机时间戳、来源侧接收时间、原始尺寸和旋转、编码（`jpeg` / `luma8`）、文件、存储尺寸 |
+| `sensors.jsonl` | `SensorRecord`：传感器（`gravity`、`game_rotation_vector`、`gyroscope`）、事件时间戳、精度、数值 |
+| `anchors.jsonl` | `ClockAnchorRecord`：会话开始、每 30–60 秒、会话结束时各记一对（墙钟毫秒，elapsed-realtime 纳秒） |
+| `markers.jsonl` | `MarkerRecord`："标记漏报"、墙钟和 elapsed 时间、最新帧序号、来源 |
 
-**采集操作**（仅 debug 版；对应现场录制手册 PR #9 里的占位）：
+- 创建目录时就写 `manifest.json`，`complete = false`；正常结束后以原子方式（临时文件 + 重命名）改写为
+  `complete = true`。应用被杀、崩溃、拔 USB、磁盘满都会留下 `complete = false`，读取器会报告。
+- 每行 JSONL 都有 `type`。读取器忽略未知字段和未知记录类型，拒绝未知的**大**版本；被截断的最后一行跳
+  过并给出警告。
+- 传感器频率按事件时间戳计算；`SENSOR_DELAY_GAME` 只是请求的档位。
+- 采集自己的计数（`framesOffered`、`framesEncoded`、`framesDroppedByEncoder` 等）与 Guidance 的丢帧计数
+  分开，这样才能解释采集为什么缺帧。
+
+**计时。** 帧的计时在来源侧取：`ImageFrameAnalyzer.analyze()` 在任何需求判断、转换或排队之前记下
+`receivedElapsedRealtimeNanos`；相机自己的 `ImageFrame.timestamp` 含义不变。采集两个都记。以哪个为准
+由 M3o 根据 `SENSOR_INFO_TIMESTAMP_SOURCE` 决定（只有 `REALTIME` 能和传感器事件比较；`UNKNOWN` 单调，
+但不保证与陀螺仪对齐）。trace 用墙钟毫秒；锚点把两者放到同一条时间线上，周期性的锚点还能发现会话中
+途被改动的墙钟。
+
+**相机参数。** `sailens-camera` 提供 `CameraCharacteristicsProvider.currentSnapshot()`，返回纯值的
+`CameraCharacteristicsSnapshot`（内参标定、畸变、镜头位姿、有效/校正前有效像素区、像素阵列、物理尺寸、
+焦距、传感器朝向、时间戳来源）。Camera2 interop 只留在 `sailens-camera` 内部（`Camera2CameraInfo` 从
+CameraX 1.7 起被弃用）。快照在每次绑定时读取、解绑时清空，绝不跨绑定缓存（有些逻辑摄像头会随设备状态
+改变 `SENSOR_ORIENTATION`）。分析尺寸取第一帧的实际尺寸，不取请求的分辨率。
+
+**会话接入（PR-B）。** `GuidanceModule` 构建基础的 `TraceService`（文件或空实现），如果绑定了可选的
+`TraceServiceDecorator` 就套上它；debug 的 `shellDebugModule` 绑定一个加上采集的装饰器，release 不绑定。
+这样就不需要 Koin 覆盖——覆盖的话，装饰器没法拿到被它覆盖掉的那个服务。规则：
+- 采集失败绝不让 Guidance 失败：磁盘满、传感器注册失败、编码线程崩溃，都只把本次采集标成失败/不完整，
+  不会从 `TraceService` 的调用里抛出异常；
+- 采集的开始/停止绝不阻塞 `TraceService` 的调用；
+- 采集模式只在会话开始时读取一次；
+- 现场采集只存在于开启了 trace（`TraceRuntimeConfig.enabled`）的 debug 版里；要和 trace 解耦，需要单独
+  的会话观察者，不属于 M0a。
+
+**帧写入器（PR-B）。** `FrameSource.frames(minIntervalMs = 200)` → 降采样复制成 NV21 → 立即
+`releaseFrame` → 有界队列（容量 1–2，丢弃最旧的待处理帧）→ 后台 JPEG 编码（长边 640 px，质量 80，不旋
+转像素，记录 `rotationDegrees`）。
+
+**对时突发采集（PR-C）。** 模式 `timing_sync`：约 15 秒，按相机帧率，存小尺寸亮度帧（`luma8`，长边
+320–480 px，不做 JPEG），逐帧精确时间戳，陀螺仪用 `SENSOR_DELAY_GAME`。只用于测帧/传感器对齐，绝不作为
+性能基线。
+
+**操作（PR-C，仅 debug 版；对应录制手册 PR #9 里的占位）**
 
 | 需求 | 设计 |
 |---|---|
-| 模式开关 | 调试设置："现场采集" 关 / 现场证据 / 现场证据 + 模型回归记录 |
-| 开始 / 停止 | 模式打开时，采集跟随 Guidance 会话一起开始和停止；不设单独按钮，免得忘按 |
-| 删除、标记保留 | 调试采集列表：每个会话显示大小、时长、是否保留；提供删除和保留操作 |
-| 导出 | 通过系统分享，每个会话一个 zip；debug 版同时写明 `files/captures/` 路径，可用 `adb pull` |
-| 查看某条提示前后的帧 | 在电脑上：读取器 + 一个小脚本，把某条 `prompt_outcome` 或标记前后 ±N 秒的帧拼成缩略图；不做应用内查看器 |
-| 存储 | 现场证据估计约 0.7 GB/小时；M0 实测后写回手册 |
-| **"标记漏报"** | 采集期间按音量减键（不用看屏幕即可操作，按下后短震确认），另有一个屏幕大按钮。写一条 `marker` 记录，含墙钟毫秒、elapsed-realtime 纳秒和最新帧的 `sequenceNumber`。只有采集打开时才拦截音量减键，其余时候不影响正常调音量 |
+| 模式开关 | 调试设置：现场采集 关 / 开 |
+| 开始 / 停止 | 模式打开时跟随 Guidance 会话；不设单独按钮 |
+| 删除、标记保留 | 采集列表：每个会话显示大小、时长、是否完整/保留；删除和保留操作 |
+| 导出 | 先检查剩余空间，在 `cacheDir/capture_exports/` 里打 ZIP，通过 FileProvider 的 `<cache-path>` 分享；`files/captures/` 本身绝不暴露；旧的导出文件在下次启动 / 打开列表时清理。`adb` + `run-as` 写进文档，作为批量导出的备选 |
+| 查看某条提示前后的帧 | 在电脑上：读取器 + 脚本，把某条 `prompt_outcome` 或标记前后 ±N 秒的帧拼成缩略图 |
+| 存储 | 估计约 0.7–1 GB/小时；M0a 实测后写回手册 |
+| 保留 | 录制 7 天后自动删除，已导出或标记保留的除外；总量上限 2 GB，先删最旧的未保留会话 |
+| **"标记漏报"** | 采集进行中按音量减键：只认 `ACTION_DOWN` 且 `repeatCount == 0`，只在这时消费按键；标记入队后才短震确认。另有屏幕大按钮。前台 Guidance 会话中不用看屏幕即可操作；不承诺锁屏或后台可用（目前还没有后台 Guidance）。TalkBack 下的表现要在真机上验证 |
 
-手册的对时约定（每段开头和结尾用手盖住镜头 3 秒）在 trace 里表现为一条 `event_camera_blocked` 的
-prompt outcome，在采集里是一段黑帧；读取器可以据此自动切段。
+**隐私。** 采集数据含人脸和地点（已确认可以接受）。它们被排除在 Auto Backup（`backup_rules.xml`）以及
+云备份和设备迁移（`data_extraction_rules.xml`）之外；导出的 ZIP 放在不参与备份的 `cacheDir`。除非用户主
+动导出，数据不会离开设备。
 
-**M0 必须在每台目标设备上测出的数据**：相机时间戳来源；帧与传感器的对齐误差（例如对着静止场景转
-动手机，把画面运动和陀螺仪做相关）；内参来源。
+**M0a 必须在每台目标设备上测出的数据**：相机时间戳来源；帧与传感器的对齐误差（用对时突发采集，把画面
+旋转和陀螺仪积分做相关）；存储速率；TalkBack 下的音量减键。
 
 **运行条件文档**（`docs/guidance-operating-envelope.md`）：手机放置方式和朝向、只支持步行、光线、
 天气、室内/室外、楼梯、过马路、人群密度、耳机、硬件档次、熄屏。版本 A 列为不支持的有：跑步、楼梯/
 落差指引、过马路指引、方向指引，以及 M3a 没有验证过的任何放置方式。
 
-**测试**：在合成采集数据上做读取器往返测试；时间戳顺序；写入器归还它收到的每一帧。
+**测试**：PR-A——schema 往返、每行带类型、拒绝未知大版本、容忍未知小版本字段和类型、报告截断行和不完
+整 manifest、来源侧计时早于转换。PR-B——写入器归还收到的每一帧、有界队列丢最旧的、写入器失败不影响
+trace 调用、manifest 原子地完成。PR-C——标记去抖、导出内容完整且不暴露导出之外的任何文件。
 
 ## 5. M1 — 资格与安全状态（精确复现现状）；M1b — 停止压住已排队事件
 
@@ -284,7 +320,7 @@ prompt outcome，在采集里是一段黑帧；读取器可以据此自动切段
 - 第一批：直路无障碍、正前/左/右障碍、变窄、完全阻塞、分割闪烁、单帧误检、连续过期帧、镜头被挡、
   固定障碍物下手机上抬/下压（给 M3a）、部分被挡的行人（给 M3a 有效性）、停止后的恢复（给 M1b）、用
   户在走而障碍物消失（给 M4）。
-- 以后：加一个采集适配器，把 M0 的模型回归记录送进同一套框架。
+- 以后：加一个采集适配器，把 M0b 的模型回归记录送进同一套框架。
 
 ## 7. M3o — 姿态与相机几何
 
@@ -433,12 +469,12 @@ sem 那种"顺序错了也能悄悄通过"的风险；对应的风险是**输出
 | 使用方 | 正式方向指引门槛（M7–M9） | 滚动空地 / 占据（M4 V1 之后、M6） |
 | 契约 | `MovementDirectionEstimate`（朝向、置信度、有效期） | `TranslationEstimate`（Δ前、Δ右、不确定度、置信度） |
 
-**M5a — 评估（离线，产出决策记录）。** 用 M0 采集数据评估候选方案：基于计步的航位推算（需要先定
+**M5a — 评估（离线，产出决策记录）。** 用 M0a 采集数据评估候选方案：基于计步的航位推算（需要先定
 `ACTIVITY_RECOGNITION` 权限）；从相邻帧估计的视觉运动（例如地面光流——M3 给出了地平面和尺度）。刚性固
 定的验证暂不做（2026-09-25 决定）。决策记录给出*方向*和*平移*两个结论，各自为"已验证 / 未验证"，并附
 与参照对比的误差统计。M5a 自己的评审要满足两个条件：(1) 结论所验证的帧率和分辨率必须与 M5b 运行时一致——
 5 Hz / 640 px 的结果不能证明 15–30 Hz 或全分辨率的实现；需要更高采样的候选方案要单独做运动评估采集，不能
-硬套 M0 数据；(2) *平移*结论需要时间对齐的位移参照，能检查每个相邻区间的 Δ前 / Δ右，而不只是整条步行路
+硬套 M0a 数据；(2) *平移*结论需要时间对齐的位移参照，能检查每个相邻区间的 Δ前 / Δ右，而不只是整条步行路
 线的总长度（总长度只能作粗略的合理性检查）。
 
 **M5b — 运行时实现。** 只针对"已验证"的结论：在 `…guidance.motion` 里实现 `MovementDirectionSource`
@@ -478,7 +514,7 @@ sem 那种"顺序错了也能悄悄通过"的风险；对应的风险是**输出
 | A | 纯 Kotlin 单测（数学、状态机、新鲜度、融合表） | JVM，CI |
 | B | native 计算核测试 + 绑定覆盖 | 真机（androidTest） |
 | C | 带基准输出的仿真场景 | JVM，CI |
-| D | 采集回放（M0 记录）前后对比 | JVM，本地 |
+| D | 采集回放（M0b 记录）前后对比 | JVM，本地 |
 | E | 真机：耗时、温控、耗电、传感器、时间戳对齐、音频路由 | SM8450 + SM8850 |
 | F | 任何输出词汇都要经过目标用户验证 | 按 guidance-validation-roadmap |
 

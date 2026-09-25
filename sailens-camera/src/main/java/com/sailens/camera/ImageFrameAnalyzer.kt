@@ -22,6 +22,7 @@ import java.util.concurrent.atomic.AtomicLong
 public class ImageFrameAnalyzer(
     private val frameConverter: ImageFrameConverter = ImageProxyToFrameConverter(),
     private val elapsedRealtimeMs: () -> Long = SystemClock::elapsedRealtime,
+    private val elapsedRealtimeNanos: () -> Long = SystemClock::elapsedRealtimeNanos,
 ) : ImageAnalysis.Analyzer, FrameSource, FrameSnapshotProvider {
     private var nextSequenceNumber = 0L
     private val emittedFrames = AtomicLong(0L)
@@ -50,6 +51,10 @@ public class ImageFrameAnalyzer(
      * which is what lets Describe work while Guidance is stopped.
      */
     override fun analyze(image: ImageProxy) {
+        // Taken first, before demand checks, conversion or any queueing: a subscriber that reads
+        // the time on its own side also measures scheduling, which would pollute frame-to-sensor
+        // alignment.
+        val receivedNanos = elapsedRealtimeNanos()
         image.use { proxy ->
             val now = elapsedRealtimeMs()
             val subscribed = subscriptions.toList()
@@ -66,7 +71,7 @@ public class ImageFrameAnalyzer(
                     image = proxy,
                     sequenceNumber = nextSequenceNumber++,
                     planes = buffers,
-                )
+                ).copy(receivedElapsedRealtimeNanos = receivedNanos)
                 latestFrame.record(frame, buffers)
                 if (due.isEmpty()) {
                     // Converted for a snapshot lease only. Nothing is collecting, so there is no

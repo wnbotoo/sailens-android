@@ -43,6 +43,7 @@ class ImageFrameAnalyzerDemandTest {
     private val analyzer = ImageFrameAnalyzer(
         frameConverter = CountingConverter(converted),
         elapsedRealtimeMs = { now },
+        elapsedRealtimeNanos = { now * 1_000_000 },
     )
 
     private val cameraRunning = AtomicBoolean(false)
@@ -167,6 +168,29 @@ class ImageFrameAnalyzerDemandTest {
                 Thread.sleep(5)
             }
         }
+    }
+
+    @Test
+    fun `a frame carries the time the analyzer received it, taken before conversion`() {
+        var nowNanos = 5_000_000L
+        val slowConverter = object : ImageFrameConverter {
+            override fun convert(image: ImageProxy, sequenceNumber: Long, planes: PlaneAllocator): ImageFrame {
+                nowNanos += 40_000_000L // conversion takes time; the receipt time must not include it
+                return CountingConverter(AtomicInteger()).convert(image, sequenceNumber, planes)
+            }
+        }
+        val timed = ImageFrameAnalyzer(
+            frameConverter = slowConverter,
+            elapsedRealtimeMs = { now },
+            elapsedRealtimeNanos = { nowNanos },
+        )
+
+        timed.openSnapshotLease().use { timed.analyze(FakeImageProxy()) }
+
+        val frame = timed.currentFrame(maxAgeMs = 10_000)
+        assertEquals(5_000_000L, frame?.receivedElapsedRealtimeNanos)
+        // The camera's own timestamp keeps its meaning.
+        assertEquals(0L, frame?.timestamp)
     }
 
     private fun awaitTrue(what: String, deadlineMs: Long = 2_000, condition: () -> Boolean) {

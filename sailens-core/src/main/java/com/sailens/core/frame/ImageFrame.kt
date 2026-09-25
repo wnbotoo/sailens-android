@@ -40,6 +40,14 @@ public data class Yuv420FrameData(
     val v: YuvPlaneData,
 )
 
+/**
+ * @param timestamp the camera's own timestamp for the frame, in nanoseconds. Its time base depends
+ *   on the device (`SENSOR_INFO_TIMESTAMP_SOURCE`): only a `REALTIME` source is comparable with
+ *   `SystemClock.elapsedRealtimeNanos()` and with sensor events.
+ * @param receivedElapsedRealtimeNanos when the capture source received the frame from the camera,
+ *   in `SystemClock.elapsedRealtimeNanos()`, taken before any conversion or queueing; 0 when the
+ *   source does not record it. It is a separate field so that [timestamp] keeps its meaning.
+ */
 public data class ImageFrame(
     val width: Int,
     val height: Int,
@@ -49,6 +57,7 @@ public data class ImageFrame(
     val rotationDegrees: Int,
     val sequenceNumber: Long,
     val yuvData: Yuv420FrameData? = null,
+    val receivedElapsedRealtimeNanos: Long = 0L,
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -60,7 +69,8 @@ public data class ImageFrame(
             rotationDegrees == other.rotationDegrees &&
             sequenceNumber == other.sequenceNumber &&
             pixelBytes.contentEquals(other.pixelBytes) &&
-            yuvData == other.yuvData
+            yuvData == other.yuvData &&
+            receivedElapsedRealtimeNanos == other.receivedElapsedRealtimeNanos
     }
 
     override fun hashCode(): Int {
@@ -72,6 +82,7 @@ public data class ImageFrame(
         result = 31 * result + rotationDegrees
         result = 31 * result + sequenceNumber.hashCode()
         result = 31 * result + (yuvData?.hashCode() ?: 0)
+        result = 31 * result + receivedElapsedRealtimeNanos.hashCode()
         return result
     }
 }
