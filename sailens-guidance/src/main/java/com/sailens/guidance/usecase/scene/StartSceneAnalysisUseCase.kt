@@ -59,7 +59,8 @@ class StartSceneAnalysisUseCase(
      * @param releaseFrame hands each frame back to its source once this pipeline is done reading
      *   it (the source may then reuse its arrays). Called exactly once per frame received, after
      *   that frame's processing -- including the model runs, which [ProcessFrameUseCase] waits
-     *   for -- has finished, whether it succeeded, was skipped or threw.
+     *   for -- has finished, whether it succeeded, was skipped or threw. No default: a caller
+     *   whose source lends frames must not lose the reuse without noticing.
      * @param semanticMaskSnapshot asked once per frame whether the caller wants
      *   [SceneResult.segmentationMask]. The pipeline's own mask is reused once a newer semantic
      *   run replaces it, so what goes out is a copy the caller owns -- made only when asked, and
@@ -68,7 +69,7 @@ class StartSceneAnalysisUseCase(
      */
     suspend operator fun invoke(
         frameFlow: Flow<ImageFrame>,
-        releaseFrame: (ImageFrame) -> Unit = {},
+        releaseFrame: (ImageFrame) -> Unit,
         semanticMaskSnapshot: () -> Boolean,
     ): Flow<SceneResult> = flow {
         // 会话开始时把设置页选中的挡位落成运行配置；必须在 obstacle provider 初始化之前，
