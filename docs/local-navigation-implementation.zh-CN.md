@@ -100,14 +100,46 @@ data class MotionState(                  // M3o：只含旋转
     val yawRateRadPerS: Float,
     val isStationary: Boolean,
     val orientationQuality: Quality,
-    val translation: TranslationKnowledge = TranslationKnowledge.UNKNOWN,
 )
 
-// sailens-guidance.safety
-sealed interface GuidanceQualification {
-    data object Qualified : GuidanceQualification
-    data class Degraded(val reasons: Set<DegradeReason>) : GuidanceQualification
-    data class Unqualified(val reason: StopReason) : GuidanceQualification
+// M5b：两种独立能力；有其一不代表有其二。
+data class MovementDirectionEstimate(    // 用户往哪走
+    val timestampMs: Long, val headingRad: Float, val confidence: Float, val validUntilMs: Long,
+)
+data class TranslationEstimate(          // 自上次估计以来用户移动了多远
+    val fromMs: Long, val toMs: Long,
+    val deltaForwardM: Float, val deltaRightM: Float, val uncertaintyM: Float, val confidence: Float,
+)
+
+// M3b：分析图像 ↔ 深度张量的几何映射。属于模型配置契约的一部分。
+data class DepthInputTransform(
+    val sourceRegion: Rect,              // 送进模型的分析图像区域
+    val modelWidth: Int, val modelHeight: Int,
+    val policy: ResizePolicy,            // STRETCH | CROP_KEEP_ASPECT | PAD_KEEP_ASPECT
+    val scaleX: Float, val scaleY: Float,// 裁到 sourceRegion 之后，分析像素 → 张量像素
+    val padLeft: Int, val padTop: Int,   // 张量像素，仅 PAD 使用
+) {
+    fun toTensor(u: Float, v: Float): PointF   // 分析图像 → 张量
+    fun toAnalysis(x: Float, y: Float): PointF // 张量 → 分析图像
+    fun covers(u: Float, v: Float): Boolean    // 在 sourceRegion 之外或落在填充区时为 false
+}
+
+// sailens-guidance.safety——按能力划分（见 §5）
+data class GuidanceQualification(
+    val baseline: BaselineQualification,                 // 今天的 Guidance 所依赖的部分
+    val capabilities: Map<GuidanceCapability, CapabilityStatus>,
+)
+sealed interface BaselineQualification {
+    data object Qualified : BaselineQualification
+    data class Degraded(val reasons: Set<DegradeReason>) : BaselineQualification
+    data class Unqualified(val reason: StopReason) : BaselineQualification
+}
+enum class GuidanceCapability { ORIENTATION, GROUND_CONTACT_DISTANCE, DEPTH_GEOMETRY,
+                                MOVEMENT_DIRECTION, TRANSLATION /* 以后：DROP_WARNING, … */ }
+sealed interface CapabilityStatus {
+    data object NotConfigured : CapabilityStatus
+    data object Available : CapabilityStatus
+    data class Unavailable(val reason: String) : CapabilityStatus
 }
 // sailens-shell：GuidanceQualification + 卡死检测 + 输出健康（映射见 §5）
 sealed interface GuidanceSafetyState { /* Initializing, Guiding, Degraded(reasons),
@@ -180,11 +212,25 @@ prompt outcome，在采集里是一段黑帧；读取器可以据此自动切段
 
 ## 5. M1 — 资格与安全状态（精确复现现状）；M1b — 停止压住已排队事件
 
-**Guidance 侧（`GuidanceQualification`）**，每个流水线结果算一次，依据：帧龄（当前时间 − 帧时间
-戳）与预算的比较；`FrameQuality`（`OBSTRUCTED` / `TOO_DARK`）；感知失败（已按
-`PipelinePerformanceBudget.maxConsecutiveFrameFailures` 统计的连续失败帧）；#5 的地面识别状态；以
-后再加几何和姿态质量。`Unqualified` 的原因：`FRAME_STALE`、`CAMERA_UNUSABLE`、`PERCEPTION_FAILED`；
-以后加 `ORIENTATION_LOST`、`NO_SAFE_PATH`。
+**Guidance 侧（`GuidanceQualification`）** 按能力划分，每个流水线结果算一次：
+
+- **基础资格**——今天的 Guidance（sem 连通性、det 障碍物、现有事件）所依赖的部分：帧龄（当前时间 −
+  帧时间戳）与预算的比较；`FrameQuality`（`OBSTRUCTED` / `TOO_DARK`）；感知失败（已按
+  `PipelinePerformanceBudget.maxConsecutiveFrameFailures` 统计的连续失败帧）；#5 的地面识别状态。
+  `Unqualified` 的原因：`FRAME_STALE`、`CAMERA_UNUSABLE`、`PERCEPTION_FAILED`；有了规划器之后再加
+  `NO_SAFE_PATH`。
+- **能力状态**——每个可选能力（姿态、接地点距离、深度几何、移动方向、平移）一项：`NotConfigured` /
+  `Available` / `Unavailable`。
+
+规则：
+
+1. 可选能力缺失、失效或过期，只让**该能力**变成 `Unavailable`。基于它的功能回退到今天的行为。基础资
+   格不变：**配置了但坏掉，绝不比没配置更糟。**
+2. 只有当一个**已启用**的面向用户的功能需要这个能力时，它的失效才有更大的影响，具体由各功能自己的评
+   审决定：通常是该功能关闭并记入 trace（如果用户依赖它，再给一条低优先级提示）；如果这个能力是当前
+   正在输出的控制信号（M7 之后）的必要输入，就停止控制输出（`StopRequired`）。
+3. 目前没有任何面向用户的功能依赖可选能力（M3a 默认关闭，M3b 对用户不可见），所以在 M1 里所有能力失
+   效都只记 trace。
 
 **shell 侧（`GuidanceSafetyState`）** 把资格和 `GuidanceStallDetector`、输出健康合成起来。映射如下
 （规则：输出通道的问题只让*送达*降级，不影响*对路的判断*）：
@@ -192,10 +238,11 @@ prompt outcome，在采集里是一段黑帧；读取器可以据此自动切段
 | 情况 | 安全状态 | 说明 |
 |---|---|---|
 | 有资格，输出全部正常 | `Guiding` | |
-| 资格 `Degraded`（例如认不出地面） | `Degraded(perception)` | 现状：路径提示暂停，障碍物照常播报 |
+| 基础资格 `Degraded`（例如认不出地面） | `Degraded(perception)` | 现状：路径提示暂停，障碍物照常播报 |
+| 某个可选能力 `Unavailable`，且没有已启用的功能依赖它 | `Guiding` | 只记 trace |
 | TTS 不可用，震动可用 | `Degraded(output: speech)` | Guidance 照常判断；由震动词汇承担告警（即今天的 `SPEECH_UNAVAILABLE`） |
 | 音频路由丢失，震动可用 | `Degraded(output: audio)` | |
-| 资格 `Unqualified`（镜头不可用、帧过期、感知失败） | `StopRequired(reason)` | Guidance 不能给出导航输出 |
+| 基础资格 `Unqualified`（镜头不可用、帧过期、感知失败） | `StopRequired(reason)` | Guidance 不能给出导航输出 |
 | 卡死窗口内完全没有结果（`GuidanceStallDetector`） | `StopRequired(PERCEPTION_STALLED)` | |
 | 没有任何可靠输出通道（语音和震动都不可用） | `Interrupted(NO_OUTPUT_CHANNEL)` | 已经没法告诉用户任何事；UI 显示状态，会话持续尝试恢复 |
 | 生命周期中断（即今天的 `INTERRUPTED`） | `Interrupted(reason)` | |
@@ -231,7 +278,8 @@ prompt outcome，在采集里是一段黑帧；读取器可以据此自动切段
   有 `DeviceMotionDataSource` 的逻辑；文档写明 `headingRad` 是机身朝向，不是行走方向。
 - 每帧的 `CameraGeometry`：用最近一次传感器采样算出相机坐标下的重力（记录采样时长差），加上内参、
   手机设置和质量。重力采样过旧、对齐误差未测或过大、缺内参时，质量下降。
-- 拿不到姿态 → 资格 `Degraded(ORIENTATION)`；所有使用方回退。
+- 拿不到姿态 → 能力 `ORIENTATION` 变为 `Unavailable`（§5）；所有使用方（M3a、M3b、M4）回退到今天的
+  行为；基础资格不变。
 - **测试**：在每种分析旋转下，用合成传感器数据检查旋转和坐标轴约定；检查内参经过裁剪和旋转后的映射。
 
 ## 8. M3a — 接地点距离
@@ -287,11 +335,29 @@ sem 那种"顺序错了也能悄悄通过"的风险；对应的风险是**输出
 静态发现，所以前几帧会检查：在与重力一致的地面拟合上，视差是否朝图像底部增大；否则把观测标为
 无效。
 
-**能力模型**：深度是 Guidance 的一个可选子能力。没有模型 → 地面几何 `Unavailable`，Guidance 照常运
-行。有模型但运行时失败 → 资格 `Degraded`，绝不悄悄变成"没有障碍物"。
+**能力模型**：深度是可选能力（`DEPTH_GEOMETRY`，§5）。没有模型 → `NotConfigured`；有模型但失效、过
+期或输出反了 → `Unavailable` 并附原因。两种情况下基础资格都不变，Guidance 照常运行——配置了但坏掉的深
+度模型绝不比没有更糟。失效也绝不会变成"没有障碍物"：基于深度的功能回退到今天的行为，只有已启用且需要
+深度的面向用户的功能才受影响（按 §5 规则 2）。
+
+**深度输入变换（几何契约）。** 分析图像和模型张量之间的映射属于模型配置契约，不是实现细节，因为每个视
+差采样都会被变成一条射线。
+- 每个深度模型声明一个 `ResizePolicy`，与该导出版的验证方式一致：`STRETCH`（例如 `litert-community`
+  导出版，不保持宽高比，直接缩放到 686×518）、`CROP_KEEP_ASPECT`（按张量宽高比中心裁剪后再缩放——PC
+  实验用的就是这种）或 `PAD_KEEP_ASPECT`。它和模型一起配置（无法从 TFLite 元数据读出），并记入 trace。
+- runner 针对每种分析尺寸/旋转构建一个 `DepthInputTransform`，与输出一起返回。允许 `scaleX ≠ scaleY`
+  （拉伸）；只要是已知的就行。
+- **所有几何计算都在分析图像像素里做。** 地面拟合的采样点是分析图像像素 `p`；`q = g · K⁻¹ p` 用的是
+  分析图像的内参 `K`；`p` 对应的视差从张量的 `toTensor(p)` 处读取（双线性）。没有任何计算在张量像素
+  里做，所以不需要 `K_depth`。（如果将来某个计算核要在张量空间里做，就必须用
+  `K_depth = S · (K − 裁剪偏移)`，`S` 为变换的缩放，并证明与分析空间路径结果一致。）
+- `GroundObservation` 的掩码在分析图像坐标系里。`covers(p)` 为 false 的像素（被裁掉或落在填充区）一律
+  是**未知**——绝不插值或外推成有效的地面、高于或低于。
+- 测试：每种策略和分析旋转下都满足 `toAnalysis(toTensor(p)) = p`；用每种策略渲染同一个合成平面，在分析
+  空间里拟合出的地面一致。
 
 **runner**（`sailens-vision.depth`）：LiteRT 会话，默认 GPU fp32（fp16 要先在真机上证明可用），在可
-用时通过零拷贝 handle 路径读输出。
+用时通过零拷贝 handle 路径读输出；把视差张量和它的 `DepthInputTransform` 一起返回。
 
 **地面拟合**（`sailens-guidance.geometry`，先用 Kotlin）：
 1. 在视差图下部按粗网格采样（约 6000 个点）。
@@ -326,7 +392,8 @@ sem 那种"顺序错了也能悄悄通过"的风险；对应的风险是**输出
 - **移动且平移未知时**：只有*风险*证据（有东西、落差）能从过去的帧带过来，按 `v_max · 时长` 膨胀
   （步行 v_max ≈ 1.5 m/s），短暂保持（约 0.5 s）后丢弃。空地/地面绝不跨帧保留：当前帧没有观测到是
   空地的格子就是未知。
-- 有了经过验证的平移来源（M5/M11）后，网格才可以平移并融合空地；那是另一个改动，单独评审。
+- 运行时有了**公制平移**来源（M5b 的平移或 M11）后，网格才可以平移并融合空地；那是另一个改动，单独评
+  审。只有移动方向来源不行。
 
 **输出**：`LocalWorldModel(timestamp, ageMs, grid, fusionMode, confidence)`；`SceneSnapshot` 保持现有
 字段，以后可以从中读取走廊摘要。
@@ -334,15 +401,29 @@ sem 那种"顺序错了也能悄悄通过"的风险；对应的风险是**输出
 **测试**：闪烁/丢帧的仿真场景；用户在走的场景，证明没有格子因为过去的观测被判成空地；静止场景，证明
 融合能减少闪烁。
 
-## 11. M5 — 移动方向来源（评估）
+## 11. M5a / M5b — 移动来源
 
-产出决策记录，不产出生产代码。候选方案都用 M0 采集的现场数据评估：基于计步的航位推算（需要先定
-`ACTIVITY_RECOGNITION` 权限）；从相邻帧估计的视觉运动（例如地平面光流——M3 已经给出了地平面）。刚性
-固定的验证暂不做（2026-09-25 决定）。结论用于正式方向指引门槛和 M6 的滚动占据。
+两种能力，分别评判、分别实现（契约见 §3）：
+
+| | 移动方向 | 公制平移 |
+|---|---|---|
+| 问题 | 用户往哪边走？ | 两帧之间用户移动了多远？ |
+| 使用方 | 正式方向指引门槛（M7–M9） | 滚动空地 / 占据（M4 V1 之后、M6） |
+| 契约 | `MovementDirectionEstimate`（朝向、置信度、有效期） | `TranslationEstimate`（Δ前、Δ右、不确定度、置信度） |
+
+**M5a — 评估（离线，产出决策记录）。** 用 M0 采集数据评估候选方案：基于计步的航位推算（需要先定
+`ACTIVITY_RECOGNITION` 权限）；从相邻帧估计的视觉运动（例如地面光流——M3 给出了地平面和尺度）。刚性固
+定的验证暂不做（2026-09-25 决定）。决策记录给出*方向*和*平移*两个结论，各自为"已验证 / 未验证"，并附
+与参照（例如已知长度和形状的步行路线）对比的误差统计。
+
+**M5b — 运行时实现。** 只针对"已验证"的结论：在 `…guidance.motion` 里实现 `MovementDirectionSource`
+和/或 `TranslationSource`，带新鲜度、置信度和显式失败（能力状态按 §5），并在真机上对照 M5a 的证据验
+证。只有离线结论而没有 M5b，不满足任何门槛。
 
 ## 12. M6–M11（概要；各自评审时再细化）
 
-- **M6** 在 M4 上做占据和走廊可通行宽度（除非 M5/M11 给出平移，否则只做逐帧 / 静止时）；先定下
+- **M6** 在 M4 上做占据和走廊可通行宽度（除非运行时有 M5b 或 M11 的公制平移来源，否则只做逐帧 / 静止
+  时）；先定下
   connectivity 透视分歧。native 候选：栅格化、距离变换——都要有 profiling 依据。
 - **M7** Kotlin 规划器；`GuidanceControlSignal(timestamp, validUntil, mode HOLD|STEER|STOP,
   headingCorrection（归一化）, confidence, stopReason)`；只做调试输出。

@@ -105,14 +105,46 @@ data class MotionState(                  // M3o: rotation only
     val yawRateRadPerS: Float,
     val isStationary: Boolean,
     val orientationQuality: Quality,
-    val translation: TranslationKnowledge = TranslationKnowledge.UNKNOWN,
 )
 
-// sailens-guidance.safety
-sealed interface GuidanceQualification {
-    data object Qualified : GuidanceQualification
-    data class Degraded(val reasons: Set<DegradeReason>) : GuidanceQualification
-    data class Unqualified(val reason: StopReason) : GuidanceQualification
+// M5b: two separate capabilities; neither implies the other.
+data class MovementDirectionEstimate(    // where the user walks
+    val timestampMs: Long, val headingRad: Float, val confidence: Float, val validUntilMs: Long,
+)
+data class TranslationEstimate(          // how far the user moved since the previous estimate
+    val fromMs: Long, val toMs: Long,
+    val deltaForwardM: Float, val deltaRightM: Float, val uncertaintyM: Float, val confidence: Float,
+)
+
+// M3b: geometry of analysis image ↔ depth tensor. Part of the model's configured contract.
+data class DepthInputTransform(
+    val sourceRegion: Rect,              // region of the analysis image fed to the model
+    val modelWidth: Int, val modelHeight: Int,
+    val policy: ResizePolicy,            // STRETCH | CROP_KEEP_ASPECT | PAD_KEEP_ASPECT
+    val scaleX: Float, val scaleY: Float,// analysis px → tensor px, after cropping to sourceRegion
+    val padLeft: Int, val padTop: Int,   // tensor px, PAD only
+) {
+    fun toTensor(u: Float, v: Float): PointF   // analysis image → tensor
+    fun toAnalysis(x: Float, y: Float): PointF // tensor → analysis image
+    fun covers(u: Float, v: Float): Boolean    // false outside sourceRegion / inside padding
+}
+
+// sailens-guidance.safety — capability-scoped (see §5)
+data class GuidanceQualification(
+    val baseline: BaselineQualification,                 // what today's Guidance depends on
+    val capabilities: Map<GuidanceCapability, CapabilityStatus>,
+)
+sealed interface BaselineQualification {
+    data object Qualified : BaselineQualification
+    data class Degraded(val reasons: Set<DegradeReason>) : BaselineQualification
+    data class Unqualified(val reason: StopReason) : BaselineQualification
+}
+enum class GuidanceCapability { ORIENTATION, GROUND_CONTACT_DISTANCE, DEPTH_GEOMETRY,
+                                MOVEMENT_DIRECTION, TRANSLATION /* later: DROP_WARNING, … */ }
+sealed interface CapabilityStatus {
+    data object NotConfigured : CapabilityStatus
+    data object Available : CapabilityStatus
+    data class Unavailable(val reason: String) : CapabilityStatus
 }
 // sailens-shell: GuidanceQualification + stall detector + output health (mapping in §5)
 sealed interface GuidanceSafetyState { /* Initializing, Guiding, Degraded(reasons),
@@ -196,11 +228,28 @@ frame it receives.
 
 ## 5. M1 — Qualification and safety state (exact reproduction); M1b — stop pre-emption
 
-**Guidance side (`GuidanceQualification`)**, computed once per pipeline result from: frame age
-(now − frame timestamp) vs a budget; `FrameQuality` (`OBSTRUCTED` / `TOO_DARK`); perception failures
-(consecutive failures already counted against `PipelinePerformanceBudget.maxConsecutiveFrameFailures`);
-ground-recognition state from #5; later geometry and orientation quality. Unqualified reasons:
-`FRAME_STALE`, `CAMERA_UNUSABLE`, `PERCEPTION_FAILED`; later `ORIENTATION_LOST`, `NO_SAFE_PATH`.
+**Guidance side (`GuidanceQualification`)** is capability-scoped. Computed once per pipeline result:
+
+- **Baseline qualification** — what today's Guidance (sem connectivity, det obstacles, current
+  events) depends on: frame age (now − frame timestamp) vs a budget; `FrameQuality` (`OBSTRUCTED` /
+  `TOO_DARK`); perception failures (consecutive failures already counted against
+  `PipelinePerformanceBudget.maxConsecutiveFrameFailures`); ground-recognition state from #5.
+  Unqualified reasons: `FRAME_STALE`, `CAMERA_UNUSABLE`, `PERCEPTION_FAILED`; later `NO_SAFE_PATH`
+  once a planner exists.
+- **Capability status** — one entry per optional capability (orientation, ground-contact distance,
+  depth geometry, movement direction, translation): `NotConfigured` / `Available` / `Unavailable`.
+
+Rules:
+
+1. An optional capability that is missing, failing or stale makes **that capability** `Unavailable`.
+   Features built on it fall back to today's behaviour. The baseline qualification does not change:
+   **configured-but-broken is never worse than not configured.**
+2. Only when a user-facing feature that is **enabled** needs the capability does its loss have wider
+   effect, decided per feature in its own review: usually the feature switches off with a trace entry
+   (and, if the user relied on it, a low-priority notice); if the capability is a necessary input to
+   a control signal currently being delivered (M7+), the control output stops (`StopRequired`).
+3. Today no user-facing feature depends on any optional capability (M3a is off by default, M3b is
+   not user-visible), so in M1 every capability failure is trace-only.
 
 **Shell side (`GuidanceSafetyState`)** composes qualification with `GuidanceStallDetector` and output
 health. Mapping (the rule: output problems degrade *delivery*, not the judgement of the way):
@@ -208,10 +257,11 @@ health. Mapping (the rule: output problems degrade *delivery*, not the judgement
 | Condition | Safety state | Note |
 |---|---|---|
 | Qualified, all outputs OK | `Guiding` | |
-| Qualification `Degraded` (e.g. ground not recognised) | `Degraded(perception)` | Today: path prompts paused, obstacles still announced |
+| Baseline `Degraded` (e.g. ground not recognised) | `Degraded(perception)` | Today: path prompts paused, obstacles still announced |
+| An optional capability `Unavailable`, no enabled feature depends on it | `Guiding` | Trace only |
 | TTS unavailable, haptics available | `Degraded(output: speech)` | Guidance keeps judging; haptic vocabulary carries alarms (today's `SPEECH_UNAVAILABLE`) |
 | Audio route lost, haptics available | `Degraded(output: audio)` | |
-| Qualification `Unqualified` (camera unusable, stale frames, perception failed) | `StopRequired(reason)` | Guidance may not give navigation output |
+| Baseline `Unqualified` (camera unusable, stale frames, perception failed) | `StopRequired(reason)` | Guidance may not give navigation output |
 | No results at all for the stall window (`GuidanceStallDetector`) | `StopRequired(PERCEPTION_STALLED)` | |
 | No reliable output channel left (speech and haptics unavailable) | `Interrupted(NO_OUTPUT_CHANNEL)` | The user cannot be told anything; the UI shows it, the session keeps trying to recover |
 | Lifecycle interruption (today's `INTERRUPTED`) | `Interrupted(reason)` | |
@@ -252,7 +302,8 @@ simulator stop/recovery scenarios and a device run against the baseline.
 - `CameraGeometry` per frame: gravity in the camera frame from the nearest sensor sample (age
   recorded), intrinsics, phone settings, quality. Quality drops when gravity is older than a bound,
   the alignment error is unmeasured/too large, or intrinsics are missing.
-- Orientation unavailable → qualification `Degraded(ORIENTATION)`; every consumer falls back.
+- Orientation unavailable → capability `ORIENTATION` is `Unavailable` (§5); every consumer
+  (M3a, M3b, M4) falls back to today's behaviour; the baseline qualification is unchanged.
 - **Tests**: rotation/axis conventions on synthetic sensor data for each analysis rotation; intrinsics
   mapping through crop and rotation.
 
@@ -317,12 +368,37 @@ does not apply; the equivalent risk is **inverse output** (depth instead of disp
 cannot detect it statically, so the first frames check that disparity grows toward the bottom of
 the image on a gravity-consistent ground fit, and the observation is marked invalid otherwise.
 
-**Capability**: depth is an optional sub-capability of Guidance. Absent model → ground geometry
-`Unavailable`, Guidance runs as today. Present but failing at runtime → qualification `Degraded`,
-never silently "no obstacles".
+**Capability**: depth is an optional capability (`DEPTH_GEOMETRY`, §5). Absent model →
+`NotConfigured`; present but failing, stale or inverse-output → `Unavailable` with a reason. In
+either case the baseline qualification is unchanged and Guidance runs as today — a configured but
+broken depth model is never worse than none. A failure never turns into "no obstacles": features
+built on depth fall back to today's behaviour, and only an enabled user-facing feature that needs
+depth is affected (per §5 rule 2).
+
+**Depth input transform (geometry contract).** The mapping between the analysis image and the model
+tensor is part of the model's configured contract, not an implementation detail, because every
+disparity sample is turned into a ray.
+- Each depth model declares a `ResizePolicy`, matching how the export was validated:
+  `STRETCH` (e.g. the `litert-community` export, which resizes to 686×518 without keeping aspect),
+  `CROP_KEEP_ASPECT` (centre crop to the tensor aspect, then resize — what the PC experiment used), or
+  `PAD_KEEP_ASPECT`. It is configured alongside the model (it cannot be read from TFLite metadata)
+  and recorded in trace.
+- The runner builds a `DepthInputTransform` per analysis size/rotation and returns it with the
+  output. `scaleX ≠ scaleY` is allowed (stretch); it only has to be known.
+- **All geometry is done in analysis-image pixels.** Ground-fit samples are analysis-image pixels
+  `p`; `q = g · K⁻¹ p` uses the analysis-image intrinsics `K`; the disparity for `p` is read from the
+  tensor at `toTensor(p)` (bilinear). Nothing works in tensor pixels, so no `K_depth` is needed. (If a
+  future kernel does work in tensor space, it must use `K_depth = S · (K − crop offset)` with the
+  transform's scale `S`, and prove equality against the analysis-space path.)
+- `GroundObservation` masks are in analysis-image coordinates. Pixels where `covers(p)` is false
+  (cropped away or padding) are **unknown** — never interpolated or extrapolated into valid ground,
+  above or below.
+- Tests: round-trip `toAnalysis(toTensor(p)) = p` for each policy and analysis rotation; a synthetic
+  plane rendered through each policy yields the same fitted ground in analysis space.
 
 **Runner** (`sailens-vision.depth`): LiteRT session, GPU fp32 by default (fp16 must be proven on
-device first), output read through the zero-copy handle path where available.
+device first), output read through the zero-copy handle path where available; returns the disparity
+tensor together with its `DepthInputTransform`.
 
 **Ground fit** (`sailens-guidance.geometry`, Kotlin first):
 1. Sample the lower part of the disparity map on a coarse grid (~6k points).
@@ -363,8 +439,9 @@ frames; binding coverage if any native kernel is added.
   frames, dilated by `v_max · age` (v_max ≈ 1.5 m/s walking) and dropped after a short hold
   (≈ 0.5 s). Free/ground is never carried across frames: a cell not observed free in the current
   frame is unknown.
-- With a validated translation source (M5/M11) the grid may translate and fuse free space; that is a
-  separate change with its own review.
+- With a runtime **metric translation** source (M5b translation or M11) the grid may translate and
+  fuse free space; that is a separate change with its own review. A movement-direction source alone
+  does not permit it.
 
 **Output**: `LocalWorldModel(timestamp, ageMs, grid, fusionMode, confidence)`; `SceneSnapshot` keeps
 its current fields and may later read corridor summaries from it.
@@ -372,18 +449,32 @@ its current fields and may later read corridor summaries from it.
 **Tests**: simulator flicker/dropout scenarios; moving-user scenario proving no cell is free from a
 past observation; stationary scenario proving fusion reduces flicker.
 
-## 11. M5 — Movement-direction source (evaluation)
+## 11. M5a / M5b — Movement sources
 
-Produces a decision record, not production code. Candidates, each assessed with field data from M0
-captures: step-based dead reckoning (needs the `ACTIVITY_RECOGNITION` decision); visual motion from
-consecutive frames (e.g. ground-plane flow, since M3 gives the plane). Rigid-mount validation is out
-of scope for now (decided 2026-09-25). Outcome feeds the production steering gate and M6 rolling
-occupancy.
+Two capabilities, judged and implemented separately (contracts in §3):
+
+| | Movement direction | Metric translation |
+|---|---|---|
+| Question | Which way is the user walking? | How far did the user move between frames? |
+| Consumer | Production steering gate (M7–M9) | Rolling free space / occupancy (M4 V1+, M6) |
+| Contract | `MovementDirectionEstimate` (heading, confidence, validity) | `TranslationEstimate` (Δforward, Δright, uncertainty, confidence) |
+
+**M5a — evaluation (offline, decision record).** Candidates assessed on M0 captures: step-based dead
+reckoning (needs the `ACTIVITY_RECOGNITION` decision); visual motion from consecutive frames (e.g.
+ground-plane flow — M3 gives the plane and scale). Rigid-mount validation is out of scope for now
+(decided 2026-09-25). The record gives two verdicts, *direction* and *translation*, each
+VALIDATED / NOT_VALIDATED with its error statistics against a reference (e.g. walked routes of known
+length and shape).
+
+**M5b — runtime implementation.** Only for a VALIDATED verdict: implement `MovementDirectionSource`
+and/or `TranslationSource` in `…guidance.motion`, with freshness, confidence and explicit failure
+(capability status per §5), and validate on device against the M5a evidence. An offline verdict
+without M5b does not satisfy any gate.
 
 ## 12. M6–M11 (outline; detailed in their own reviews)
 
-- **M6** occupancy and corridor clearance over M4 (frame-local / stationary unless M5/M11 give
-  translation); decide the connectivity perspective divergence first. Native candidates:
+- **M6** occupancy and corridor clearance over M4 (frame-local / stationary unless a runtime metric
+  translation source from M5b or M11 exists); decide the connectivity perspective divergence first. Native candidates:
   rasterisation, distance transform — only with profiling.
 - **M7** planner in Kotlin; `GuidanceControlSignal(timestamp, validUntil, mode HOLD|STEER|STOP,
   headingCorrection (normalised), confidence, stopReason)`; debug output only.

@@ -95,6 +95,15 @@ Resolution (DA V2 Small, every third frame): 266×350 ground linearity 0.7% outd
 
 ## Caveats
 
+- **Preprocessing is this experiment's own policy.** DA V2 inputs were centre-cropped to the tensor
+  aspect (686:518) and then resized (bicubic); PG inputs were centre-cropped to a square and resized
+  to 192. This differs from the `litert-community` export's documented policy (stretch to 686×518
+  without keeping aspect) and from the upstream HF processor (`keep_aspect_ratio=true`, short side
+  518, multiple of 14). For DIODE (4:3) the crop removes < 1% of the width; for Cityscapes (2:1) it
+  removes the sides. The numbers are therefore "DA V2 Small under centre-crop preprocessing", not
+  model metrics under an official policy; the production contract makes the policy explicit
+  (implementation §9, depth input transform).
+
 - DIODE is a tripod laser scanner (median outdoor height 2.4 m, indoor ~1.2 m), not a handheld phone;
   camera-height effects for a phone are therefore reported as a relative error (h ± 15%), not by
   running with 1.3 m against DIODE.

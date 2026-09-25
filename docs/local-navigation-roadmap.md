@@ -142,16 +142,28 @@ phone without VIO gives:
 
 Consequences written into the milestones:
 
-1. **No metric cross-frame fusion while moving.** At 1–1.5 m/s, 0.7 s of unknown translation is
-   0.7–1 m of position error against 0.1 m cells. Without a translation source the world model is
-   frame-local; temporal fusion is allowed only while stationary, and risk evidence carried across
-   frames is spread by the worst-case walked distance and can never mark a cell free (M4).
-2. **No production steering without a movement-direction source.** A planner that knows where the
-   phone points but not where the user walks must not steer. See the gate in §7.
-3. ARCore would give metric pose but takes over the camera (it cannot share with CameraX;
-   shared-camera mode is Camera2 only) and adds a Play Services for AR dependency. It stays the
-   **last** milestone (M11). The consequence: production steering waits for M11 unless another
-   movement-direction source (M5) or a rigid-mount operating envelope is validated first.
+Two different capabilities are missing, and they are not interchangeable:
+
+- **Movement direction** — which way the user is walking (heading, confidence, freshness). Needed by
+  production steering.
+- **Metric translation** — how far the user moved between two frames (Δx, Δy, uncertainty). Needed
+  by any cross-frame metric fusion (rolling free space, rolling occupancy).
+
+A reliable walking heading does not imply a reliable displacement, and vice versa.
+
+Consequences written into the milestones:
+
+1. **No metric cross-frame fusion while moving** without a validated *metric translation* source.
+   At 1–1.5 m/s, 0.7 s of unknown translation is 0.7–1 m of position error against 0.1 m cells. The
+   world model is frame-local; temporal fusion is allowed only while stationary, and risk evidence
+   carried across frames is spread by the worst-case walked distance and can never mark a cell free
+   (M4).
+2. **No production steering without a runtime movement-direction source.** A planner that knows where
+   the phone points but not where the user walks must not steer. See the gate in §7.
+3. ARCore would give metric pose (both capabilities) but takes over the camera (it cannot share with
+   CameraX; shared-camera mode is Camera2 only) and adds a Play Services for AR dependency. It stays
+   the **last** milestone (M11). The consequence: production steering waits for M11 unless M5
+   validates and implements another direction source first.
 
 ## 7. Milestones
 
@@ -162,8 +174,8 @@ M0 ─┬─ M1 ── M1b
     ├─ M2 ───┘
     └─ M3o ── M3a
           └── M3b ── M4 ── M6 ── M7 ── M8 ── M9
-    M5 (movement direction) ─────────┘   (production steering gate needs M5 or M11)
-    M10 after M6–M8 stabilise;  M11 last
+          └── M5a ── M5b          (M5b direction → steering gate; M5b translation → M4/M6 rolling)
+    M10 after M6–M8 stabilise;  M11 last (can supply both capabilities)
 ```
 
 ### M0 — Baseline and field capture (shared with Stage 2)
@@ -224,8 +236,10 @@ M0 ─┬─ M1 ── M1b
   **risk-conservative fusion** — the level used is the nearer of today's level and the new level
   computed from the interval's *lower* bound, so the new estimator can raise or keep risk but never
   push an obstacle into FAR where `EventGenerator` would drop it; phone height from a user/device
-  geometry setting (with a guided calibration or placement preset), not from the runtime profile.
-- **Enable gate** (the code can land earlier, default off): calibration available; simulator tilt
+  geometry setting (placement preset, optionally refined by body height), not from the runtime
+  profile.
+- **Enable gate** (the code can land earlier, default off): a preset or body-height calibration is
+  set; simulator tilt
   scenarios pass; capture replay and device evidence reviewed against the baseline.
 - **User-visible**: only after the enable gate.
 
@@ -233,9 +247,14 @@ M0 ─┬─ M1 ── M1b
 - **Depends on**: M3o, M2.
 - **Goal**: class-agnostic ground, above-ground structure and steps/drops, indoors and outdoors.
 - **Deliverables**: `ModelType` for depth (BYO, optional); depth runner; gravity-constrained ground
-  fit; observation with ground / above / below masks and confidence; 2–5 Hz scheduling; device
-  latency budget and GPU contention measured (this absorbs the pending P3 GPU-arbitration work);
-  debug overlay and trace.
+  fit; observation with ground / above / below masks and confidence, expressed in analysis-image
+  coordinates through an explicit **depth input transform** (implementation §9) — regions the model
+  did not see are unknown, never interpolated; 2–5 Hz scheduling; device latency budget and GPU
+  contention measured (this absorbs the pending P3 GPU-arbitration work); debug overlay and trace.
+- **Failure scope**: depth is an optional capability. Absent or failing, the depth-geometry
+  capability is unavailable and the baseline Guidance keeps its qualification — a configured but
+  broken depth model is never worse than no depth model. Only a user-facing feature that is enabled
+  and depends on depth is affected (implementation §5, capability-scoped qualification).
 - **Exit**: device budget met (§8); capture replay agrees with the PC experiment on the same scenes;
   no regression of sem/det p95 beyond the budget.
 - **User-visible**: no. Using geometry to change prompts (e.g. letting a confirmed floor lift the
@@ -253,17 +272,28 @@ M0 ─┬─ M1 ── M1b
   from past observations.
 - **User-visible**: no.
 
-### M5 — Movement-direction source (evaluation)
-- **Depends on**: M3o.
-- **Goal**: decide whether any non-ARCore source can give a validated walking direction: step-based
-  dead reckoning (needs the permission decision) or visual motion from consecutive frames. Rigid-mount
-  validation is out of scope for now (decided 2026-09-25). Output: a decision record with field
-  evidence, or "none validated".
+### M5a — Movement sources: evaluation
+- **Depends on**: M3o, M0 captures.
+- **Goal**: evaluate non-ARCore candidates — step-based dead reckoning (needs the permission
+  decision) and visual motion from consecutive frames (e.g. ground-plane flow using M3's plane) —
+  offline on M0 captures. Rigid-mount validation is out of scope for now (decided 2026-09-25).
+- **Output**: a decision record with **two separate verdicts**, each VALIDATED / NOT_VALIDATED with
+  its evidence: *movement direction* (`MovementDirectionEstimate`) and *metric translation*
+  (`TranslationEstimate`).
+- **User-visible**: no.
+
+### M5b — Movement sources: runtime implementation
+- **Depends on**: M5a (only for a verdict that is VALIDATED).
+- **Goal**: implement the selected source(s) behind `MovementDirectionSource` /
+  `TranslationSource`, with freshness, confidence and failure reporting, and validate on device
+  against the M5a evidence.
+- **Exit**: device validation passes for each implemented capability; traced.
 - **User-visible**: no.
 
 ### M6 — Occupancy and clearance
 - **Depends on**: M4; rolling (translation-compensated) occupancy additionally needs a validated
-  source from M5 or M11 — otherwise frame-local / stationary only.
+  **metric translation** source at runtime (M5b translation or M11) — a direction source is not
+  enough. Otherwise frame-local / stationary only.
 - **Prerequisite**: decide the connectivity perspective divergence between the native kernel and the
   Kotlin fallback before anything consumes connectivity geometrically.
 - First place where a native kernel is likely (only with profiling evidence).
@@ -282,9 +312,11 @@ M0 ─┬─ M1 ── M1b
 
 ### Production steering gate (not a milestone; a condition)
 `GuidanceControlSignal.STEER` reaches users only when **all** hold: M8 passed; M9 target-user
-evidence; and **either** a validated movement-direction source (M5 or M11) **or** an operating
-envelope that requires a rigid mount whose forward axis is the walking direction, validated in the
-field. Otherwise STEER stays debug-only. HOLD/STOP semantics can ship earlier through M1b.
+evidence; and **either** a movement-direction source that is implemented in the runtime and
+validated on device (M5b or M11) **or** an operating envelope that requires a rigid mount whose
+forward axis is the walking direction, validated in the field (not planned for now). An offline
+decision record alone does not satisfy the gate. Otherwise STEER stays debug-only. Stop-class safety
+behaviour (M1b) can ship earlier; it is not a control signal.
 
 ### M10 — Native optimisation
 - After M6–M8 stabilise. Projection, BEV rasterisation, occupancy, distance transform, depth
@@ -298,7 +330,8 @@ field. Otherwise STEER stays debug-only. HOLD/STOP semantics can ship earlier th
 ### Suggested release grouping (no deadlines)
 - **Release A**: M0, M1, M2, M3o, M3a code (M3a default off unless its enable gate is met), M1b if
   ready.
-- **Release B**: M3b, M4, M6 (frame-local / stationary), M5 decision — still no steering.
+- **Release B**: M3b, M4, M6 (frame-local / stationary), M5a decision (M5b if a verdict is VALIDATED) — still no
+  steering.
 - **Release C**: M7–M9 as experiments. Production steering only through its gate.
 
 ## 8. Device budget for the geometry work (to be measured)
@@ -339,8 +372,8 @@ Adopted (PR #7 review):
 
 - M0 capture at 5 Hz / 640 px JPEG is field evidence, not exact replay; exact replay uses recorded
   perception outputs plus event-window full frames.
-- Phone height: 1.3 m is only a seed; enabling M3a requires a guided calibration or explicit
-  placement presets.
+- Phone height: 1.3 m is only a seed; enabling M3a requires a calibration (the form was decided
+  below: placement presets, optionally refined by body height).
 - M3a code may land in Release A but stays off by default until its enable gate is met.
 - Release A operating envelope declares unsupported: running, stair/drop guidance, road-crossing
   guidance, directional steering, and any phone placement M3a has not been validated for.
@@ -353,5 +386,6 @@ Decided afterwards (2026-09-25):
   distance to a wall, which is the thing we are trying to measure.
 - **Captures may contain faces.** Retention: deleted automatically 7 days after recording unless
   exported or pinned in the debug UI; total cap 2 GB, oldest removed first.
-- **No rigid-mount validation for now.** M5 evaluates step-based and visual movement direction only;
-  production steering therefore waits for M5 to validate a source or for M11.
+- **No rigid-mount validation for now.** M5a evaluates step-based and visual sources only;
+  production steering therefore waits for a direction source validated in M5a and implemented in
+  M5b, or for M11.
