@@ -142,8 +142,11 @@ elapsed-realtime 纳秒。采集写入器在会话开始时（以及恢复时）
 | 不能用于 | 重跑 sem/det 并期望输出完全一致（缩放 + JPEG 会改变模型输入） | 任何需要连续画面的用途 |
 
 **采集写入器（仅 debug 版）。**
-- 使用 P3 相机帧池 PR 提供的限速订阅（例如 `frames(minIntervalMs = 200)`），不需要的帧根本不会送
-  到它这里；收到的每一帧都通过 `FrameSource.releaseFrame` 归还。
+- 使用相机帧池 PR（#10）提供的限速订阅：`FrameSource.frames(minIntervalMs = 200)`，不需要的帧根本不会
+  送到它这里。流上的帧是借出的（见 #10 修订后的 architecture §6.1）：收到的每一帧都通过
+  `FrameSource.releaseFrame` 归还（幂等）。每个订阅者拿到各自的 `ImageFrame.copy()`，所以放在
+  `ImageFrame` 上的 `FrameCaptureInfo` 会随之带过去；M3o 在 `ImageFrameConverter.convert`（#10 给它加了
+  `PlaneAllocator` 参数）里填写它。
 - 每个会话一个目录，放在应用内部 `files/captures/` 下，JSONL + 图像文件；手动导出；可在调试 UI
   里列出和删除；release 版不包含。采集数据里有人脸和地点（已确认可以接受），不会自动离开设备。
 - 保留期限：会话录制 7 天后自动删除，已导出或标记保留的除外；总量上限 2 GB，超出时先删最旧的未标记

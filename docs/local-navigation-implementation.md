@@ -150,9 +150,12 @@ by `sequenceNumber`.
 | Not valid for | Re-running sem/det and expecting identical outputs (scaling + JPEG change model input) | Anything needing continuous video |
 
 **Capture writer (debug builds only).**
-- Uses the rate-limited frame subscription from the P3 camera-frame-pool PR (e.g.
-  `frames(minIntervalMs = 200)`), so frames it does not need are never delivered to it; every frame
-  it receives is released through `FrameSource.releaseFrame`.
+- Uses the rate-limited subscription from the camera-frame-pool PR (#10):
+  `FrameSource.frames(minIntervalMs = 200)`, so frames it does not need are never delivered to it.
+  Stream frames are borrowed (architecture §6.1 as amended by #10): every frame it receives is
+  released through `FrameSource.releaseFrame` (idempotent). Each subscriber gets its own
+  `ImageFrame.copy()`, so `FrameCaptureInfo` placed on `ImageFrame` travels with it; M3o extends
+  `ImageFrameConverter.convert` (which gains a `PlaneAllocator` parameter in #10) to fill it.
 - One directory per session under app-internal `files/captures/`, JSONL + image files; exported
   manually; listed and deletable in the debug UI; excluded from release builds. Captures contain
   faces and places (accepted) and never leave the device automatically.
