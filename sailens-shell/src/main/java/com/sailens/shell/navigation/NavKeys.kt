@@ -25,5 +25,9 @@ data object OssLicensesKey : NavKey
 @Serializable
 data object TraceSessionsKey : NavKey
 
+/** Debug-only destination (field capture, M0a); release registers no entry for it. */
+@Serializable
+data object FieldCaptureKey : NavKey
+
 @Serializable
 data class TraceReportKey(val sessionId: String? = null) : NavKey

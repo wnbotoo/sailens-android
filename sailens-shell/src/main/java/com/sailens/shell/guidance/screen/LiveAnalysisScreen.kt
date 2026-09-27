@@ -77,6 +77,7 @@ import com.sailens.core.geometry.NormalizedRect
 import com.sailens.guidance.model.common.ObstacleCategory
 import com.sailens.guidance.model.perception.ObstacleDetection
 import com.sailens.shell.R
+import com.sailens.shell.capture.FieldCaptureMarkerButton
 import com.sailens.shell.device.SceneEventTextResolver
 import com.sailens.shell.guidance.overlay.SceneDebugInfoView
 import com.sailens.shell.guidance.overlay.SceneOverlayMode
@@ -697,6 +698,8 @@ private fun ControlView(
             )
 
             if (state.showDiagnostics) {
+                // Debug builds only, and only while a field capture is recording.
+                FieldCaptureMarkerButton(modifier = Modifier.fillMaxWidth())
                 HomePanelDivider()
                 HomePanelSectionTitle(text = stringResource(R.string.label_overlay_mode))
                 val selectableOverlayModes =

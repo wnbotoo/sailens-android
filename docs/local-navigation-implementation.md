@@ -197,7 +197,8 @@ behaviour change. Nothing below promises exact replay.
 |---|---|
 | A — contracts / foundation | This section; capture schema and `manifest.json`; JVM reader; source-side frame timing (`ImageFrame.receivedElapsedRealtimeNanos`); camera characteristics snapshot API in `sailens-camera`; backup/device-transfer exclusion of `captures/`; unit tests |
 | B — capture engine | `TraceService` decorator hook; frame, sensor, anchor and marker writers; bounded queues; retention; mode setting; failure isolation; writer tests |
-| C — field tooling | Capture list (pin / delete / export); ZIP share; Volume-Down marker and on-screen button; timing-sync burst; Python tools (contact sheet, alignment, storage) |
+| C1 — in-app tooling | Capture switch and list (keep / delete / export); ZIP share; Volume-Down marker and on-screen button |
+| C2 — timing and PC tools | Timing-sync burst; Python tools (contact sheet, alignment, storage) |
 
 **Trace delivery fields** (PR #8, merged). `FrameTrace.messageKeys` stay the candidates after
 cooldown. A `prompt_outcome` record per offered prompt carries `eventId`, `sourceSequenceNumber`
@@ -234,10 +235,15 @@ Guidance session, named after the trace session id:
   meaning or type; that is a major version. Closed enums inside records are not extended in a minor
   version.
 - Sensor cadence is computed from event timestamps; `SENSOR_DELAY_GAME` is only the requested rate.
-- Capture counters are separate from Guidance's dropped frames, so a gap can be explained:
+- Capture counters are separate from Guidance's dropped frames, so a gap can be explained. For a
+  **complete** capture they account for everything the engine received:
   `framesOffered` = `framesEncoded` + `framesDroppedByEncoder`; `sensorEvents` (persisted) +
-  `sensorEventsDropped` (capture queue full) = samples the capture received. A timestamp gap not
-  covered by a drop count means the device delivered nothing.
+  `sensorEventsDropped` (capture queue full) = samples received; a timestamp gap not covered by a
+  drop count means the device delivered nothing. An **incomplete** capture (`complete = false`) may
+  hold unaccounted records at the failure boundary (the item being written when it failed, items
+  still queued) and is evidence of lower standing.
+- The 2 GB cap counts frames and records; the manifest itself (a few KB) is not counted, so the cap
+  can be exceeded by that much.
 
 **Timing.** Frame timing is taken at the source: `ImageFrameAnalyzer.analyze()` stamps
 `receivedElapsedRealtimeNanos` before any demand check, conversion or queueing, and the camera's own
@@ -281,14 +287,14 @@ JPEG encode (640 px long side, quality 80, pixels not rotated; `rotationDegrees`
 
 | Need | Design |
 |---|---|
-| Mode switch | Debug settings: field capture off / on |
+| Mode switch | Settings → Diagnostics → Field capture: on / off (the timing-sync burst is added in C2). The mode is read when a Guidance session starts, so the switch takes effect at the next session and is locked while a capture is recording |
 | Start / stop | Follows the Guidance session while the mode is on; no separate button |
-| Delete, pin | Capture list: per session size, duration, complete/pinned flags; delete and pin |
-| Export | ZIP built into `cacheDir/capture_exports/` (free space checked first) and shared via FileProvider `<cache-path>`; `files/captures/` itself is never exposed; stale exports cleared on next launch / list open. `adb` + `run-as` documented as the bulk fallback |
+| Keep, delete | Capture list: per session start time, size, status (recording / complete / incomplete with reason), kept, exported, frames and markers; keep, delete and export are refused while any capture is recording (the list is read-only then; the tool must not disturb the evidence it is collecting); delete asks for confirmation, and a refused or failed action is reported |
+| Export | Finished sessions only. ZIP built into `cacheDir/capture_exports/` (free space checked first) off the capture writer thread, with the session protected from retention and delete meanwhile. Capture and export never overlap in either direction: while a ZIP is being built, starting Guidance is refused with "finish exporting first" (debug `GuidanceStartGate`), and a capture that starts anyway ends at once as incomplete with `failureReason = export_in_progress`. A ZIP whose session cannot be marked exported is discarded and reported as a failure. The ZIP is then shared via FileProvider `<cache-path>`; `files/captures/` itself is never exposed; the session is marked exported; exports older than a day cleared at app start and when the list opens (a share target reads the ZIP after the share sheet closes, with no signal when it is done). `adb` + `run-as` documented as the bulk fallback |
 | Viewing frames around a prompt | On the PC: reader + script rendering ±N s around a `prompt_outcome` or marker as a contact sheet |
 | Storage | Estimated ≈ 0.7–1 GB/hour; measured in M0a and written back into the manual |
 | Retention | Runs at debug app start (whether or not capture is on), before a capture starts, when the capture list opens, and every 30 s during a capture. A session older than 7 days, not exported or pinned, is deleted at the next of these. The 2 GB cap is enforced during capture: older unpinned sessions go first, and if the active capture alone would exceed it, it ends as incomplete with `failureReason = storage_limit_reached` (checked after every frame) instead of writing until the disk is full |
-| **"Missed alert" marker** | Volume Down while capture is active: only `ACTION_DOWN` with `repeatCount == 0` counts, the key is consumed only then, and a short vibration confirms after the marker is queued. Plus a large on-screen button. Works eyes-free in a foreground Guidance session; no promise for a locked screen or background (there is no background Guidance yet). TalkBack behaviour verified on device |
+| **"Missed alert" marker** | Volume Down while capture is active: only `ACTION_DOWN` with `repeatCount == 0` counts, the key is consumed only then, the time, session and last stored frame are fixed when the press is observed (a busy writer delays the write, not the event), and a short vibration confirms only once the marker was written. Plus a large on-screen button. Works eyes-free in a foreground Guidance session; no promise for a locked screen or background (there is no background Guidance yet). TalkBack behaviour verified on device |
 
 **Privacy.** Captures contain faces and places (accepted). They are excluded from Auto Backup
 (`backup_rules.xml`) and from cloud backup and device transfer (`data_extraction_rules.xml`); export
