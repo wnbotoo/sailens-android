@@ -33,8 +33,14 @@ import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import com.sailens.guidance.trace.capture.CaptureSchema
 import java.io.File
+import java.io.IOException
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicLong
 
@@ -61,6 +67,21 @@ internal data class CaptureDeviceInfo(
     val manufacturer: String,
     val model: String,
     val sdkInt: Int,
+)
+
+/** One row of the capture list. */
+internal data class CaptureSummary(
+    val sessionId: String,
+    val startedWallMs: Long,
+    val endedWallMs: Long?,
+    val bytes: Long,
+    val framesStored: Long,
+    val markers: Long,
+    val complete: Boolean,
+    val failureReason: String?,
+    val pinned: Boolean,
+    val exported: Boolean,
+    val active: Boolean,
 )
 
 internal data class FieldCaptureConfig(
@@ -103,6 +124,7 @@ internal class FieldCaptureController(
             .asCoroutineDispatcher(),
     private val frameDispatcher: CoroutineDispatcher = Dispatchers.Default,
     private val retention: CaptureRetention = CaptureRetention(root),
+    private val exporter: CaptureExporter? = null,
 ) {
     private val scope = CoroutineScope(
         SupervisorJob() + writerDispatcher + CoroutineExceptionHandler { _, throwable ->
@@ -112,18 +134,105 @@ internal class FieldCaptureController(
 
     /** Confined to [writerDispatcher]. */
     private var active: ActiveCapture? = null
+        set(value) {
+            field = value
+            _isCapturing.value = value != null
+        }
+
+    private val _isCapturing = MutableStateFlow(false)
+
+    /** Whether a capture is recording right now (for the marker button and the Volume-Down key). */
+    val isCapturing: StateFlow<Boolean> = _isCapturing.asStateFlow()
 
     /** Bytes held by the sessions other than the active one, as of the last retention pass. */
     private var otherSessionsBytes = 0L
 
     init {
         // A maintenance opportunity at start-up, whether or not capture is switched on, so expired
-        // captures do not stay on the device just because nobody records any more.
-        scope.launch { maintain() }
+        // captures do not stay on the device just because nobody records any more. Leftover export
+        // ZIPs go too.
+        scope.launch {
+            maintain()
+            runCatching { exporter?.clearExports() }
+        }
     }
 
-    /** Runs retention now (e.g. when the capture list opens). Never throws. */
-    fun runMaintenance(): Job = scope.launch { maintain() }
+    /**
+     * Runs retention now and clears old export ZIPs -- called when the capture list opens. Never
+     * throws.
+     */
+    fun runMaintenance(): Job = scope.launch {
+        maintain()
+        runCatching { exporter?.clearExports() }
+    }
+
+    // ---- session management (capture list). All on the writer thread, so none of it can race
+    // ---- retention or the active capture's writes.
+
+    suspend fun listSessions(): List<CaptureSummary> = onWriter {
+        val activeId = active?.writer?.directory?.name
+        root.listFiles { file -> file.isDirectory }.orEmpty()
+            .map { directory -> summarize(directory, active = directory.name == activeId) }
+            .sortedByDescending { it.startedWallMs }
+    }
+
+    /** Pins or unpins a finished session; returns false for the active one or an unreadable one. */
+    suspend fun setPinned(sessionId: String, pinned: Boolean): Boolean = onWriter {
+        editFinishedManifest(sessionId) { it.copy(pinned = pinned) }
+    }
+
+    /** Deletes a finished session; the active one is refused. */
+    suspend fun delete(sessionId: String): Boolean = onWriter {
+        if (sessionId == active?.writer?.directory?.name) return@onWriter false
+        File(root, sessionId).deleteRecursively().also { maintain() }
+    }
+
+    /**
+     * Packs a finished session into a ZIP for sharing and marks it exported (which also keeps it
+     * past the age limit). The active session is refused. Throws when there is no exporter or
+     * exporting fails.
+     */
+    suspend fun export(sessionId: String): File = onWriter {
+        val zipper = exporter ?: throw IOException("export is not available")
+        if (sessionId == active?.writer?.directory?.name) throw IOException("the capture is still recording")
+        val zip = zipper.export(sessionId)
+        editFinishedManifest(sessionId) { it.copy(exportedAtWallMs = clock.wallMs()) }
+        zip
+    }
+
+    private fun summarize(directory: File, active: Boolean): CaptureSummary {
+        val manifest = runCatching {
+            CaptureSchema.json.decodeFromString(
+                CaptureManifest.serializer(),
+                File(directory, CaptureSchema.MANIFEST_FILE).readText(),
+            )
+        }.getOrNull()
+        return CaptureSummary(
+            sessionId = directory.name,
+            startedWallMs = manifest?.startedWallMs ?: directory.lastModified(),
+            endedWallMs = manifest?.endedWallMs,
+            bytes = directory.walkBottomUp().filter { it.isFile }.sumOf { it.length() },
+            framesStored = manifest?.stats?.framesEncoded ?: 0,
+            markers = manifest?.stats?.markers ?: 0,
+            complete = manifest?.complete ?: false,
+            failureReason = if (manifest == null) "unreadable manifest" else manifest.failureReason,
+            pinned = manifest?.pinned ?: false,
+            exported = manifest?.exportedAtWallMs != null,
+            active = active,
+        )
+    }
+
+    private fun editFinishedManifest(sessionId: String, edit: (CaptureManifest) -> CaptureManifest): Boolean {
+        if (sessionId == active?.writer?.directory?.name) return false
+        val file = File(File(root, sessionId), CaptureSchema.MANIFEST_FILE)
+        val manifest = runCatching {
+            CaptureSchema.json.decodeFromString(CaptureManifest.serializer(), file.readText())
+        }.getOrNull() ?: return false
+        writeAtomically(file, CaptureSchema.encodeManifest(edit(manifest)))
+        return true
+    }
+
+    private suspend fun <T> onWriter(block: () -> T): T = withContext(scope.coroutineContext) { block() }
 
     /** Called when a trace session starts. Never throws, never blocks. */
     fun onSessionStarted(sessionId: String, targetHardwareProfile: String?): Job? {

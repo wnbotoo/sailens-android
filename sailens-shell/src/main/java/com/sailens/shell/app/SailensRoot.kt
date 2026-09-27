@@ -24,6 +24,7 @@ import com.sailens.shell.navigation.DescribeKey
 import com.sailens.shell.navigation.LiveKey
 import com.sailens.shell.navigation.OssLicensesKey
 import com.sailens.shell.navigation.SettingsKey
+import com.sailens.shell.navigation.FieldCaptureKey
 import com.sailens.shell.navigation.TraceSessionsKey
 import com.sailens.shell.navigation.sailensDebugEntries
 import com.sailens.shell.guidance.screen.LiveAnalysisScreen
@@ -151,6 +152,7 @@ fun SailensRoot(
                             onNavigateBack = { backStack.removeLastOrNull() },
                             onOpenLicenses = { backStack.add(OssLicensesKey) },
                             onOpenTraceReports = { backStack.add(TraceSessionsKey) },
+                            onOpenFieldCapture = { backStack.add(FieldCaptureKey) },
                         )
                     }
                     entry<OssLicensesKey> {

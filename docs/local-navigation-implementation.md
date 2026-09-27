@@ -197,7 +197,8 @@ behaviour change. Nothing below promises exact replay.
 |---|---|
 | A — contracts / foundation | This section; capture schema and `manifest.json`; JVM reader; source-side frame timing (`ImageFrame.receivedElapsedRealtimeNanos`); camera characteristics snapshot API in `sailens-camera`; backup/device-transfer exclusion of `captures/`; unit tests |
 | B — capture engine | `TraceService` decorator hook; frame, sensor, anchor and marker writers; bounded queues; retention; mode setting; failure isolation; writer tests |
-| C — field tooling | Capture list (pin / delete / export); ZIP share; Volume-Down marker and on-screen button; timing-sync burst; Python tools (contact sheet, alignment, storage) |
+| C1 — in-app tooling | Capture switch and list (keep / delete / export); ZIP share; Volume-Down marker and on-screen button |
+| C2 — timing and PC tools | Timing-sync burst; Python tools (contact sheet, alignment, storage) |
 
 **Trace delivery fields** (PR #8, merged). `FrameTrace.messageKeys` stay the candidates after
 cooldown. A `prompt_outcome` record per offered prompt carries `eventId`, `sourceSequenceNumber`
@@ -234,10 +235,15 @@ Guidance session, named after the trace session id:
   meaning or type; that is a major version. Closed enums inside records are not extended in a minor
   version.
 - Sensor cadence is computed from event timestamps; `SENSOR_DELAY_GAME` is only the requested rate.
-- Capture counters are separate from Guidance's dropped frames, so a gap can be explained:
+- Capture counters are separate from Guidance's dropped frames, so a gap can be explained. For a
+  **complete** capture they account for everything the engine received:
   `framesOffered` = `framesEncoded` + `framesDroppedByEncoder`; `sensorEvents` (persisted) +
-  `sensorEventsDropped` (capture queue full) = samples the capture received. A timestamp gap not
-  covered by a drop count means the device delivered nothing.
+  `sensorEventsDropped` (capture queue full) = samples received; a timestamp gap not covered by a
+  drop count means the device delivered nothing. An **incomplete** capture (`complete = false`) may
+  hold unaccounted records at the failure boundary (the item being written when it failed, items
+  still queued) and is evidence of lower standing.
+- The 2 GB cap counts frames and records; the manifest itself (a few KB) is not counted, so the cap
+  can be exceeded by that much.
 
 **Timing.** Frame timing is taken at the source: `ImageFrameAnalyzer.analyze()` stamps
 `receivedElapsedRealtimeNanos` before any demand check, conversion or queueing, and the camera's own
@@ -281,10 +287,10 @@ JPEG encode (640 px long side, quality 80, pixels not rotated; `rotationDegrees`
 
 | Need | Design |
 |---|---|
-| Mode switch | Debug settings: field capture off / on |
+| Mode switch | Settings → Diagnostics → Field capture: on / off (the timing-sync burst is added in C2) |
 | Start / stop | Follows the Guidance session while the mode is on; no separate button |
-| Delete, pin | Capture list: per session size, duration, complete/pinned flags; delete and pin |
-| Export | ZIP built into `cacheDir/capture_exports/` (free space checked first) and shared via FileProvider `<cache-path>`; `files/captures/` itself is never exposed; stale exports cleared on next launch / list open. `adb` + `run-as` documented as the bulk fallback |
+| Keep, delete | Capture list: per session start time, size, status (recording / complete / incomplete with reason), kept, exported, frames and markers; keep and delete apply to finished sessions only — the recording one is refused |
+| Export | Finished sessions only. ZIP built into `cacheDir/capture_exports/` (free space checked first) on the capture's writer thread, then shared via FileProvider `<cache-path>`; `files/captures/` itself is never exposed; the session is marked exported; stale exports cleared at app start and when the list opens. `adb` + `run-as` documented as the bulk fallback |
 | Viewing frames around a prompt | On the PC: reader + script rendering ±N s around a `prompt_outcome` or marker as a contact sheet |
 | Storage | Estimated ≈ 0.7–1 GB/hour; measured in M0a and written back into the manual |
 | Retention | Runs at debug app start (whether or not capture is on), before a capture starts, when the capture list opens, and every 30 s during a capture. A session older than 7 days, not exported or pinned, is deleted at the next of these. The 2 GB cap is enforced during capture: older unpinned sessions go first, and if the active capture alone would exceed it, it ends as incomplete with `failureReason = storage_limit_reached` (checked after every frame) instead of writing until the disk is full |

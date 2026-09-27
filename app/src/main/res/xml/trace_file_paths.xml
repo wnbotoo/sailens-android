@@ -3,4 +3,8 @@
     <files-path
         name="trace_files"
         path="traces/" />
+    <!-- Field capture export ZIPs only (debug builds). files/captures/ itself is never exposed. -->
+    <cache-path
+        name="capture_exports"
+        path="capture_exports/" />
 </paths>

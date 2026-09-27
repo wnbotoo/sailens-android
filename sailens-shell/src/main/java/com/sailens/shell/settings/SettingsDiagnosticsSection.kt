@@ -10,6 +10,7 @@ import com.sailens.shell.design.components.SettingsSection
 @Composable
 internal fun SettingsDiagnosticsSection(
     onOpenTraceReports: () -> Unit,
+    onOpenFieldCapture: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     SettingsSection(
@@ -20,6 +21,11 @@ internal fun SettingsDiagnosticsSection(
             title = stringResource(R.string.btn_open_trace_reports),
             supportingText = stringResource(R.string.settings_diagnostics_trace_reports_supporting),
             onClick = onOpenTraceReports,
+        )
+        SettingRow(
+            title = stringResource(R.string.btn_open_field_capture),
+            supportingText = stringResource(R.string.settings_diagnostics_field_capture_supporting),
+            onClick = onOpenFieldCapture,
         )
     }
 }

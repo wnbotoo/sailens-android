@@ -109,6 +109,9 @@ data class CaptureManifest(
  * Capture's own counters, kept apart from Guidance's dropped frames on purpose. A gap in the
  * recorded frames or sensor samples must be explainable: dropped by capture (counted here) versus
  * never delivered by the device (not counted anywhere, visible only as a timestamp gap).
+ *
+ * This accounting is exact for a complete capture only. An incomplete one may hold unaccounted
+ * records at the failure boundary (the item being written, items still queued).
  */
 @Serializable
 data class CaptureStats(

@@ -155,6 +155,28 @@
     <string name="btn_copy_trace_report">复制报告</string>
     <string name="btn_share_trace_file">分享 JSONL</string>
     <string name="title_share_trace_file">分享 Trace 文件</string>
+
+    <!-- 现场采集（仅 debug 版，M0a） -->
+    <string name="btn_open_field_capture">现场采集</string>
+    <string name="settings_diagnostics_field_capture_supporting">在 Guidance 运行时录制缩小的相机画面和运动传感器数据，用于标注和标定。</string>
+    <string name="title_field_capture_page">现场采集</string>
+    <string name="field_capture_switch">Guidance 运行时采集</string>
+    <string name="field_capture_switch_supporting">随每次 Guidance 会话开始和结束。采集数据包含人脸和地点，只保存在本机、不参与备份，7 天后自动删除，已保留或已导出的除外。</string>
+    <string name="field_capture_empty">还没有采集数据。</string>
+    <string name="field_capture_row_summary">%1$s · %2$s · %3$d 帧 · %4$d 个标记</string>
+    <string name="field_capture_status_recording">正在录制</string>
+    <string name="field_capture_status_complete">完整</string>
+    <string name="field_capture_status_incomplete">不完整：%1$s</string>
+    <string name="field_capture_status_kept">已保留</string>
+    <string name="field_capture_status_exported">已导出</string>
+    <string name="btn_field_capture_keep">保留</string>
+    <string name="btn_field_capture_unkeep">取消保留</string>
+    <string name="btn_field_capture_export">导出</string>
+    <string name="btn_field_capture_delete">删除</string>
+    <string name="title_share_capture">分享采集数据</string>
+    <string name="field_capture_export_failed">导出失败：%1$s</string>
+    <string name="btn_mark_missed_alert">标记漏报</string>
+    <string name="field_capture_marker_hint">也可以按音量减键。</string>
     <string name="trace_file_not_found">未找到 Trace 文件</string>
     <string name="label_trace_sessions">已存储会话</string>
     <string name="label_trace_report">回放报告</string>

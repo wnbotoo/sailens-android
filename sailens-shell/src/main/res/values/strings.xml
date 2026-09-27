@@ -156,6 +156,28 @@
     <string name="btn_copy_trace_report">Copy report</string>
     <string name="btn_share_trace_file">Share JSONL</string>
     <string name="title_share_trace_file">Share trace file</string>
+
+    <!-- Field capture (debug builds only, M0a) -->
+    <string name="btn_open_field_capture">Field capture</string>
+    <string name="settings_diagnostics_field_capture_supporting">Record reduced camera frames and motion sensors during Guidance, for labelling and calibration.</string>
+    <string name="title_field_capture_page">Field capture</string>
+    <string name="field_capture_switch">Capture during Guidance</string>
+    <string name="field_capture_switch_supporting">Starts and stops with each Guidance session. Captures contain faces and places. They stay on this device, are not backed up, and are deleted after 7 days unless kept or exported.</string>
+    <string name="field_capture_empty">No captures yet.</string>
+    <string name="field_capture_row_summary">%1$s · %2$s · %3$d frames · %4$d markers</string>
+    <string name="field_capture_status_recording">Recording</string>
+    <string name="field_capture_status_complete">Complete</string>
+    <string name="field_capture_status_incomplete">Incomplete: %1$s</string>
+    <string name="field_capture_status_kept">Kept</string>
+    <string name="field_capture_status_exported">Exported</string>
+    <string name="btn_field_capture_keep">Keep</string>
+    <string name="btn_field_capture_unkeep">Stop keeping</string>
+    <string name="btn_field_capture_export">Export</string>
+    <string name="btn_field_capture_delete">Delete</string>
+    <string name="title_share_capture">Share capture</string>
+    <string name="field_capture_export_failed">Export failed: %1$s</string>
+    <string name="btn_mark_missed_alert">Mark missed alert</string>
+    <string name="field_capture_marker_hint">Or press Volume Down.</string>
     <string name="trace_file_not_found">Trace file not found</string>
     <string name="label_trace_sessions">Stored sessions</string>
     <string name="label_trace_report">Replay report</string>

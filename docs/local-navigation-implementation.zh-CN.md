@@ -185,7 +185,8 @@ M0 拆成两部分（路线图 §7）：**M0a** 是这里描述的现场证据�
 |---|---|
 | A — 契约 / 基础 | 本节；采集 schema 和 `manifest.json`；JVM 读取器；来源侧的帧计时（`ImageFrame.receivedElapsedRealtimeNanos`）；`sailens-camera` 的相机参数快照 API；`captures/` 不进入备份和设备迁移；单测 |
 | B — 采集引擎 | `TraceService` 装饰钩子；帧、传感器、锚点、标记写入器；有界队列；保留策略；模式设置；失败隔离；写入器测试 |
-| C — 现场工具 | 采集列表（保留 / 删除 / 导出）；分享 ZIP；音量减键标记和屏幕按钮；对时突发采集；Python 工具（缩略图、对齐、存储） |
+| C1 — 应用内工具 | 采集开关和列表（保留 / 删除 / 导出）；分享 ZIP；音量减键标记和屏幕按钮 |
+| C2 — 对时与电脑端工具 | 对时突发采集；Python 工具（缩略图、对齐、存储） |
 
 **trace 送达字段**（PR #8，已合入）。`FrameTrace.messageKeys` 仍是冷却后的候选。每条交出的提示有一条
 `prompt_outcome` 记录，包含 `eventId`、`sourceSequenceNumber`（一定能关联：交出过提示的帧无论采样设置
@@ -215,9 +216,12 @@ M0 拆成两部分（路线图 §7）：**M0a** 是这里描述的现场证据�
   符串——M0b 的 `model_regression` 会被旧读取器带着警告读过去）。不能删除或改名必填字段，也不能改变字段
   的含义或类型；那属于大版本。记录里的封闭枚举不在小版本里扩展。
 - 传感器频率按事件时间戳计算；`SENSOR_DELAY_GAME` 只是请求的档位。
-- 采集自己的计数与 Guidance 的丢帧计数分开，这样缺口才能解释：`framesOffered` = `framesEncoded` +
-  `framesDroppedByEncoder`；`sensorEvents`（已写入）+ `sensorEventsDropped`（采集队列满而丢弃）= 采集收到
-  的样本数。没有被丢弃计数覆盖的时间戳缺口，说明是设备本身没有给样本。
+- 采集自己的计数与 Guidance 的丢帧计数分开，这样缺口才能解释。对**完整的**采集，这些计数覆盖引擎收到的
+  全部内容：`framesOffered` = `framesEncoded` + `framesDroppedByEncoder`；`sensorEvents`（已写入）+
+  `sensorEventsDropped`（采集队列满而丢弃）= 收到的样本数；没有被丢弃计数覆盖的时间戳缺口，说明是设备本身没
+  有给样本。**不完整的**采集（`complete = false`）在失败边界上可能有未计入的记录（失败时正在写的那一条、
+  仍在队列里的条目），作为证据的可信度也更低。
+- 2 GB 上限只统计帧和记录，manifest 本身（几 KB）不计入，所以实际可能超出这么一点。
 
 **计时。** 帧的计时在来源侧取：`ImageFrameAnalyzer.analyze()` 在任何需求判断、转换或排队之前记下
 `receivedElapsedRealtimeNanos`；相机自己的 `ImageFrame.timestamp` 含义不变。采集两个都记。以哪个为准
@@ -255,10 +259,10 @@ CameraX 1.7 起被弃用）。快照在每次绑定时读取、解绑时清空�
 
 | 需求 | 设计 |
 |---|---|
-| 模式开关 | 调试设置：现场采集 关 / 开 |
+| 模式开关 | 设置 → 诊断 → 现场采集：开 / 关（对时突发采集在 C2 加入） |
 | 开始 / 停止 | 模式打开时跟随 Guidance 会话；不设单独按钮 |
-| 删除、标记保留 | 采集列表：每个会话显示大小、时长、是否完整/保留；删除和保留操作 |
-| 导出 | 先检查剩余空间，在 `cacheDir/capture_exports/` 里打 ZIP，通过 FileProvider 的 `<cache-path>` 分享；`files/captures/` 本身绝不暴露；旧的导出文件在下次启动 / 打开列表时清理。`adb` + `run-as` 写进文档，作为批量导出的备选 |
+| 保留、删除 | 采集列表：每个会话显示开始时间、大小、状态（正在录制 / 完整 / 不完整及原因）、是否保留、是否导出、帧数和标记数；保留和删除只对已结束的会话生效——正在录制的会被拒绝 |
+| 导出 | 只针对已结束的会话。先检查剩余空间，在采集的写入线程上于 `cacheDir/capture_exports/` 里打 ZIP，再通过 FileProvider 的 `<cache-path>` 分享；`files/captures/` 本身绝不暴露；会话被标记为已导出；旧的导出文件在应用启动和打开列表时清理。`adb` + `run-as` 写进文档，作为批量导出的备选 |
 | 查看某条提示前后的帧 | 在电脑上：读取器 + 脚本，把某条 `prompt_outcome` 或标记前后 ±N 秒的帧拼成缩略图 |
 | 存储 | 估计约 0.7–1 GB/小时；M0a 实测后写回手册 |
 | 保留 | 在以下时机运行：debug 应用启动时（无论采集是否打开）、采集开始前、打开采集列表时、采集期间每 30 秒。超过 7 天且未导出、未标记保留的会话，在下一个时机被删除。2 GB 上限在采集期间强制执行：先删较旧的未保留会话；如果仅当前采集就会超限，就以 `failureReason = storage_limit_reached` 结束为不完整（每帧之后检查），而不是一直写到磁盘满 |
