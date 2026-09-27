@@ -125,6 +125,8 @@ internal class FieldCaptureController(
     private val frameDispatcher: CoroutineDispatcher = Dispatchers.Default,
     private val retention: CaptureRetention = CaptureRetention(root),
     private val exporter: CaptureExporter? = null,
+    /** Heavy session management (listing, ZIP export): never on the writer thread. */
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) {
     private val scope = CoroutineScope(
         SupervisorJob() + writerDispatcher + CoroutineExceptionHandler { _, throwable ->
@@ -136,8 +138,19 @@ internal class FieldCaptureController(
     private var active: ActiveCapture? = null
         set(value) {
             field = value
+            observable = value
             _isCapturing.value = value != null
         }
+
+    /**
+     * The same capture as [active], readable from any thread for observing a marker. Only its
+     * immutable id and its volatile last stored frame are read through it.
+     */
+    @Volatile
+    private var observable: ActiveCapture? = null
+
+    /** Sessions being exported right now; retention and delete leave them alone. Writer thread only. */
+    private val busySessions = mutableSetOf<String>()
 
     private val _isCapturing = MutableStateFlow(false)
 
@@ -149,55 +162,72 @@ internal class FieldCaptureController(
 
     init {
         // A maintenance opportunity at start-up, whether or not capture is switched on, so expired
-        // captures do not stay on the device just because nobody records any more. Leftover export
+        // captures do not stay on the device just because nobody records any more. Stale export
         // ZIPs go too.
         scope.launch {
             maintain()
-            runCatching { exporter?.clearExports() }
+            runCatching { exporter?.clearStaleExports(clock.wallMs()) }
         }
     }
 
     /**
-     * Runs retention now and clears old export ZIPs -- called when the capture list opens. Never
+     * Runs retention now and clears stale export ZIPs -- called when the capture list opens. Never
      * throws.
      */
     fun runMaintenance(): Job = scope.launch {
         maintain()
-        runCatching { exporter?.clearExports() }
+        runCatching { exporter?.clearStaleExports(clock.wallMs()) }
     }
 
-    // ---- session management (capture list). All on the writer thread, so none of it can race
-    // ---- retention or the active capture's writes.
+    // ---- session management (capture list) ------------------------------------------------------
+    //
+    // Rule: only light mutations that must be atomic with capture state run on the writer thread.
+    // Heavy I/O (scanning directories, building a ZIP) never does, so it cannot stall a recording.
+    // While a capture is recording, finished sessions are read-only: managing data waits until the
+    // recording ends, so the tool cannot disturb the evidence it is collecting.
 
-    suspend fun listSessions(): List<CaptureSummary> = onWriter {
-        val activeId = active?.writer?.directory?.name
+    /** Scans the capture directory off the writer thread; a directory deleted meanwhile is skipped. */
+    suspend fun listSessions(): List<CaptureSummary> = withContext(ioDispatcher) {
+        val activeId = observable?.sessionId
         root.listFiles { file -> file.isDirectory }.orEmpty()
-            .map { directory -> summarize(directory, active = directory.name == activeId) }
+            .mapNotNull { directory -> runCatching { summarize(directory, directory.name == activeId) }.getOrNull() }
             .sortedByDescending { it.startedWallMs }
     }
 
-    /** Pins or unpins a finished session; returns false for the active one or an unreadable one. */
+    /** Keeps or stops keeping a finished session. Refused while recording, or for an unreadable one. */
     suspend fun setPinned(sessionId: String, pinned: Boolean): Boolean = onWriter {
-        editFinishedManifest(sessionId) { it.copy(pinned = pinned) }
+        if (active != null || sessionId in busySessions) return@onWriter false
+        editManifest(sessionId) { it.copy(pinned = pinned) }
     }
 
-    /** Deletes a finished session; the active one is refused. */
+    /** Deletes a finished session. Refused while recording and while it is being exported. */
     suspend fun delete(sessionId: String): Boolean = onWriter {
-        if (sessionId == active?.writer?.directory?.name) return@onWriter false
+        if (active != null || sessionId in busySessions) return@onWriter false
         File(root, sessionId).deleteRecursively().also { maintain() }
     }
 
     /**
-     * Packs a finished session into a ZIP for sharing and marks it exported (which also keeps it
-     * past the age limit). The active session is refused. Throws when there is no exporter or
-     * exporting fails.
+     * Packs a finished session into a ZIP for sharing and marks it exported (which also keeps it past
+     * the age limit). Refused while recording. The ZIP is built off the writer thread; the session
+     * is protected from retention and delete meanwhile. Throws when exporting is refused or fails.
      */
-    suspend fun export(sessionId: String): File = onWriter {
+    suspend fun export(sessionId: String): File {
         val zipper = exporter ?: throw IOException("export is not available")
-        if (sessionId == active?.writer?.directory?.name) throw IOException("the capture is still recording")
-        val zip = zipper.export(sessionId)
-        editFinishedManifest(sessionId) { it.copy(exportedAtWallMs = clock.wallMs()) }
-        zip
+        onWriter {
+            if (active != null) throw IOException("a capture is recording; export after it ends")
+            if (!busySessions.add(sessionId)) throw IOException("already exporting")
+        }
+        var zip: File? = null
+        try {
+            zip = withContext(ioDispatcher) { zipper.export(sessionId) }
+            return zip
+        } finally {
+            val exported = zip != null
+            onWriter {
+                busySessions -= sessionId
+                if (exported) editManifest(sessionId) { it.copy(exportedAtWallMs = clock.wallMs()) }
+            }
+        }
     }
 
     private fun summarize(directory: File, active: Boolean): CaptureSummary {
@@ -222,8 +252,8 @@ internal class FieldCaptureController(
         )
     }
 
-    private fun editFinishedManifest(sessionId: String, edit: (CaptureManifest) -> CaptureManifest): Boolean {
-        if (sessionId == active?.writer?.directory?.name) return false
+    /** Writer thread; never for the active session (callers refuse while recording). */
+    private fun editManifest(sessionId: String, edit: (CaptureManifest) -> CaptureManifest): Boolean {
         val file = File(File(root, sessionId), CaptureSchema.MANIFEST_FILE)
         val manifest = runCatching {
             CaptureSchema.json.decodeFromString(CaptureManifest.serializer(), file.readText())
@@ -244,15 +274,34 @@ internal class FieldCaptureController(
     /** Called when the trace session finishes. Never throws, never blocks. */
     fun onSessionFinished(): Job = scope.launch { end() }
 
+    // ---- missed-alert markers ------------------------------------------------------------------
+
     /**
-     * Records a "missed alert" marker in the active capture. Returns whether a capture was active to
-     * take it, so the caller can confirm the press only when it was recorded.
+     * Fixes a marker at the moment of the press, on the caller's (input) thread: the time, the
+     * session it belongs to, and the newest frame already stored. Writing it is separate and may
+     * happen later, when the writer is free -- it never decides when the event happened. Returns null
+     * when nothing is recording.
      */
-    suspend fun recordMarker(source: MarkerSource): Boolean {
+    fun observeMarker(source: MarkerSource): MarkerObservation? {
+        val capture = observable ?: return null
+        return MarkerObservation(
+            sessionId = capture.sessionId,
+            wallMs = clock.wallMs(),
+            elapsedRealtimeNanos = clock.elapsedRealtimeNanos(),
+            lastStoredFrameSeq = capture.lastStoredFrameSeq,
+            source = source,
+        )
+    }
+
+    /**
+     * Persists an observed marker. Returns whether it was written, so the press is confirmed only
+     * then; a marker whose session has ended (or failed) meanwhile is dropped.
+     */
+    suspend fun writeMarker(observation: MarkerObservation): Boolean {
         val result = CompletableDeferred<Boolean>()
         scope.launch {
             val capture = active
-            if (capture == null) {
+            if (capture == null || capture.sessionId != observation.sessionId) {
                 result.complete(false)
                 return@launch
             }
@@ -260,10 +309,10 @@ internal class FieldCaptureController(
                 capture.writer.append(
                     MarkerRecord(
                         kind = MarkerKind.MISSED_ALERT,
-                        wallMs = clock.wallMs(),
-                        elapsedRealtimeNanos = clock.elapsedRealtimeNanos(),
-                        lastStoredFrameSeq = capture.lastStoredFrameSeq,
-                        source = source,
+                        wallMs = observation.wallMs,
+                        elapsedRealtimeNanos = observation.elapsedRealtimeNanos,
+                        lastStoredFrameSeq = observation.lastStoredFrameSeq,
+                        source = observation.source,
                     ),
                 )
                 capture.writer.flush()
@@ -273,6 +322,10 @@ internal class FieldCaptureController(
         }.invokeOnCompletion { if (!result.isCompleted) result.complete(false) }
         return result.await()
     }
+
+    /** Observe and write in one call. */
+    suspend fun recordMarker(source: MarkerSource): Boolean =
+        observeMarker(source)?.let { writeMarker(it) } ?: false
 
     // ---- writer thread -------------------------------------------------------------------------
 
@@ -340,14 +393,14 @@ internal class FieldCaptureController(
     }
 
     /**
-     * Retention pass. The active session is never deleted, only counted; its size comes from the
-     * writer so that no directory walk is needed per frame.
+     * Retention pass. The active session and sessions being exported are never deleted, only
+     * counted; the active size comes from the writer so that no directory walk is needed per frame.
      */
     private fun maintain(
-        activeSessionId: String? = active?.writer?.directory?.name,
+        activeSessionId: String? = active?.sessionId,
         activeBytes: Long = active?.writer?.bytesWritten ?: 0,
     ) {
-        runCatching { retention.prune(clock.wallMs(), activeSessionId, activeBytes) }
+        runCatching { retention.prune(clock.wallMs(), activeSessionId, activeBytes, busySessions.toSet()) }
             .onSuccess { otherSessionsBytes = it.otherSessionsBytes }
             .onFailure { log.warning(TAG, "Capture retention failed", throwable = it) }
     }
@@ -494,6 +547,7 @@ internal class FieldCaptureController(
     )
 
     private inner class ActiveCapture(val writer: CaptureSessionWriter) {
+        val sessionId: String = writer.directory.name
         val offered = AtomicLong()
         val encoded = AtomicLong()
         val droppedByEncoder = AtomicLong()
@@ -571,3 +625,12 @@ internal fun CameraCharacteristicsSnapshot.toRecord() = CaptureCameraRecord(
 )
 
 private fun PixelRect.toList() = listOf(left, top, right, bottom)
+
+/** A missed-alert press, fixed when it was observed; see [FieldCaptureController.observeMarker]. */
+internal data class MarkerObservation(
+    val sessionId: String,
+    val wallMs: Long,
+    val elapsedRealtimeNanos: Long,
+    val lastStoredFrameSeq: Long?,
+    val source: MarkerSource,
+)

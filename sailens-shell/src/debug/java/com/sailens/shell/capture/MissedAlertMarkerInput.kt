@@ -33,6 +33,9 @@ internal fun markerKeyDecision(capturing: Boolean, keyCode: Int, action: Int, re
 /**
  * Records a marker and confirms it with a short vibration -- only once the marker was actually
  * written, so the person recording can trust the buzz without looking.
+ *
+ * The marker's time, session and frame reference are fixed here, on the input thread, when the
+ * press arrives; the write that follows may wait for the capture writer without moving the event.
  */
 internal class MissedAlertMarkers(
     context: Context,
@@ -42,8 +45,9 @@ internal class MissedAlertMarkers(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     fun mark(source: MarkerSource) {
+        val observation = controller.observeMarker(source) ?: return
         scope.launch {
-            if (controller.recordMarker(source)) haptics.play(CONFIRM, CONFIRM_AMPLITUDE)
+            if (controller.writeMarker(observation)) haptics.play(CONFIRM, CONFIRM_AMPLITUDE)
         }
     }
 

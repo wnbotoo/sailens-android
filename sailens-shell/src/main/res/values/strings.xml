@@ -162,7 +162,7 @@
     <string name="settings_diagnostics_field_capture_supporting">Record reduced camera frames and motion sensors during Guidance, for labelling and calibration.</string>
     <string name="title_field_capture_page">Field capture</string>
     <string name="field_capture_switch">Capture during Guidance</string>
-    <string name="field_capture_switch_supporting">Starts and stops with each Guidance session. Captures contain faces and places. They stay on this device, are not backed up, and are deleted after 7 days unless kept or exported.</string>
+    <string name="field_capture_switch_supporting">Takes effect when the next Guidance session starts, and records until it stops. Captures contain faces and places. They stay on this device, are not backed up, and are deleted after 7 days unless kept or exported.</string>
     <string name="field_capture_empty">No captures yet.</string>
     <string name="field_capture_row_summary">%1$s · %2$s · %3$d frames · %4$d markers</string>
     <string name="field_capture_status_recording">Recording</string>
@@ -176,6 +176,11 @@
     <string name="btn_field_capture_delete">Delete</string>
     <string name="title_share_capture">Share capture</string>
     <string name="field_capture_export_failed">Export failed: %1$s</string>
+    <string name="field_capture_recording_notice">Recording now. Stop Guidance before changing this setting or managing captures.</string>
+    <string name="field_capture_action_failed">Could not change the capture. Stop Guidance and try again.</string>
+    <string name="title_field_capture_delete">Delete this capture?</string>
+    <string name="field_capture_delete_body">It is removed from this device and cannot be recovered.</string>
+    <string name="btn_cancel_field_capture_delete">Cancel</string>
     <string name="btn_mark_missed_alert">Mark missed alert</string>
     <string name="field_capture_marker_hint">Or press Volume Down.</string>
     <string name="trace_file_not_found">Trace file not found</string>

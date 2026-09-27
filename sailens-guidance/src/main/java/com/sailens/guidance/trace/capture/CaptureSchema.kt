@@ -232,7 +232,10 @@ enum class AnchorReason {
     @SerialName("end") END,
 }
 
-/** Pressed by the person recording when a prompt that should have come did not. */
+/**
+ * Pressed by the person recording when a prompt that should have come did not. [wallMs] and
+ * [elapsedRealtimeNanos] are when the press was observed, not when the record was written.
+ */
 @Serializable
 @SerialName("marker")
 data class MarkerRecord(

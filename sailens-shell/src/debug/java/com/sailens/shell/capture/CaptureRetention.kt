@@ -7,7 +7,8 @@ import java.io.File
 /**
  * Keeps the capture directory bounded (decided 2026-09-25): a session expires [maxAgeMs] after it
  * was recorded unless it was exported or pinned, and the total is kept under [maxTotalBytes] by
- * deleting the oldest sessions that are not pinned. The active session is never deleted here; the
+ * deleting the oldest sessions that are not pinned. The active session, and one being exported, is
+ * never deleted here; the
  * capture engine ends it instead when it alone would exceed the cap.
  *
  * Retention runs at maintenance opportunities (debug app start, before a capture, when the capture
@@ -25,22 +26,29 @@ internal class CaptureRetention(
 
     /**
      * @param activeBytes the active session's current size, counted towards the cap.
+     * @param busySessionIds sessions in use (being exported): counted, never deleted.
      * @return what it deleted and how many bytes the other (non-active) sessions still hold.
      */
-    fun prune(nowWallMs: Long, activeSessionId: String? = null, activeBytes: Long = 0): Result {
+    fun prune(
+        nowWallMs: Long,
+        activeSessionId: String? = null,
+        activeBytes: Long = 0,
+        busySessionIds: Set<String> = emptySet(),
+    ): Result {
         val sessions = root.listFiles { file -> file.isDirectory }.orEmpty()
             .filter { it.name != activeSessionId }
             .map { describe(it) }
         val deleted = mutableListOf<String>()
+        fun deletable(session: SessionOnDisk) = !session.pinned && session.directory.name !in busySessionIds
 
         sessions
-            .filter { !it.pinned && !it.exported && nowWallMs - it.startedWallMs > maxAgeMs }
+            .filter { deletable(it) && !it.exported && nowWallMs - it.startedWallMs > maxAgeMs }
             .forEach { if (it.directory.deleteRecursively()) deleted += it.directory.name }
 
         val remaining = sessions.filter { it.directory.name !in deleted }
         var others = remaining.sumOf { it.bytes }
         remaining
-            .filter { !it.pinned }
+            .filter { deletable(it) }
             .sortedBy { it.startedWallMs }
             .forEach { session ->
                 if (others + activeBytes <= maxTotalBytes) return@forEach

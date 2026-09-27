@@ -5,6 +5,7 @@ import com.sailens.camera.CameraCharacteristicsProvider
 import com.sailens.guidance.trace.capture.CaptureManifest
 import com.sailens.guidance.trace.capture.CaptureSchema
 import com.sailens.guidance.trace.capture.CaptureSessionReader
+import com.sailens.guidance.trace.capture.MarkerSource
 import com.sailens.guidance.trace.capture.orThrow
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -27,6 +28,7 @@ class FieldCaptureToolingTest {
     private val root by lazy { tmp.newFolder("captures") }
     private val exports by lazy { File(tmp.root, "capture_exports") }
     private val frames = FakeFrameSource()
+    private val clock = FakeClock()
 
     private fun controller() = FieldCaptureController(
         root = root,
@@ -35,7 +37,7 @@ class FieldCaptureToolingTest {
         cameraFacts = CameraCharacteristicsProvider { null },
         sensors = FakeSensors(),
         encoder = JpegEncoder { image, _ -> ByteArray(image.width) },
-        clock = FakeClock(),
+        clock = clock,
         deviceInfo = TEST_DEVICE,
         log = RecordingLog(),
         exporter = CaptureExporter(root, exports),
@@ -126,15 +128,79 @@ class FieldCaptureToolingTest {
     }
 
     @Test
-    fun `opening the list clears old export ZIPs`() = runBlocking {
+    fun `opening the list clears export ZIPs older than a day and leaves fresh ones for the share target`() = runBlocking {
         val capture = controller()
         recorded(capture, "a")
-        val zip = capture.export("a")
-        assertTrue(zip.isFile)
+        recorded(capture, "b")
+        val stale = capture.export("a")
+        val fresh = capture.export("b")
+        val hour = 60L * 60 * 1000
+        stale.setLastModified(clock.wallMs() - 25 * hour)
+        fresh.setLastModified(clock.wallMs() - 1 * hour)
 
         capture.runMaintenance().join()
 
-        assertFalse(zip.exists())
+        assertFalse(stale.exists())
+        assertTrue(fresh.isFile)
         assertTrue("the session itself stays", File(root, "a").isDirectory)
+    }
+
+    @Test
+    fun `finished sessions are read-only while a capture is recording`() = runBlocking {
+        val capture = controller()
+        recorded(capture, "done")
+        capture.onSessionStarted("live", null)!!.join()
+
+        assertFalse(capture.setPinned("done", true))
+        assertFalse(capture.delete("done"))
+        try {
+            capture.export("done")
+            fail("exporting while recording must be refused")
+        } catch (expected: IOException) {
+        }
+        assertTrue(File(root, "done").isDirectory)
+        assertFalse(capture.listSessions().first { it.sessionId == "done" }.pinned)
+
+        capture.onSessionFinished().join()
+        assertTrue("allowed again once the recording ends", capture.setPinned("done", true))
+    }
+
+    // ---- markers -------------------------------------------------------------------------------
+
+    @Test
+    fun `a marker keeps the time and frame of the press even when the write comes later`() = runBlocking {
+        val capture = controller()
+        capture.onSessionStarted("s", null)!!.join()
+        frames.emit(yuvFrame(7))
+        awaitTrue("frame stored") { capture.observeMarker(MarkerSource.VOLUME_DOWN)?.lastStoredFrameSeq == 7L }
+
+        val observation = capture.observeMarker(MarkerSource.VOLUME_DOWN)!!
+        clock.advanceMs(5_000) // the writer was busy; the write lands 5 s later
+        frames.emit(yuvFrame(8))
+        awaitTrue("newer frame stored") { capture.observeMarker(MarkerSource.VOLUME_DOWN)?.lastStoredFrameSeq == 8L }
+        assertTrue(capture.writeMarker(observation))
+        capture.onSessionFinished().join()
+
+        val marker = CaptureSessionReader.read(File(root, "s")).orThrow().markers.single()
+        assertEquals(observation.wallMs, marker.wallMs)
+        assertEquals(observation.elapsedRealtimeNanos, marker.elapsedRealtimeNanos)
+        assertEquals(7L, marker.lastStoredFrameSeq)
+    }
+
+    @Test
+    fun `a marker observed in a session that has ended is not written anywhere`() = runBlocking {
+        val capture = controller()
+        capture.onSessionStarted("first", null)!!.join()
+        val late = capture.observeMarker(MarkerSource.SCREEN_BUTTON)!!
+        capture.onSessionFinished().join()
+        assertFalse("session ended", capture.writeMarker(late))
+
+        capture.onSessionStarted("second", null)!!.join()
+        assertFalse("never lands in the next session", capture.writeMarker(late))
+        capture.onSessionFinished().join()
+
+        assertTrue(CaptureSessionReader.read(File(root, "first")).orThrow().markers.isEmpty())
+        assertTrue(CaptureSessionReader.read(File(root, "second")).orThrow().markers.isEmpty())
+        assertEquals(null, capture.observeMarker(MarkerSource.SCREEN_BUTTON))
     }
 }

@@ -125,6 +125,21 @@ class CaptureEnginePartsTest {
     }
 
     @Test
+    fun `a session being exported is counted but never deleted, by age or by size`() {
+        session("old-busy", startedWallMs = 1, bytes = 1_000)
+        session("newer", startedWallMs = 2, bytes = 1_000)
+
+        val result = CaptureRetention(tmp.root, maxAgeMs = 1, maxTotalBytes = 1).prune(
+            nowWallMs = 10_000,
+            busySessionIds = setOf("old-busy"),
+        )
+
+        assertEquals(listOf("newer"), result.deleted)
+        assertEquals(setOf("old-busy"), tmp.root.list()!!.toSet())
+        assertTrue("still counted towards the cap", result.otherSessionsBytes >= 1_000)
+    }
+
+    @Test
     fun `a directory without a readable manifest is judged by its age and never pins space`() {
         val broken = File(tmp.root, "broken").apply { mkdirs() }
         File(broken, "manifest.json").writeText("{ not json")

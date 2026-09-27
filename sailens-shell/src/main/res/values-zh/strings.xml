@@ -161,7 +161,7 @@
     <string name="settings_diagnostics_field_capture_supporting">在 Guidance 运行时录制缩小的相机画面和运动传感器数据，用于标注和标定。</string>
     <string name="title_field_capture_page">现场采集</string>
     <string name="field_capture_switch">Guidance 运行时采集</string>
-    <string name="field_capture_switch_supporting">随每次 Guidance 会话开始和结束。采集数据包含人脸和地点，只保存在本机、不参与备份，7 天后自动删除，已保留或已导出的除外。</string>
+    <string name="field_capture_switch_supporting">下一次 Guidance 会话开始时生效，录制到该会话停止。采集数据包含人脸和地点，只保存在本机、不参与备份，7 天后自动删除，已保留或已导出的除外。</string>
     <string name="field_capture_empty">还没有采集数据。</string>
     <string name="field_capture_row_summary">%1$s · %2$s · %3$d 帧 · %4$d 个标记</string>
     <string name="field_capture_status_recording">正在录制</string>
@@ -175,6 +175,11 @@
     <string name="btn_field_capture_delete">删除</string>
     <string name="title_share_capture">分享采集数据</string>
     <string name="field_capture_export_failed">导出失败：%1$s</string>
+    <string name="field_capture_recording_notice">正在录制。请先停止 Guidance，再修改此设置或管理采集数据。</string>
+    <string name="field_capture_action_failed">无法修改这份采集数据。请停止 Guidance 后重试。</string>
+    <string name="title_field_capture_delete">删除这份采集数据？</string>
+    <string name="field_capture_delete_body">它会从本机移除，无法恢复。</string>
+    <string name="btn_cancel_field_capture_delete">取消</string>
     <string name="btn_mark_missed_alert">标记漏报</string>
     <string name="field_capture_marker_hint">也可以按音量减键。</string>
     <string name="trace_file_not_found">未找到 Trace 文件</string>

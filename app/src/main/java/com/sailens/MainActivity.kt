@@ -26,6 +26,11 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    override fun dispatchKeyEvent(event: KeyEvent): Boolean =
-        keyHandler?.onKeyEvent(event) == true || super.dispatchKeyEvent(event)
+    // Public platform callbacks rather than dispatchKeyEvent (restricted on ComponentActivity).
+    // Volume keys reach them because no view consumes them; repeatCount is preserved.
+    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean =
+        keyHandler?.onKeyEvent(event) == true || super.onKeyDown(keyCode, event)
+
+    override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean =
+        keyHandler?.onKeyEvent(event) == true || super.onKeyUp(keyCode, event)
 }

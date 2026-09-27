@@ -11,8 +11,8 @@ import java.util.zip.ZipOutputStream
  *
  * The export directory is meant to be `cacheDir/capture_exports/`: it is the only thing exposed to
  * other apps (FileProvider `<cache-path>`), `files/captures/` never is, and `cacheDir` is not backed
- * up. Old exports are cleared at start-up and whenever the capture list opens -- there is no
- * reliable signal for when a share target has finished reading one.
+ * up. Exports older than a day are cleared at start-up and whenever the capture list opens -- there
+ * is no reliable signal for when a share target has finished reading one.
  */
 internal class CaptureExporter(
     private val root: File,
@@ -47,7 +47,18 @@ internal class CaptureExporter(
         return zip
     }
 
-    fun clearExports() {
-        exportDir.listFiles().orEmpty().forEach { it.deleteRecursively() }
+    /**
+     * Deletes exports older than [maxAgeMs]. A share target reads the ZIP some time after the share
+     * sheet closes and there is no signal for when it has finished, so a fresh export is left alone;
+     * a day is far longer than any hand-off takes.
+     */
+    fun clearStaleExports(nowWallMs: Long, maxAgeMs: Long = STALE_EXPORT_AGE_MS) {
+        exportDir.listFiles().orEmpty()
+            .filter { nowWallMs - it.lastModified() > maxAgeMs }
+            .forEach { it.deleteRecursively() }
+    }
+
+    companion object {
+        const val STALE_EXPORT_AGE_MS: Long = 24L * 60 * 60 * 1000
     }
 }
