@@ -300,11 +300,15 @@ burst cannot keep up with the camera on a device, that shows as capture's own lo
 camera's. Files are `frames/NNNNNN.y`. It ends itself after 15 s as a complete capture while
 Guidance continues; the session's own end then finds nothing to stop (capture start and end are
 serialised, so the two ends cannot interleave). A capture — burst or field evidence, ended or
-failed — stays active until its manifest is final: `isCapturing` turns false only after the END
-anchor and the finished manifest are written, so the capture list never reads a half-written one.
-Analysed with `scripts/capture/timing_align.py`: phase-correlated image motion per frame pair
-against gyroscope x/y rotation over the same interval, lag by best correlation, with the spread
-over four parts of the burst as the error bar (≈1.5 ms accuracy on synthetic bursts).
+failed — stays active until it is finalised: `isCapturing` turns false only after a normal end has
+written the END anchor and the complete manifest, or a failure has made its attempt to write the
+incomplete manifest (no END anchor: the disk may be what failed). The capture list therefore never
+reads a half-written manifest. Analysed with `scripts/capture/timing_align.py`: phase-correlated
+image motion per frame pair against gyroscope x/y rotation over the same interval, lag by best
+correlation, with the spread over four parts of the burst as the error bar. On synthetic bursts
+(gyro at 200 Hz and at the typical `SENSOR_DELAY_GAME` 50 Hz) it is within ≈1.5 ms of the truth;
+that is numerical accuracy only, not a device measurement floor, which comes from each target
+device's real gyro cadence and repeated bursts in M0a.
 
 **Clock contract for alignment.** Camera timestamps are compared with the gyroscope **only when
 the camera's timestamp source is `REALTIME`**, which Android defines as sharing `SensorEvent`'s
@@ -313,9 +317,12 @@ the camera result is then not measured (`cameraComparable = false`), must never 
 clock as gyro-comparable however good a correlation looks, and the source receipt time
 (elapsedRealtime by construction) is the authoritative measurement. An empirical estimate of a
 non-REALTIME camera clock is available as a diagnostic only. A burst is usable for qualification
-only if it is complete, capture dropped no sensor samples, there was enough motion, and the
-authoritative result is clean (not at the search edge, the four parts agree); otherwise it is
-recorded again. Heavy frame loss is a warning.
+only if it is complete, capture dropped no sensor samples, there was enough motion, and on the
+authoritative clock the image-motion/gyro correlation is at least 0.5 (a negative control with real
+motion unrelated to the gyro gives ≈0.3), all four parts were checked and agree within 5 ms, and
+the offset is not at the search edge; otherwise it is recorded again. Heavy frame loss is a
+warning. The thresholds are conservative until the target devices' real bursts are in — a false
+rejection only costs another burst.
 
 **Controls (PR-C, debug builds; these fill the placeholders of the recording manual, PR #9)**
 
@@ -355,7 +362,8 @@ burst stores every frame as raw luma, counts its own mailbox misses and ends its
 session goes on; a capture is inactive only once its manifest is final; luma area averaging; a
 refused Guidance start never starts; PC tools on synthetic captures in the app's format: loss
 attribution, bursts with known offsets on both clocks, an UNKNOWN camera clock never qualified,
-dropped gyroscope samples disqualify (run in CI).
+dropped gyroscope samples, a negative control (real motion unrelated to the gyro) and a burst too
+short for four checked parts never qualify (run in CI).
 
 ## 5. M1 — Qualification and safety state (exact reproduction); M1b — stop pre-emption
 

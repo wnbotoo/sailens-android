@@ -108,7 +108,11 @@ internal data class FieldCaptureConfig(
 internal data class TimingSyncConfig(
     val durationMs: Long = 15_000,
     val maxLongSide: Int = 400,
-    /** A little slack at camera rate; a frame dropped here is counted, one dropped at the source shows as a gap. */
+    /**
+     * A little slack at camera rate. A frame dropped here is `framesDroppedByEncoder`; one replaced in
+     * capture's mailbox is `framesMissedBySubscriber`; one lost before the analyzer is counted nowhere
+     * and shows only as a camera-timestamp gap (see `CaptureStats`).
+     */
     val queueCapacity: Int = 4,
 )
 

@@ -150,10 +150,13 @@ class ContactSheetTest(unittest.TestCase):
 
 
 def synthetic_burst(root, offset_s=0.012, latency_s=0.028, focal=180.0, seconds=8.0, moving=True,
-                    camera_origin_ns=0, timestamp_source="realtime", stats=None):
+                    camera_origin_ns=0, timestamp_source="realtime", stats=None, gyro_hz=200.0,
+                    gyro_independent=False):
     """A timing_sync capture of a camera turning over a smooth texture. The frame at camera time t
     shows the orientation the gyroscope reports at t + offset_s; receipt = camera + latency_s. A
-    non-REALTIME camera clock is modelled by camera_origin_ns added to every camera timestamp."""
+    non-REALTIME camera clock is modelled by camera_origin_ns added to every camera timestamp.
+    gyro_independent: the gyroscope reports a different motion than the images show (a negative
+    control: real image motion, no relation to the gyro)."""
     rng = np.random.default_rng(7)
     size, crop_h, crop_w = 256, 96, 128
     spectrum = np.fft.fft2(rng.random((size, size)))
@@ -182,10 +185,11 @@ def synthetic_burst(root, offset_s=0.012, latency_s=0.028, focal=180.0, seconds=
         received = t_ns + int((latency_s + rng.normal(0, 0.001)) * 1e9)
         frames.append((luma_record(i + 1, t_ns + camera_origin_ns, received, crop_w, crop_h), crop.tobytes()))
     gyro = []
-    for k in range(int((seconds + 0.4) * 200)):
-        t = -0.2 + k / 200.0
+    gyro_x, gyro_y = (y_terms[::-1], [(a, f * 1.37, p + 2.0) for a, f, p in x_terms]) if gyro_independent else (x_terms, y_terms)
+    for k in range(int((seconds + 0.4) * gyro_hz)):
+        t = -0.2 + k / gyro_hz
         gyro.append({"sensor": "gyroscope", "timestampNanos": START_NS + int(t * 1e9), "accuracy": 3,
-                     "values": [rate(x_terms, t) + rng.normal(0, 0.005), rate(y_terms, t) + rng.normal(0, 0.005), 0.0]})
+                     "values": [rate(gyro_x, t) + rng.normal(0, 0.005), rate(gyro_y, t) + rng.normal(0, 0.005), 0.0]})
     camera = {"cameraId": "0", "capturedAtElapsedRealtimeNanos": START_NS, "timestampSource": timestamp_source}
     return write_capture(root, "burst", mode="timing_sync", frames=frames, sensors=gyro, stats=stats,
                          manifest_overrides={"camera": camera})
@@ -193,14 +197,31 @@ def synthetic_burst(root, offset_s=0.012, latency_s=0.028, focal=180.0, seconds=
 
 class TimingAlignTest(unittest.TestCase):
     def test_recovers_a_known_offset_on_both_frame_clocks(self):
-        for offset_ms in (12.0, -45.0):
-            with self.subTest(offset_ms=offset_ms), tempfile.TemporaryDirectory() as root:
-                result = timing_align.analyse(synthetic_burst(root, offset_s=offset_ms / 1000), max_lag_ms=100)
+        # 50 Hz is what SENSOR_DELAY_GAME typically gives (a hint only; devices differ).
+        for offset_ms, gyro_hz in ((12.0, 200.0), (-45.0, 200.0), (12.0, 50.0)):
+            with self.subTest(offset_ms=offset_ms, gyro_hz=gyro_hz), tempfile.TemporaryDirectory() as root:
+                directory = synthetic_burst(root, offset_s=offset_ms / 1000, gyro_hz=gyro_hz)
+                result = timing_align.analyse(directory, max_lag_ms=100)
+                self.assertTrue(result["usableForQualification"])
                 self.assertAlmostEqual(result["camera"]["offsetMs"], offset_ms, delta=2.0)
                 self.assertAlmostEqual(result["received"]["offsetMs"], offset_ms - 28.0, delta=3.0)
                 self.assertGreater(result["camera"]["peakCorrelation"], 0.9)
                 self.assertAlmostEqual(result["camera"]["focalPxEstimate"], 180.0, delta=180.0 * 0.15)
                 self.assertFalse(result["warnings"])
+
+    def test_negative_control_real_motion_unrelated_to_the_gyro_never_qualifies(self):
+        with tempfile.TemporaryDirectory() as root:
+            result = timing_align.analyse(synthetic_burst(root, gyro_independent=True), max_lag_ms=100)
+        self.assertGreater(result["pairsMoving"], 200)  # passes the motion gate: this tests correlation
+        self.assertFalse(result["usableForQualification"])
+        self.assertTrue(any("correlate only" in w for w in result["warnings"]))
+
+    def test_a_burst_too_short_for_four_checked_parts_never_qualifies(self):
+        with tempfile.TemporaryDirectory() as root:
+            result = timing_align.analyse(synthetic_burst(root, seconds=1.5), max_lag_ms=100)
+        self.assertGreater(result["camera"]["peakCorrelation"], 0.9)  # otherwise a good result
+        self.assertFalse(result["usableForQualification"])
+        self.assertTrue(any("parts of the burst could be checked" in w for w in result["warnings"]))
 
     def test_a_burst_without_motion_asks_for_a_new_recording(self):
         with tempfile.TemporaryDirectory() as root:

@@ -26,12 +26,17 @@ Result, per frame time base: ``gyro_time ≈ frame_time + δ``.
   This is the authoritative measurement when the camera clock is not REALTIME.
 The estimate is repeated on four consecutive parts of the burst; their spread is the error bar (hand
 motion is smooth, so the correlation peak is broad) and would also reveal drift. It does not catch
-a consistent bias: on synthetic bursts the estimate is within ~1.5 ms of the truth, so treat
-anything under ~2 ms as zero.
+a consistent bias. On synthetic bursts (gyro at 200 Hz and at 50 Hz, the typical SENSOR_DELAY_GAME
+rate) the estimate is within ~1.5 ms of the truth: that is the method's numerical accuracy only,
+not a measurement floor on a device. The real error comes from the device's actual gyro cadence
+and from repeated bursts (their spread), measured per target device in M0a.
 
 ``usableForQualification`` (exit code 0, else 2) needs a complete capture, no sensor samples
-dropped by capture, enough motion, and a clean result on the authoritative clock (not at the
-search edge, parts agreeing). Otherwise record the burst again. Heavy frame loss is a warning.
+dropped by capture, enough motion, and on the authoritative clock: correlation r >= 0.5 (a
+negative control -- real image motion unrelated to the gyro -- gives about 0.3), all four parts
+checked and agreeing within 5 ms, and the offset not at the search edge. Otherwise record the burst
+again. Heavy frame loss is a warning. The thresholds are conservative until real bursts from the
+target devices are in: a false rejection only costs another burst.
 """
 from __future__ import annotations
 
@@ -52,6 +57,9 @@ MIN_MOVING_FRACTION = 0.3  # of pairs whose image moved by more than half a pixe
 SEGMENTS = 4
 MAX_SEGMENT_SPREAD_MS = 5.0
 MAX_FRAME_LOSS = 0.10
+# Pearson r between image motion and gyro rotation on the authoritative clock. Conservative until the
+# two target devices give real numbers: a false rejection only costs recording the burst again.
+MIN_QUALIFICATION_CORRELATION = 0.5
 
 
 def phase_shift(a, b, window):
@@ -240,7 +248,12 @@ def analyse(directory, max_lag_ms=300.0, diagnose_camera_clock=False):
         problems = []
         if r["atSearchEdge"]:
             problems.append(f"{name}: best offset is at the search edge; widen --max-lag-ms")
-        if r["segmentSpreadMs"] is not None and r["segmentSpreadMs"] > MAX_SEGMENT_SPREAD_MS:
+        if r["peakCorrelation"] < MIN_QUALIFICATION_CORRELATION:
+            problems.append(f"{name}: image motion and gyroscope correlate only r={r['peakCorrelation']} "
+                            f"(< {MIN_QUALIFICATION_CORRELATION}): moving people, sliding instead of turning, blur or repetitive texture")
+        if len(r["segmentOffsetsMs"]) < SEGMENTS or r["segmentSpreadMs"] is None:
+            problems.append(f"{name}: only {len(r['segmentOffsetsMs'])} of {SEGMENTS} parts of the burst could be checked; record a longer burst")
+        elif r["segmentSpreadMs"] > MAX_SEGMENT_SPREAD_MS:
             problems.append(f"{name}: parts of the burst disagree by {r['segmentSpreadMs']} ms (drift, or too little motion in parts)")
         (blocking if r is authoritative else warnings).extend(problems)
     if authoritative is None:
