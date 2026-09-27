@@ -85,6 +85,23 @@ class CaptureEnginePartsTest {
         assertEquals(listOf(200, 100, 200, 102), chroma)
     }
 
+    @Test
+    fun `luma for the timing burst is area-averaged over every source pixel, honouring the row stride`() {
+        val frame = yuvFrame(seq = 1, width = 8, height = 6, rowPadding = 4) // luma = x + 10*y
+
+        val image = LumaDownscaler.downscale(frame, maxLongSide = 4)!!
+
+        assertEquals(4 to 3, image.width to image.height) // no even-size rounding for luma
+        // Each output pixel averages a 2x2 cell: mean x = 2c + 0.5, mean y = 2r + 0.5.
+        val expected = (0 until 3).flatMap { r -> (0 until 4).map { c -> 2 * c + 20 * r + 5 } }
+        assertEquals(expected, image.bytes.map { it.toInt() and 0xFF })
+
+        // Uneven cells (8 -> 3 columns: widths 2, 3, 3) still cover the whole row.
+        val uneven = LumaDownscaler.downscale(frame, maxLongSide = 3)!!
+        assertEquals(3 to 2, uneven.width to uneven.height)
+        assertEquals(listOf(10, 13, 16), uneven.bytes.take(3).map { it.toInt() and 0xFF })
+    }
+
     // ---- retention -----------------------------------------------------------------------------
 
     private fun session(id: String, startedWallMs: Long, bytes: Int = 10, pinned: Boolean = false, exported: Boolean = false) {

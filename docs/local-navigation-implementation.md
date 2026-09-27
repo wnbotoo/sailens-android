@@ -279,20 +279,31 @@ service it replaces. Rules:
 `releaseFrame` immediately → a bounded queue (capacity 1–2, drop the oldest pending) → background
 JPEG encode (640 px long side, quality 80, pixels not rotated; `rotationDegrees` recorded).
 
-**Timing-sync burst (PR-C).** Mode `timing_sync`: about 15 s at camera rate, small luma frames
+**Timing-sync burst (PR-C2).** Mode `timing_sync`: about 15 s at camera rate, small luma frames
 (`luma8`, 320–480 px long side, no JPEG), exact per-frame timestamps, gyroscope at
 `SENSOR_DELAY_GAME`. Used only to measure frame/sensor alignment; never a performance baseline.
+Armed once on the field capture page, independent of the capture switch, and used up by the next
+Guidance start (in memory only, so a killed app forgets it). The capture takes every frame the
+source delivers (`FrameSource.frames`, not the sampled stream), area-averages the Y plane to 400 px
+long side (averaging, not point sampling, so fine texture does not alias into false motion), and
+queues up to 4 frames; one dropped there is counted, one the source never delivered shows as a
+sequence gap. Files are `frames/NNNNNN.y`. It ends itself after 15 s as a complete capture while
+Guidance continues; the session's own end then finds nothing to stop (capture start and end are
+serialised, so the two ends cannot interleave). Analysed with `scripts/capture/timing_align.py`:
+phase-correlated image motion per frame pair against gyroscope x/y rotation over the same interval,
+lag by best correlation, for camera timestamps and source receipt times separately, with the
+spread over four parts of the burst as the error bar (≈1.5 ms accuracy on synthetic bursts).
 
 **Controls (PR-C, debug builds; these fill the placeholders of the recording manual, PR #9)**
 
 | Need | Design |
 |---|---|
-| Mode switch | Settings → Diagnostics → Field capture: on / off (the timing-sync burst is added in C2). The mode is read when a Guidance session starts, so the switch takes effect at the next session and is locked while a capture is recording |
+| Mode switch | Settings → Diagnostics → Field capture: on / off, plus "arm the timing-sync burst for the next Guidance start" (one-shot). The mode is read when a Guidance session starts, so the switch takes effect at the next session and is locked while a capture is recording |
 | Start / stop | Follows the Guidance session while the mode is on; no separate button |
 | Keep, delete | Capture list: per session start time, size, status (recording / complete / incomplete with reason), kept, exported, frames and markers; keep, delete and export are refused while any capture is recording (the list is read-only then; the tool must not disturb the evidence it is collecting); delete asks for confirmation, and a refused or failed action is reported |
 | Export | Finished sessions only. ZIP built into `cacheDir/capture_exports/` (free space checked first) off the capture writer thread, with the session protected from retention and delete meanwhile. Capture and export never overlap in either direction: while a ZIP is being built, starting Guidance is refused with "finish exporting first" (debug `GuidanceStartGate`), and a capture that starts anyway ends at once as incomplete with `failureReason = export_in_progress`. A ZIP whose session cannot be marked exported is discarded and reported as a failure. The ZIP is then shared via FileProvider `<cache-path>`; `files/captures/` itself is never exposed; the session is marked exported; exports older than a day cleared at app start and when the list opens (a share target reads the ZIP after the share sheet closes, with no signal when it is done). `adb` + `run-as` documented as the bulk fallback |
-| Viewing frames around a prompt | On the PC: reader + script rendering ±N s around a `prompt_outcome` or marker as a contact sheet |
-| Storage | Estimated ≈ 0.7–1 GB/hour; measured in M0a and written back into the manual |
+| Viewing frames around a prompt | On the PC: `scripts/capture/contact_sheet.py` renders ±N s around a `prompt_outcome` (centred on the offering frame: trace `sourceSequenceNumber` → `frameTimestamp` = capture `sensorTimestampNanos`) or a marker (its `elapsedRealtimeNanos` against frame receipt times) |
+| Storage | Estimated ≈ 0.7–1 GB/hour; measured in M0a with `scripts/capture/capture_stats.py` (also cadence, gaps, drops, counter balance, wall-clock jumps) and written back into the manual |
 | Retention | Runs at debug app start (whether or not capture is on), before a capture starts, when the capture list opens, and every 30 s during a capture. A session older than 7 days, not exported or pinned, is deleted at the next of these. The 2 GB cap is enforced during capture: older unpinned sessions go first, and if the active capture alone would exceed it, it ends as incomplete with `failureReason = storage_limit_reached` (checked after every frame) instead of writing until the disk is full |
 | **"Missed alert" marker** | Volume Down while capture is active: only `ACTION_DOWN` with `repeatCount == 0` counts, the key is consumed only then, the time, session and last stored frame are fixed when the press is observed (a busy writer delays the write, not the event), and a short vibration confirms only once the marker was written. Plus a large on-screen button. Works eyes-free in a foreground Guidance session; no promise for a locked screen or background (there is no background Guidance yet). TalkBack behaviour verified on device |
 
@@ -316,7 +327,10 @@ road-crossing guidance, directional steering, and any placement M3a has not been
 types tolerated, torn line and incomplete manifest reported, source-side timing taken before
 conversion. PR-B — writer releases every frame it receives, bounded queue drops oldest, a failing
 writer does not fail the trace calls, manifest completed atomically. PR-C — marker debouncing,
-export excludes nothing it should include and exposes nothing outside the export.
+export excludes nothing it should include and exposes nothing outside the export. PR-C2 — the
+burst stores every frame as raw luma and ends itself while the session goes on; luma area
+averaging; a refused Guidance start never starts; PC tools on synthetic captures in the app's format,
+including bursts with known offsets (run in CI).
 
 ## 5. M1 — Qualification and safety state (exact reproduction); M1b — stop pre-emption
 

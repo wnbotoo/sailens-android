@@ -201,16 +201,14 @@ class SceneAnalysisViewModel(
     }
 
     fun toggleAnalysis() {
-        if (_uiState.value.isRunning) {
-            stopSceneAnalysis()
-        } else {
-            val blocked = startGate?.startBlockedReason()
-            if (blocked != null) {
-                viewModelScope.launch { _uiEffect.emit(SceneAnalysisUiEffect.ShowToast(blocked)) }
-                return
+        when (val action = guidanceToggleAction(_uiState.value.isRunning, startGate)) {
+            GuidanceToggleAction.Stop -> stopSceneAnalysis()
+            GuidanceToggleAction.Start -> {
+                _uiState.update { it.copy(isLoading = true) }
+                startSceneAnalysis()
             }
-            _uiState.update { it.copy(isLoading = true) }
-            startSceneAnalysis()
+            is GuidanceToggleAction.Refuse ->
+                viewModelScope.launch { _uiEffect.emit(SceneAnalysisUiEffect.ShowToast(action.reason)) }
         }
     }
 

@@ -2,6 +2,7 @@ package com.sailens.shell.capture
 
 import android.view.KeyEvent
 import com.sailens.camera.CameraCharacteristicsProvider
+import com.sailens.guidance.trace.capture.CaptureModes
 import com.sailens.guidance.trace.capture.CaptureManifest
 import com.sailens.guidance.trace.capture.CaptureSchema
 import com.sailens.guidance.trace.capture.CaptureSessionReader
@@ -38,7 +39,7 @@ class FieldCaptureToolingTest {
 
     private fun controller(io: CoroutineDispatcher = Dispatchers.IO) = FieldCaptureController(
         root = root,
-        isEnabled = { true },
+        sessionMode = { CaptureModes.FIELD_EVIDENCE },
         frameSource = frames,
         cameraFacts = CameraCharacteristicsProvider { null },
         sensors = FakeSensors(),

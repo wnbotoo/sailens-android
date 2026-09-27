@@ -12,6 +12,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.SystemClock
+import com.sailens.guidance.trace.capture.CaptureModes
 import com.sailens.guidance.trace.capture.CaptureSensor
 import com.sailens.guidance.trace.capture.SensorRecord
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -19,15 +20,37 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.io.ByteArrayOutputStream
 
-/** The debug-only "field capture" switch. Off by default; read once per session by the controller. */
+/**
+ * The debug-only "field capture" switch (off by default) and the one-shot timing-sync burst. Read
+ * once per session by the controller, through [takeSessionMode].
+ */
 internal class FieldCaptureSettingsStore(context: Context) {
     private val preferences = context.applicationContext.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
     private val _enabled = MutableStateFlow(preferences.getBoolean(KEY_ENABLED, false))
     val enabled: StateFlow<Boolean> = _enabled.asStateFlow()
 
+    // In memory on purpose: an armed burst is meant for the very next session, not one days later
+    // after the app was killed.
+    private val _timingSyncArmed = MutableStateFlow(false)
+    val timingSyncArmed: StateFlow<Boolean> = _timingSyncArmed.asStateFlow()
+
     fun setEnabled(enabled: Boolean) {
         preferences.edit().putBoolean(KEY_ENABLED, enabled).apply()
         _enabled.value = enabled
+    }
+
+    fun setTimingSyncArmed(armed: Boolean) {
+        _timingSyncArmed.value = armed
+    }
+
+    /**
+     * The capture mode for a Guidance session starting now, or null for none. An armed burst is
+     * used up here, whether or not the switch is on; otherwise the switch decides.
+     */
+    fun takeSessionMode(): String? = when {
+        _timingSyncArmed.compareAndSet(expect = true, update = false) -> CaptureModes.TIMING_SYNC
+        _enabled.value -> CaptureModes.FIELD_EVIDENCE
+        else -> null
     }
 
     private companion object {
