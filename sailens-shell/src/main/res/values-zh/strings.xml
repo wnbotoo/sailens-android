@@ -169,6 +169,8 @@
     <string name="field_capture_status_incomplete">不完整：%1$s</string>
     <string name="field_capture_status_kept">已保留</string>
     <string name="field_capture_status_exported">已导出</string>
+    <string name="field_capture_mode_field_evidence">现场证据</string>
+    <string name="field_capture_mode_timing_sync">对时突发</string>
     <string name="btn_field_capture_keep">保留</string>
     <string name="btn_field_capture_unkeep">取消保留</string>
     <string name="btn_field_capture_export">导出</string>

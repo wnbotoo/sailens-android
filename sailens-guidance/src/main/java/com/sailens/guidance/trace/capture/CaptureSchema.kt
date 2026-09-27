@@ -33,7 +33,8 @@ import kotlinx.serialization.json.Json
  */
 object CaptureSchema {
     const val MAJOR: Int = 1
-    const val MINOR: Int = 0
+    /** 1: `CaptureStats.framesMissedBySubscriber`. */
+    const val MINOR: Int = 1
 
     const val MANIFEST_FILE: String = "manifest.json"
     const val FRAMES_FILE: String = "frames.jsonl"
@@ -107,17 +108,31 @@ data class CaptureManifest(
 
 /**
  * Capture's own counters, kept apart from Guidance's dropped frames on purpose. A gap in the
- * recorded frames or sensor samples must be explainable: dropped by capture (counted here) versus
- * never delivered by the device (not counted anywhere, visible only as a timestamp gap).
+ * recorded frames or sensor samples must be explainable. Frames can be lost at three places:
+ * - **before the analyzer** (the camera, or CameraX keeping only the latest image while the analyzer
+ *   is busy): such a frame never gets a sequence number, so it is not counted anywhere and shows
+ *   only as a longer camera-timestamp interval;
+ * - **in capture's own mailbox** (the analyzer offered it; capture had not taken the previous one):
+ *   [framesMissedBySubscriber], measurable only when capture wants every frame;
+ * - **in capture's encode queue**: [framesDroppedByEncoder].
  *
  * This accounting is exact for a complete capture only. An incomplete one may hold unaccounted
  * records at the failure boundary (the item being written, items still queued).
  */
 @Serializable
 data class CaptureStats(
+    /** Frames capture received from the frame source (= framesEncoded + framesDroppedByEncoder when complete). */
     val framesOffered: Long = 0,
     val framesEncoded: Long = 0,
     val framesDroppedByEncoder: Long = 0,
+    /**
+     * Frames the analyzer converted and offered to capture that capture never received, because
+     * its one-frame mailbox still held the previous one (from gaps between consecutive received
+     * sequence numbers). Counted only in [CaptureModes.TIMING_SYNC], where capture wants every
+     * frame; null otherwise -- the sampled field-evidence stream skips frames by design, and the
+     * analyzer numbers frames it converts for other subscribers too. Since schema 1.1.
+     */
+    val framesMissedBySubscriber: Long? = null,
     /** Sensor events successfully written to `sensors.jsonl`. */
     val sensorEvents: Long = 0,
     /** Sensor events the capture received but dropped because its queue was full. */

@@ -1,13 +1,21 @@
-"""Storage rate, cadence and gap accounting for Sailens field captures (M0a).
+"""Storage rate, cadence and loss accounting for Sailens field captures (M0a).
 
     python capture_stats.py <capture dir or folder of captures> [--json]
 
 For each capture: duration, bytes and bytes per hour (the storage rate the recording manual
-quotes), frame cadence from camera timestamps, source-side gaps (frame sequence numbers the
-capture never saw), drops the capture itself counted, per-sensor cadence and gaps, and whether the
-counters balance. For a complete capture they must: framesOffered = framesEncoded +
-framesDroppedByEncoder, and one stored frame per encoded frame. A gap no counter explains means the
-device delivered nothing (or, for an incomplete capture, records lost at the failure boundary).
+quotes), frame cadence from camera timestamps, per-sensor cadence and gaps, and where frames were
+lost. Frames can be lost at three places, and only two of them are counted:
+- before the analyzer (the camera, or CameraX keeping only the latest image): the frame never gets
+  a sequence number, so nothing counts it; for a timing_sync capture it is *estimated* from the
+  camera-timestamp gaps minus the two counted losses below;
+- in capture's own mailbox (timing_sync only): ``framesMissedBySubscriber``;
+- in capture's encode queue: ``framesDroppedByEncoder``.
+Field evidence samples about 5 frames a second, so its sequence and timestamp gaps are mostly by
+design; only its encoder drops are losses.
+
+For a complete capture the counters must balance: framesOffered = framesEncoded +
+framesDroppedByEncoder, one frame record per encoded frame, and (timing_sync) the sequence gaps
+between stored frames = framesMissedBySubscriber + framesDroppedByEncoder.
 """
 from __future__ import annotations
 
@@ -54,6 +62,38 @@ def directory_bytes(directory):
     return total
 
 
+def frame_losses(capture):
+    """Where frames were lost; see the module docstring for the three places."""
+    stats = capture.manifest.get("stats", {})
+    frames = capture.frames
+    losses = {
+        "droppedByEncoder": stats.get("framesDroppedByEncoder", 0),
+        "missedBySubscriber": stats.get("framesMissedBySubscriber"),
+        "missingFromTimestamps": None,
+        "upstreamEstimate": None,
+        "lossFraction": None,
+        "storedSeqGaps": None,
+    }
+    if capture.mode != "timing_sync" or len(frames) < 3:
+        return losses
+    ts = [f["sensorTimestampNanos"] for f in frames]
+    intervals = sorted(b - a for a, b in zip(ts, ts[1:]) if b > a)
+    if not intervals:
+        return losses
+    # Assumes the most common interval is the camera's own; heavy steady loss would hide that.
+    median = intervals[len(intervals) // 2]
+    missing = sum(max(0, round((b - a) / median) - 1) for a, b in zip(ts, ts[1:]) if b > a)
+    counted = (losses["missedBySubscriber"] or 0) + losses["droppedByEncoder"]
+    seqs = [f["seq"] for f in frames]
+    losses.update(
+        missingFromTimestamps=missing,
+        upstreamEstimate=max(0, missing - counted),
+        lossFraction=round(missing / (missing + len(frames)), 3),
+        storedSeqGaps=sum(b - a - 1 for a, b in zip(seqs, seqs[1:]) if b - a > 1),
+    )
+    return losses
+
+
 def summarize(directory):
     capture = load_capture(directory)
     m = capture.manifest
@@ -69,9 +109,8 @@ def summarize(directory):
         duration_s = None
     size = directory_bytes(directory)
 
-    seqs = [f["seq"] for f in frames]
-    seq_gaps = sum(b - a - 1 for a, b in zip(seqs, seqs[1:]) if b - a > 1)
     stored_files = sum(1 for f in frames if os.path.exists(capture.frame_path(f)))
+    losses = frame_losses(capture)
 
     checks = []
     if capture.complete:
@@ -82,6 +121,12 @@ def summarize(directory):
             checks.append(f"framesEncoded {encoded} but {len(frames)} frame records")
         if stats.get("sensorEvents", 0) != len(capture.sensors):
             checks.append(f"sensorEvents {stats.get('sensorEvents', 0)} but {len(capture.sensors)} sensor records")
+        if losses["storedSeqGaps"] is not None and losses["missedBySubscriber"] is not None:
+            # Every missed or encoder-dropped frame leaves a hole between stored frames, except one
+            # dropped before the first stored frame.
+            counted = losses["missedBySubscriber"] + losses["droppedByEncoder"]
+            if not counted - 1 <= losses["storedSeqGaps"] <= counted:
+                checks.append(f"{losses['storedSeqGaps']} sequence gaps between stored frames, but {counted} frames counted as lost")
     if stored_files != len(frames):
         checks.append(f"{len(frames) - stored_files} frame record(s) without an image file")
 
@@ -109,8 +154,7 @@ def summarize(directory):
         "mbPerHour": round(size / 1e6 / (duration_s / 3600.0), 1) if duration_s else None,
         "frames": {
             **cadence([f["sensorTimestampNanos"] for f in frames]),
-            "sourceSeqGaps": seq_gaps,
-            "droppedByEncoder": stats.get("framesDroppedByEncoder", 0),
+            **losses,
         },
         "sensorsAvailable": m.get("sensorsAvailable", []),
         "sensors": sensors,
@@ -128,7 +172,11 @@ def print_summary(s):
     print(f"   duration {s['durationS']} s, {s['bytes'] / 1e6:.1f} MB, {s['mbPerHour']} MB/hour")
     f = s["frames"]
     print(f"   frames {f['count']} @ {f['rateHz']} Hz (median {f['medianMs']} ms, p95 {f['p95Ms']}, max {f['maxMs']}), "
-          f"gaps {f['gaps']}, source seq gaps {f['sourceSeqGaps']}, dropped by encoder {f['droppedByEncoder']}")
+          f"timestamp gaps {f['gaps']}, dropped by encoder {f['droppedByEncoder']}")
+    if f["missingFromTimestamps"] is not None:
+        missed = f["missedBySubscriber"] if f["missedBySubscriber"] is not None else "not recorded"
+        print(f"   frame loss {f['lossFraction'] * 100:.1f}%: {f['missingFromTimestamps']} missing by camera timestamps = "
+              f"capture mailbox {missed} + encoder {f['droppedByEncoder']} + before the analyzer ≈ {f['upstreamEstimate']} (estimate)")
     for name, c in s["sensors"].items():
         print(f"   {name}: {c['count']} @ {c['rateHz']} Hz (median {c['medianMs']} ms, max {c['maxMs']}), gaps {c['gaps']}")
     missing = sorted(set(("gravity", "game_rotation_vector", "gyroscope")) - set(s["sensorsAvailable"]))

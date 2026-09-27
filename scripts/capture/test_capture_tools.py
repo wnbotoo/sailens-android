@@ -80,24 +80,38 @@ class ReaderTest(unittest.TestCase):
 
 
 class StatsTest(unittest.TestCase):
-    def test_rate_gaps_and_counter_balance(self):
+    def test_losses_are_attributed_to_where_they_happened(self):
         with tempfile.TemporaryDirectory() as root:
-            frames = []
-            for i, seq in enumerate([1, 2, 3, 7, 8]):  # seq 4-6 never reached the capture
-                t = START_NS + i * 200_000_000 + (600_000_000 if seq >= 7 else 0)  # one 800 ms gap
-                frames.append((luma_record(seq, t, t, 4, 3), bytes(12)))
+            period = 33_000_000
+            # Seq 11-13 were converted but lost in capture (2 mailbox, 1 encoder); one more frame never
+            # reached the analyzer (no sequence number): seq 15 comes two camera slots after seq 14.
+            frames = [(luma_record(seq, START_NS + slot * period, START_NS + slot * period, 4, 3), bytes(12))
+                      for seq, slot in [(s, s) for s in range(1, 11)] + [(14, 13)] + [(s, s + 1) for s in range(15, 21)]]
             directory = write_capture(
-                root, "s", frames=frames,
-                stats={"framesOffered": 6, "framesEncoded": 5, "framesDroppedByEncoder": 1, "sensorEvents": 0},
+                root, "s", mode="timing_sync", frames=frames,
+                stats={"framesOffered": 18, "framesEncoded": 17, "framesDroppedByEncoder": 1,
+                       "framesMissedBySubscriber": 2, "sensorEvents": 0},
                 anchors=[{"wallMs": START_WALL, "elapsedRealtimeNanos": START_NS, "reason": "start"},
                          {"wallMs": START_WALL + 3_600_000, "elapsedRealtimeNanos": START_NS + 3_600 * 10**9, "reason": "end"}],
             )
             s = capture_stats.summarize(directory)
-            self.assertEqual(s["frames"]["sourceSeqGaps"], 3)
-            self.assertEqual(s["frames"]["gaps"], 1)
-            self.assertEqual(s["frames"]["rateHz"], 5.0)
+            f = s["frames"]
+            self.assertEqual(f["missingFromTimestamps"], 4)
+            self.assertEqual(f["missedBySubscriber"], 2)
+            self.assertEqual(f["droppedByEncoder"], 1)
+            self.assertEqual(f["upstreamEstimate"], 1)
+            self.assertEqual(f["storedSeqGaps"], 3)
             self.assertEqual(s["counterProblems"], [])
             self.assertAlmostEqual(s["mbPerHour"], capture_stats.directory_bytes(directory) / 1e6, places=1)
+
+    def test_field_evidence_gaps_are_not_reported_as_losses(self):
+        with tempfile.TemporaryDirectory() as root:
+            frames = [(luma_record(seq, START_NS + seq * 200_000_000, START_NS, 4, 3), bytes(12)) for seq in (1, 7, 13)]
+            directory = write_capture(root, "s", frames=frames,
+                                      stats={"framesOffered": 3, "framesEncoded": 3, "framesDroppedByEncoder": 0})
+            f = capture_stats.summarize(directory)["frames"]
+            self.assertIsNone(f["missingFromTimestamps"])
+            self.assertIsNone(f["upstreamEstimate"])
 
     def test_unbalanced_counters_are_reported(self):
         with tempfile.TemporaryDirectory() as root:
@@ -135,9 +149,11 @@ class ContactSheetTest(unittest.TestCase):
             self.assertEqual(sorted(os.listdir(out)), ["s_marker_001.png", "s_prompt_e1.png"])
 
 
-def synthetic_burst(root, offset_s=0.012, latency_s=0.028, focal=180.0, seconds=8.0, moving=True):
+def synthetic_burst(root, offset_s=0.012, latency_s=0.028, focal=180.0, seconds=8.0, moving=True,
+                    camera_origin_ns=0, timestamp_source="realtime", stats=None):
     """A timing_sync capture of a camera turning over a smooth texture. The frame at camera time t
-    shows the orientation the gyroscope reports at t + offset_s; receipt = camera + latency_s."""
+    shows the orientation the gyroscope reports at t + offset_s; receipt = camera + latency_s. A
+    non-REALTIME camera clock is modelled by camera_origin_ns added to every camera timestamp."""
     rng = np.random.default_rng(7)
     size, crop_h, crop_w = 256, 96, 128
     spectrum = np.fft.fft2(rng.random((size, size)))
@@ -164,13 +180,15 @@ def synthetic_burst(root, offset_s=0.012, latency_s=0.028, focal=180.0, seconds=
         crop = np.clip((crop - crop.min()) / (np.ptp(crop) + 1e-12) * 255, 0, 255).astype(np.uint8)
         t_ns = START_NS + int(t_cam * 1e9)
         received = t_ns + int((latency_s + rng.normal(0, 0.001)) * 1e9)
-        frames.append((luma_record(i + 1, t_ns, received, crop_w, crop_h), crop.tobytes()))
+        frames.append((luma_record(i + 1, t_ns + camera_origin_ns, received, crop_w, crop_h), crop.tobytes()))
     gyro = []
     for k in range(int((seconds + 0.4) * 200)):
         t = -0.2 + k / 200.0
         gyro.append({"sensor": "gyroscope", "timestampNanos": START_NS + int(t * 1e9), "accuracy": 3,
                      "values": [rate(x_terms, t) + rng.normal(0, 0.005), rate(y_terms, t) + rng.normal(0, 0.005), 0.0]})
-    return write_capture(root, "burst", mode="timing_sync", frames=frames, sensors=gyro)
+    camera = {"cameraId": "0", "capturedAtElapsedRealtimeNanos": START_NS, "timestampSource": timestamp_source}
+    return write_capture(root, "burst", mode="timing_sync", frames=frames, sensors=gyro, stats=stats,
+                         manifest_overrides={"camera": camera})
 
 
 class TimingAlignTest(unittest.TestCase):
@@ -188,6 +206,29 @@ class TimingAlignTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             result = timing_align.analyse(synthetic_burst(root, moving=False), max_lag_ms=100)
         self.assertTrue(any("insufficient motion" in w for w in result["warnings"]))
+        self.assertFalse(result["usableForQualification"])
+
+    def test_an_unknown_camera_clock_is_never_qualified_and_receipt_time_is_authoritative(self):
+        with tempfile.TemporaryDirectory() as root:
+            # The camera's own clock starts 3.7 s away from elapsedRealtime, as UNKNOWN may.
+            directory = synthetic_burst(root, camera_origin_ns=-3_700_000_000, timestamp_source="unknown")
+            result = timing_align.analyse(directory, max_lag_ms=100)
+            self.assertFalse(result["cameraComparable"])
+            self.assertEqual(result["authoritativeClock"], "received")
+            self.assertIsNone(result["camera"])
+            self.assertAlmostEqual(result["received"]["offsetMs"], 12.0 - 28.0, delta=3.0)
+            self.assertTrue(result["usableForQualification"])
+            self.assertTrue(any("not comparable" in w for w in result["warnings"]))
+
+            diagnostic = timing_align.analyse(directory, max_lag_ms=100, diagnose_camera_clock=True)["camera"]
+            self.assertTrue(diagnostic["diagnosticOnly"])
+            self.assertAlmostEqual(diagnostic["offsetMs"], 3_700 + 12.0, delta=3.0)
+
+    def test_dropped_gyroscope_samples_disqualify_the_burst(self):
+        with tempfile.TemporaryDirectory() as root:
+            result = timing_align.analyse(synthetic_burst(root, stats={"sensorEventsDropped": 5}), max_lag_ms=100)
+        self.assertFalse(result["usableForQualification"])
+        self.assertTrue(any("dropped by capture" in w for w in result["warnings"]))
 
 
 if __name__ == "__main__":

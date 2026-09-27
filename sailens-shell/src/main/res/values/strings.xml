@@ -170,6 +170,8 @@
     <string name="field_capture_status_incomplete">Incomplete: %1$s</string>
     <string name="field_capture_status_kept">Kept</string>
     <string name="field_capture_status_exported">Exported</string>
+    <string name="field_capture_mode_field_evidence">Field evidence</string>
+    <string name="field_capture_mode_timing_sync">Timing sync</string>
     <string name="btn_field_capture_keep">Keep</string>
     <string name="btn_field_capture_unkeep">Stop keeping</string>
     <string name="btn_field_capture_export">Export</string>

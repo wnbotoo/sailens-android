@@ -75,6 +75,8 @@ internal data class CaptureDeviceInfo(
 /** One row of the capture list. */
 internal data class CaptureSummary(
     val sessionId: String,
+    /** `captureMode` from the manifest; null when it cannot be read. */
+    val mode: String?,
     val startedWallMs: Long,
     val endedWallMs: Long?,
     val bytes: Long,
@@ -285,6 +287,7 @@ internal class FieldCaptureController(
         }.getOrNull()
         return CaptureSummary(
             sessionId = directory.name,
+            mode = manifest?.captureMode,
             startedWallMs = manifest?.startedWallMs ?: directory.lastModified(),
             endedWallMs = manifest?.endedWallMs,
             bytes = directory.walkBottomUp().filter { it.isFile }.sumOf { it.length() },
@@ -494,15 +497,20 @@ internal class FieldCaptureController(
     private suspend fun endLocked(only: ActiveCapture?) {
         val capture = active ?: return
         if (only != null && capture !== only) return
-        active = null
+        // A capture stays active until its files are final: stopping, draining and finishing the
+        // manifest all happen before `isCapturing` turns false, so whoever reacts to that (the
+        // capture list) reads the finished manifest, never a half-written one.
         stopProducers(capture)
-        if (capture.failed) return
-        capture.guarded("finish") {
-            capture.writer.append(anchor(AnchorReason.END))
-            capture.writer.finish {
-                it.copy(complete = true, endedWallMs = clock.wallMs(), stats = capture.stats())
+        if (!capture.failed) {
+            capture.guarded("finish") {
+                capture.writer.append(anchor(AnchorReason.END))
+                capture.writer.finish {
+                    it.copy(complete = true, endedWallMs = clock.wallMs(), stats = capture.stats())
+                }
             }
         }
+        capture.ended = true
+        if (active === capture) active = null
     }
 
     /** Stops frames and sensors, then lets the queues drain what they already hold. */
@@ -518,9 +526,8 @@ internal class FieldCaptureController(
     }
 
     private suspend fun fail(capture: ActiveCapture, reason: String) {
-        if (capture.failed) return
+        if (capture.failed || capture.ended) return
         capture.failed = true
-        if (active === capture) active = null
         log.warning(TAG, "Field capture failed: $reason")
         capture.frameJob?.cancel()
         runCatching { sensors.stop() }
@@ -532,6 +539,9 @@ internal class FieldCaptureController(
                 it.copy(complete = false, failureReason = reason, endedWallMs = clock.wallMs(), stats = capture.stats())
             }
         }.onFailure { runCatching { capture.writer.close() } }
+        // Inactive only once the incomplete manifest is final, as for a normal end.
+        capture.ended = true
+        if (active === capture) active = null
     }
 
     private fun writeSensor(capture: ActiveCapture, record: SensorRecord) {
@@ -582,9 +592,20 @@ internal class FieldCaptureController(
     private suspend fun collectFrames(capture: ActiveCapture) {
         // The burst takes every frame the source delivers; field evidence samples.
         val frames = if (capture.timingSync) frameSource.frames else frameSource.frames(config.frameIntervalMs)
+        // For the burst, capture is due every frame the analyzer converts, and the analyzer numbers
+        // exactly those; so a jump in the sequence numbers received is frames capture's own mailbox
+        // replaced. (A frame lost before the analyzer has no number and shows only in timestamps.)
+        var previousSeq: Long? = null
         try {
             frames.collect { frame ->
                 try {
+                    if (capture.timingSync) {
+                        previousSeq?.let { previous ->
+                            val missed = frame.sequenceNumber - previous - 1
+                            if (missed > 0) capture.missedBySubscriber.addAndGet(missed)
+                        }
+                        previousSeq = frame.sequenceNumber
+                    }
                     capture.offered.incrementAndGet()
                     toPending(capture, frame)?.let { capture.encodeQueue.trySend(it) }
                 } finally {
@@ -661,6 +682,10 @@ internal class FieldCaptureController(
         val markers = AtomicLong()
         @Volatile var lastStoredFrameSeq: Long? = null
         var failed = false
+
+        /** Its files are final (complete or failed); nothing may write to it any more. */
+        var ended = false
+        val missedBySubscriber = AtomicLong()
         var frameJob: Job? = null
         var sensorWriterJob: Job? = null
         var frameWriterJob: Job? = null
@@ -682,6 +707,7 @@ internal class FieldCaptureController(
             framesOffered = offered.get(),
             framesEncoded = encoded.get(),
             framesDroppedByEncoder = droppedByEncoder.get(),
+            framesMissedBySubscriber = if (timingSync) missedBySubscriber.get() else null,
             sensorEvents = sensorEvents.get(),
             sensorEventsDropped = sensorDropped.get(),
             markers = markers.get(),

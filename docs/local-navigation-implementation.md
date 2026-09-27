@@ -238,8 +238,16 @@ Guidance session, named after the trace session id:
 - Capture counters are separate from Guidance's dropped frames, so a gap can be explained. For a
   **complete** capture they account for everything the engine received:
   `framesOffered` = `framesEncoded` + `framesDroppedByEncoder`; `sensorEvents` (persisted) +
-  `sensorEventsDropped` (capture queue full) = samples received; a timestamp gap not covered by a
-  drop count means the device delivered nothing. An **incomplete** capture (`complete = false`) may
+  `sensorEventsDropped` (capture queue full) = samples received. Frames are lost at three places:
+  **before the analyzer** (the camera, or CameraX keeping only the latest image) — such a frame gets
+  no sequence number, is counted nowhere and shows only as a longer camera-timestamp interval;
+  **in capture's own mailbox** (converted and offered, but capture had not taken the previous one) —
+  `framesMissedBySubscriber`, from gaps in the received sequence numbers, counted only in
+  `timing_sync` where capture wants every frame (field evidence samples, and the analyzer also
+  numbers frames it converts for other subscribers, so its gaps are by design); **in capture's
+  encode queue** — `framesDroppedByEncoder`. So for a burst, missing frames by timestamps −
+  mailbox − encoder ≈ loss before the analyzer (an estimate). A sequence gap is therefore never
+  "the device delivered nothing". An **incomplete** capture (`complete = false`) may
   hold unaccounted records at the failure boundary (the item being written when it failed, items
   still queued) and is evidence of lower standing.
 - The 2 GB cap counts frames and records; the manifest itself (a few KB) is not counted, so the cap
@@ -286,13 +294,28 @@ Armed once on the field capture page, independent of the capture switch, and use
 Guidance start (in memory only, so a killed app forgets it). The capture takes every frame the
 source delivers (`FrameSource.frames`, not the sampled stream), area-averages the Y plane to 400 px
 long side (averaging, not point sampling, so fine texture does not alias into false motion), and
-queues up to 4 frames; one dropped there is counted, one the source never delivered shows as a
-sequence gap. Files are `frames/NNNNNN.y`. It ends itself after 15 s as a complete capture while
+queues up to 4 frames. Losses are split as above: capture's mailbox (`framesMissedBySubscriber`),
+its queue (`framesDroppedByEncoder`), and before the analyzer (estimated from timestamps). If the
+burst cannot keep up with the camera on a device, that shows as capture's own loss, not as the
+camera's. Files are `frames/NNNNNN.y`. It ends itself after 15 s as a complete capture while
 Guidance continues; the session's own end then finds nothing to stop (capture start and end are
-serialised, so the two ends cannot interleave). Analysed with `scripts/capture/timing_align.py`:
-phase-correlated image motion per frame pair against gyroscope x/y rotation over the same interval,
-lag by best correlation, for camera timestamps and source receipt times separately, with the
-spread over four parts of the burst as the error bar (≈1.5 ms accuracy on synthetic bursts).
+serialised, so the two ends cannot interleave). A capture — burst or field evidence, ended or
+failed — stays active until its manifest is final: `isCapturing` turns false only after the END
+anchor and the finished manifest are written, so the capture list never reads a half-written one.
+Analysed with `scripts/capture/timing_align.py`: phase-correlated image motion per frame pair
+against gyroscope x/y rotation over the same interval, lag by best correlation, with the spread
+over four parts of the burst as the error bar (≈1.5 ms accuracy on synthetic bursts).
+
+**Clock contract for alignment.** Camera timestamps are compared with the gyroscope **only when
+the camera's timestamp source is `REALTIME`**, which Android defines as sharing `SensorEvent`'s
+timebase. `UNKNOWN` is monotonic with an unspecified origin, and an unreported source is no better:
+the camera result is then not measured (`cameraComparable = false`), must never qualify the camera
+clock as gyro-comparable however good a correlation looks, and the source receipt time
+(elapsedRealtime by construction) is the authoritative measurement. An empirical estimate of a
+non-REALTIME camera clock is available as a diagnostic only. A burst is usable for qualification
+only if it is complete, capture dropped no sensor samples, there was enough motion, and the
+authoritative result is clean (not at the search edge, the four parts agree); otherwise it is
+recorded again. Heavy frame loss is a warning.
 
 **Controls (PR-C, debug builds; these fill the placeholders of the recording manual, PR #9)**
 
@@ -328,9 +351,11 @@ types tolerated, torn line and incomplete manifest reported, source-side timing 
 conversion. PR-B — writer releases every frame it receives, bounded queue drops oldest, a failing
 writer does not fail the trace calls, manifest completed atomically. PR-C — marker debouncing,
 export excludes nothing it should include and exposes nothing outside the export. PR-C2 — the
-burst stores every frame as raw luma and ends itself while the session goes on; luma area
-averaging; a refused Guidance start never starts; PC tools on synthetic captures in the app's format,
-including bursts with known offsets (run in CI).
+burst stores every frame as raw luma, counts its own mailbox misses and ends itself while the
+session goes on; a capture is inactive only once its manifest is final; luma area averaging; a
+refused Guidance start never starts; PC tools on synthetic captures in the app's format: loss
+attribution, bursts with known offsets on both clocks, an UNKNOWN camera clock never qualified,
+dropped gyroscope samples disqualify (run in CI).
 
 ## 5. M1 — Qualification and safety state (exact reproduction); M1b — stop pre-emption
 
