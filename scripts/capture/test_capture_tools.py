@@ -85,8 +85,9 @@ class StatsTest(unittest.TestCase):
             period = 33_000_000
             # Seq 11-13 were converted but lost in capture (2 mailbox, 1 encoder); one more frame never
             # reached the analyzer (no sequence number): seq 15 comes two camera slots after seq 14.
+            layout = [(s, s) for s in range(1, 11)] + [(14, 14)] + [(s, s + 1) for s in range(15, 21)]
             frames = [(luma_record(seq, START_NS + slot * period, START_NS + slot * period, 4, 3), bytes(12))
-                      for seq, slot in [(s, s) for s in range(1, 11)] + [(14, 13)] + [(s, s + 1) for s in range(15, 21)]]
+                      for seq, slot in layout]
             directory = write_capture(
                 root, "s", mode="timing_sync", frames=frames,
                 stats={"framesOffered": 18, "framesEncoded": 17, "framesDroppedByEncoder": 1,
@@ -96,13 +97,32 @@ class StatsTest(unittest.TestCase):
             )
             s = capture_stats.summarize(directory)
             f = s["frames"]
-            self.assertEqual(f["missingFromTimestamps"], 4)
+            self.assertAlmostEqual(f["analyzerPeriodMs"], 33.0)
+            self.assertEqual(f["knownLoss"], 3)
+            self.assertAlmostEqual(f["knownLossFraction"], 3 / 20, places=3)
             self.assertEqual(f["missedBySubscriber"], 2)
             self.assertEqual(f["droppedByEncoder"], 1)
             self.assertEqual(f["upstreamEstimate"], 1)
             self.assertEqual(f["storedSeqGaps"], 3)
+            self.assertAlmostEqual(f["overallLossFraction"], 4 / 21, places=3)
             self.assertEqual(s["counterProblems"], [])
             self.assertAlmostEqual(s["mbPerHour"], capture_stats.directory_bytes(directory) / 1e6, places=1)
+
+    def test_steady_loss_is_never_hidden_by_the_cadence(self):
+        with tempfile.TemporaryDirectory() as root:
+            # 30 Hz camera; capture keeps up with only every other frame, every time.
+            period = 33_000_000
+            frames = [(luma_record(seq, START_NS + seq * period, START_NS + seq * period, 4, 3), bytes(12))
+                      for seq in range(1, 61, 2)]
+            directory = write_capture(root, "s", mode="timing_sync", frames=frames,
+                                      stats={"framesOffered": 30, "framesEncoded": 30, "framesDroppedByEncoder": 0,
+                                             "framesMissedBySubscriber": 29})
+            f = capture_stats.summarize(directory)["frames"]
+            self.assertAlmostEqual(f["medianMs"], 66.0)  # the cadence alone would call this normal
+            self.assertAlmostEqual(f["analyzerPeriodMs"], 33.0)
+            self.assertGreaterEqual(f["knownLossFraction"], 0.45)
+            self.assertGreaterEqual(f["overallLossFraction"], f["knownLossFraction"])
+            self.assertEqual(f["upstreamEstimate"], 0)
 
     def test_field_evidence_gaps_are_not_reported_as_losses(self):
         with tempfile.TemporaryDirectory() as root:
@@ -110,7 +130,7 @@ class StatsTest(unittest.TestCase):
             directory = write_capture(root, "s", frames=frames,
                                       stats={"framesOffered": 3, "framesEncoded": 3, "framesDroppedByEncoder": 0})
             f = capture_stats.summarize(directory)["frames"]
-            self.assertIsNone(f["missingFromTimestamps"])
+            self.assertIsNone(f["knownLoss"])
             self.assertIsNone(f["upstreamEstimate"])
 
     def test_unbalanced_counters_are_reported(self):
@@ -151,12 +171,13 @@ class ContactSheetTest(unittest.TestCase):
 
 def synthetic_burst(root, offset_s=0.012, latency_s=0.028, focal=180.0, seconds=8.0, moving=True,
                     camera_origin_ns=0, timestamp_source="realtime", stats=None, gyro_hz=200.0,
-                    gyro_independent=False):
+                    gyro_independent=False, keep_every=1):
     """A timing_sync capture of a camera turning over a smooth texture. The frame at camera time t
     shows the orientation the gyroscope reports at t + offset_s; receipt = camera + latency_s. A
     non-REALTIME camera clock is modelled by camera_origin_ns added to every camera timestamp.
     gyro_independent: the gyroscope reports a different motion than the images show (a negative
-    control: real image motion, no relation to the gyro)."""
+    control: real image motion, no relation to the gyro). keep_every=2 stores every other frame (the
+    rest lost in capture), sequence numbers staying those of all frames."""
     rng = np.random.default_rng(7)
     size, crop_h, crop_w = 256, 96, 128
     spectrum = np.fft.fft2(rng.random((size, size)))
@@ -175,6 +196,8 @@ def synthetic_burst(root, offset_s=0.012, latency_s=0.028, focal=180.0, seconds=
 
     frames = []
     for i in range(int(seconds * 30)):
+        if i % keep_every:
+            continue
         t_cam = i / 30.0
         ax, ay = angle(x_terms, t_cam + offset_s), angle(y_terms, t_cam + offset_s)
         shifted = np.fft.ifft2(spectrum * np.exp(-2j * np.pi * (fx * focal * ay + fy * focal * ax))).real
@@ -215,6 +238,14 @@ class TimingAlignTest(unittest.TestCase):
         self.assertGreater(result["pairsMoving"], 200)  # passes the motion gate: this tests correlation
         self.assertFalse(result["usableForQualification"])
         self.assertTrue(any("correlate only" in w for w in result["warnings"]))
+
+    def test_steady_frame_loss_is_reported_from_the_counters(self):
+        with tempfile.TemporaryDirectory() as root:
+            stats = {"framesOffered": 120, "framesEncoded": 120, "framesDroppedByEncoder": 0, "framesMissedBySubscriber": 119}
+            result = timing_align.analyse(synthetic_burst(root, keep_every=2, stats=stats), max_lag_ms=100)
+        self.assertGreaterEqual(result["knownFrameLossFraction"], 0.45)
+        self.assertGreaterEqual(result["overallFrameLossFraction"], result["knownFrameLossFraction"])
+        self.assertTrue(any("frames were lost" in w for w in result["warnings"]))
 
     def test_a_burst_too_short_for_four_checked_parts_never_qualifies(self):
         with tempfile.TemporaryDirectory() as root:

@@ -245,8 +245,13 @@ Guidance session, named after the trace session id:
   `framesMissedBySubscriber`, from gaps in the received sequence numbers, counted only in
   `timing_sync` where capture wants every frame (field evidence samples, and the analyzer also
   numbers frames it converts for other subscribers, so its gaps are by design); **in capture's
-  encode queue** — `framesDroppedByEncoder`. So for a burst, missing frames by timestamps −
-  mailbox − encoder ≈ loss before the analyzer (an estimate). A sequence gap is therefore never
+  encode queue** — `framesDroppedByEncoder`. For a burst the tools report the **known** loss (the
+  two counters) on its own, never replaced by an estimate, and only *estimate* loss before the
+  analyzer: camera-timestamp slots missing between stored frames that no sequence gap explains,
+  with the analyzer period taken as interval ÷ sequence step, so steady loss after the analyzer
+  (say every other frame) cannot hide in the cadence. Steady loss before the analyzer can, so the
+  period is checked against the camera's rate. The overall fraction is known + estimated and never
+  lower than the known loss. A sequence gap is therefore never
   "the device delivered nothing". An **incomplete** capture (`complete = false`) may
   hold unaccounted records at the failure boundary (the item being written when it failed, items
   still queued) and is evidence of lower standing.
@@ -362,7 +367,8 @@ burst stores every frame as raw luma, counts its own mailbox misses and ends its
 session goes on; a capture is inactive only once its manifest is final; luma area averaging; a
 refused Guidance start never starts; PC tools on synthetic captures in the app's format: loss
 attribution, bursts with known offsets on both clocks, an UNKNOWN camera clock never qualified,
-dropped gyroscope samples, a negative control (real motion unrelated to the gyro) and a burst too
+steady loss is reported from the counters, never hidden by the cadence; dropped gyroscope
+samples, a negative control (real motion unrelated to the gyro) and a burst too
 short for four checked parts never qualify (run in CI).
 
 ## 5. M1 — Qualification and safety state (exact reproduction); M1b — stop pre-emption

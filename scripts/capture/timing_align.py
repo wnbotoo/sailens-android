@@ -194,7 +194,9 @@ def analyse(directory, max_lag_ms=300.0, diagnose_camera_clock=False):
         "frames": len(capture.frames),
         "frameIntervalMedianMs": round(float(np.median(frame_dt)), 2) if len(frame_dt) else None,
         "gyroIntervalMedianMs": round(float(np.median(np.diff(t) / 1e6)), 2),
-        "frameLossFraction": losses["lossFraction"],
+        # Known from capture's counters, and known + estimated loss before the analyzer.
+        "knownFrameLossFraction": losses["knownLossFraction"],
+        "overallFrameLossFraction": losses["overallLossFraction"],
         "sensorEventsDropped": stats.get("sensorEventsDropped", 0),
         "pairsUsable": len(good),
         "pairsMoving": moving,
@@ -211,10 +213,11 @@ def analyse(directory, max_lag_ms=300.0, diagnose_camera_clock=False):
         blocking.append(f"{result['sensorEventsDropped']} sensor samples were dropped by capture")
     if len(good) < MIN_PAIRS or moving < MIN_MOVING_FRACTION * len(good):
         blocking.append("insufficient motion or texture: turn the phone steadily at a detailed scene")
-    if losses["lossFraction"] is not None and losses["lossFraction"] > MAX_FRAME_LOSS:
+    if losses["overallLossFraction"] is not None and losses["overallLossFraction"] > MAX_FRAME_LOSS:
         warnings.append(
-            f"{losses['lossFraction'] * 100:.0f}% of frames were lost (capture mailbox {losses['missedBySubscriber']}, "
-            f"encoder {losses['droppedByEncoder']}, before the analyzer ~{losses['upstreamEstimate']}); lower confidence"
+            f"~{losses['overallLossFraction'] * 100:.0f}% of frames were lost: known {losses['knownLossFraction'] * 100:.0f}% "
+            f"(capture mailbox {losses['missedBySubscriber']}, encoder {losses['droppedByEncoder']}), before the analyzer "
+            f"~{losses['upstreamEstimate']} (estimate); lower confidence"
         )
 
     result["received"] = align(good, t, theta, "receivedElapsedRealtimeNanos", max_lag_ms)
@@ -279,7 +282,7 @@ def main(argv=None):
         return exit_code
     comparable = "comparable with the gyroscope" if r["cameraComparable"] else "NOT comparable with the gyroscope"
     print(f"== {r['sessionId']}  camera timestamp source: {r['timestampSource']} ({comparable})")
-    print(f"   {r['frames']} frames, median interval {r['frameIntervalMedianMs']} ms, frame loss {r['frameLossFraction']}; "
+    print(f"   {r['frames']} frames, median interval {r['frameIntervalMedianMs']} ms, frame loss known {r['knownFrameLossFraction']} / overall ~{r['overallFrameLossFraction']}; "
           f"gyro median interval {r['gyroIntervalMedianMs']} ms, sensor samples dropped {r['sensorEventsDropped']}")
     print(f"   frame pairs usable {r['pairsUsable']}, of which moving {r['pairsMoving']}")
     for name, label in (("camera", "camera timestamp"), ("received", "source receipt time")):
