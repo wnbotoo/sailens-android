@@ -11,6 +11,7 @@ import com.sailens.core.log.LogService
 import com.sailens.guidance.service.TraceService
 import com.sailens.guidance.usecase.decision.RevokeUndeliveredEventUseCase
 import com.sailens.guidance.usecase.scene.StartSceneAnalysisUseCase
+import com.sailens.shell.app.GuidanceStartGate
 import com.sailens.guidance.usecase.scene.StopSceneAnalysisUseCase
 import com.sailens.guidance.util.Timestamp
 import com.sailens.shell.diagnostics.GuidanceDiagnosticsStore
@@ -86,6 +87,8 @@ class SceneAnalysisViewModel(
     /** Tells Guidance a decided event never reached the user, so its cooldown does not mute it. */
     private val revokeUndeliveredEvent: RevokeUndeliveredEventUseCase,
     private val noticeText: GuidanceNoticeText,
+    /** Bound only by debug tooling; null means Guidance may always start. */
+    private val startGate: GuidanceStartGate? = null,
     /** The same monotonic clock Guidance stamps events with. */
     private val clock: () -> Long = SystemClock::elapsedRealtime,
 ) : ViewModel() {
@@ -201,6 +204,11 @@ class SceneAnalysisViewModel(
         if (_uiState.value.isRunning) {
             stopSceneAnalysis()
         } else {
+            val blocked = startGate?.startBlockedReason()
+            if (blocked != null) {
+                viewModelScope.launch { _uiEffect.emit(SceneAnalysisUiEffect.ShowToast(blocked)) }
+                return
+            }
             _uiState.update { it.copy(isLoading = true) }
             startSceneAnalysis()
         }

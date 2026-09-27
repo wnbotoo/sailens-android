@@ -7,7 +7,7 @@ import android.text.format.Formatter
 import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -116,6 +116,14 @@ internal fun FieldCaptureScreen(
                     modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
                 )
             }
+            if (state.exporting) {
+                Text(
+                    text = stringResource(R.string.field_capture_exporting_notice),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                )
+            }
             if (state.sessions.isEmpty()) {
                 Text(
                     text = stringResource(R.string.field_capture_empty),
@@ -179,7 +187,11 @@ private fun CaptureRow(
                 style = MaterialTheme.typography.bodySmall,
             )
             if (!session.active) {
-                Row(horizontalArrangement = Arrangement.spacedBy(SailensDimens.spaceSm)) {
+                // Wraps under large font sizes instead of squeezing three buttons into one line.
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(SailensDimens.spaceSm),
+                    verticalArrangement = Arrangement.spacedBy(SailensDimens.spaceSm),
+                ) {
                     OutlinedButton(onClick = onKeep, enabled = actionsEnabled) {
                         Text(
                             stringResource(

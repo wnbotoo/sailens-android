@@ -15,6 +15,8 @@ import java.io.File
 internal data class FieldCaptureUiState(
     val enabled: Boolean = false,
     val capturing: Boolean = false,
+    /** A ZIP export is running; Guidance is held off until it ends. */
+    val exporting: Boolean = false,
     val sessions: List<CaptureSummary> = emptyList(),
     val busySessionId: String? = null,
 )
@@ -50,6 +52,7 @@ internal class FieldCaptureViewModel(
                 refresh()
             }
         }
+        viewModelScope.launch { controller.isManagingFiles.collect { on -> _state.update { it.copy(exporting = on) } } }
         // Opening the list is a retention opportunity and clears stale export ZIPs.
         viewModelScope.launch {
             controller.runMaintenance().join()

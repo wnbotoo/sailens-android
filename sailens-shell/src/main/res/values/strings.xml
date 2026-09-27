@@ -178,6 +178,8 @@
     <string name="field_capture_export_failed">Export failed: %1$s</string>
     <string name="field_capture_recording_notice">Recording now. Stop Guidance before changing this setting or managing captures.</string>
     <string name="field_capture_action_failed">Could not change the capture. Stop Guidance and try again.</string>
+    <string name="field_capture_export_blocks_guidance">Finish exporting the capture before starting Guidance.</string>
+    <string name="field_capture_exporting_notice">Exporting. Guidance cannot start until the export finishes.</string>
     <string name="title_field_capture_delete">Delete this capture?</string>
     <string name="field_capture_delete_body">It is removed from this device and cannot be recovered.</string>
     <string name="btn_cancel_field_capture_delete">Cancel</string>

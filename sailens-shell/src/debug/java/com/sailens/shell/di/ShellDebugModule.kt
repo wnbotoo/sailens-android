@@ -3,10 +3,12 @@ package com.sailens.shell.di
 import com.sailens.guidance.service.TraceServiceDecorator
 import com.sailens.shell.capture.AndroidCaptureClock
 import com.sailens.shell.capture.AndroidCaptureSensorSource
+import com.sailens.shell.app.GuidanceStartGate
 import com.sailens.shell.app.HardwareKeyHandler
 import com.sailens.shell.capture.CaptureExporter
 import com.sailens.shell.capture.CapturingTraceService
 import com.sailens.shell.capture.FieldCaptureController
+import com.sailens.shell.capture.FieldCaptureStartGate
 import com.sailens.shell.capture.FieldCaptureSettingsStore
 import com.sailens.shell.capture.FieldCaptureViewModel
 import com.sailens.shell.capture.MissedAlertMarkers
@@ -60,6 +62,7 @@ val shellDebugModule: Module = module {
     }
     single { MissedAlertMarkers(androidContext(), get()) }
     single<HardwareKeyHandler> { VolumeDownMarkerKeyHandler(get(), get()) }
+    single<GuidanceStartGate> { FieldCaptureStartGate(androidContext(), get()) }
     viewModel { FieldCaptureViewModel(get(), get()) }
 }
 

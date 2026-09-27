@@ -7,6 +7,10 @@ import com.sailens.guidance.trace.capture.CaptureSchema
 import com.sailens.guidance.trace.capture.CaptureSessionReader
 import com.sailens.guidance.trace.capture.MarkerSource
 import com.sailens.guidance.trace.capture.orThrow
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -18,6 +22,8 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
 import java.io.IOException
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
 import java.util.zip.ZipFile
 
 class FieldCaptureToolingTest {
@@ -30,7 +36,7 @@ class FieldCaptureToolingTest {
     private val frames = FakeFrameSource()
     private val clock = FakeClock()
 
-    private fun controller() = FieldCaptureController(
+    private fun controller(io: CoroutineDispatcher = Dispatchers.IO) = FieldCaptureController(
         root = root,
         isEnabled = { true },
         frameSource = frames,
@@ -41,6 +47,7 @@ class FieldCaptureToolingTest {
         deviceInfo = TEST_DEVICE,
         log = RecordingLog(),
         exporter = CaptureExporter(root, exports),
+        ioDispatcher = io,
     )
 
     /** A finished capture with a couple of frames, recorded through the real engine. */
@@ -163,6 +170,46 @@ class FieldCaptureToolingTest {
 
         capture.onSessionFinished().join()
         assertTrue("allowed again once the recording ends", capture.setPinned("done", true))
+    }
+
+    @Test
+    fun `a capture never runs alongside an export - one that starts anyway ends at once, visibly`() = runBlocking {
+        val io = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
+        try {
+            val capture = controller(io)
+            recorded(capture, "a")
+            val release = CountDownLatch(1)
+            io.executor.execute { release.await() } // holds the ZIP build until the capture has tried to start
+
+            val export = async(Dispatchers.Default) { capture.export("a") }
+            awaitTrue("export under way") { capture.isManagingFiles.value }
+            capture.onSessionStarted("b", null)!!.join()
+            assertFalse("no recording while exporting", capture.isCapturing.value)
+
+            release.countDown()
+            assertTrue(export.await().isFile)
+            assertFalse(capture.isManagingFiles.value)
+            val b = CaptureSessionReader.read(File(root, "b")).orThrow().manifest
+            assertFalse(b.complete)
+            assertEquals(FieldCaptureController.EXPORT_IN_PROGRESS, b.failureReason)
+        } finally {
+            io.close()
+        }
+    }
+
+    @Test
+    fun `an export that cannot mark its session exported fails and leaves no ZIP to share`() = runBlocking {
+        val capture = controller()
+        recorded(capture, "a")
+        File(File(root, "a"), CaptureSchema.MANIFEST_FILE).writeText("{ not json")
+
+        try {
+            capture.export("a")
+            fail("the session would still expire, so the export must not be offered for sharing")
+        } catch (expected: IOException) {
+        }
+        assertFalse(File(exports, "capture_a.zip").exists())
+        assertFalse(capture.isManagingFiles.value)
     }
 
     // ---- markers -------------------------------------------------------------------------------

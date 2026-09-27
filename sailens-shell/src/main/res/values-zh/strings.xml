@@ -177,6 +177,8 @@
     <string name="field_capture_export_failed">导出失败：%1$s</string>
     <string name="field_capture_recording_notice">正在录制。请先停止 Guidance，再修改此设置或管理采集数据。</string>
     <string name="field_capture_action_failed">无法修改这份采集数据。请停止 Guidance 后重试。</string>
+    <string name="field_capture_export_blocks_guidance">请等采集数据导出完成后再启动 Guidance。</string>
+    <string name="field_capture_exporting_notice">正在导出。导出完成前无法启动 Guidance。</string>
     <string name="title_field_capture_delete">删除这份采集数据？</string>
     <string name="field_capture_delete_body">它会从本机移除，无法恢复。</string>
     <string name="btn_cancel_field_capture_delete">取消</string>

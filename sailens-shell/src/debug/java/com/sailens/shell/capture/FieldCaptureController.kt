@@ -26,6 +26,7 @@ import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.cancelAndJoin
@@ -157,6 +158,23 @@ internal class FieldCaptureController(
     /** Whether a capture is recording right now (for the marker button and the Volume-Down key). */
     val isCapturing: StateFlow<Boolean> = _isCapturing.asStateFlow()
 
+    private val _isManagingFiles = MutableStateFlow(false)
+
+    /**
+     * Whether heavy file work (a ZIP export) is running. Capture and heavy file work never overlap,
+     * in either direction: exporting is refused while recording, and Guidance is held off while
+     * this is true ([FieldCaptureStartGate]); a capture that starts anyway ends at once as
+     * [EXPORT_IN_PROGRESS].
+     */
+    val isManagingFiles: StateFlow<Boolean> = _isManagingFiles.asStateFlow()
+
+    /** Writer thread. */
+    private fun setBusy(sessionId: String, busy: Boolean): Boolean {
+        val changed = if (busy) busySessions.add(sessionId) else busySessions.remove(sessionId)
+        _isManagingFiles.value = busySessions.isNotEmpty()
+        return changed
+    }
+
     /** Bytes held by the sessions other than the active one, as of the last retention pass. */
     private var otherSessionsBytes = 0L
 
@@ -209,25 +227,33 @@ internal class FieldCaptureController(
     /**
      * Packs a finished session into a ZIP for sharing and marks it exported (which also keeps it past
      * the age limit). Refused while recording. The ZIP is built off the writer thread; the session
-     * is protected from retention and delete meanwhile. Throws when exporting is refused or fails.
+     * is protected from retention and delete meanwhile. Throws when exporting is refused or fails --
+     * including when the ZIP was built but the session could not be marked exported, so a ZIP is
+     * never shared from a session that would still expire.
      */
     suspend fun export(sessionId: String): File {
         val zipper = exporter ?: throw IOException("export is not available")
         onWriter {
             if (active != null) throw IOException("a capture is recording; export after it ends")
-            if (!busySessions.add(sessionId)) throw IOException("already exporting")
+            if (!setBusy(sessionId, true)) throw IOException("already exporting")
         }
-        var zip: File? = null
-        try {
-            zip = withContext(ioDispatcher) { zipper.export(sessionId) }
-            return zip
-        } finally {
-            val exported = zip != null
+        val zip = try {
+            withContext(ioDispatcher) { zipper.export(sessionId) }
+        } catch (e: Throwable) {
+            withContext(NonCancellable) { onWriter { setBusy(sessionId, false) } }
+            throw e
+        }
+        val marked = withContext(NonCancellable) {
             onWriter {
-                busySessions -= sessionId
-                if (exported) editManifest(sessionId) { it.copy(exportedAtWallMs = clock.wallMs()) }
+                setBusy(sessionId, false)
+                runCatching { editManifest(sessionId) { it.copy(exportedAtWallMs = clock.wallMs()) } }.getOrDefault(false)
             }
         }
+        if (!marked) {
+            zip.delete()
+            throw IOException("the capture's manifest could not be updated")
+        }
+        return zip
     }
 
     private fun summarize(directory: File, active: Boolean): CaptureSummary {
@@ -358,6 +384,12 @@ internal class FieldCaptureController(
         }
         val capture = ActiveCapture(writer)
         active = capture
+        if (busySessions.isNotEmpty()) {
+            // The start gate should have held Guidance off; this is the backstop. An empty, failed
+            // capture is left behind so the gap in the evidence is visible rather than silent.
+            fail(capture, EXPORT_IN_PROGRESS)
+            return
+        }
 
         capture.guarded("start") {
             writer.append(anchor(AnchorReason.START))
@@ -599,6 +631,9 @@ internal class FieldCaptureController(
 
         /** `failureReason` of a capture ended because the capture directory reached its cap. */
         const val STORAGE_LIMIT_REACHED: String = "storage_limit_reached"
+
+        /** `failureReason` of a capture that started while a ZIP export was running. */
+        const val EXPORT_IN_PROGRESS: String = "export_in_progress"
     }
 }
 
