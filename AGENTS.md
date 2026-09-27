@@ -47,7 +47,7 @@ pipeline that turns the scene ahead into speech and haptics. This file is the re
 - Capability model (§5.2): *configured* (a null spec), *expected* (`CapabilityExpectations`), *available* (`PipelinePreflight` + the edition's own check — cheap and static: it reads the model's TFLite metadata tables but never compiles a model or opens a delegate), *runtime state*. Zero pipelines is legal; A ships no weights and lands there. The four combinations route to four different start destinations; Describe-only never lands on the guidance screen.
 
 ## Runtime flow to preserve
-- `ImageAnalysis` outputs `YUV_420_888` frames -> `ImageFrameAnalyzer` -> `FrameSource.frames` (`SharedFlow<ImageFrame>`, `DROP_OLDEST`). The analyzer converts a frame only on demand, and demand is either a stream subscriber or an open `FrameLease`, so `FrameSnapshotProvider` works with Guidance stopped.
+- `ImageAnalysis` outputs `YUV_420_888` frames -> `ImageFrameAnalyzer` -> `FrameSource.frames` (a one-frame mailbox per subscriber; a newer frame replaces a waiting one). The analyzer converts a frame only on demand, and demand is either a stream subscriber that is due a frame (`frames(minIntervalMs)` samples) or an open `FrameLease`, so `FrameSnapshotProvider` works with Guidance stopped. Stream frames come from a buffer pool and are lent: the subscriber returns each with `releaseFrame` (Guidance does so once the frame is processed); snapshots are detached from the pool and owned by the caller.
 - `StartSceneAnalysisUseCase` initializes `PerceptionRepository`; in `DEFAULT` profile it also initializes the realtime obstacle (detection) provider.
 - `StartSceneAnalysisUseCase` starts a trace session, maps each frame to `PerceptionResult`, `SceneResult`, and `FrameTrace`, then records runtime backend fields.
 - `ProcessFrameUseCase` runs semantic segmentation, can reuse cached semantic analysis between scheduled runs, then runs obstacle detection extraction/tracking (det only; no instance-segmentation refinement).
@@ -71,6 +71,7 @@ pipeline that turns the scene ahead into speech and haptics. This file is the re
 - Speech and haptics only interrupt for strictly higher priority, and the cooldown records only what was delivered (`DecideEventsUseCase` + `RevokeUndeliveredEventUseCase`). Guidance time is `SystemClock.elapsedRealtime()` end to end.
 - The semantic mask covers the camera frame only (letterbox padding cropped by `SemanticContentRegion`), so mask pixels and detection boxes share one coordinate space. Ratio thresholds are fractions of the camera frame.
 - `BinaryMask` is `BitSet`-based and used in hot loops; avoid allocation-heavy patterns in analysis code.
+- The semantic class map (`SegmentationMask`) comes from a pool and is owned by a `SegmentationMaskLease`. `ProcessFrameUseCase`'s cached analysis is its only holder beyond the frame, and closes the lease when a newer analysis replaces it; after that the array carries a later run. So never keep `analysis.segmentation` past the frame being processed: `SceneResult.segmentationMask` is a copy, made only when the caller asks (`semanticMaskSnapshot`).
 
 ## Integrations and assets
 - CameraX (`camera-core/camera2/camera-lifecycle/camera-compose`) in `:sailens-camera`.

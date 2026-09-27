@@ -76,6 +76,7 @@
   - `session_start`
   - 多条 `frame`
   - 可选 `overlay_render`
+  - 可选 `prompt_outcome`（每条交出的提示一条）
   - 可选 `error`
   - `session_summary`
 

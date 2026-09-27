@@ -126,6 +126,7 @@ val shellModule = module {
             announcements = get(),
             revokeUndeliveredEvent = get(),
             noticeText = get(),
+            startGate = getOrNull(),
         )
     }
     viewModel {

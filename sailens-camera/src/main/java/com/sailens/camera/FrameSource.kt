@@ -2,6 +2,7 @@ package com.sailens.camera
 
 import com.sailens.core.frame.ImageFrame
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 
 /**
  * A continuous stream of camera frames, for work that runs on every frame.
@@ -9,10 +10,53 @@ import kotlinx.coroutines.flow.Flow
  * Guidance consumes this. Collecting it is one of the two things that keeps capture converting; a
  * caller that only wants to look at the current view should use [FrameSnapshotProvider] instead of
  * subscribing to every frame it will throw away (architecture.md §6.1).
+ *
+ * Frames on a stream are lent, not given. Their plane arrays may be reused for a later frame once
+ * the subscriber hands the frame back with [releaseFrame], and not before. A subscriber that keeps a
+ * frame simply never releases it; one that forgets to release costs an allocation later, never a
+ * frame overwritten under it. A subscriber that falls behind does not see every frame: only the
+ * newest waiting one is kept, and the ones it replaced are returned by the source itself.
  */
 public interface FrameSource {
+    /** Every frame, for as long as the collector keeps up. */
     public val frames: Flow<ImageFrame>
+
+    /**
+     * At most about one frame per [minIntervalMs], for a subscriber that samples the scene rather
+     * than analysing every frame. Frames between the samples are never delivered, so there is
+     * nothing for the subscriber to release for them.
+     *
+     * The default filters [frames] by [ImageFrame.timestamp] (nanoseconds) and releases what it
+     * skips; a source that can avoid converting the skipped frames should override it.
+     */
+    public fun frames(minIntervalMs: Long): Flow<ImageFrame> {
+        require(minIntervalMs >= 0) { "minIntervalMs must not be negative: $minIntervalMs" }
+        if (minIntervalMs == 0L) return frames
+        val minIntervalNs = minIntervalMs * NANOS_PER_MILLI
+        return flow {
+            var lastTimestamp: Long? = null
+            frames.collect { frame ->
+                val last = lastTimestamp
+                val sinceLast = if (last == null) null else frame.timestamp - last
+                // A negative gap is a restarted clock, not a frame from the past: take it.
+                if (sinceLast == null || sinceLast < 0 || sinceLast >= minIntervalNs) {
+                    lastTimestamp = frame.timestamp
+                    emit(frame)
+                } else {
+                    releaseFrame(frame)
+                }
+            }
+        }
+    }
+
+    /**
+     * Hands a frame received from [frames] back to the source once the subscriber is done reading
+     * it. Idempotent, and a no-op for a frame the source did not lend.
+     */
+    public fun releaseFrame(frame: ImageFrame) {}
 }
+
+private const val NANOS_PER_MILLI = 1_000_000L
 
 /**
  * A declared need for converted frames. Capture keeps converting while at least one is open.

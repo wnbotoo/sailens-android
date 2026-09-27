@@ -28,4 +28,19 @@ class TraceRuntimeConfigTest {
         assertFalse(config.shouldRecordFrame(2L))
         assertTrue(config.shouldRecordFrame(3L))
     }
+
+    @Test
+    fun `a frame that offered a prompt is kept whatever the sampling`() {
+        val config = TraceRuntimeConfig(enabled = true, sampleEveryNFrames = 3)
+
+        assertFalse(config.shouldRecordFrame(10L))
+        assertTrue(config.shouldRecordFrame(10L, offeredPrompt = true))
+    }
+
+    @Test
+    fun `disabled tracing records nothing even for a prompt`() {
+        val config = TraceRuntimeConfig(enabled = false)
+
+        assertFalse(config.shouldRecordFrame(10L, offeredPrompt = true))
+    }
 }

@@ -363,6 +363,8 @@ sailens-camera therefore exposes two concepts:
 ~~~kotlin
 interface FrameSource {
     val frames: Flow<ImageFrame>
+    fun frames(minIntervalMs: Long): Flow<ImageFrame>
+    fun releaseFrame(frame: ImageFrame)
 }
 
 interface FrameSnapshotProvider {
@@ -374,9 +376,19 @@ interface FrameSnapshotProvider {
 
 Both are backed by the same camera session, and **demand is explicit**. Turning a camera image into
 an ImageFrame copies every plane, so it happens only when something has asked for one — but asking
-is not the same as running Guidance. A stream subscription and a snapshot lease are each sufficient
-on their own. That is what lets Describe answer while Guidance is stopped, without capture
-converting frames nobody reads.
+is not the same as running Guidance. A stream subscriber that is due a frame and a snapshot lease
+are each sufficient on their own. That is what lets Describe answer while Guidance is stopped,
+without capture converting frames nobody reads. A subscriber that samples the scene asks for
+`frames(minIntervalMs)`: frames between its samples are not delivered, and not converted either if
+nothing else wants them.
+
+**Stream frames are lent; snapshots are given.** The plane copies come from a small pool, so
+converting a frame normally reuses arrays instead of allocating about 1 MB. A frame on a stream is
+the subscriber's until it hands it back with `releaseFrame`; only then — and only once every other
+holder has let go too — can its arrays carry a later frame. Forgetting to release is safe: the
+arrays are simply never reused. Frames a lagging subscriber never took are returned by the source
+itself. A snapshot is detached from the pool instead, so Describe owns an ordinary frame it may keep
+for as long as its request takes.
 
 Describe rejects a stale snapshot. It must never silently describe a frame from several seconds ago.
 This preserves the intent already documented in the VLM/ASR assistant plan.

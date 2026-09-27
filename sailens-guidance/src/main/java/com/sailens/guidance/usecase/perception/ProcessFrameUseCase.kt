@@ -10,6 +10,7 @@ import com.sailens.core.frame.ImageFrame
 import com.sailens.core.runtime.MlRuntimeInfo
 import com.sailens.guidance.model.perception.PerceptionResult
 import com.sailens.guidance.model.perception.SegmentationAnalysis
+import com.sailens.guidance.model.perception.SegmentationMaskLease
 import com.sailens.guidance.processor.perception.ObstacleExtractor
 import com.sailens.guidance.processor.perception.ObstacleTracker
 import com.sailens.guidance.processor.perception.PerceptionProfileManager
@@ -71,14 +72,25 @@ class ProcessFrameUseCase(
         val runtimeInfo: MlRuntimeInfo = MlRuntimeInfo(),
     )
 
+    /**
+     * The analysis reused between semantic runs. [maskLease] owns the class map behind
+     * `analysis.segmentation`: this cache is the only thing that keeps a mask beyond the frame it
+     * was produced for, so it is the one that gives the array back.
+     */
     private data class CachedSemanticAnalysis(
         val frameWidth: Int,
         val frameHeight: Int,
         val rotationDegrees: Int,
         val analysis: SegmentationAnalysis,
         val runtimeInfo: MlRuntimeInfo,
+        val maskLease: SegmentationMaskLease?,
     )
 
+    /**
+     * Drops the cached analysis without returning its mask for reuse: reset can arrive from the
+     * thread stopping Guidance while a cancelled pipeline is still finishing its last frame, which
+     * may be reading that mask. Leaving the lease open only costs one allocation next session.
+     */
     fun reset() {
         scheduler.reset()
         cachedSemanticAnalysis = null
@@ -219,17 +231,28 @@ class ProcessFrameUseCase(
             return Result.failure(it)
         }
         scheduler.markSemanticRun(clock())
-        val analysis = segmentationAnalyzer.analyze(
-            segmentation = segmentationOutput.mask,
-            stats = segmentationOutput.analysisStats,
-        )
+        val analysis = try {
+            segmentationAnalyzer.analyze(
+                segmentation = segmentationOutput.mask,
+                stats = segmentationOutput.analysisStats,
+            )
+        } catch (error: Throwable) {
+            // Nothing kept this mask; the analysis that would have is gone.
+            segmentationOutput.maskLease?.close()
+            throw error
+        }
+        val replaced = cachedSemanticAnalysis
         cachedSemanticAnalysis = CachedSemanticAnalysis(
             frameWidth = frame.width,
             frameHeight = frame.height,
             rotationDegrees = frame.rotationDegrees,
             analysis = analysis,
             runtimeInfo = segmentationOutput.runtimeInfo,
+            maskLease = segmentationOutput.maskLease,
         )
+        // The previous frame's processing has finished and the UI only ever gets a copy, so the
+        // replaced analysis's mask has no reader left: its array can carry the next run.
+        replaced?.maskLease?.close()
         return Result.success(
             SemanticAnalysisOutput(
                 analysis = analysis,

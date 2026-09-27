@@ -11,7 +11,9 @@ import com.sailens.core.log.LogService
 import com.sailens.guidance.service.TraceService
 import com.sailens.guidance.usecase.decision.RevokeUndeliveredEventUseCase
 import com.sailens.guidance.usecase.scene.StartSceneAnalysisUseCase
+import com.sailens.shell.app.GuidanceStartGate
 import com.sailens.guidance.usecase.scene.StopSceneAnalysisUseCase
+import com.sailens.guidance.util.Timestamp
 import com.sailens.shell.diagnostics.GuidanceDiagnosticsStore
 import com.sailens.output.AccessibilityStatusProvider
 import com.sailens.shell.device.GuidanceHaptic
@@ -85,6 +87,8 @@ class SceneAnalysisViewModel(
     /** Tells Guidance a decided event never reached the user, so its cooldown does not mute it. */
     private val revokeUndeliveredEvent: RevokeUndeliveredEventUseCase,
     private val noticeText: GuidanceNoticeText,
+    /** Bound only by debug tooling; null means Guidance may always start. */
+    private val startGate: GuidanceStartGate? = null,
     /** The same monotonic clock Guidance stamps events with. */
     private val clock: () -> Long = SystemClock::elapsedRealtime,
 ) : ViewModel() {
@@ -197,11 +201,14 @@ class SceneAnalysisViewModel(
     }
 
     fun toggleAnalysis() {
-        if (_uiState.value.isRunning) {
-            stopSceneAnalysis()
-        } else {
-            _uiState.update { it.copy(isLoading = true) }
-            startSceneAnalysis()
+        when (val action = guidanceToggleAction(_uiState.value.isRunning, startGate)) {
+            GuidanceToggleAction.Stop -> stopSceneAnalysis()
+            GuidanceToggleAction.Start -> {
+                _uiState.update { it.copy(isLoading = true) }
+                startSceneAnalysis()
+            }
+            is GuidanceToggleAction.Refuse ->
+                viewModelScope.launch { _uiEffect.emit(SceneAnalysisUiEffect.ShowToast(action.reason)) }
         }
     }
 
@@ -291,7 +298,13 @@ class SceneAnalysisViewModel(
             startStallWatch()
 
             // collectLatest is often used for high-frequency data, discarding previous incomplete processing
-            startSceneAnalysisUseCase(frameSource.frames).onStart {
+            startSceneAnalysisUseCase(
+                frameSource.frames,
+                releaseFrame = frameSource::releaseFrame,
+                // The class-map overlay is the only reader of the mask outside the pipeline; the
+                // copy it needs is made only while it is showing.
+                semanticMaskSnapshot = { rendersSemanticClassMask() },
+            ).onStart {
                 _uiState.update {
                     it.copy(isInitializing = false, isRunning = true, isLoading = false)
                 }
@@ -349,12 +362,12 @@ class SceneAnalysisViewModel(
                         )
                     )
                 }
-                onSceneEvents(events)
+                onSceneEvents(events, result.sequenceNumber)
             }
         }
     }
 
-    private fun onSceneEvents(events: List<SceneEvent>) {
+    private fun onSceneEvents(events: List<SceneEvent>, sequenceNumber: Long) {
         if (events.isEmpty()) return
         // Guidance 为这一条（且只为这一条）记了冷却，见 DecideEventsUseCase。
         val primaryEvent = events.first()
@@ -363,14 +376,23 @@ class SceneAnalysisViewModel(
 
         logger.debug(TAG, "Scene events generated, ${primaryEvent.messageKey}", mapOf("count" to events.size))
 
-        // 等描述 / 打断描述 / 送达 / 没送达就撤销冷却——整条规则在 offerGuidancePrompt 里，有单测。
-        // 协调器是整个 shell 共用的那一个，所以打断的就是用户正在听的那一段描述，不管它在哪个屏幕上。
-        val delivered = offerGuidancePrompt(
-            priority = primaryEvent.priority,
+        // 等描述 / 打断描述 / 送达 / 没送达就撤销冷却，并为这条提示写一条 prompt_outcome（实际送达的
+        // 通道或撤回原因）——整条规则在 offerAndTraceGuidancePrompt 里，有单测。协调器是整个 shell
+        // 共用的那一个，所以打断的就是用户正在听的那一段描述，不管它在哪个屏幕上。
+        val delivered = offerAndTraceGuidancePrompt(
+            event = primaryEvent,
+            sourceSequenceNumber = sequenceNumber,
+            outputs = GuidanceOutputSettings(
+                speechEnabled = state.isSpeechEnabled,
+                screenReaderActive = state.isScreenReaderActive,
+                hapticsEnabled = state.isHapticsEnabled,
+            ),
             descriptionHoldsTheFloor = sceneDescriptionCoordinator.holdsTheFloor,
+            now = Timestamp::now,
             preemptDescription = { sceneDescriptionCoordinator.preemptForGuidance(primaryEvent.messageKey) },
             deliver = { deliver(primaryEvent, state) },
             revoke = { revokeUndeliveredEvent(primaryEvent) },
+            record = traceService::recordPromptOutcome,
         )
         if (!delivered) return
 
@@ -382,9 +404,9 @@ class SceneAnalysisViewModel(
     /**
      * 把 [event] 送到用户可感知的通道，见 [deliverGuidanceEvent]。
      *
-     * @return 是否至少有一条通道真的接收了它。
+     * @return 真正接收了它的通道；为空表示没送达。
      */
-    private fun deliver(event: SceneEvent, state: SceneAnalysisUiState): Boolean = deliverGuidanceEvent(
+    private fun deliver(event: SceneEvent, state: SceneAnalysisUiState): GuidanceDeliveryResult = deliverGuidanceEvent(
         speechEnabled = state.isSpeechEnabled,
         screenReaderActive = state.isScreenReaderActive,
         speechEngineReady = speechManager.isReady,
@@ -683,6 +705,11 @@ class SceneAnalysisViewModel(
             SceneOverlayMode.DETECTION_BOXES -> null
         }
     }
+
+    /** Read from the pipeline thread, once per frame. */
+    private fun rendersSemanticClassMask(): Boolean =
+        _uiState.value.overlayMode == SceneOverlayMode.SEMANTIC_CLASS_MASK &&
+            sceneOverlayConfig.isModeEnabled(SceneOverlayMode.SEMANTIC_CLASS_MASK)
 
     private fun SceneOverlayMode.rendersBitmap(): Boolean {
         return when (this) {

@@ -26,6 +26,7 @@ import com.sailens.guidance.sensors.DeviceMotionDataSource
 import com.sailens.guidance.sensors.DeviceRotationDataSource
 import com.sailens.guidance.service.TraceReplayService
 import com.sailens.guidance.service.TraceService
+import com.sailens.guidance.service.TraceServiceDecorator
 import com.sailens.guidance.trace.FileTraceReplayService
 import com.sailens.guidance.trace.FileTraceService
 import com.sailens.guidance.trace.NoOpTraceService
@@ -111,7 +112,7 @@ val guidanceModule = module {
     // Trace / replay
     single<TraceService> {
         val traceRuntimeConfig = get<TraceRuntimeConfig>()
-        if (traceRuntimeConfig.enabled) {
+        val base = if (traceRuntimeConfig.enabled) {
             FileTraceService(
                 context = androidContext(),
                 logService = get(),
@@ -120,6 +121,8 @@ val guidanceModule = module {
         } else {
             NoOpTraceService
         }
+        // Debug builds bind a decorator that adds field capture; release binds none.
+        getOrNull<TraceServiceDecorator>()?.decorate(base) ?: base
     }
     single<TraceReplayService> { FileTraceReplayService(androidContext()) }
 }

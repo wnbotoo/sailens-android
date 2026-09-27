@@ -84,7 +84,7 @@ pipelines rather than technical layers -- see [docs/architecture.md](docs/archit
 ```
 
 Dependencies point downward only; Guidance and Describe never depend on each other. Frames flow
-`CameraX → ImageFrameAnalyzer → SharedFlow<ImageFrame> → ProcessFrameUseCase → AnalyzeSceneUseCase
+`CameraX → ImageFrameAnalyzer → FrameSource.frames → ProcessFrameUseCase → AnalyzeSceneUseCase
 → DecideEventsUseCase → speech/haptics`.
 
 Two orthogonal knobs:

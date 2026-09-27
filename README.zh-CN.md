@@ -77,7 +77,7 @@ zero-pipeline 屏，并指向这里。官方发行版声明导航为必需，因
 ```
 
 依赖只向下；Guidance 和 Describe 互不依赖。帧的流向：
-`CameraX → ImageFrameAnalyzer → SharedFlow<ImageFrame> → ProcessFrameUseCase → AnalyzeSceneUseCase
+`CameraX → ImageFrameAnalyzer → FrameSource.frames → ProcessFrameUseCase → AnalyzeSceneUseCase
 → DecideEventsUseCase → 语音/触觉`。
 
 两个正交的旋钮：

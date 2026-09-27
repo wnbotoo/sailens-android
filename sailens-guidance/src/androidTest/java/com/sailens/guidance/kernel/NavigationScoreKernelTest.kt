@@ -9,6 +9,7 @@ import com.sailens.vision.semantic.SemanticContentRegion
 import com.sailens.vision.semantic.cropClassMap
 import com.sailens.guidance.config.AnalysisConfig
 import com.sailens.guidance.model.perception.SegmentationMask
+import com.sailens.guidance.model.perception.SegmentationMaskPool
 import com.sailens.guidance.processor.perception.KotlinSegmentationStatsExtractor
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -60,7 +61,6 @@ class NavigationScoreKernelTest {
 
         val result = postprocessor.postprocessScores(
             scores = scores,
-            reusableResultMask = IntArray(WIDTH * HEIGHT),
             width = WIDTH,
             height = HEIGHT,
             channels = CLASS_COUNT,
@@ -95,7 +95,6 @@ class NavigationScoreKernelTest {
 
         val result = postprocessor.postprocessScores(
             scores = scores,
-            reusableResultMask = IntArray(content.pixelCount),
             width = WIDTH,
             height = HEIGHT,
             channels = CLASS_COUNT,
@@ -135,7 +134,6 @@ class NavigationScoreKernelTest {
 
         val int8Result = postprocessor.postprocessInt8Scores(
             scores = int8Scores,
-            reusableResultMask = IntArray(WIDTH * HEIGHT),
             width = WIDTH,
             height = HEIGHT,
             channels = CLASS_COUNT,
@@ -143,7 +141,6 @@ class NavigationScoreKernelTest {
         )
         val floatResult = postprocessor.postprocessScores(
             scores = floatScores,
-            reusableResultMask = IntArray(WIDTH * HEIGHT),
             width = WIDTH,
             height = HEIGHT,
             channels = CLASS_COUNT,
@@ -173,7 +170,6 @@ class NavigationScoreKernelTest {
 
         val result = postprocessor.postprocessScores(
             scores = FloatArray(WIDTH * HEIGHT * CLASS_COUNT - 1),
-            reusableResultMask = IntArray(WIDTH * HEIGHT),
             width = WIDTH,
             height = HEIGHT,
             channels = CLASS_COUNT,
@@ -181,6 +177,47 @@ class NavigationScoreKernelTest {
         )
 
         assertEquals(null, result)
+    }
+
+    @Test
+    fun pooledMasksStayIntactUntilTheirLeaseIsClosed() {
+        // The ownership pattern ProcessFrameUseCase follows: the previous frame's mask is still
+        // held (the cached analysis) while the next run writes, and is given back only after. Each
+        // frame's scores differ, so a run that wrote into a held mask would show up in it.
+        val pool = SegmentationMaskPool()
+        val postprocessor = NavigationScorePostprocessor(
+            config = analysisConfig,
+            navigationSemantics = navigationSemantics,
+            logService = SilentLogService,
+            maskPool = pool,
+        )
+        var held: SemanticPostprocessResult? = null
+        var heldExpected: IntArray? = null
+
+        repeat(6) { frame ->
+            val scores = syntheticScores(ImageTensorLayout.NHWC, seed = SEED + frame)
+            val expected = referenceArgmax(scores, ImageTensorLayout.NHWC)
+
+            val result = checkNotNull(
+                postprocessor.postprocessScores(
+                    scores = scores,
+                    width = WIDTH,
+                    height = HEIGHT,
+                    channels = CLASS_COUNT,
+                    scoreLayout = ImageTensorLayout.NHWC,
+                ),
+            ) { "native score postprocess returned null on frame $frame" }
+
+            assertArrayEquals("frame $frame mask", expected, result.mask.classMap)
+            held?.let { previous ->
+                assertArrayEquals("frame ${frame - 1} mask while still held", heldExpected, previous.mask.classMap)
+                previous.maskLease.close()
+            }
+            held = result
+            heldExpected = expected
+        }
+
+        assertEquals("two masks alternate: the held one and the one being written", 2L, pool.arraysAllocated)
     }
 
     // ---------------------------------------------------------------------------------------
@@ -204,8 +241,8 @@ class NavigationScoreKernelTest {
      * of the statistics are actually populated. A fixed seed keeps it reproducible, and the
      * deterministic tilt keeps ties out of the argmax.
      */
-    private fun syntheticScores(layout: ImageTensorLayout): FloatArray {
-        val random = Random(SEED)
+    private fun syntheticScores(layout: ImageTensorLayout, seed: Int = SEED): FloatArray {
+        val random = Random(seed)
         val scores = FloatArray(WIDTH * HEIGHT * CLASS_COUNT)
         val pixelCount = WIDTH * HEIGHT
 

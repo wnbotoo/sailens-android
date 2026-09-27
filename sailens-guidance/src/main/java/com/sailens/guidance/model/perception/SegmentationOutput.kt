@@ -3,6 +3,10 @@ import com.sailens.core.runtime.MlRuntimeInfo
 
 /**
  * 语义分割模型输出
+ *
+ * [maskLease] owns [mask]'s class map when it came from a pool: the receiver keeps the mask for as
+ * long as it reads it and then closes the lease (ProcessFrameUseCase does, when a newer analysis
+ * replaces the cached one). Null for a mask nobody will reuse.
  */
 data class SegmentationOutput(
     val mask: SegmentationMask,
@@ -13,6 +17,7 @@ data class SegmentationOutput(
     val outputReadTimeMs: Long = 0,
     val analysisStats: SegmentationAnalysisStats? = null,
     val runtimeInfo: MlRuntimeInfo = MlRuntimeInfo(),
+    val maskLease: SegmentationMaskLease? = null,
 )
 
 /**

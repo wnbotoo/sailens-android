@@ -45,6 +45,7 @@ fun SettingsScreen(
     onNavigateBack: () -> Unit,
     onOpenLicenses: () -> Unit,
     onOpenTraceReports: () -> Unit,
+    onOpenFieldCapture: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: SettingsViewModel = koinViewModel(),
 ) {
@@ -126,6 +127,7 @@ fun SettingsScreen(
             if (state.diagnostics.showDiagnostics) {
                 SettingsDiagnosticsSection(
                     onOpenTraceReports = onOpenTraceReports,
+                    onOpenFieldCapture = onOpenFieldCapture,
                 )
             }
 

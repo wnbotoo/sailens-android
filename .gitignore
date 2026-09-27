@@ -44,3 +44,7 @@ app/src/main/assets/*.tflite
 
 # Store listing assets (icon / feature graphic exports); regenerate as needed
 /store/
+
+# Python bytecode (scripts/)
+__pycache__/
+*.pyc
