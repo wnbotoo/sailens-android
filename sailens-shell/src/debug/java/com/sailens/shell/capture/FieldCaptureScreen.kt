@@ -33,6 +33,7 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.sailens.guidance.trace.capture.CaptureModes
 import com.sailens.shell.R
 import com.sailens.shell.design.components.SailensScaffold
 import com.sailens.shell.design.components.ToggleRow
@@ -108,6 +109,11 @@ internal fun FieldCaptureScreen(
                 supportingText = stringResource(R.string.field_capture_switch_supporting),
                 enabled = !state.capturing,
             )
+            TimingSyncSection(
+                armed = state.timingSyncArmed,
+                enabled = !state.capturing,
+                onArmedChange = viewModel::setTimingSyncArmed,
+            )
             if (state.capturing) {
                 Text(
                     text = stringResource(R.string.field_capture_recording_notice),
@@ -157,6 +163,13 @@ private fun CaptureRow(
     val started = DateFormat.getMediumDateFormat(context).format(Date(session.startedWallMs)) + " " +
         DateFormat.getTimeFormat(context).format(Date(session.startedWallMs))
     val status = buildList {
+        add(
+            when (session.mode) {
+                CaptureModes.TIMING_SYNC -> stringResource(R.string.field_capture_mode_timing_sync)
+                CaptureModes.FIELD_EVIDENCE -> stringResource(R.string.field_capture_mode_field_evidence)
+                else -> session.mode ?: "?"
+            },
+        )
         add(
             when {
                 session.active -> stringResource(R.string.field_capture_status_recording)
@@ -219,4 +232,29 @@ private fun shareZip(context: Context, zip: File, title: String) {
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
     context.startActivity(Intent.createChooser(intent, title))
+}
+
+/**
+ * The one-shot timing-sync burst: armed here, it runs for about 15 s at the next Guidance start,
+ * whatever the capture switch says, and then Guidance carries on without capture.
+ */
+@Composable
+private fun TimingSyncSection(armed: Boolean, enabled: Boolean, onArmedChange: (Boolean) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(SailensDimens.spaceSm)) {
+        Text(text = stringResource(R.string.field_capture_timing_sync_title), style = MaterialTheme.typography.titleSmall)
+        Text(
+            text = stringResource(
+                if (armed) R.string.field_capture_timing_sync_armed else R.string.field_capture_timing_sync_supporting,
+            ),
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+        )
+        OutlinedButton(onClick = { onArmedChange(!armed) }, enabled = enabled) {
+            Text(
+                stringResource(
+                    if (armed) R.string.btn_field_capture_timing_sync_cancel else R.string.btn_field_capture_timing_sync_arm,
+                ),
+            )
+        }
+    }
 }

@@ -42,7 +42,7 @@ val shellDebugModule: Module = module {
         val settings = get<FieldCaptureSettingsStore>()
         FieldCaptureController(
             root = File(androidContext().filesDir, CAPTURES_DIR),
-            isEnabled = { settings.enabled.value },
+            sessionMode = settings::takeSessionMode,
             frameSource = get(),
             cameraFacts = get(),
             sensors = AndroidCaptureSensorSource(androidContext()),

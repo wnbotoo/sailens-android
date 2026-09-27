@@ -17,6 +17,8 @@ internal data class FieldCaptureUiState(
     val capturing: Boolean = false,
     /** A ZIP export is running; Guidance is held off until it ends. */
     val exporting: Boolean = false,
+    /** The one-shot timing-sync burst will run at the next Guidance start. */
+    val timingSyncArmed: Boolean = false,
     val sessions: List<CaptureSummary> = emptyList(),
     val busySessionId: String? = null,
 )
@@ -46,6 +48,7 @@ internal class FieldCaptureViewModel(
 
     init {
         viewModelScope.launch { settings.enabled.collect { on -> _state.update { it.copy(enabled = on) } } }
+        viewModelScope.launch { settings.timingSyncArmed.collect { on -> _state.update { it.copy(timingSyncArmed = on) } } }
         viewModelScope.launch {
             controller.isCapturing.collect { on ->
                 _state.update { it.copy(capturing = on) }
@@ -62,6 +65,10 @@ internal class FieldCaptureViewModel(
 
     fun setEnabled(enabled: Boolean) {
         if (!_state.value.capturing) settings.setEnabled(enabled)
+    }
+
+    fun setTimingSyncArmed(armed: Boolean) {
+        if (!_state.value.capturing) settings.setTimingSyncArmed(armed)
     }
 
     fun setKept(sessionId: String, kept: Boolean) = act(sessionId) {

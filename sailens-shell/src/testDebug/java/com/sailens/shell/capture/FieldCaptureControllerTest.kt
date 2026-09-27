@@ -1,6 +1,7 @@
 package com.sailens.shell.capture
 
 import com.sailens.camera.CameraCharacteristicsProvider
+import com.sailens.guidance.trace.capture.CaptureModes
 import com.sailens.guidance.model.trace.FrameTrace
 import com.sailens.guidance.model.trace.PromptOutcomeTrace
 import com.sailens.guidance.model.trace.SessionTraceMetadata
@@ -8,6 +9,7 @@ import com.sailens.guidance.model.trace.SessionTraceSummary
 import com.sailens.guidance.service.TraceService
 import com.sailens.guidance.trace.capture.AnchorReason
 import com.sailens.guidance.trace.capture.CaptureSessionReader
+import com.sailens.guidance.trace.capture.FrameEncoding
 import com.sailens.guidance.trace.capture.MarkerSource
 import com.sailens.guidance.trace.capture.orThrow
 import kotlinx.coroutines.runBlocking
@@ -35,12 +37,13 @@ class FieldCaptureControllerTest {
 
     private fun controller(
         enabled: () -> Boolean = { true },
+        sessionMode: (() -> String?)? = null,
         encoder: JpegEncoder = JpegEncoder { image, _ -> ByteArray(image.width) },
         config: FieldCaptureConfig = FieldCaptureConfig(),
         retention: CaptureRetention = CaptureRetention(tmp.root),
     ) = FieldCaptureController(
         root = tmp.root,
-        isEnabled = enabled,
+        sessionMode = sessionMode ?: { if (enabled()) CaptureModes.FIELD_EVIDENCE else null },
         frameSource = frames,
         cameraFacts = CameraCharacteristicsProvider { null },
         sensors = sensors,
@@ -244,6 +247,63 @@ class FieldCaptureControllerTest {
         assertEquals(1, session.markers.size)
         assertEquals(MarkerSource.SCREEN_BUTTON, session.markers.single().source)
         assertEquals(1L, session.manifest.stats.markers)
+    }
+
+    @Test
+    fun `a timing-sync burst stores every frame as raw luma, counts its own mailbox misses and ends on its own`() = runBlocking {
+        val capture = controller(
+            sessionMode = { CaptureModes.TIMING_SYNC },
+            config = FieldCaptureConfig(timingSync = TimingSyncConfig(durationMs = 1_000, maxLongSide = 4)),
+        )
+        capture.onSessionStarted("burst", null)!!.join()
+        assertTrue(capture.isCapturing.value)
+        // Seq 3 and 4 were converted and offered but replaced in capture's mailbox.
+        listOf(1L, 2L, 5L).forEach { frames.emit(yuvFrame(it)) }
+        awaitTrue("frames released") { frames.released.containsAll(listOf(1L, 2L, 5L)) }
+
+        awaitTrue("burst ended by itself") { !capture.isCapturing.value }
+        // Read at once: inactive is published only after the files are final.
+        val session = read("burst")
+        assertEquals(CaptureModes.TIMING_SYNC, session.manifest.captureMode)
+        assertTrue(session.manifest.complete)
+        assertEquals(AnchorReason.END, session.anchors.last().reason)
+        assertEquals(listOf(1L, 2L, 5L), session.frames.map { it.seq })
+        session.frames.forEach { frame ->
+            assertEquals(FrameEncoding.LUMA8, frame.encoding)
+            assertEquals(4 to 3, frame.width to frame.height)
+            assertEquals(12L, File(session.directory, frame.file).length())
+        }
+        assertEquals(3L, session.manifest.stats.framesOffered)
+        assertEquals(3L, session.manifest.stats.framesEncoded)
+        assertEquals(2L, session.manifest.stats.framesMissedBySubscriber)
+
+        // The session's own end then has nothing to stop and changes nothing.
+        capture.onSessionFinished().join()
+        assertEquals(session.manifest, read("burst").manifest)
+    }
+
+    @Test
+    fun `a capture is inactive only once its manifest is final, and field evidence does not claim mailbox misses`() = runBlocking {
+        val capture = controller()
+        capture.onSessionStarted("s", null)!!.join()
+        frames.emit(yuvFrame(1))
+        frames.emit(yuvFrame(9)) // a gap the sampled stream makes by design
+        awaitTrue("frames released") { frames.released.containsAll(listOf(1L, 9L)) }
+
+        capture.onSessionFinished() // not joined: react to the state flow, as the capture list does
+        awaitTrue("inactive") { !capture.isCapturing.value }
+
+        val session = read("s")
+        assertTrue(session.manifest.complete)
+        assertEquals(AnchorReason.END, session.anchors.last().reason)
+        assertEquals(session.frames.size.toLong(), session.manifest.stats.framesEncoded)
+        assertNull(session.manifest.stats.framesMissedBySubscriber)
+    }
+
+    @Test
+    fun `an unknown mode captures nothing and never reaches the caller`() {
+        assertNull(controller(sessionMode = { "future_mode" }).onSessionStarted("s", null))
+        assertFalse(File(tmp.root, "s").exists())
     }
 
     @Test

@@ -38,6 +38,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import com.sailens.guidance.trace.capture.CaptureSchema
 import java.io.File
@@ -73,6 +75,8 @@ internal data class CaptureDeviceInfo(
 /** One row of the capture list. */
 internal data class CaptureSummary(
     val sessionId: String,
+    /** `captureMode` from the manifest; null when it cannot be read. */
+    val mode: String?,
     val startedWallMs: Long,
     val endedWallMs: Long?,
     val bytes: Long,
@@ -93,16 +97,35 @@ internal data class FieldCaptureConfig(
     val encodeQueueCapacity: Int = 1,
     val sensorQueueCapacity: Int = 4096,
     val anchorIntervalMs: Long = 30_000,
+    val timingSync: TimingSyncConfig = TimingSyncConfig(),
 )
 
 /**
- * Field evidence capture for one Guidance session at a time (M0a, implementation §4).
+ * The timing-sync burst ([CaptureModes.TIMING_SYNC]): every frame the camera delivers, as small raw
+ * luma, for [durationMs]; then the capture ends on its own while Guidance carries on. It exists to
+ * measure frame-to-gyroscope alignment and changes the device load, so it is never a baseline.
+ */
+internal data class TimingSyncConfig(
+    val durationMs: Long = 15_000,
+    val maxLongSide: Int = 400,
+    /**
+     * A little slack at camera rate. A frame dropped here is `framesDroppedByEncoder`; one replaced in
+     * capture's mailbox is `framesMissedBySubscriber`; one lost before the analyzer is counted nowhere
+     * and shows only as a camera-timestamp gap (see `CaptureStats`).
+     */
+    val queueCapacity: Int = 4,
+)
+
+/**
+ * Field capture for one Guidance session at a time (M0a, implementation §4), in one of two modes:
+ * [CaptureModes.FIELD_EVIDENCE] (reduced JPEG frames for the whole session) or
+ * [CaptureModes.TIMING_SYNC] (a short burst of raw luma at camera rate).
  *
  * Rules this class exists to keep:
  * - **Capture never fails or blocks Guidance.** The session hooks only read a flag and hand work to
  *   the capture's own thread; every failure inside capture ends as a failed, incomplete capture on
  *   disk and a log line, never as an exception to the caller.
- * - **The mode is read once**, when a session starts.
+ * - **The mode is read once**, when a session starts ([sessionMode]; null means no capture).
  * - **Frames are borrowed briefly.** Each frame is downscaled into capture's own buffer and
  *   released to the frame source immediately, whatever happens next.
  * - **Nothing piles up.** At most [FieldCaptureConfig.encodeQueueCapacity] frames wait for the
@@ -111,7 +134,7 @@ internal data class FieldCaptureConfig(
  */
 internal class FieldCaptureController(
     private val root: File,
-    private val isEnabled: () -> Boolean,
+    private val sessionMode: () -> String?,
     private val frameSource: FrameSource,
     private val cameraFacts: CameraCharacteristicsProvider,
     private val sensors: CaptureSensorSource,
@@ -152,6 +175,9 @@ internal class FieldCaptureController(
 
     /** Sessions being exported right now; retention and delete leave them alone. Writer thread only. */
     private val busySessions = mutableSetOf<String>()
+
+    /** Serialises capture start and end; see [end]. */
+    private val lifecycle = Mutex()
 
     private val _isCapturing = MutableStateFlow(false)
 
@@ -265,6 +291,7 @@ internal class FieldCaptureController(
         }.getOrNull()
         return CaptureSummary(
             sessionId = directory.name,
+            mode = manifest?.captureMode,
             startedWallMs = manifest?.startedWallMs ?: directory.lastModified(),
             endedWallMs = manifest?.endedWallMs,
             bytes = directory.walkBottomUp().filter { it.isFile }.sumOf { it.length() },
@@ -292,9 +319,12 @@ internal class FieldCaptureController(
 
     /** Called when a trace session starts. Never throws, never blocks. */
     fun onSessionStarted(sessionId: String, targetHardwareProfile: String?): Job? {
-        val enabled = runCatching(isEnabled).getOrDefault(false)
-        if (!enabled) return null
-        return scope.launch { begin(sessionId, targetHardwareProfile) }
+        val mode = runCatching(sessionMode).getOrNull() ?: return null
+        if (mode != CaptureModes.FIELD_EVIDENCE && mode != CaptureModes.TIMING_SYNC) {
+            log.warning(TAG, "Unknown capture mode '$mode'; not capturing")
+            return null
+        }
+        return scope.launch { begin(sessionId, mode, targetHardwareProfile) }
     }
 
     /** Called when the trace session finishes. Never throws, never blocks. */
@@ -355,7 +385,10 @@ internal class FieldCaptureController(
 
     // ---- writer thread -------------------------------------------------------------------------
 
-    private suspend fun begin(sessionId: String, targetHardwareProfile: String?) {
+    private suspend fun begin(sessionId: String, mode: String, targetHardwareProfile: String?): Unit =
+        lifecycle.withLock { beginLocked(sessionId, mode, targetHardwareProfile) }
+
+    private suspend fun beginLocked(sessionId: String, mode: String, targetHardwareProfile: String?) {
         // A session that never finished (the app kept running but the hook was missed) is closed
         // as incomplete rather than silently mixed with the new one.
         active?.let { fail(it, "superseded by session $sessionId") }
@@ -364,7 +397,7 @@ internal class FieldCaptureController(
 
         val manifest = CaptureManifest(
             sessionId = sessionId,
-            captureMode = CaptureModes.FIELD_EVIDENCE,
+            captureMode = mode,
             startedWallMs = clock.wallMs(),
             startedElapsedRealtimeNanos = clock.elapsedRealtimeNanos(),
             appVersionName = deviceInfo.appVersionName,
@@ -382,7 +415,7 @@ internal class FieldCaptureController(
             log.warning(TAG, "Field capture could not start", throwable = e)
             return
         }
-        val capture = ActiveCapture(writer)
+        val capture = ActiveCapture(writer, mode)
         active = capture
         if (busySessions.isNotEmpty()) {
             // The start gate should have held Guidance off; this is the backstop. An empty, failed
@@ -422,6 +455,13 @@ internal class FieldCaptureController(
             }
         }
         capture.frameJob = scope.launch(frameDispatcher) { collectFrames(capture) }
+        if (capture.timingSync) {
+            // The burst ends on its own; the session's own end then finds nothing to stop.
+            capture.burstJob = scope.launch {
+                delay(config.timingSync.durationMs)
+                end(only = capture)
+            }
+        }
     }
 
     /**
@@ -451,17 +491,30 @@ internal class FieldCaptureController(
     private fun overLimit(capture: ActiveCapture) =
         otherSessionsBytes + capture.writer.bytesWritten > retention.maxTotalBytes
 
-    private suspend fun end() {
+    /**
+     * Ends [only] if given (and still active), otherwise whatever capture is active. Start and end
+     * are serialised by [lifecycle]: they suspend while draining, and a start interleaved into an
+     * end would have its sensors stopped by the end it overtook.
+     */
+    private suspend fun end(only: ActiveCapture? = null): Unit = lifecycle.withLock { endLocked(only) }
+
+    private suspend fun endLocked(only: ActiveCapture?) {
         val capture = active ?: return
-        active = null
+        if (only != null && capture !== only) return
+        // A capture stays active until its files are final: stopping, draining and finishing the
+        // manifest all happen before `isCapturing` turns false, so whoever reacts to that (the
+        // capture list) reads the finished manifest, never a half-written one.
         stopProducers(capture)
-        if (capture.failed) return
-        capture.guarded("finish") {
-            capture.writer.append(anchor(AnchorReason.END))
-            capture.writer.finish {
-                it.copy(complete = true, endedWallMs = clock.wallMs(), stats = capture.stats())
+        if (!capture.failed) {
+            capture.guarded("finish") {
+                capture.writer.append(anchor(AnchorReason.END))
+                capture.writer.finish {
+                    it.copy(complete = true, endedWallMs = clock.wallMs(), stats = capture.stats())
+                }
             }
         }
+        capture.ended = true
+        if (active === capture) active = null
     }
 
     /** Stops frames and sensors, then lets the queues drain what they already hold. */
@@ -477,9 +530,8 @@ internal class FieldCaptureController(
     }
 
     private suspend fun fail(capture: ActiveCapture, reason: String) {
-        if (capture.failed) return
+        if (capture.failed || capture.ended) return
         capture.failed = true
-        if (active === capture) active = null
         log.warning(TAG, "Field capture failed: $reason")
         capture.frameJob?.cancel()
         runCatching { sensors.stop() }
@@ -491,6 +543,9 @@ internal class FieldCaptureController(
                 it.copy(complete = false, failureReason = reason, endedWallMs = clock.wallMs(), stats = capture.stats())
             }
         }.onFailure { runCatching { capture.writer.close() } }
+        // Inactive only once the incomplete manifest is final, as for a normal end.
+        capture.ended = true
+        if (active === capture) active = null
     }
 
     private fun writeSensor(capture: ActiveCapture, record: SensorRecord) {
@@ -505,8 +560,17 @@ internal class FieldCaptureController(
                 capture.writer.updateManifest { it.copy(camera = camera) }
             }
         }
-        val jpeg = encoder.encode(pending.image, config.jpegQuality)
-        val file = capture.writer.writeFrameImage("%06d.jpg".format(pending.seq), jpeg)
+        val image = pending.image
+        val (encoding, file) = when (image) {
+            is PendingImage.Nv21 -> FrameEncoding.JPEG to capture.writer.writeFrameImage(
+                "%06d.jpg".format(pending.seq),
+                encoder.encode(image.image, config.jpegQuality),
+            )
+            is PendingImage.Luma -> FrameEncoding.LUMA8 to capture.writer.writeFrameImage(
+                "%06d.y".format(pending.seq),
+                image.image.bytes,
+            )
+        }
         capture.writer.append(
             FrameRecord(
                 seq = pending.seq,
@@ -515,10 +579,10 @@ internal class FieldCaptureController(
                 sourceWidth = pending.sourceWidth,
                 sourceHeight = pending.sourceHeight,
                 rotationDegrees = pending.rotationDegrees,
-                encoding = FrameEncoding.JPEG,
+                encoding = encoding,
                 file = file,
-                width = pending.image.width,
-                height = pending.image.height,
+                width = image.width,
+                height = image.height,
                 sensorToBufferTransform = pending.sensorToBufferTransform,
                 cropRect = pending.cropRect,
             ),
@@ -530,11 +594,24 @@ internal class FieldCaptureController(
     // ---- frame thread --------------------------------------------------------------------------
 
     private suspend fun collectFrames(capture: ActiveCapture) {
+        // The burst takes every frame the source delivers; field evidence samples.
+        val frames = if (capture.timingSync) frameSource.frames else frameSource.frames(config.frameIntervalMs)
+        // For the burst, capture is due every frame the analyzer converts, and the analyzer numbers
+        // exactly those; so a jump in the sequence numbers received is frames capture's own mailbox
+        // replaced. (A frame lost before the analyzer has no number and shows only in timestamps.)
+        var previousSeq: Long? = null
         try {
-            frameSource.frames(config.frameIntervalMs).collect { frame ->
+            frames.collect { frame ->
                 try {
+                    if (capture.timingSync) {
+                        previousSeq?.let { previous ->
+                            val missed = frame.sequenceNumber - previous - 1
+                            if (missed > 0) capture.missedBySubscriber.addAndGet(missed)
+                        }
+                        previousSeq = frame.sequenceNumber
+                    }
                     capture.offered.incrementAndGet()
-                    toPending(frame)?.let { capture.encodeQueue.trySend(it) }
+                    toPending(capture, frame)?.let { capture.encodeQueue.trySend(it) }
                 } finally {
                     // Borrowed only for the copy above.
                     frameSource.releaseFrame(frame)
@@ -547,8 +624,12 @@ internal class FieldCaptureController(
         }
     }
 
-    private fun toPending(frame: ImageFrame): PendingFrame? {
-        val image = Nv21Downscaler.downscale(frame, config.maxLongSide) ?: return null
+    private fun toPending(capture: ActiveCapture, frame: ImageFrame): PendingFrame? {
+        val image = if (capture.timingSync) {
+            LumaDownscaler.downscale(frame, config.timingSync.maxLongSide)?.let(PendingImage::Luma)
+        } else {
+            Nv21Downscaler.downscale(frame, config.maxLongSide)?.let(PendingImage::Nv21)
+        } ?: return null
         val geometry = frame.sourceGeometry
         return PendingFrame(
             seq = frame.sequenceNumber,
@@ -566,6 +647,22 @@ internal class FieldCaptureController(
     private fun anchor(reason: AnchorReason) =
         ClockAnchorRecord(wallMs = clock.wallMs(), elapsedRealtimeNanos = clock.elapsedRealtimeNanos(), reason = reason)
 
+    /** Capture's own copy of a frame: NV21 to be JPEG-encoded (field evidence) or raw luma (burst). */
+    private sealed interface PendingImage {
+        val width: Int
+        val height: Int
+
+        class Nv21(val image: Nv21Image) : PendingImage {
+            override val width get() = image.width
+            override val height get() = image.height
+        }
+
+        class Luma(val image: LumaImage) : PendingImage {
+            override val width get() = image.width
+            override val height get() = image.height
+        }
+    }
+
     private class PendingFrame(
         val seq: Long,
         val sensorTimestampNanos: Long,
@@ -575,11 +672,12 @@ internal class FieldCaptureController(
         val rotationDegrees: Int,
         val sensorToBufferTransform: List<Float>?,
         val cropRect: List<Int>?,
-        val image: Nv21Image,
+        val image: PendingImage,
     )
 
-    private inner class ActiveCapture(val writer: CaptureSessionWriter) {
+    private inner class ActiveCapture(val writer: CaptureSessionWriter, val mode: String) {
         val sessionId: String = writer.directory.name
+        val timingSync: Boolean = mode == CaptureModes.TIMING_SYNC
         val offered = AtomicLong()
         val encoded = AtomicLong()
         val droppedByEncoder = AtomicLong()
@@ -588,13 +686,18 @@ internal class FieldCaptureController(
         val markers = AtomicLong()
         @Volatile var lastStoredFrameSeq: Long? = null
         var failed = false
+
+        /** Its files are final (complete or failed); nothing may write to it any more. */
+        var ended = false
+        val missedBySubscriber = AtomicLong()
         var frameJob: Job? = null
         var sensorWriterJob: Job? = null
         var frameWriterJob: Job? = null
         var anchorJob: Job? = null
+        var burstJob: Job? = null
 
         val encodeQueue = Channel<PendingFrame>(
-            capacity = config.encodeQueueCapacity,
+            capacity = if (timingSync) config.timingSync.queueCapacity else config.encodeQueueCapacity,
             onBufferOverflow = BufferOverflow.DROP_OLDEST,
             onUndeliveredElement = { droppedByEncoder.incrementAndGet() },
         )
@@ -608,6 +711,7 @@ internal class FieldCaptureController(
             framesOffered = offered.get(),
             framesEncoded = encoded.get(),
             framesDroppedByEncoder = droppedByEncoder.get(),
+            framesMissedBySubscriber = if (timingSync) missedBySubscriber.get() else null,
             sensorEvents = sensorEvents.get(),
             sensorEventsDropped = sensorDropped.get(),
             markers = markers.get(),

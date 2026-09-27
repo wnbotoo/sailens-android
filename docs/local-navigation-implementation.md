@@ -238,8 +238,21 @@ Guidance session, named after the trace session id:
 - Capture counters are separate from Guidance's dropped frames, so a gap can be explained. For a
   **complete** capture they account for everything the engine received:
   `framesOffered` = `framesEncoded` + `framesDroppedByEncoder`; `sensorEvents` (persisted) +
-  `sensorEventsDropped` (capture queue full) = samples received; a timestamp gap not covered by a
-  drop count means the device delivered nothing. An **incomplete** capture (`complete = false`) may
+  `sensorEventsDropped` (capture queue full) = samples received. Frames are lost at three places:
+  **before the analyzer** (the camera, or CameraX keeping only the latest image) — such a frame gets
+  no sequence number, is counted nowhere and shows only as a longer camera-timestamp interval;
+  **in capture's own mailbox** (converted and offered, but capture had not taken the previous one) —
+  `framesMissedBySubscriber`, from gaps in the received sequence numbers, counted only in
+  `timing_sync` where capture wants every frame (field evidence samples, and the analyzer also
+  numbers frames it converts for other subscribers, so its gaps are by design); **in capture's
+  encode queue** — `framesDroppedByEncoder`. For a burst the tools report the **known** loss (the
+  two counters) on its own, never replaced by an estimate, and only *estimate* loss before the
+  analyzer: camera-timestamp slots missing between stored frames that no sequence gap explains,
+  with the analyzer period taken as interval ÷ sequence step, so steady loss after the analyzer
+  (say every other frame) cannot hide in the cadence. Steady loss before the analyzer can, so the
+  period is checked against the camera's rate. The overall fraction is known + estimated and never
+  lower than the known loss. A sequence gap is therefore never
+  "the device delivered nothing". An **incomplete** capture (`complete = false`) may
   hold unaccounted records at the failure boundary (the item being written when it failed, items
   still queued) and is evidence of lower standing.
 - The 2 GB cap counts frames and records; the manifest itself (a few KB) is not counted, so the cap
@@ -279,20 +292,53 @@ service it replaces. Rules:
 `releaseFrame` immediately → a bounded queue (capacity 1–2, drop the oldest pending) → background
 JPEG encode (640 px long side, quality 80, pixels not rotated; `rotationDegrees` recorded).
 
-**Timing-sync burst (PR-C).** Mode `timing_sync`: about 15 s at camera rate, small luma frames
+**Timing-sync burst (PR-C2).** Mode `timing_sync`: about 15 s at camera rate, small luma frames
 (`luma8`, 320–480 px long side, no JPEG), exact per-frame timestamps, gyroscope at
 `SENSOR_DELAY_GAME`. Used only to measure frame/sensor alignment; never a performance baseline.
+Armed once on the field capture page, independent of the capture switch, and used up by the next
+Guidance start (in memory only, so a killed app forgets it). The capture takes every frame the
+source delivers (`FrameSource.frames`, not the sampled stream), area-averages the Y plane to 400 px
+long side (averaging, not point sampling, so fine texture does not alias into false motion), and
+queues up to 4 frames. Losses are split as above: capture's mailbox (`framesMissedBySubscriber`),
+its queue (`framesDroppedByEncoder`), and before the analyzer (estimated from timestamps). If the
+burst cannot keep up with the camera on a device, that shows as capture's own loss, not as the
+camera's. Files are `frames/NNNNNN.y`. It ends itself after 15 s as a complete capture while
+Guidance continues; the session's own end then finds nothing to stop (capture start and end are
+serialised, so the two ends cannot interleave). A capture — burst or field evidence, ended or
+failed — stays active until it is finalised: `isCapturing` turns false only after a normal end has
+written the END anchor and the complete manifest, or a failure has made its attempt to write the
+incomplete manifest (no END anchor: the disk may be what failed). The capture list therefore never
+reads a half-written manifest. Analysed with `scripts/capture/timing_align.py`: phase-correlated
+image motion per frame pair against gyroscope x/y rotation over the same interval, lag by best
+correlation, with the spread over four parts of the burst as the error bar. On synthetic bursts
+(gyro at 200 Hz and at the typical `SENSOR_DELAY_GAME` 50 Hz) it is within ≈1.5 ms of the truth;
+that is numerical accuracy only, not a device measurement floor, which comes from each target
+device's real gyro cadence and repeated bursts in M0a.
+
+**Clock contract for alignment.** Camera timestamps are compared with the gyroscope **only when
+the camera's timestamp source is `REALTIME`**, which Android defines as sharing `SensorEvent`'s
+timebase. `UNKNOWN` is monotonic with an unspecified origin, and an unreported source is no better:
+the camera result is then not measured (`cameraComparable = false`), must never qualify the camera
+clock as gyro-comparable however good a correlation looks, and the source receipt time
+(elapsedRealtime by construction) is the authoritative measurement. An empirical estimate of a
+non-REALTIME camera clock is available as a diagnostic only. A burst is usable for qualification
+only if it is complete, capture dropped no sensor samples, there was enough motion, and on the
+authoritative clock the image-motion/gyro correlation is at least 0.5 (a negative control with real
+motion unrelated to the gyro gives ≈0.3), all four parts were checked and agree within 5 ms, and
+the offset is not at the search edge; otherwise it is recorded again. Heavy frame loss is a
+warning. The thresholds are conservative until the target devices' real bursts are in — a false
+rejection only costs another burst.
 
 **Controls (PR-C, debug builds; these fill the placeholders of the recording manual, PR #9)**
 
 | Need | Design |
 |---|---|
-| Mode switch | Settings → Diagnostics → Field capture: on / off (the timing-sync burst is added in C2). The mode is read when a Guidance session starts, so the switch takes effect at the next session and is locked while a capture is recording |
+| Mode switch | Settings → Diagnostics → Field capture: on / off, plus "arm the timing-sync burst for the next Guidance start" (one-shot). The mode is read when a Guidance session starts, so the switch takes effect at the next session and is locked while a capture is recording |
 | Start / stop | Follows the Guidance session while the mode is on; no separate button |
 | Keep, delete | Capture list: per session start time, size, status (recording / complete / incomplete with reason), kept, exported, frames and markers; keep, delete and export are refused while any capture is recording (the list is read-only then; the tool must not disturb the evidence it is collecting); delete asks for confirmation, and a refused or failed action is reported |
 | Export | Finished sessions only. ZIP built into `cacheDir/capture_exports/` (free space checked first) off the capture writer thread, with the session protected from retention and delete meanwhile. Capture and export never overlap in either direction: while a ZIP is being built, starting Guidance is refused with "finish exporting first" (debug `GuidanceStartGate`), and a capture that starts anyway ends at once as incomplete with `failureReason = export_in_progress`. A ZIP whose session cannot be marked exported is discarded and reported as a failure. The ZIP is then shared via FileProvider `<cache-path>`; `files/captures/` itself is never exposed; the session is marked exported; exports older than a day cleared at app start and when the list opens (a share target reads the ZIP after the share sheet closes, with no signal when it is done). `adb` + `run-as` documented as the bulk fallback |
-| Viewing frames around a prompt | On the PC: reader + script rendering ±N s around a `prompt_outcome` or marker as a contact sheet |
-| Storage | Estimated ≈ 0.7–1 GB/hour; measured in M0a and written back into the manual |
+| Viewing frames around a prompt | On the PC: `scripts/capture/contact_sheet.py` renders ±N s around a `prompt_outcome` (centred on the offering frame: trace `sourceSequenceNumber` → `frameTimestamp` = capture `sensorTimestampNanos`) or a marker (its `elapsedRealtimeNanos` against frame receipt times) |
+| Storage | Estimated ≈ 0.7–1 GB/hour; measured in M0a with `scripts/capture/capture_stats.py` (also cadence, gaps, drops, counter balance, wall-clock jumps) and written back into the manual |
 | Retention | Runs at debug app start (whether or not capture is on), before a capture starts, when the capture list opens, and every 30 s during a capture. A session older than 7 days, not exported or pinned, is deleted at the next of these. The 2 GB cap is enforced during capture: older unpinned sessions go first, and if the active capture alone would exceed it, it ends as incomplete with `failureReason = storage_limit_reached` (checked after every frame) instead of writing until the disk is full |
 | **"Missed alert" marker** | Volume Down while capture is active: only `ACTION_DOWN` with `repeatCount == 0` counts, the key is consumed only then, the time, session and last stored frame are fixed when the press is observed (a busy writer delays the write, not the event), and a short vibration confirms only once the marker was written. Plus a large on-screen button. Works eyes-free in a foreground Guidance session; no promise for a locked screen or background (there is no background Guidance yet). TalkBack behaviour verified on device |
 
@@ -316,7 +362,14 @@ road-crossing guidance, directional steering, and any placement M3a has not been
 types tolerated, torn line and incomplete manifest reported, source-side timing taken before
 conversion. PR-B — writer releases every frame it receives, bounded queue drops oldest, a failing
 writer does not fail the trace calls, manifest completed atomically. PR-C — marker debouncing,
-export excludes nothing it should include and exposes nothing outside the export.
+export excludes nothing it should include and exposes nothing outside the export. PR-C2 — the
+burst stores every frame as raw luma, counts its own mailbox misses and ends itself while the
+session goes on; a capture is inactive only once its manifest is final; luma area averaging; a
+refused Guidance start never starts; PC tools on synthetic captures in the app's format: loss
+attribution, bursts with known offsets on both clocks, an UNKNOWN camera clock never qualified,
+steady loss is reported from the counters, never hidden by the cadence; dropped gyroscope
+samples, a negative control (real motion unrelated to the gyro) and a burst too
+short for four checked parts never qualify (run in CI).
 
 ## 5. M1 — Qualification and safety state (exact reproduction); M1b — stop pre-emption
 

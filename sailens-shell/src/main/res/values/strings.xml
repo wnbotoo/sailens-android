@@ -170,6 +170,8 @@
     <string name="field_capture_status_incomplete">Incomplete: %1$s</string>
     <string name="field_capture_status_kept">Kept</string>
     <string name="field_capture_status_exported">Exported</string>
+    <string name="field_capture_mode_field_evidence">Field evidence</string>
+    <string name="field_capture_mode_timing_sync">Timing sync</string>
     <string name="btn_field_capture_keep">Keep</string>
     <string name="btn_field_capture_unkeep">Stop keeping</string>
     <string name="btn_field_capture_export">Export</string>
@@ -180,6 +182,11 @@
     <string name="field_capture_action_failed">Could not change the capture. Stop Guidance and try again.</string>
     <string name="field_capture_export_blocks_guidance">Finish exporting the capture before starting Guidance.</string>
     <string name="field_capture_exporting_notice">Exporting. Guidance cannot start until the export finishes.</string>
+    <string name="field_capture_timing_sync_title">Timing-sync burst</string>
+    <string name="field_capture_timing_sync_supporting">Measures how camera frames line up with the gyroscope. When armed, the next Guidance start records about 15 seconds of small frames at full camera rate, then Guidance continues without capture. During those seconds, point the phone at a detailed scene and turn it slowly left and right, then up and down.</string>
+    <string name="field_capture_timing_sync_armed">Armed. Start Guidance, then turn the phone slowly left and right, then up and down, for about 15 seconds.</string>
+    <string name="btn_field_capture_timing_sync_arm">Arm for next Guidance start</string>
+    <string name="btn_field_capture_timing_sync_cancel">Cancel burst</string>
     <string name="title_field_capture_delete">Delete this capture?</string>
     <string name="field_capture_delete_body">It is removed from this device and cannot be recovered.</string>
     <string name="btn_cancel_field_capture_delete">Cancel</string>
