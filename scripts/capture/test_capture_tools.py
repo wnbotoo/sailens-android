@@ -24,6 +24,8 @@ START_NS = 5_000_000_000
 START_WALL = 1_700_000_000_000
 BUILD_A = "a" * 40
 BUILD_B = "b" * 40
+MODELS_A = {"det.tflite": "sha256:" + "d1" * 32, "sem.tflite": "sha256:" + "51" * 32}
+MODELS_B = {"det.tflite": "sha256:" + "d1" * 32, "sem.tflite": "sha256:" + "52" * 32}
 
 
 def write_capture(root, session_id, mode="field_evidence", frames=(), sensors=(), markers=(), anchors=None,
@@ -196,7 +198,7 @@ class ContactSheetTest(unittest.TestCase):
 
 def synthetic_burst(root, offset_s=0.012, latency_s=0.028, focal=180.0, seconds=8.0, moving=True,
                     camera_origin_ns=0, timestamp_source="realtime", stats=None, gyro_hz=200.0,
-                    gyro_independent=False, keep_every=1, gyro_still=False, git_sha=BUILD_A):
+                    gyro_independent=False, keep_every=1, gyro_still=False, git_sha=BUILD_A, models=MODELS_A):
     """A timing_sync capture of a camera turning over a smooth texture. The frame at camera time t
     shows the orientation the gyroscope reports at t + offset_s; receipt = camera + latency_s. A
     non-REALTIME camera clock is modelled by camera_origin_ns added to every camera timestamp.
@@ -243,7 +245,7 @@ def synthetic_burst(root, offset_s=0.012, latency_s=0.028, focal=180.0, seconds=
                      "values": [rate(gyro_x, t) + rng.normal(0, 0.005), rate(gyro_y, t) + rng.normal(0, 0.005), 0.0]})
     camera = {"cameraId": "0", "capturedAtElapsedRealtimeNanos": START_NS, "timestampSource": timestamp_source}
     return write_capture(root, "burst", mode="timing_sync", frames=frames, sensors=gyro, stats=stats,
-                         manifest_overrides={"camera": camera, "gitSha": git_sha})
+                         manifest_overrides={"camera": camera, "gitSha": git_sha, "modelArtifacts": models})
 
 
 class TimingAlignTest(unittest.TestCase):
@@ -360,6 +362,22 @@ class DeviceSummaryTest(unittest.TestCase):
                 code = timing_align.main([root, "--max-lag-ms", "100"])
         summaries = timing_align.device_summary(results)
         self.assertEqual([(s["gitSha"], s["usableBursts"]) for s in summaries], [(BUILD_A, 2), (BUILD_B, 1)])
+        self.assertFalse(any(s["enough"] for s in summaries))
+        self.assertEqual(code, 2)
+
+    def test_bursts_with_different_model_weights_are_never_pooled(self):
+        # Same phone, same commit, but the semantic model differs: a different build (the weights are
+        # not in git, and the burst runs with Guidance, whose load depends on them).
+        with tempfile.TemporaryDirectory() as root:
+            for i, models in enumerate((MODELS_A, MODELS_A, MODELS_B)):
+                synthetic_burst(os.path.join(root, f"b{i}"), models=models)
+            results = [timing_align.analyse(d, 100) for d in find_captures(root)]
+            with redirect_stdout(io.StringIO()):
+                code = timing_align.main([root, "--max-lag-ms", "100"])
+        summaries = timing_align.device_summary(results)
+        self.assertEqual(sorted((s["modelArtifacts"]["sem.tflite"][-2:], s["usableBursts"]) for s in summaries),
+                         [("51", 2), ("52", 1)])
+        self.assertTrue(all(s["gitSha"] == BUILD_A for s in summaries))
         self.assertFalse(any(s["enough"] for s in summaries))
         self.assertEqual(code, 2)
 

@@ -206,6 +206,7 @@ def analyse(directory, max_lag_ms=300.0, diagnose_camera_clock=False):
         "sessionId": capture.manifest.get("sessionId"),
         "device": f"{capture.manifest.get('deviceManufacturer')} {capture.manifest.get('deviceModel')}",
         "gitSha": capture.manifest.get("gitSha"),
+        "modelArtifacts": capture.manifest.get("modelArtifacts", {}),
         "timestampSource": source,
         "cameraComparable": camera_comparable,
         # The clock whose offset M0 may record as the frame-to-gyro alignment.
@@ -299,16 +300,20 @@ def device_summary(results, allow_unknown_build=False):
     authoritative clock and its spread across bursts, which is the measurement's uncertainty (M0a
     reports it; it does not gate on it). Needs at least MIN_BURSTS usable bursts of that build.
 
-    Bursts are never pooled across builds. A capture without a recorded git SHA cannot be placed in
-    a build, so it gets no result unless ``allow_unknown_build`` (for captures made before build
-    identity was recorded; the result then says so)."""
+    A build is the git SHA **and** the packaged model hashes (the weights are not in git; the burst
+    runs with Guidance, whose load depends on them). Bursts are never pooled across builds. A capture
+    without a recorded git SHA cannot be placed in a build, so it gets no result unless
+    ``allow_unknown_build`` (for captures made before build identity was recorded; the result then
+    says so)."""
     by_build = {}
     for r in results:
-        by_build.setdefault((r["device"], r["gitSha"]), []).append(r)
+        models = tuple(sorted(r["modelArtifacts"].items()))
+        by_build.setdefault((r["device"], r["gitSha"], models), []).append(r)
     summaries = []
-    for (device, sha), rows in sorted(by_build.items(), key=lambda item: (item[0][0], item[0][1] or "")):
+    for (device, sha, models), rows in sorted(by_build.items(), key=lambda item: (item[0][0], item[0][1] or "", item[0][2])):
         usable = [r for r in rows if r["usable"]]
-        summary = {"device": device, "gitSha": sha, "bursts": len(rows), "usableBursts": len(usable),
+        summary = {"device": device, "gitSha": sha, "modelArtifacts": dict(models), "bursts": len(rows),
+                   "usableBursts": len(usable),
                    "enough": len(usable) >= MIN_BURSTS and (sha is not None or allow_unknown_build)}
         if sha is None:
             summary["warning"] = ("build unknown (no git SHA recorded): bursts may come from different builds"
@@ -360,7 +365,8 @@ def print_burst(r):
 
 def print_device(s):
     build = s["gitSha"] or "unknown"
-    print(f"== device {s['device']}, build {build}: {s['usableBursts']} of {s['bursts']} bursts usable")
+    models = ", ".join(f"{name} {digest[:15]}" for name, digest in sorted(s["modelArtifacts"].items())) or "no models recorded"
+    print(f"== device {s['device']}, build {build} ({models}): {s['usableBursts']} of {s['bursts']} bursts usable")
     if s["gitSha"] is None and not s["enough"] and "warning" in s and s["warning"].startswith("no result"):
         print(f"   ! {s['warning']} (--allow-unknown-build for captures made before build identity was recorded)")
         return

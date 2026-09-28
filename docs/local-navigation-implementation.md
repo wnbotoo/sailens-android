@@ -335,7 +335,7 @@ again. Disagreement between the four parts is a warning: hand-made motion often 
 part. Heavy frame loss is a warning.
 
 **Device result (decided 2026-09-28, "B′").** M0a *measures* frame-to-gyro alignment; it does not
-gate on a precision. The result is per device **and build** (the capture manifest's `gitSha`; bursts
+gate on a precision. The result is per device **and build** (the capture manifest's `gitSha` and `modelArtifacts`; bursts
 are never pooled across builds, and captures without a SHA give no result): the median offset over
 at least three usable bursts,
 with their range and standard deviation recorded as the uncertainty the geometry layer must design

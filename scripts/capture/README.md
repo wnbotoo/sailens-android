@@ -10,10 +10,10 @@ python3 -m venv .venv && .venv/bin/pip install -r scripts/capture/requirements.t
 
 | Tool | What it answers |
 |---|---|
-| `capture_stats.py <dir>` | Storage rate (MB/hour), frame and sensor cadence, where frames were lost (capture mailbox, encoder, before the analyzer), and whether the counters balance. Accepts a folder of captures. |
+| `capture_stats.py <dir>` | Storage rate (MB/hour), frame and sensor cadence, where frames were lost (capture mailbox, encoder, before the analyzer), and whether the counters balance; prints each capture's build (git SHA + model hashes). Accepts a folder of captures. With `--baseline-tag <tag>`, checks every capture against the baseline's commit and model hashes (exit code 3 on a mismatch). |
 | `contact_sheet.py <capture> --markers` | What the camera saw around each "missed alert" press. |
-| `contact_sheet.py <capture> --trace trace_<id>.jsonl --prompts` | What the camera saw around each prompt, centred on the frame that offered it, with its delivery or revocation. |
-| `timing_align.py <burst or folder>` | The offset between frames and the gyroscope: on camera timestamps when the camera reports a REALTIME timestamp source, otherwise on source receipt times. For a folder, lists every burst (usable or rejected, with the reason) and the result per device and build (the capture's git SHA; bursts from different builds are never pooled, and captures without a SHA give no result unless `--allow-unknown-build`): the median over at least three usable bursts, with its range as the uncertainty. |
+| `contact_sheet.py <capture> --trace trace_<id>.jsonl --prompts` | What the camera saw around each prompt, centred on the exact timestamp of the frame that offered it (the nearest stored frame is highlighted; the offering frame itself may not be stored), with its delivery or revocation. |
+| `timing_align.py <burst or folder>` | The offset between frames and the gyroscope: on camera timestamps when the camera reports a REALTIME timestamp source, otherwise on source receipt times. For a folder, lists every burst (usable or rejected, with the reason) and the result per device and build (git SHA + packaged model hashes, from the capture manifest; bursts from different builds are never pooled, and captures without a SHA give no result unless `--allow-unknown-build`): the median over at least three usable bursts, with its range as the uncertainty. |
 
 Getting the data off the phone: Settings → Diagnostics → Field capture → Export shares a ZIP. In
 bulk, without the share sheet:
