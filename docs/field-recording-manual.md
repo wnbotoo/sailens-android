@@ -2,34 +2,35 @@
 
 # Field Recording Manual (stage 2)
 
-> Status: **draft**. The recording tool is M0a field capture (see
+> The recording tool is M0a field capture (see
 > [`local-navigation-implementation.md`](local-navigation-implementation.md) §4), implemented in #12–#15
-> and measured on SM8850 (OnePlus CPH2747) and SM8450 (Samsung S22) on 2026-09-27/28 (results: implementation doc §4). Model
-> regression recording (M0b) is not built yet: scenes marked "regression" are recorded as field evidence
-> for now. **Do not start the real recording before the baseline is tagged** (section 3, item 1):
-> trace-only data, with no frames or sensors, can later be used neither for threshold calibration nor
-> for geometry or replay, and would have to be recorded again.
+> and measured on SM8850 (OnePlus CPH2747) and SM8450 (Samsung S22) on 2026-09-27/28 (results:
+> implementation doc §4). **Record only with the baseline build** (section 3, item 1).
 
 ## 1. What this recording is for
 
-One recording serves four purposes, so record every segment as described here:
+This round records **M0a field evidence**: sampled frames (4.3–5 Hz), motion sensors and camera facts,
+plus the trace of every prompt. It serves:
 
 | Purpose | Needs |
 |---|---|
 | **False-alarm / miss baseline** (every stage 3 change is compared against it) | every prompt the user actually received, and the frames around it |
 | **#5 ground-gate threshold calibration** | `unrecognizedGroundRatio` indoors, on sidewalks, at grass edges, facing walls |
-| **Ground geometry calibration** (M3) | frames + gravity/rotation/gyro + camera intrinsics, time-aligned |
-| **Replay / simulation regression** (M2) | as above, plus full frames around events (M0 "model regression recording") |
+| **Ground geometry evidence** (M3) | frames + gravity/rotation/gyro + camera intrinsics, time-aligned |
+| **Scenario design for the simulator** (M2), and choosing the scenes M0b must re-record | the frames and prompts of each scene |
+
+It does **not** give exact replay of perception. Field evidence stores a sample of frames, not the
+model outputs Guidance acted on, so a decision cannot be re-run from it. That is **M0b** (model
+regression recording), which is not built yet: scenes marked **regression** in section 5 must be
+recorded again once M0b lands. Do not treat this round as exact-replay evidence.
 
 Capture is controlled on **Settings → Diagnostics → Field capture** (debug builds only):
 
 - **Field evidence capture** (the "Capture during Guidance" switch): 640 px JPEG at 4.3–5 Hz + gravity,
-  rotation and gyroscope (~47 Hz) + camera intrinsics, for the whole Guidance session. For labelling
-  and calibration; not an exact replay of perception. **This manual assumes it by default.**
+  rotation and gyroscope (~47 Hz) + camera intrinsics, for the whole Guidance session. **This manual
+  assumes it throughout.**
 - **Timing-sync burst** (one-shot, armed on the same page): about 15 s of small frames at full camera
-  rate, to measure frame-to-gyroscope timing once per device. See section 6a.
-- **Model regression recording** (per-frame perception output for exact replay) is M0b and not built
-  yet. Record "regression" scenes as field evidence for now.
+  rate, to measure frame-to-gyroscope timing once per device and build. See section 6a.
 
 ## 2. Safety and privacy (read first)
 
@@ -39,17 +40,23 @@ Capture is controlled on **Settings → Diagnostics → Field capture** (debug b
   change how you cross for the recording; stop if it is not safe.
 - Captures contain **faces and places**. They stay on the phone and your own computer; **never commit
   them to a repository or upload them**. Delete segments you no longer need in the capture list.
-- **Captures are cleaned up automatically**: deleted 7 days after recording, and the oldest unkept
-  sessions go first once the total passes 2 GB — that is only about **3 hours** of field evidence.
-  Exported or "Keep"-marked sessions are not deleted. So **export on the day you record** (section 8),
-  or tap Keep in the capture list.
+- **Captures are cleaned up automatically**, in two ways:
+  - **Age**: a session is deleted 7 days after recording unless it is **Kept** or has been exported.
+  - **Size**: once the total passes 2 GB (only about **3 hours** of field evidence), the oldest sessions
+    that are **not Kept** are deleted — **exported ones included**.
+
+  "Exported" only means the ZIP was made and the share sheet opened, not that your computer received
+  it. So: **tap Keep on every session you want**, export it the same day, check the ZIP is actually on
+  your computer, and only then tap "Stop keeping" or Delete on the phone.
 - Record indoors only where you are allowed to (your home, areas your workplace permits).
 
 ## 3. Pre-recording checklist (every outing)
 
-1. **The build is the baseline.** Recordings must come from the frozen baseline commit (a `baseline/...`
-   tag; fill in here once tagged). Every stage 3 change is compared against this data; mixing builds
-   breaks the comparison.
+1. **The build is the baseline.** Recordings must come from the debug APK built from the tag
+   **`baseline/stage2-1`** (a clean checkout of that tag; local weights in the ignored `assets/` do not
+   count as changes). Every stage 3 change is compared against this data; mixing builds breaks the
+   comparison. Each capture records the commit it was built from: `capture_stats.py` prints it, and it
+   must equal `git rev-parse baseline/stage2-1` with no `-dirty` suffix.
 2. **Run the full device test suite first, then install the recording build.**
    `connectedDebugAndroidTest` **uninstalls** the app when it finishes, so the order is:
    ```bash
@@ -89,8 +96,9 @@ Keep the hold the same across the whole recording, or the geometry calibration i
 ## 5. Scene list
 
 Record each class for "count × duration". About 90–120 minutes in total, spread over several days.
-**★** marks scenes needed for #5 threshold calibration; **regression** marks scenes where model
-regression recording is also turned on.
+**★** marks scenes needed for #5 threshold calibration; **regression** marks scenes that must be
+recorded again with model regression recording once M0b is built (it does not exist yet; record them
+as field evidence now).
 
 | Class | Scene | Count × duration | Notes |
 |---|---|---|---|
@@ -148,8 +156,9 @@ not part of the baseline and changes the device load, so never use it for perfor
    - Slow, small movements are rejected too: the phone must turn, not just drift.
 4. Stop Guidance. Record three such bursts per device.
 5. On the computer: `python3 scripts/capture/timing_align.py <folder with the captures>`. It lists
-   every burst (usable, or rejected with the reason) and the device result: the median offset over
-   the usable bursts with its range. Record again until there are at least three usable ones.
+   every burst (usable, or rejected with the reason) and the result for this device and build: the
+   median offset over the usable bursts with its range. Record again until there are at least three
+   usable ones.
 
 ## 7. Scene card
 
@@ -165,8 +174,8 @@ One row per segment, on paper or in a notes app, typed up afterwards:
   Or with adb: `files/traces/trace_<sessionId>.jsonl` (debug builds: `adb shell run-as
   com.sailens.reference`).
 - **Capture** (frames, sensors, intrinsics, markers): capture list → the session's **Export** → system
-  share, one ZIP per session. Exported sessions are no longer deleted after 7 days. Everything at once,
-  captures and traces together, over USB:
+  share, one ZIP per session. Keep the session until you have checked the ZIP arrived (section 2).
+  Everything at once, captures and traces together, over USB:
   ```bash
   adb exec-out run-as com.sailens.reference tar -cf - files/captures files/traces > captures.tar
   ```
@@ -199,8 +208,12 @@ python3 scripts/capture/contact_sheet.py <capture folder> --trace <trace>.jsonl 
 python3 scripts/capture/contact_sheet.py <capture folder> --markers --window 3
 ```
 
-One PNG per prompt, centred on the exact frame that raised it, titled with the message, how it was
-delivered and how long after the frame; one per miss marker, centred on the press.
+One PNG per prompt, centred on the **timestamp** of the frame that raised it (exact, from the trace)
+and titled with the message and how it was delivered. Field evidence stores only a sample of frames
+(4.3–5 Hz), so that frame's image is often not stored: the stored frame nearest to it is highlighted,
+which can be up to about 0.12 s away — keep that in mind when judging `late` or a fast-moving obstacle. The
+delivery latency ("… ms after the frame") appears only when the raising frame itself was stored.
+One per miss marker, centred on the moment the press was observed.
 
 | Label | Meaning |
 |---|---|
@@ -230,4 +243,5 @@ before continuing.
   stage 3. The script comes with stage 3.
 - **#5 thresholds**: the `unrecognizedGroundRatio` distribution in classes F, G, H, I and M sets the
   entry/exit thresholds and the confirmation time; A and B confirm nothing triggers outdoors.
-- **Geometry / replay**: consumed by the M0 reader; see the implementation doc §4.
+- **Geometry**: read with the capture tools (`scripts/capture/`); see the implementation doc §4.
+  **Replay** of decisions needs M0b recordings, not this round.

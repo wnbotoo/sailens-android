@@ -335,7 +335,9 @@ again. Disagreement between the four parts is a warning: hand-made motion often 
 part. Heavy frame loss is a warning.
 
 **Device result (decided 2026-09-28, "B′").** M0a *measures* frame-to-gyro alignment; it does not
-gate on a precision. The device result is the median offset over at least three usable bursts,
+gate on a precision. The result is per device **and build** (the capture manifest's `gitSha`; bursts
+are never pooled across builds, and captures without a SHA give no result): the median offset over
+at least three usable bursts,
 with their range and standard deviation recorded as the uncertainty the geometry layer must design
 for (`timing_align.py <folder>`). An earlier rule — three bursts agreeing within 5 ms — was dropped
 when more bursts showed a real spread of 9–14 ms per device (below).
@@ -366,6 +368,11 @@ are added then, not before.
 
 **M0a results (2026-09-27/28; capture code as merged in #15, `1137c3e`; Guidance running during every capture)**
 
+These captures predate build identity in captures (the manifest's `gitSha` is filled in from #9 on),
+so they carry no SHA. They came from two debug builds whose capture code is identical (#15); only
+the in-app burst instructions differed. The table was computed with
+`timing_align.py --allow-unknown-build`. From now on a device result is per build, never pooled.
+
 | | SM8850 — OnePlus CPH2747, SDK 36 | SM8450 — Samsung SM-S9010 (S22), SDK 36 |
 |---|---|---|
 | Camera timestamp source | `REALTIME` (all cameras) | `REALTIME` |
@@ -385,11 +392,14 @@ What this settles for M3o:
   60–70 ms of delivery latency.
 - The camera clock itself is stable — camera-to-receipt time stays within ±1 ms — but where the
   image content sits relative to its start-of-exposure timestamp varies by 9–14 ms between bursts
-  on the same phone (in clusters by session). Exposure time is the likely cause and is not recorded;
-  M3o either designs for **±10 ms** or, if its budget is tighter, first records per-frame
-  `SENSOR_EXPOSURE_TIME` / `SENSOR_ROLLING_SHUTTER_SKEW` (the same Camera2 capture-result hook
-  would also give `LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_ID`). For scale: 10 ms at a walking turn
-  rate of 0.2–0.5 rad/s is 0.1–0.3°.
+  on the same phone (in clusters by session). Exposure time is the likely cause and is not recorded.
+- **Timing contract for M3o:** the raw camera timestamp is the canonical frame time, **with no
+  per-device correction** (no calibration table to maintain, nothing hardcoded per phone). Frame
+  content is taken to lie within **about 20 ms** of it — the measured offsets across both devices
+  span −5.2 to +17.2 ms. For scale, 20 ms at a walking turn rate of 0.2–0.5 rad/s is 0.2–0.6°. If M3o
+  finds that budget too large, it first records per-frame `SENSOR_EXPOSURE_TIME` /
+  `SENSOR_ROLLING_SHUTTER_SKEW` to model the offset (the same Camera2 capture-result hook would also
+  give `LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_ID`) — a design change it proposes then, not now.
 - Physical-camera switching was not seen, so static intrinsics stand; the per-frame physical id is
   not added now.
 

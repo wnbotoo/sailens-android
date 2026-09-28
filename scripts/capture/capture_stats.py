@@ -171,6 +171,7 @@ def summarize(directory):
         "complete": capture.complete,
         "failureReason": m.get("failureReason"),
         "device": f"{m.get('deviceManufacturer')} {m.get('deviceModel')} (SDK {m.get('sdkInt')})",
+        "gitSha": m.get("gitSha"),
         "timestampSource": (m.get("camera") or {}).get("timestampSource"),
         "durationS": round(duration_s, 1) if duration_s is not None else None,
         "bytes": size,
@@ -191,7 +192,7 @@ def summarize(directory):
 
 def print_summary(s):
     print(f"== {s['sessionId']}  [{s['mode']}]  {'complete' if s['complete'] else 'INCOMPLETE: ' + str(s['failureReason'])}")
-    print(f"   {s['device']}, camera timestamp source: {s['timestampSource']}")
+    print(f"   {s['device']}, build {s['gitSha'] or 'unknown (no git SHA recorded)'}, camera timestamp source: {s['timestampSource']}")
     print(f"   duration {s['durationS']} s, {s['bytes'] / 1e6:.1f} MB, {s['mbPerHour']} MB/hour")
     f = s["frames"]
     print(f"   frames {f['count']} @ {f['rateHz']} Hz (median {f['medianMs']} ms, p95 {f['p95Ms']}, max {f['maxMs']}), "

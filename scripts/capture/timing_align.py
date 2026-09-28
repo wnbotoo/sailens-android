@@ -205,6 +205,7 @@ def analyse(directory, max_lag_ms=300.0, diagnose_camera_clock=False):
     result = {
         "sessionId": capture.manifest.get("sessionId"),
         "device": f"{capture.manifest.get('deviceManufacturer')} {capture.manifest.get('deviceModel')}",
+        "gitSha": capture.manifest.get("gitSha"),
         "timestampSource": source,
         "cameraComparable": camera_comparable,
         # The clock whose offset M0 may record as the frame-to-gyro alignment.
@@ -293,17 +294,26 @@ def analyse(directory, max_lag_ms=300.0, diagnose_camera_clock=False):
     return result
 
 
-def device_summary(results):
-    """One result per device from its usable bursts: the median offset on the authoritative clock and
-    its spread across bursts, which is the measurement's uncertainty (M0a reports it; it does not
-    gate on it). Needs at least MIN_BURSTS usable bursts."""
-    by_device = {}
+def device_summary(results, allow_unknown_build=False):
+    """One result per device **and build** from its usable bursts: the median offset on the
+    authoritative clock and its spread across bursts, which is the measurement's uncertainty (M0a
+    reports it; it does not gate on it). Needs at least MIN_BURSTS usable bursts of that build.
+
+    Bursts are never pooled across builds. A capture without a recorded git SHA cannot be placed in
+    a build, so it gets no result unless ``allow_unknown_build`` (for captures made before build
+    identity was recorded; the result then says so)."""
+    by_build = {}
     for r in results:
-        by_device.setdefault(r["device"], []).append(r)
+        by_build.setdefault((r["device"], r["gitSha"]), []).append(r)
     summaries = []
-    for device, rows in sorted(by_device.items()):
+    for (device, sha), rows in sorted(by_build.items(), key=lambda item: (item[0][0], item[0][1] or "")):
         usable = [r for r in rows if r["usable"]]
-        summary = {"device": device, "bursts": len(rows), "usableBursts": len(usable), "enough": len(usable) >= MIN_BURSTS}
+        summary = {"device": device, "gitSha": sha, "bursts": len(rows), "usableBursts": len(usable),
+                   "enough": len(usable) >= MIN_BURSTS and (sha is not None or allow_unknown_build)}
+        if sha is None:
+            summary["warning"] = ("build unknown (no git SHA recorded): bursts may come from different builds"
+                                  if allow_unknown_build else
+                                  "no result: these captures record no git SHA, so they cannot be tied to one build")
         if usable:
             clock = usable[0]["authoritativeClock"]
             offsets = np.array([r[clock]["offsetMs"] for r in usable])
@@ -349,15 +359,21 @@ def print_burst(r):
 
 
 def print_device(s):
-    print(f"== device {s['device']}: {s['usableBursts']} of {s['bursts']} bursts usable")
+    build = s["gitSha"] or "unknown"
+    print(f"== device {s['device']}, build {build}: {s['usableBursts']} of {s['bursts']} bursts usable")
+    if s["gitSha"] is None and not s["enough"] and "warning" in s and s["warning"].startswith("no result"):
+        print(f"   ! {s['warning']} (--allow-unknown-build for captures made before build identity was recorded)")
+        return
     if not s["usableBursts"]:
         print(f"   no result: record at least {MIN_BURSTS} usable bursts")
         return
     print(f"   {s['clock']} clock: gyro = frame {s['offsetMedianMs']:+.1f} ms (median), range {s['offsetMinMs']:+.1f} .. "
           f"{s['offsetMaxMs']:+.1f}, sd {s['offsetSdMs']}; receipt time {s['receiptOffsetMedianMs']:+.1f} ms"
           + (f"; camera-to-app latency {s['receiptLatencyMedianMs']} ms" if "receiptLatencyMedianMs" in s else ""))
-    if not s["enough"]:
-        print(f"   ! only {s['usableBursts']} usable bursts; record at least {MIN_BURSTS}")
+    if "warning" in s:
+        print(f"   ! {s['warning']}")
+    if s["usableBursts"] < MIN_BURSTS:
+        print(f"   ! only {s['usableBursts']} usable bursts of this build; record at least {MIN_BURSTS}")
 
 
 def main(argv=None):
@@ -366,6 +382,8 @@ def main(argv=None):
     parser.add_argument("--max-lag-ms", type=float, default=300.0)
     parser.add_argument("--diagnose-camera-clock", action="store_true",
                         help="also estimate a non-REALTIME camera clock empirically (diagnostic only)")
+    parser.add_argument("--allow-unknown-build", action="store_true",
+                        help="pool captures that record no git SHA (made before build identity was recorded)")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
     directories = []
@@ -378,7 +396,7 @@ def main(argv=None):
         print("no timing_sync captures found", file=sys.stderr)
         return 1
     results = [analyse(d, args.max_lag_ms, args.diagnose_camera_clock) for d in directories]
-    devices = device_summary(results)
+    devices = device_summary(results, args.allow_unknown_build)
     if len(results) == 1:
         exit_code = 0 if results[0]["usable"] else 2
     else:
@@ -393,7 +411,8 @@ def main(argv=None):
         a = r[r["authoritativeClock"]]
         offset = f"{a['offsetMs']:+7.2f} ms r={a['peakCorrelation']:.2f}" if a else "    n/a"
         reason = "" if r["usable"] else "  <- " + r["warnings"][0]
-        print(f"   {r['sessionId'][:8]}  {r['device']}  turn {r['turnRateMedianRadPerS']:.2f}  {offset}  "
+        build = (r['gitSha'] or 'no-sha')[:8]
+        print(f"   {r['sessionId'][:8]}  {r['device']} @{build}  turn {r['turnRateMedianRadPerS']:.2f}  {offset}  "
               f"{'usable' if r['usable'] else 'REJECTED'}{reason}")
     for s in devices:
         print_device(s)

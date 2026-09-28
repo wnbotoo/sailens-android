@@ -11,6 +11,9 @@ never heard, so it cannot be a false alarm. The `label` and `note` columns are l
 the person labelling; the field-recording manual (docs/field-recording-manual.md) defines the
 label values.
 
+A prompt whose offering frame has no frame record (a damaged trace) is marked in `note` and makes
+the run exit with 1.
+
 Frame `messageKeys` are candidates after cooldown, not what the user received; they are not used
 here. Traces recorded before `prompt_outcome` existed produce no rows (a warning is printed).
 
@@ -47,6 +50,9 @@ COLUMNS = [
     "label",
     "note",
 ]
+
+
+MISSING_FRAME_NOTE = "frame record missing from the trace"
 
 
 def read_records(path):
@@ -105,7 +111,16 @@ def rows_for(path, include_revoked):
         if not delivered and not include_revoked:
             continue
         at = outcome["deliveredAt"] if delivered else outcome["revokedAt"]
-        frame = frames.get(outcome["sourceSequenceNumber"], {})
+        frame = frames.get(outcome["sourceSequenceNumber"])
+        note = ""
+        if frame is None:
+            # The trace contract says a frame that offered a prompt always has its frame record, so
+            # this is a damaged or truncated trace. Never emit a baseline row with a silently empty
+            # context: say so on the row, and make the run fail (see main).
+            print(f"warning: {path}: prompt {outcome['eventId']} offered by frame "
+                  f"{outcome['sourceSequenceNumber']}, which has no frame record", file=sys.stderr)
+            note = MISSING_FRAME_NOTE
+            frame = {}
         yield {
             "segment": segment,
             "session_id": outcome["sessionId"],
@@ -130,17 +145,19 @@ def rows_for(path, include_revoked):
             "tracked_obstacles": "|".join(frame.get("trackedObstacleCategories", [])),
             "dominant_classes": "|".join(frame.get("dominantClassPercentages", [])),
             "label": "",
-            "note": "",
+            "note": note,
         }
 
 
-def main():
+def main(argv=None):
+    """Writes the sheet. Exit code 1 when a prompt's frame record is missing (the rows are still
+    written, marked in `note`), else 0."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("traces", nargs="+", help="trace_<session>.jsonl files")
     parser.add_argument("-o", "--output", default="prompts.csv", help="CSV to write")
     parser.add_argument("--include-revoked", action="store_true",
                         help="also list prompts that were revoked (never heard)")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     rows = []
     for path in args.traces:
@@ -151,8 +168,13 @@ def main():
         writer.writeheader()
         writer.writerows(rows)
 
+    missing = sum(1 for row in rows if row["note"] == MISSING_FRAME_NOTE)
     print(f"{len(rows)} prompts -> {args.output}")
+    if missing:
+        print(f"error: {missing} prompt(s) have no frame record; the trace is damaged", file=sys.stderr)
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

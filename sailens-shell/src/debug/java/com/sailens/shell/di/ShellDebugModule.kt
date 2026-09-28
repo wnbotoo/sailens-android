@@ -3,6 +3,7 @@ package com.sailens.shell.di
 import com.sailens.guidance.service.TraceServiceDecorator
 import com.sailens.shell.capture.AndroidCaptureClock
 import com.sailens.shell.capture.AndroidCaptureSensorSource
+import com.sailens.shell.app.BuildIdentity
 import com.sailens.shell.app.GuidanceStartGate
 import com.sailens.shell.app.HardwareKeyHandler
 import com.sailens.shell.capture.CaptureExporter
@@ -48,7 +49,7 @@ val shellDebugModule: Module = module {
             sensors = AndroidCaptureSensorSource(androidContext()),
             encoder = YuvImageJpegEncoder,
             clock = AndroidCaptureClock,
-            deviceInfo = captureDeviceInfo(androidContext()),
+            deviceInfo = captureDeviceInfo(androidContext(), getOrNull<BuildIdentity>()),
             log = get(),
             exporter = CaptureExporter(
                 root = File(androidContext().filesDir, CAPTURES_DIR),

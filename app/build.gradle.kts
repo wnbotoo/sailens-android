@@ -35,6 +35,18 @@ val availableLitertNpuRuntimeFeatures = litertNpuRuntimeFeatureModules
     .map { moduleName -> ":litert_npu_runtime_libraries_jit:$moduleName" }
     .toSet()
 
+// Build identity for recorded data: the commit this APK was built from, with "-dirty" when tracked
+// files were modified. Field captures record it, so data from different builds is never pooled.
+// Empty when git is unavailable (a source archive); captures then record no SHA and the PC tools
+// refuse to produce a per-build result from them.
+val gitSha: String = runCatching {
+    val sha = providers.exec { commandLine("git", "rev-parse", "HEAD") }
+        .standardOutput.asText.get().trim()
+    val dirty = providers.exec { commandLine("git", "status", "--porcelain", "--untracked-files=no") }
+        .standardOutput.asText.get().isNotBlank()
+    if (Regex("[0-9a-f]{40}").matches(sha)) sha + (if (dirty) "-dirty" else "") else ""
+}.getOrDefault("")
+
 android {
     namespace = "com.sailens"
     compileSdk = 37
@@ -56,6 +68,7 @@ android {
         // and nothing else.
         buildConfigField("String", "APP_LICENSE", "\"Apache-2.0\"")
         buildConfigField("String", "APP_SOURCE_URL", "\"https://github.com/wnbotoo/sailens-android\"")
+        buildConfigField("String", "GIT_SHA", "\"$gitSha\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

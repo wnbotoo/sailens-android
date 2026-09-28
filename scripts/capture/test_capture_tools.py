@@ -22,6 +22,8 @@ from sailens_capture import UnsupportedCapture, find_captures, load_capture  # n
 
 START_NS = 5_000_000_000
 START_WALL = 1_700_000_000_000
+BUILD_A = "a" * 40
+BUILD_B = "b" * 40
 
 
 def write_capture(root, session_id, mode="field_evidence", frames=(), sensors=(), markers=(), anchors=None,
@@ -171,7 +173,7 @@ class ContactSheetTest(unittest.TestCase):
 
 def synthetic_burst(root, offset_s=0.012, latency_s=0.028, focal=180.0, seconds=8.0, moving=True,
                     camera_origin_ns=0, timestamp_source="realtime", stats=None, gyro_hz=200.0,
-                    gyro_independent=False, keep_every=1, gyro_still=False):
+                    gyro_independent=False, keep_every=1, gyro_still=False, git_sha=BUILD_A):
     """A timing_sync capture of a camera turning over a smooth texture. The frame at camera time t
     shows the orientation the gyroscope reports at t + offset_s; receipt = camera + latency_s. A
     non-REALTIME camera clock is modelled by camera_origin_ns added to every camera timestamp.
@@ -218,7 +220,7 @@ def synthetic_burst(root, offset_s=0.012, latency_s=0.028, focal=180.0, seconds=
                      "values": [rate(gyro_x, t) + rng.normal(0, 0.005), rate(gyro_y, t) + rng.normal(0, 0.005), 0.0]})
     camera = {"cameraId": "0", "capturedAtElapsedRealtimeNanos": START_NS, "timestampSource": timestamp_source}
     return write_capture(root, "burst", mode="timing_sync", frames=frames, sensors=gyro, stats=stats,
-                         manifest_overrides={"camera": camera})
+                         manifest_overrides={"camera": camera, "gitSha": git_sha})
 
 
 class TimingAlignTest(unittest.TestCase):
@@ -322,6 +324,33 @@ class DeviceSummaryTest(unittest.TestCase):
             with redirect_stdout(io.StringIO()):
                 code = timing_align.main([root, "--max-lag-ms", "100"])
         self.assertEqual(code, 2)
+
+
+    def test_bursts_from_different_builds_are_never_pooled(self):
+        # Two usable bursts of build A and one of build B on the same phone model: three bursts in
+        # all, but no build has three, so there is no result.
+        with tempfile.TemporaryDirectory() as root:
+            for i, build in enumerate((BUILD_A, BUILD_A, BUILD_B)):
+                synthetic_burst(os.path.join(root, f"b{i}"), git_sha=build)
+            results = [timing_align.analyse(d, 100) for d in find_captures(root)]
+            with redirect_stdout(io.StringIO()):
+                code = timing_align.main([root, "--max-lag-ms", "100"])
+        summaries = timing_align.device_summary(results)
+        self.assertEqual([(s["gitSha"], s["usableBursts"]) for s in summaries], [(BUILD_A, 2), (BUILD_B, 1)])
+        self.assertFalse(any(s["enough"] for s in summaries))
+        self.assertEqual(code, 2)
+
+    def test_captures_without_a_build_identity_give_no_result_unless_allowed(self):
+        with tempfile.TemporaryDirectory() as root:
+            for i in range(3):
+                synthetic_burst(os.path.join(root, f"b{i}"), git_sha=None)
+            results = [timing_align.analyse(d, 100) for d in find_captures(root)]
+        refused = timing_align.device_summary(results)[0]
+        self.assertFalse(refused["enough"])
+        self.assertTrue(refused["warning"].startswith("no result"))
+        allowed = timing_align.device_summary(results, allow_unknown_build=True)[0]
+        self.assertTrue(allowed["enough"])
+        self.assertIn("build unknown", allowed["warning"])
 
 
 

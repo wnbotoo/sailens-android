@@ -13,7 +13,7 @@ python3 -m venv .venv && .venv/bin/pip install -r scripts/capture/requirements.t
 | `capture_stats.py <dir>` | Storage rate (MB/hour), frame and sensor cadence, where frames were lost (capture mailbox, encoder, before the analyzer), and whether the counters balance. Accepts a folder of captures. |
 | `contact_sheet.py <capture> --markers` | What the camera saw around each "missed alert" press. |
 | `contact_sheet.py <capture> --trace trace_<id>.jsonl --prompts` | What the camera saw around each prompt, centred on the frame that offered it, with its delivery or revocation. |
-| `timing_align.py <burst or folder>` | The offset between frames and the gyroscope: on camera timestamps when the camera reports a REALTIME timestamp source, otherwise on source receipt times. For a folder, lists every burst (usable or rejected, with the reason) and each device's result: the median over at least three usable bursts, with its range as the uncertainty. |
+| `timing_align.py <burst or folder>` | The offset between frames and the gyroscope: on camera timestamps when the camera reports a REALTIME timestamp source, otherwise on source receipt times. For a folder, lists every burst (usable or rejected, with the reason) and the result per device and build (the capture's git SHA; bursts from different builds are never pooled, and captures without a SHA give no result unless `--allow-unknown-build`): the median over at least three usable bursts, with its range as the uncertainty. |
 
 Getting the data off the phone: Settings → Diagnostics → Field capture → Export shares a ZIP. In
 bulk, without the share sheet:
