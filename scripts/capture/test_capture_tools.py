@@ -171,13 +171,14 @@ class ContactSheetTest(unittest.TestCase):
 
 def synthetic_burst(root, offset_s=0.012, latency_s=0.028, focal=180.0, seconds=8.0, moving=True,
                     camera_origin_ns=0, timestamp_source="realtime", stats=None, gyro_hz=200.0,
-                    gyro_independent=False, keep_every=1):
+                    gyro_independent=False, keep_every=1, gyro_still=False):
     """A timing_sync capture of a camera turning over a smooth texture. The frame at camera time t
     shows the orientation the gyroscope reports at t + offset_s; receipt = camera + latency_s. A
     non-REALTIME camera clock is modelled by camera_origin_ns added to every camera timestamp.
     gyro_independent: the gyroscope reports a different motion than the images show (a negative
     control: real image motion, no relation to the gyro). keep_every=2 stores every other frame (the
-    rest lost in capture), sequence numbers staying those of all frames."""
+    rest lost in capture), sequence numbers staying those of all frames. gyro_still: the images move
+    but the phone does not turn, as when walking forward holding it steady."""
     rng = np.random.default_rng(7)
     size, crop_h, crop_w = 256, 96, 128
     spectrum = np.fft.fft2(rng.random((size, size)))
@@ -209,6 +210,8 @@ def synthetic_burst(root, offset_s=0.012, latency_s=0.028, focal=180.0, seconds=
         frames.append((luma_record(i + 1, t_ns + camera_origin_ns, received, crop_w, crop_h), crop.tobytes()))
     gyro = []
     gyro_x, gyro_y = (y_terms[::-1], [(a, f * 1.37, p + 2.0) for a, f, p in x_terms]) if gyro_independent else (x_terms, y_terms)
+    if gyro_still:
+        gyro_x, gyro_y = [(0.01, 0.37, 0.0)], [(0.01, 0.53, 0.5)]
     for k in range(int((seconds + 0.4) * gyro_hz)):
         t = -0.2 + k / gyro_hz
         gyro.append({"sensor": "gyroscope", "timestampNanos": START_NS + int(t * 1e9), "accuracy": 3,
@@ -231,6 +234,14 @@ class TimingAlignTest(unittest.TestCase):
                 self.assertGreater(result["camera"]["peakCorrelation"], 0.9)
                 self.assertAlmostEqual(result["camera"]["focalPxEstimate"], 180.0, delta=180.0 * 0.15)
                 self.assertFalse(result["warnings"])
+
+    def test_walking_forward_is_not_turning(self):
+        # Seen on SM8850: the phone held steady while walking. The image moves, the gyroscope does not.
+        with tempfile.TemporaryDirectory() as root:
+            result = timing_align.analyse(synthetic_burst(root, gyro_still=True), max_lag_ms=100)
+        self.assertLess(result["turnRateMedianRadPerS"], 0.05)
+        self.assertFalse(result["usableForQualification"])
+        self.assertTrue(any("barely turned" in w for w in result["warnings"]))
 
     def test_negative_control_real_motion_unrelated_to_the_gyro_never_qualifies(self):
         with tempfile.TemporaryDirectory() as root:

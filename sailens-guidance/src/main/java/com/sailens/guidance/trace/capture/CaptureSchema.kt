@@ -66,7 +66,7 @@ object CaptureSchema {
  * the whole manifest unreadable.
  */
 object CaptureModes {
-    /** Reduced frames (5 Hz, 640 px JPEG) + sensors + camera facts: labelling and geometry. */
+    /** Reduced frames (4.3–5 Hz, 640 px JPEG) + sensors + camera facts: labelling and geometry. */
     const val FIELD_EVIDENCE: String = "field_evidence"
 
     /**

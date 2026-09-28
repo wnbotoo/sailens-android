@@ -2,13 +2,13 @@
 
 # Field Recording Manual (stage 2)
 
-> Status: **draft**. The recording tool is M0 field capture (see
-> [`local-navigation-implementation.md`](local-navigation-implementation.md) §4), which is still being
-> built. Steps marked **[M0 proposal]** follow the "capture operation" table in the implementation doc
-> §4; they may change in M0 review and must be checked once it is implemented. Everything else can be
-> used to prepare now. **Do not start the real recording before M0 is ready**: trace-only data, with
-> no frames or sensors, can later be used neither for threshold calibration nor for geometry or replay,
-> and would have to be recorded again.
+> Status: **draft**. The recording tool is M0a field capture (see
+> [`local-navigation-implementation.md`](local-navigation-implementation.md) §4), implemented in #12–#15
+> and measured on SM8850 (OnePlus CPH2747) on 2026-09-27/28; SM8450 is still to be measured. Model
+> regression recording (M0b) is not built yet: scenes marked "regression" are recorded as field evidence
+> for now. **Do not start the real recording before the baseline is tagged** (section 3, item 1):
+> trace-only data, with no frames or sensors, can later be used neither for threshold calibration nor
+> for geometry or replay, and would have to be recorded again.
 
 ## 1. What this recording is for
 
@@ -21,13 +21,15 @@ One recording serves four purposes, so record every segment as described here:
 | **Ground geometry calibration** (M3) | frames + gravity/rotation/gyro + camera intrinsics, time-aligned |
 | **Replay / simulation regression** (M2) | as above, plus full frames around events (M0 "model regression recording") |
 
-M0 captures in two modes, chosen with the capture switch in **debug settings**, which has three
-positions: off / field evidence / field evidence + model regression **[M0 proposal]**:
+Capture is controlled on **Settings → Diagnostics → Field capture** (debug builds only):
 
-- **Field evidence capture**: 5 Hz JPEG at 640 px on the long side + sensors. For labelling and
-  calibration; not an exact replay of perception. **This manual assumes it by default.**
-- **Model regression recording**: per-frame perception output + full frames in a window around events,
-  for exact replay. Turn it on only for scenes marked "regression" in section 5.
+- **Field evidence capture** (the "Capture during Guidance" switch): 640 px JPEG at 4.3–5 Hz + gravity,
+  rotation and gyroscope (~47 Hz) + camera intrinsics, for the whole Guidance session. For labelling
+  and calibration; not an exact replay of perception. **This manual assumes it by default.**
+- **Timing-sync burst** (one-shot, armed on the same page): about 15 s of small frames at full camera
+  rate, to measure frame-to-gyroscope timing once per device. See section 6a.
+- **Model regression recording** (per-frame perception output for exact replay) is M0b and not built
+  yet. Record "regression" scenes as field evidence for now.
 
 ## 2. Safety and privacy (read first)
 
@@ -36,11 +38,11 @@ positions: off / field evidence / field evidence + model regression **[M0 propos
 - **At crossings, attention stays on the road.** Keep recording if you like, but never slow down or
   change how you cross for the recording; stop if it is not safe.
 - Captures contain **faces and places**. They stay on the phone and your own computer; **never commit
-  them to a repository or upload them**. Delete segments you no longer need in the debug capture list
-  **[M0 proposal]**.
-- **Captures are cleaned up automatically**: deleted 7 days after recording, with a 2 GB total cap;
-  exported or "keep"-marked sessions are not deleted **[M0 proposal]**. So **export on the day you
-  record** (section 8), or mark sessions as keep in the capture list.
+  them to a repository or upload them**. Delete segments you no longer need in the capture list.
+- **Captures are cleaned up automatically**: deleted 7 days after recording, and the oldest unkept
+  sessions go first once the total passes 2 GB — that is only about **3 hours** of field evidence.
+  Exported or "Keep"-marked sessions are not deleted. So **export on the day you record** (section 8),
+  or tap Keep in the capture list.
 - Record indoors only where you are allowed to (your home, areas your workplace permits).
 
 ## 3. Pre-recording checklist (every outing)
@@ -64,12 +66,13 @@ positions: off / field evidence / field evidence + model regression **[M0 propos
    - Perception profile: **Standard** (sem + det).
    - TalkBack off (unless the segment tests the screen reader).
    - Debug panel on. It shows "Ground: … (unrecognised N%)", so the #5 gate state is visible live.
-5. Battery above 60%, free storage above 5 GB (field evidence capture is estimated at about 0.7 GB/hour;
-   updated once M0 is measured **[M0 proposal]**). The phone heats up; rest about every 20 minutes, since
-   thermal throttling makes the data unrepresentative.
-6. The **capture switch** is set for the segment: usually "field evidence"; for scenes marked
-   "regression" in section 5, "field evidence + model regression" **[M0 proposal]**.
-7. Bring a **scene card** (section 7) and fill in one row per segment.
+5. Battery above 60%, free storage above 5 GB. Field evidence takes **0.56–0.74 GB/hour** (measured on
+   SM8850; 0.65 on an outdoor walk), a timing burst 41 MB. The phone heats up; rest about every 20
+   minutes, since thermal throttling makes the data unrepresentative.
+6. The **capture switch** ("Capture during Guidance") is on. It takes effect when the next Guidance
+   session starts and is locked while one is recording.
+7. **Once per device and build**: three usable timing-sync bursts (section 6a).
+8. Bring a **scene card** (section 7) and fill in one row per segment.
 
 ## 4. How to hold the phone
 
@@ -107,25 +110,45 @@ regression recording is also turned on.
 
 ## 6. Recording one segment
 
-Capture starts and stops with the Guidance session; there is no separate start/stop button
-**[M0 proposal]**. So **one "Start guidance → Stop guidance" is one segment**.
+Capture starts and stops with the Guidance session; there is no separate start/stop button. So **one
+"Start guidance → Stop guidance" is one segment**.
 
-1. Go to the start, check the capture switch is in the position this segment needs, and fill in the
-   first half of the scene-card row (class, place type, light).
+1. Go to the start, check the capture switch is on, and fill in the first half of the scene-card row
+   (class, place type, light).
 2. Tap "Start guidance" in the app (capture starts with it).
 3. **Sync mark: cover the camera fully with your palm for 3 s**, until you hear "Camera is covered", then
    uncover. It leaves an `event_camera_blocked` in the trace and dark frames in the capture — the
-   segment's start, afterwards; the reader also splits segments on it.
+   segment's start, afterwards.
 4. Walk the scene. **If you notice a miss** (an obvious hazard with no prompt), **press volume down once**
-   (a short buzz confirms), or tap the large marker button on screen **[M0 proposal]**. It writes a
-   marker with the time and frame number, which labelling uses to find misses. No need to look at the
-   screen; keep your eyes on the path.
+   (a short buzz confirms, only once the marker is written), or tap "Mark missed alert" on screen. It
+   records the moment you pressed and the last stored frame, which labelling uses to find misses. No
+   need to look at the screen; keep your eyes on the path. Works with TalkBack on (checked on SM8850).
 5. Before finishing, cover the camera for 3 s again as the end mark.
 6. Tap "Stop guidance" (capture stops with it).
 7. Complete the scene-card row (duration, anything unusual).
 
 Do not switch apps or lock the screen during a segment; if it gets interrupted, stop and start a new
-segment. Volume down is only intercepted while capture is on; otherwise it changes the volume as usual.
+segment. Volume down is only intercepted while capture is recording; otherwise it changes the volume
+as usual. While a ZIP is being exported, Guidance will not start ("Finish exporting the capture before
+starting Guidance").
+
+## 6a. Timing-sync burst (once per device and build)
+
+Measures how camera frames line up in time with the gyroscope, which the geometry layer needs. It is
+not part of the baseline and changes the device load, so never use it for performance numbers.
+
+1. Settings → Diagnostics → Field capture → **"Arm for next Guidance start"**. The burst applies to
+   the next start only: **arm it again before every burst**.
+2. Stand still somewhere with a detailed scene a few metres away, in good light.
+3. Start Guidance and **at once turn the phone in place**: briskly left and right about once a second
+   (about ±30°), then up and down, pivoting at the wrist. Keep going for about 15 s; the burst then
+   ends on its own and Guidance carries on without capture.
+   - **Walking forward with the phone held steady is not turning.** The gyroscope sees almost nothing
+     and the burst is rejected (this happened on the first attempts).
+   - Slow, small movements are rejected too: the phone must turn, not just drift.
+4. Stop Guidance. Record three such bursts per device.
+5. On the computer: `python3 scripts/capture/timing_align.py <capture folder>`. It prints the offset
+   and "usable for M0 qualification: yes/no" with the reason; record again until three are usable.
 
 ## 7. Scene card
 
@@ -140,9 +163,14 @@ One row per segment, on paper or in a notes app, typed up afterwards:
 - **Trace**: Settings → Diagnostics → Trace reports → pick the session → "Share JSONL", to your computer.
   Or with adb: `files/traces/trace_<sessionId>.jsonl` (debug builds: `adb shell run-as
   com.sailens.reference`).
-- **Capture** (frames, sensors, intrinsics, markers): debug capture list → pick the session → system
-  share, one zip per session; debug builds can also `adb pull` from `files/captures/`
-  **[M0 proposal]**. Exported sessions are not cleaned up automatically.
+- **Capture** (frames, sensors, intrinsics, markers): capture list → the session's **Export** → system
+  share, one ZIP per session. Exported sessions are no longer deleted after 7 days. Everything at once,
+  captures and traces together, over USB:
+  ```bash
+  adb exec-out run-as com.sailens.reference tar -cf - files/captures files/traces > captures.tar
+  ```
+- Check a day's recordings: `python3 scripts/capture/capture_stats.py <folder>` (duration, storage,
+  frame and sensor rates, losses, whether the counters balance). See `scripts/capture/README.md`.
 - Keep each segment's trace and capture in one folder named after the scene-card segment number.
 
 ## 9. Labelling
@@ -163,9 +191,15 @@ state, whether it was judged blocked, the tracked obstacles and the dominant cla
 ### 9.2 Label each row
 
 Compare with the frames a few seconds around the prompt, and fill in `label`. Frames are viewed on the
-computer: a script that comes with the M0 reader tiles the frames ±N seconds around each
-`prompt_outcome` (and each miss marker) into one contact sheet; there is no in-app viewer
-**[M0 proposal]**.
+computer (there is no in-app viewer):
+
+```bash
+python3 scripts/capture/contact_sheet.py <capture folder> --trace <trace>.jsonl --prompts --window 2
+python3 scripts/capture/contact_sheet.py <capture folder> --markers --window 3
+```
+
+One PNG per prompt, centred on the exact frame that raised it, titled with the message, how it was
+delivered and how long after the frame; one per miss marker, centred on the press.
 
 | Label | Meaning |
 |---|---|

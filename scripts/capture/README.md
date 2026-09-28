@@ -25,10 +25,13 @@ adb exec-out run-as com.sailens.reference tar -cf - files/captures files/traces 
 The trace for a capture is `traces/trace_<sessionId>.jsonl`; the capture directory has the same
 session id.
 
-**Timing-sync burst.** On the field capture page, arm the burst, start Guidance, point the phone at a
-detailed scene and turn it slowly left and right, then up and down, for the ~15 s it records. Then
-run `timing_align.py` on that capture. The burst changes the device load, so never use it for
-performance numbers.
+**Timing-sync burst.** On the field capture page, arm the burst (it applies to the next Guidance start
+only; arm it again before every burst). Stand still, start Guidance, and at once turn the phone **in
+place**: briskly left and right about once a second (about ±30°), then up and down, pivoting at the
+wrist, pointed at a detailed scene a few metres away, for the ~15 s it records. Walking forward with
+the phone held steady is not turning; the gyroscope sees almost nothing and `timing_align.py`
+rejects the burst ("the phone barely turned"). Then run `timing_align.py` on that capture. The burst
+changes the device load, so never use it for performance numbers.
 
 Tests: `python3 -m unittest discover -s scripts/capture` (synthetic captures in the app's format,
 including a burst with a known offset).

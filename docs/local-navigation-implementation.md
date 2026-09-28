@@ -290,7 +290,10 @@ service it replaces. Rules:
 
 **Frame writer (PR-B).** `FrameSource.frames(minIntervalMs = 200)` → downscale-copy to NV21 →
 `releaseFrame` immediately → a bounded queue (capacity 1–2, drop the oldest pending) → background
-JPEG encode (640 px long side, quality 80, pixels not rotated; `rotationDegrees` recorded).
+JPEG encode (640 px long side, quality 80, pixels not rotated; `rotationDegrees` recorded). The
+sampler takes the first frame arriving at least 200 ms after the last. At 30 fps six frames are
+199.96 ms, right on that edge, so it stores every 6th or 7th frame depending on arrival jitter:
+4.3–5 Hz (SM8850 sessions measured 4.29 Hz and 5.0 Hz).
 
 **Timing-sync burst (PR-C2).** Mode `timing_sync`: about 15 s at camera rate, small luma frames
 (`luma8`, 320–480 px long side, no JPEG), exact per-frame timestamps, gyroscope at
@@ -322,7 +325,9 @@ the camera result is then not measured (`cameraComparable = false`), must never 
 clock as gyro-comparable however good a correlation looks, and the source receipt time
 (elapsedRealtime by construction) is the authoritative measurement. An empirical estimate of a
 non-REALTIME camera clock is available as a diagnostic only. A burst is usable for qualification
-only if it is complete, capture dropped no sensor samples, there was enough motion, and on the
+only if it is complete, capture dropped no sensor samples, the phone really turned (median gyro
+rate across the optical axis ≥ 0.3 rad/s: image motion cannot tell turning from walking forward, and
+on the device noise alone reaches ~0.5 px per frame), and on the
 authoritative clock the image-motion/gyro correlation is at least 0.5 (a negative control with real
 motion unrelated to the gyro gives ≈0.3), all four parts were checked and agree within 5 ms, and
 the offset is not at the search edge; otherwise it is recorded again. Heavy frame loss is a
@@ -338,7 +343,7 @@ rejection only costs another burst.
 | Keep, delete | Capture list: per session start time, size, status (recording / complete / incomplete with reason), kept, exported, frames and markers; keep, delete and export are refused while any capture is recording (the list is read-only then; the tool must not disturb the evidence it is collecting); delete asks for confirmation, and a refused or failed action is reported |
 | Export | Finished sessions only. ZIP built into `cacheDir/capture_exports/` (free space checked first) off the capture writer thread, with the session protected from retention and delete meanwhile. Capture and export never overlap in either direction: while a ZIP is being built, starting Guidance is refused with "finish exporting first" (debug `GuidanceStartGate`), and a capture that starts anyway ends at once as incomplete with `failureReason = export_in_progress`. A ZIP whose session cannot be marked exported is discarded and reported as a failure. The ZIP is then shared via FileProvider `<cache-path>`; `files/captures/` itself is never exposed; the session is marked exported; exports older than a day cleared at app start and when the list opens (a share target reads the ZIP after the share sheet closes, with no signal when it is done). `adb` + `run-as` documented as the bulk fallback |
 | Viewing frames around a prompt | On the PC: `scripts/capture/contact_sheet.py` renders ±N s around a `prompt_outcome` (centred on the offering frame: trace `sourceSequenceNumber` → `frameTimestamp` = capture `sensorTimestampNanos`) or a marker (its `elapsedRealtimeNanos` against frame receipt times) |
-| Storage | Estimated ≈ 0.7–1 GB/hour; measured in M0a with `scripts/capture/capture_stats.py` (also cadence, gaps, drops, counter balance, wall-clock jumps) and written back into the manual |
+| Storage | Estimated ≈ 0.7–1 GB/hour; measured on SM8850: 0.56–0.74 GB/hour of field evidence (0.65 on a 4-minute outdoor walk), plus 41 MB per timing burst; measured in M0a with `scripts/capture/capture_stats.py` (also cadence, gaps, drops, counter balance, wall-clock jumps) and written back into the manual |
 | Retention | Runs at debug app start (whether or not capture is on), before a capture starts, when the capture list opens, and every 30 s during a capture. A session older than 7 days, not exported or pinned, is deleted at the next of these. The 2 GB cap is enforced during capture: older unpinned sessions go first, and if the active capture alone would exceed it, it ends as incomplete with `failureReason = storage_limit_reached` (checked after every frame) instead of writing until the disk is full |
 | **"Missed alert" marker** | Volume Down while capture is active: only `ACTION_DOWN` with `repeatCount == 0` counts, the key is consumed only then, the time, session and last stored frame are fixed when the press is observed (a busy writer delays the write, not the event), and a short vibration confirms only once the marker was written. Plus a large on-screen button. Works eyes-free in a foreground Guidance session; no promise for a locked screen or background (there is no background Guidance yet). TalkBack behaviour verified on device |
 

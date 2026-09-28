@@ -182,8 +182,8 @@
     <string name="field_capture_export_blocks_guidance">请等采集数据导出完成后再启动 Guidance。</string>
     <string name="field_capture_exporting_notice">正在导出。导出完成前无法启动 Guidance。</string>
     <string name="field_capture_timing_sync_title">对时突发采集</string>
-    <string name="field_capture_timing_sync_supporting">用于测量相机画面与陀螺仪的时间对齐。开启后，下一次启动 Guidance 时会以相机全帧率录制约 15 秒的小尺寸画面，之后 Guidance 继续运行但不再采集。这段时间里请把手机对准细节丰富的场景，先慢慢左右转动，再上下转动。</string>
-    <string name="field_capture_timing_sync_armed">已就绪。启动 Guidance 后，先慢慢左右转动手机，再上下转动，持续约 15 秒。</string>
+    <string name="field_capture_timing_sync_supporting">用于测量相机画面与陀螺仪的时间对齐。开启后，下一次启动 Guidance 时会以相机全帧率录制约 15 秒的小尺寸画面，之后 Guidance 继续运行但不再采集。请站着不动，从 Guidance 启动那一刻起原地转动手机：以手腕为轴，大约每秒一次快速左右转动，再上下转动，对准几米外细节丰富的场景。向前走路不算。</string>
+    <string name="field_capture_timing_sync_armed">已就绪。站着不动，启动 Guidance 后立即原地转动手机：大约每秒一次快速左右转动，再上下转动，持续约 15 秒。</string>
     <string name="btn_field_capture_timing_sync_arm">下次启动 Guidance 时采集</string>
     <string name="btn_field_capture_timing_sync_cancel">取消突发采集</string>
     <string name="title_field_capture_delete">删除这份采集数据？</string>

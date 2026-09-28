@@ -2,8 +2,10 @@
 
     python timing_align.py <timing_sync capture dir> [--max-lag-ms 300] [--json] [--diagnose-camera-clock]
 
-Record the burst by arming it on the field capture page, starting Guidance, and turning the phone
-slowly left-right then up-down at a detailed scene for the ~15 s it lasts.
+Record the burst by arming it on the field capture page, standing still, starting Guidance, and at
+once turning the phone in place (briskly left-right about once a second, then up-down, pivoting at
+the wrist) at a detailed scene a few metres away for the ~15 s it lasts. Walking forward is not
+turning: the gyroscope sees almost nothing and the burst is rejected.
 
 Method. Between consecutive frames the image moves by about f·θ, θ being the camera rotation about
 the two axes across the optical axis (roll moves nothing at the centre). So:
@@ -32,7 +34,8 @@ not a measurement floor on a device. The real error comes from the device's actu
 and from repeated bursts (their spread), measured per target device in M0a.
 
 ``usableForQualification`` (exit code 0, else 2) needs a complete capture, no sensor samples
-dropped by capture, enough motion, and on the authoritative clock: correlation r >= 0.5 (a
+dropped by capture, the phone really turning (median gyro rate across the optical axis >= 0.3
+rad/s), enough texture, and on the authoritative clock: correlation r >= 0.5 (a
 negative control -- real image motion unrelated to the gyro -- gives about 0.3), all four parts
 checked and agreeing within 5 ms, and the offset not at the search edge. Otherwise record the burst
 again. Heavy frame loss is a warning. The thresholds are conservative until real bursts from the
@@ -53,7 +56,9 @@ from sailens_capture import load_capture, read_image  # noqa: E402
 
 MIN_PEAK = 0.05  # phase-correlation peak below which a pair is too blurred or bare to use
 MIN_PAIRS = 30
-MIN_MOVING_FRACTION = 0.3  # of pairs whose image moved by more than half a pixel
+# Median gyro rate across the optical axis while frames were stored. Brisk turning is ~1-3 rad/s;
+# holding the phone steady while walking gave 0.01-0.09 on SM8850.
+MIN_TURN_RATE = 0.3
 SEGMENTS = 4
 MAX_SEGMENT_SPREAD_MS = 5.0
 MAX_FRAME_LOSS = 0.10
@@ -182,6 +187,11 @@ def analyse(directory, max_lag_ms=300.0, diagnose_camera_clock=False):
     good = [p for p in pairs if p[3] >= MIN_PEAK]
     moving = sum(1 for p in good if p[2] > 0.5)
     t, theta = cumulative_rotation(gyro)
+    # Whether the phone actually turned is the gyroscope's call: image motion cannot tell turning
+    # from walking forward, and on a real device noise alone reaches about half a pixel per frame.
+    first, last = capture.frames[0]["sensorTimestampNanos"], capture.frames[-1]["sensorTimestampNanos"]
+    during = [s["values"] for s in gyro if first <= s["timestampNanos"] <= last]
+    turn_rate = float(np.median([np.hypot(v[0], v[1]) for v in during])) if during else 0.0
     frame_dt = np.diff([f["sensorTimestampNanos"] for f in capture.frames]) / 1e6
     losses = frame_losses(capture)
     stats = capture.manifest.get("stats", {})
@@ -200,6 +210,7 @@ def analyse(directory, max_lag_ms=300.0, diagnose_camera_clock=False):
         "sensorEventsDropped": stats.get("sensorEventsDropped", 0),
         "pairsUsable": len(good),
         "pairsMoving": moving,
+        "turnRateMedianRadPerS": round(turn_rate, 3),
         "camera": None,
         "received": None,
         "usableForQualification": False,
@@ -211,8 +222,13 @@ def analyse(directory, max_lag_ms=300.0, diagnose_camera_clock=False):
         blocking.append("the capture is incomplete")
     if result["sensorEventsDropped"]:
         blocking.append(f"{result['sensorEventsDropped']} sensor samples were dropped by capture")
-    if len(good) < MIN_PAIRS or moving < MIN_MOVING_FRACTION * len(good):
-        blocking.append("insufficient motion or texture: turn the phone steadily at a detailed scene")
+    if turn_rate < MIN_TURN_RATE:
+        blocking.append(
+            f"insufficient motion: the phone barely turned (median {turn_rate:.2f} rad/s, need {MIN_TURN_RATE}); stand still "
+            "and turn it in place, briskly left-right about once a second, then up-down. Walking forward does not count"
+        )
+    if len(good) < MIN_PAIRS:
+        blocking.append("too little texture or too much blur: point at a detailed scene a few metres away")
     if losses["overallLossFraction"] is not None and losses["overallLossFraction"] > MAX_FRAME_LOSS:
         warnings.append(
             f"~{losses['overallLossFraction'] * 100:.0f}% of frames were lost: known {losses['knownLossFraction'] * 100:.0f}% "
@@ -284,7 +300,7 @@ def main(argv=None):
     print(f"== {r['sessionId']}  camera timestamp source: {r['timestampSource']} ({comparable})")
     print(f"   {r['frames']} frames, median interval {r['frameIntervalMedianMs']} ms, frame loss known {r['knownFrameLossFraction']} / overall ~{r['overallFrameLossFraction']}; "
           f"gyro median interval {r['gyroIntervalMedianMs']} ms, sensor samples dropped {r['sensorEventsDropped']}")
-    print(f"   frame pairs usable {r['pairsUsable']}, of which moving {r['pairsMoving']}")
+    print(f"   frame pairs usable {r['pairsUsable']}, of which moving {r['pairsMoving']}; phone turn rate median {r['turnRateMedianRadPerS']} rad/s")
     for name, label in (("camera", "camera timestamp"), ("received", "source receipt time")):
         a = r[name]
         if a is None:
