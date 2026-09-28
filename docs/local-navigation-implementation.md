@@ -326,7 +326,8 @@ clock as gyro-comparable however good a correlation looks, and the source receip
 (elapsedRealtime by construction) is the authoritative measurement. An empirical estimate of a
 non-REALTIME camera clock is available as a diagnostic only. A burst is usable for qualification
 only if it is complete, capture dropped no sensor samples, the phone really turned (median gyro
-rate across the optical axis ≥ 0.3 rad/s: image motion cannot tell turning from walking forward, and
+rate across the optical axis ≥ 0.15 rad/s — walking with the phone steady measured 0.01–0.09, turning
+in place 0.20–0.24: image motion cannot tell turning from walking forward, and
 on the device noise alone reaches ~0.5 px per frame), and on the
 authoritative clock the image-motion/gyro correlation is at least 0.5 (a negative control with real
 motion unrelated to the gyro gives ≈0.3), all four parts were checked and agree within 5 ms, and

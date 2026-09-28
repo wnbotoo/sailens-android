@@ -34,7 +34,7 @@ not a measurement floor on a device. The real error comes from the device's actu
 and from repeated bursts (their spread), measured per target device in M0a.
 
 ``usableForQualification`` (exit code 0, else 2) needs a complete capture, no sensor samples
-dropped by capture, the phone really turning (median gyro rate across the optical axis >= 0.3
+dropped by capture, the phone really turning (median gyro rate across the optical axis >= 0.15
 rad/s), enough texture, and on the authoritative clock: correlation r >= 0.5 (a
 negative control -- real image motion unrelated to the gyro -- gives about 0.3), all four parts
 checked and agreeing within 5 ms, and the offset not at the search edge. Otherwise record the burst
@@ -56,9 +56,11 @@ from sailens_capture import load_capture, read_image  # noqa: E402
 
 MIN_PEAK = 0.05  # phase-correlation peak below which a pair is too blurred or bare to use
 MIN_PAIRS = 30
-# Median gyro rate across the optical axis while frames were stored. Brisk turning is ~1-3 rad/s;
-# holding the phone steady while walking gave 0.01-0.09 on SM8850.
-MIN_TURN_RATE = 0.3
+# Median gyro rate across the optical axis while frames were stored. This gate only tells turning
+# from not turning; quality is judged by correlation and segment agreement. Measured: the phone held
+# steady while walking 0.01-0.09 rad/s (SM8850); turning in place 0.20-0.24 rad/s (SM8450), with three
+# bursts agreeing within ~4 ms. The threshold sits between the two.
+MIN_TURN_RATE = 0.15
 SEGMENTS = 4
 MAX_SEGMENT_SPREAD_MS = 5.0
 MAX_FRAME_LOSS = 0.10
