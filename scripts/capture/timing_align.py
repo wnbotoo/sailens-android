@@ -1,6 +1,6 @@
 """Frame-to-gyroscope time alignment from a timing-sync burst (M0a).
 
-    python timing_align.py <timing_sync capture dir> [--max-lag-ms 300] [--json] [--diagnose-camera-clock]
+    python timing_align.py <timing_sync capture dir or folder> [...] [--max-lag-ms 300] [--json] [--diagnose-camera-clock]
 
 Record the burst by arming it on the field capture page, standing still, starting Guidance, and at
 once turning the phone in place (briskly left-right about once a second, then up-down, pivoting at
@@ -26,20 +26,24 @@ Result, per frame time base: ``gyro_time ≈ frame_time + δ``.
 - source receipt times (``receivedElapsedRealtimeNanos``) are on elapsedRealtime by construction:
   δ is negative by the camera-to-app delivery latency, and jitter in it lowers the correlation.
   This is the authoritative measurement when the camera clock is not REALTIME.
-The estimate is repeated on four consecutive parts of the burst; their spread is the error bar (hand
-motion is smooth, so the correlation peak is broad) and would also reveal drift. It does not catch
-a consistent bias. On synthetic bursts (gyro at 200 Hz and at 50 Hz, the typical SENSOR_DELAY_GAME
-rate) the estimate is within ~1.5 ms of the truth: that is the method's numerical accuracy only,
-not a measurement floor on a device. The real error comes from the device's actual gyro cadence
-and from repeated bursts (their spread), measured per target device in M0a.
+Within a burst the estimate is repeated on four consecutive parts; their spread is reported, but
+hand-made motion often leaves one weak ~4 s part, so it is a warning, not a rejection. The
+uncertainty that counts is the spread **across repeated bursts** (see below). On synthetic bursts
+(gyro at 200 Hz and at 50 Hz, the typical SENSOR_DELAY_GAME rate) the method is within ~1.5 ms of
+the truth: numerical accuracy only, not a device measurement floor.
 
-``usableForQualification`` (exit code 0, else 2) needs a complete capture, no sensor samples
-dropped by capture, the phone really turning (median gyro rate across the optical axis >= 0.15
-rad/s), enough texture, and on the authoritative clock: correlation r >= 0.5 (a
-negative control -- real image motion unrelated to the gyro -- gives about 0.3), all four parts
-checked and agreeing within 5 ms, and the offset not at the search edge. Otherwise record the burst
-again. Heavy frame loss is a warning. The thresholds are conservative until real bursts from the
-target devices are in: a false rejection only costs another burst.
+A burst is ``usable`` (single burst: exit code 0, else 2) if the capture is complete, capture
+dropped no sensor samples, the phone really turned (median gyro rate across the optical axis
+>= 0.15 rad/s), there is enough texture, and on the authoritative clock the correlation is
+r >= 0.5 (a negative control -- real image motion unrelated to the gyro -- gives about 0.3), all
+four parts could be checked (a full ~15 s burst) and the offset is not at the search edge.
+
+Device result (several captures or a folder; exit code 0 once every device has >= 3 usable
+bursts): the median offset over that device's usable bursts, with its range and standard
+deviation as the uncertainty. M0a reports it; it does not gate on it. On SM8450 and SM8850 the
+camera-clock offset varied by 9-14 ms between bursts while camera-to-receipt time stayed constant,
+so the camera clock is stable and what moves is where the image content sits relative to its
+start-of-exposure timestamp -- plausibly exposure time, which capture does not record yet.
 """
 from __future__ import annotations
 
@@ -52,7 +56,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from capture_stats import frame_losses  # noqa: E402
-from sailens_capture import load_capture, read_image  # noqa: E402
+from sailens_capture import find_captures, load_capture, read_image  # noqa: E402
 
 MIN_PEAK = 0.05  # phase-correlation peak below which a pair is too blurred or bare to use
 MIN_PAIRS = 30
@@ -62,6 +66,7 @@ MIN_PAIRS = 30
 # bursts agreeing within ~4 ms. The threshold sits between the two.
 MIN_TURN_RATE = 0.15
 SEGMENTS = 4
+MIN_BURSTS = 3  # usable bursts per device for a device result
 MAX_SEGMENT_SPREAD_MS = 5.0
 MAX_FRAME_LOSS = 0.10
 # Pearson r between image motion and gyro rotation on the authoritative clock. Conservative until the
@@ -199,6 +204,7 @@ def analyse(directory, max_lag_ms=300.0, diagnose_camera_clock=False):
     stats = capture.manifest.get("stats", {})
     result = {
         "sessionId": capture.manifest.get("sessionId"),
+        "device": f"{capture.manifest.get('deviceManufacturer')} {capture.manifest.get('deviceModel')}",
         "timestampSource": source,
         "cameraComparable": camera_comparable,
         # The clock whose offset M0 may record as the frame-to-gyro alignment.
@@ -215,7 +221,7 @@ def analyse(directory, max_lag_ms=300.0, diagnose_camera_clock=False):
         "turnRateMedianRadPerS": round(turn_rate, 3),
         "camera": None,
         "received": None,
-        "usableForQualification": False,
+        "usable": False,
         "warnings": warnings,
     }
 
@@ -275,31 +281,51 @@ def analyse(directory, max_lag_ms=300.0, diagnose_camera_clock=False):
         if len(r["segmentOffsetsMs"]) < SEGMENTS or r["segmentSpreadMs"] is None:
             problems.append(f"{name}: only {len(r['segmentOffsetsMs'])} of {SEGMENTS} parts of the burst could be checked; record a longer burst")
         elif r["segmentSpreadMs"] > MAX_SEGMENT_SPREAD_MS:
-            problems.append(f"{name}: parts of the burst disagree by {r['segmentSpreadMs']} ms (drift, or too little motion in parts)")
+            # A warning only: hand-made motion often leaves one weak ~4 s part. The device result's
+            # spread over repeated bursts is the uncertainty that counts (see device_summary).
+            warnings.append(f"{name}: parts of the burst disagree by {r['segmentSpreadMs']} ms (one weak part of the motion, or drift)")
         (blocking if r is authoritative else warnings).extend(problems)
     if authoritative is None:
         blocking.append(f"not enough overlapping frame and gyroscope data on the {result['authoritativeClock']} clock")
 
-    result["usableForQualification"] = not blocking
+    result["usable"] = not blocking
     result["warnings"] = blocking + warnings
     return result
 
 
-def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    parser.add_argument("capture", help="a timing_sync capture directory")
-    parser.add_argument("--max-lag-ms", type=float, default=300.0)
-    parser.add_argument("--diagnose-camera-clock", action="store_true",
-                        help="also estimate a non-REALTIME camera clock empirically (diagnostic only)")
-    parser.add_argument("--json", action="store_true")
-    args = parser.parse_args(argv)
-    r = analyse(args.capture, args.max_lag_ms, args.diagnose_camera_clock)
-    exit_code = 0 if r["usableForQualification"] else 2
-    if args.json:
-        print(json.dumps(r, indent=2))
-        return exit_code
+def device_summary(results):
+    """One result per device from its usable bursts: the median offset on the authoritative clock and
+    its spread across bursts, which is the measurement's uncertainty (M0a reports it; it does not
+    gate on it). Needs at least MIN_BURSTS usable bursts."""
+    by_device = {}
+    for r in results:
+        by_device.setdefault(r["device"], []).append(r)
+    summaries = []
+    for device, rows in sorted(by_device.items()):
+        usable = [r for r in rows if r["usable"]]
+        summary = {"device": device, "bursts": len(rows), "usableBursts": len(usable), "enough": len(usable) >= MIN_BURSTS}
+        if usable:
+            clock = usable[0]["authoritativeClock"]
+            offsets = np.array([r[clock]["offsetMs"] for r in usable])
+            received = np.array([r["received"]["offsetMs"] for r in usable])
+            summary.update(
+                clock=clock,
+                offsetMedianMs=round(float(np.median(offsets)), 1),
+                offsetMinMs=round(float(offsets.min()), 1),
+                offsetMaxMs=round(float(offsets.max()), 1),
+                offsetSdMs=round(float(offsets.std()), 1),
+                receiptOffsetMedianMs=round(float(np.median(received)), 1),
+            )
+            if clock == "camera":
+                # Camera time to receipt time: the delivery latency, from the same bursts.
+                summary["receiptLatencyMedianMs"] = round(float(np.median(offsets - received)), 1)
+        summaries.append(summary)
+    return summaries
+
+
+def print_burst(r):
     comparable = "comparable with the gyroscope" if r["cameraComparable"] else "NOT comparable with the gyroscope"
-    print(f"== {r['sessionId']}  camera timestamp source: {r['timestampSource']} ({comparable})")
+    print(f"== {r['sessionId']}  {r['device']}, camera timestamp source: {r['timestampSource']} ({comparable})")
     print(f"   {r['frames']} frames, median interval {r['frameIntervalMedianMs']} ms, frame loss known {r['knownFrameLossFraction']} / overall ~{r['overallFrameLossFraction']}; "
           f"gyro median interval {r['gyroIntervalMedianMs']} ms, sensor samples dropped {r['sensorEventsDropped']}")
     print(f"   frame pairs usable {r['pairsUsable']}, of which moving {r['pairsMoving']}; phone turn rate median {r['turnRateMedianRadPerS']} rad/s")
@@ -317,9 +343,60 @@ def main(argv=None):
             tag = ""
         print(f"   {label}: gyro = frame {a['offsetMs']:+.2f} ms +/- {a['segmentSpreadMs']} (r={a['peakCorrelation']}, "
               f"per segment {a['segmentOffsetsMs']}, pairs {a['pairs']}, focal ~{a['focalPxEstimate']} px){tag}")
-    print(f"   usable for M0 qualification: {'yes' if r['usableForQualification'] else 'NO - record the burst again'}")
+    print(f"   usable for the device measurement: {'yes' if r['usable'] else 'NO - record the burst again'}")
     for warning in r["warnings"]:
         print(f"   ! {warning}")
+
+
+def print_device(s):
+    print(f"== device {s['device']}: {s['usableBursts']} of {s['bursts']} bursts usable")
+    if not s["usableBursts"]:
+        print(f"   no result: record at least {MIN_BURSTS} usable bursts")
+        return
+    print(f"   {s['clock']} clock: gyro = frame {s['offsetMedianMs']:+.1f} ms (median), range {s['offsetMinMs']:+.1f} .. "
+          f"{s['offsetMaxMs']:+.1f}, sd {s['offsetSdMs']}; receipt time {s['receiptOffsetMedianMs']:+.1f} ms"
+          + (f"; camera-to-app latency {s['receiptLatencyMedianMs']} ms" if "receiptLatencyMedianMs" in s else ""))
+    if not s["enough"]:
+        print(f"   ! only {s['usableBursts']} usable bursts; record at least {MIN_BURSTS}")
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    parser.add_argument("captures", nargs="+", help="timing_sync capture directories, or folders containing them")
+    parser.add_argument("--max-lag-ms", type=float, default=300.0)
+    parser.add_argument("--diagnose-camera-clock", action="store_true",
+                        help="also estimate a non-REALTIME camera clock empirically (diagnostic only)")
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args(argv)
+    directories = []
+    for path in args.captures:
+        if os.path.exists(os.path.join(path, "manifest.json")):
+            directories.append(path)  # named explicitly: analysed whatever its mode
+        else:
+            directories += [d for d in find_captures(path) if load_capture(d).mode == "timing_sync"]
+    if not directories:
+        print("no timing_sync captures found", file=sys.stderr)
+        return 1
+    results = [analyse(d, args.max_lag_ms, args.diagnose_camera_clock) for d in directories]
+    devices = device_summary(results)
+    if len(results) == 1:
+        exit_code = 0 if results[0]["usable"] else 2
+    else:
+        exit_code = 0 if all(s["enough"] for s in devices) else 2
+    if args.json:
+        print(json.dumps({"bursts": results, "devices": devices}, indent=2))
+        return exit_code
+    if len(results) == 1:
+        print_burst(results[0])
+        return exit_code
+    for r in results:
+        a = r[r["authoritativeClock"]]
+        offset = f"{a['offsetMs']:+7.2f} ms r={a['peakCorrelation']:.2f}" if a else "    n/a"
+        reason = "" if r["usable"] else "  <- " + r["warnings"][0]
+        print(f"   {r['sessionId'][:8]}  {r['device']}  turn {r['turnRateMedianRadPerS']:.2f}  {offset}  "
+              f"{'usable' if r['usable'] else 'REJECTED'}{reason}")
+    for s in devices:
+        print_device(s)
     return exit_code
 
 

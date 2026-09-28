@@ -4,7 +4,7 @@
 
 > Status: **draft**. The recording tool is M0a field capture (see
 > [`local-navigation-implementation.md`](local-navigation-implementation.md) §4), implemented in #12–#15
-> and measured on SM8850 (OnePlus CPH2747) on 2026-09-27/28; SM8450 is still to be measured. Model
+> and measured on SM8850 (OnePlus CPH2747) and SM8450 (Samsung S22) on 2026-09-27/28 (results: implementation doc §4). Model
 > regression recording (M0b) is not built yet: scenes marked "regression" are recorded as field evidence
 > for now. **Do not start the real recording before the baseline is tagged** (section 3, item 1):
 > trace-only data, with no frames or sensors, can later be used neither for threshold calibration nor
@@ -147,8 +147,9 @@ not part of the baseline and changes the device load, so never use it for perfor
      and the burst is rejected (this happened on the first attempts).
    - Slow, small movements are rejected too: the phone must turn, not just drift.
 4. Stop Guidance. Record three such bursts per device.
-5. On the computer: `python3 scripts/capture/timing_align.py <capture folder>`. It prints the offset
-   and "usable for M0 qualification: yes/no" with the reason; record again until three are usable.
+5. On the computer: `python3 scripts/capture/timing_align.py <folder with the captures>`. It lists
+   every burst (usable, or rejected with the reason) and the device result: the median offset over
+   the usable bursts with its range. Record again until there are at least three usable ones.
 
 ## 7. Scene card
 

@@ -13,7 +13,7 @@ python3 -m venv .venv && .venv/bin/pip install -r scripts/capture/requirements.t
 | `capture_stats.py <dir>` | Storage rate (MB/hour), frame and sensor cadence, where frames were lost (capture mailbox, encoder, before the analyzer), and whether the counters balance. Accepts a folder of captures. |
 | `contact_sheet.py <capture> --markers` | What the camera saw around each "missed alert" press. |
 | `contact_sheet.py <capture> --trace trace_<id>.jsonl --prompts` | What the camera saw around each prompt, centred on the frame that offered it, with its delivery or revocation. |
-| `timing_align.py <timing_sync capture>` | The offset between frames and the gyroscope: on camera timestamps only when the camera reports a REALTIME timestamp source, otherwise on source receipt times. Says whether the burst is usable for M0 qualification (exit code 0) or must be recorded again. |
+| `timing_align.py <burst or folder>` | The offset between frames and the gyroscope: on camera timestamps when the camera reports a REALTIME timestamp source, otherwise on source receipt times. For a folder, lists every burst (usable or rejected, with the reason) and each device's result: the median over at least three usable bursts, with its range as the uncertainty. |
 
 Getting the data off the phone: Settings → Diagnostics → Field capture → Export shares a ZIP. In
 bulk, without the share sheet:
@@ -30,7 +30,7 @@ only; arm it again before every burst). Stand still, start Guidance, and at once
 place**: briskly left and right about once a second (about ±30°), then up and down, pivoting at the
 wrist, pointed at a detailed scene a few metres away, for the ~15 s it records. Walking forward with
 the phone held steady is not turning; the gyroscope sees almost nothing and `timing_align.py`
-rejects the burst ("the phone barely turned"). Then run `timing_align.py` on that capture. The burst
+rejects the burst ("the phone barely turned"). Then run `timing_align.py` on the folder of bursts. The burst
 changes the device load, so never use it for performance numbers.
 
 Tests: `python3 -m unittest discover -s scripts/capture` (synthetic captures in the app's format,

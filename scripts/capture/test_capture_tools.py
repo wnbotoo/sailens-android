@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import capture_stats  # noqa: E402
 import contact_sheet  # noqa: E402
 import timing_align  # noqa: E402
-from sailens_capture import UnsupportedCapture, load_capture  # noqa: E402
+from sailens_capture import UnsupportedCapture, find_captures, load_capture  # noqa: E402
 
 START_NS = 5_000_000_000
 START_WALL = 1_700_000_000_000
@@ -228,7 +228,7 @@ class TimingAlignTest(unittest.TestCase):
             with self.subTest(offset_ms=offset_ms, gyro_hz=gyro_hz), tempfile.TemporaryDirectory() as root:
                 directory = synthetic_burst(root, offset_s=offset_ms / 1000, gyro_hz=gyro_hz)
                 result = timing_align.analyse(directory, max_lag_ms=100)
-                self.assertTrue(result["usableForQualification"])
+                self.assertTrue(result["usable"])
                 self.assertAlmostEqual(result["camera"]["offsetMs"], offset_ms, delta=2.0)
                 self.assertAlmostEqual(result["received"]["offsetMs"], offset_ms - 28.0, delta=3.0)
                 self.assertGreater(result["camera"]["peakCorrelation"], 0.9)
@@ -240,14 +240,14 @@ class TimingAlignTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             result = timing_align.analyse(synthetic_burst(root, gyro_still=True), max_lag_ms=100)
         self.assertLess(result["turnRateMedianRadPerS"], 0.05)
-        self.assertFalse(result["usableForQualification"])
+        self.assertFalse(result["usable"])
         self.assertTrue(any("barely turned" in w for w in result["warnings"]))
 
     def test_negative_control_real_motion_unrelated_to_the_gyro_never_qualifies(self):
         with tempfile.TemporaryDirectory() as root:
             result = timing_align.analyse(synthetic_burst(root, gyro_independent=True), max_lag_ms=100)
         self.assertGreater(result["pairsMoving"], 200)  # passes the motion gate: this tests correlation
-        self.assertFalse(result["usableForQualification"])
+        self.assertFalse(result["usable"])
         self.assertTrue(any("correlate only" in w for w in result["warnings"]))
 
     def test_steady_frame_loss_is_reported_from_the_counters(self):
@@ -262,14 +262,14 @@ class TimingAlignTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             result = timing_align.analyse(synthetic_burst(root, seconds=1.5), max_lag_ms=100)
         self.assertGreater(result["camera"]["peakCorrelation"], 0.9)  # otherwise a good result
-        self.assertFalse(result["usableForQualification"])
+        self.assertFalse(result["usable"])
         self.assertTrue(any("parts of the burst could be checked" in w for w in result["warnings"]))
 
     def test_a_burst_without_motion_asks_for_a_new_recording(self):
         with tempfile.TemporaryDirectory() as root:
             result = timing_align.analyse(synthetic_burst(root, moving=False), max_lag_ms=100)
         self.assertTrue(any("insufficient motion" in w for w in result["warnings"]))
-        self.assertFalse(result["usableForQualification"])
+        self.assertFalse(result["usable"])
 
     def test_an_unknown_camera_clock_is_never_qualified_and_receipt_time_is_authoritative(self):
         with tempfile.TemporaryDirectory() as root:
@@ -280,7 +280,7 @@ class TimingAlignTest(unittest.TestCase):
             self.assertEqual(result["authoritativeClock"], "received")
             self.assertIsNone(result["camera"])
             self.assertAlmostEqual(result["received"]["offsetMs"], 12.0 - 28.0, delta=3.0)
-            self.assertTrue(result["usableForQualification"])
+            self.assertTrue(result["usable"])
             self.assertTrue(any("not comparable" in w for w in result["warnings"]))
 
             diagnostic = timing_align.analyse(directory, max_lag_ms=100, diagnose_camera_clock=True)["camera"]
@@ -290,8 +290,39 @@ class TimingAlignTest(unittest.TestCase):
     def test_dropped_gyroscope_samples_disqualify_the_burst(self):
         with tempfile.TemporaryDirectory() as root:
             result = timing_align.analyse(synthetic_burst(root, stats={"sensorEventsDropped": 5}), max_lag_ms=100)
-        self.assertFalse(result["usableForQualification"])
+        self.assertFalse(result["usable"])
         self.assertTrue(any("dropped by capture" in w for w in result["warnings"]))
+
+
+class DeviceSummaryTest(unittest.TestCase):
+    """B': a device result is the median over repeated usable bursts, with their spread as the
+    uncertainty; per-burst segment disagreement does not reject a burst."""
+
+    def test_repeated_bursts_give_a_median_and_a_spread_and_rejected_ones_are_left_out(self):
+        with tempfile.TemporaryDirectory() as root:
+            for i, offset_ms in enumerate((10.0, 12.0, 16.0)):
+                synthetic_burst(os.path.join(root, f"b{i}"), offset_s=offset_ms / 1000)
+            synthetic_burst(os.path.join(root, "still"), moving=False)
+            with redirect_stdout(io.StringIO()) as out:
+                code = timing_align.main([root, "--max-lag-ms", "100"])
+            results = [timing_align.analyse(d, 100) for d in find_captures(root)]
+        device = timing_align.device_summary(results)[0]
+        self.assertEqual(code, 0, out.getvalue())
+        self.assertEqual((device["bursts"], device["usableBursts"]), (4, 3))
+        self.assertTrue(device["enough"])
+        self.assertEqual(device["clock"], "camera")
+        self.assertAlmostEqual(device["offsetMedianMs"], 12.0, delta=2.0)
+        self.assertAlmostEqual(device["offsetMaxMs"] - device["offsetMinMs"], 6.0, delta=3.0)
+        self.assertAlmostEqual(device["receiptLatencyMedianMs"], 28.0, delta=3.0)
+
+    def test_fewer_than_three_usable_bursts_give_no_device_result(self):
+        with tempfile.TemporaryDirectory() as root:
+            for i in range(2):
+                synthetic_burst(os.path.join(root, f"b{i}"))
+            with redirect_stdout(io.StringIO()):
+                code = timing_align.main([root, "--max-lag-ms", "100"])
+        self.assertEqual(code, 2)
+
 
 
 if __name__ == "__main__":

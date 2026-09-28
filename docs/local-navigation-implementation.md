@@ -324,16 +324,21 @@ timebase. `UNKNOWN` is monotonic with an unspecified origin, and an unreported s
 the camera result is then not measured (`cameraComparable = false`), must never qualify the camera
 clock as gyro-comparable however good a correlation looks, and the source receipt time
 (elapsedRealtime by construction) is the authoritative measurement. An empirical estimate of a
-non-REALTIME camera clock is available as a diagnostic only. A burst is usable for qualification
-only if it is complete, capture dropped no sensor samples, the phone really turned (median gyro
-rate across the optical axis ≥ 0.15 rad/s — walking with the phone steady measured 0.01–0.09, turning
-in place 0.20–0.24: image motion cannot tell turning from walking forward, and
-on the device noise alone reaches ~0.5 px per frame), and on the
-authoritative clock the image-motion/gyro correlation is at least 0.5 (a negative control with real
-motion unrelated to the gyro gives ≈0.3), all four parts were checked and agree within 5 ms, and
-the offset is not at the search edge; otherwise it is recorded again. Heavy frame loss is a
-warning. The thresholds are conservative until the target devices' real bursts are in — a false
-rejection only costs another burst.
+non-REALTIME camera clock is available as a diagnostic only. A burst is **usable** only if it is
+complete, capture dropped no sensor samples, the phone really turned (median gyro rate across the
+optical axis ≥ 0.15 rad/s — walking with the phone steady measured 0.01–0.09, turning in place
+0.20–0.24: image motion cannot tell turning from walking forward, and on the device noise alone
+reaches ~0.5 px per frame), and on the authoritative clock the image-motion/gyro correlation is at
+least 0.5 (a negative control with real motion unrelated to the gyro gives ≈0.3), all four parts
+could be checked (a full burst) and the offset is not at the search edge; otherwise it is recorded
+again. Disagreement between the four parts is a warning: hand-made motion often leaves one weak
+part. Heavy frame loss is a warning.
+
+**Device result (decided 2026-09-28, "B′").** M0a *measures* frame-to-gyro alignment; it does not
+gate on a precision. The device result is the median offset over at least three usable bursts,
+with their range and standard deviation recorded as the uncertainty the geometry layer must design
+for (`timing_align.py <folder>`). An earlier rule — three bursts agreeing within 5 ms — was dropped
+when more bursts showed a real spread of 9–14 ms per device (below).
 
 **Controls (PR-C, debug builds; these fill the placeholders of the recording manual, PR #9)**
 
@@ -344,9 +349,9 @@ rejection only costs another burst.
 | Keep, delete | Capture list: per session start time, size, status (recording / complete / incomplete with reason), kept, exported, frames and markers; keep, delete and export are refused while any capture is recording (the list is read-only then; the tool must not disturb the evidence it is collecting); delete asks for confirmation, and a refused or failed action is reported |
 | Export | Finished sessions only. ZIP built into `cacheDir/capture_exports/` (free space checked first) off the capture writer thread, with the session protected from retention and delete meanwhile. Capture and export never overlap in either direction: while a ZIP is being built, starting Guidance is refused with "finish exporting first" (debug `GuidanceStartGate`), and a capture that starts anyway ends at once as incomplete with `failureReason = export_in_progress`. A ZIP whose session cannot be marked exported is discarded and reported as a failure. The ZIP is then shared via FileProvider `<cache-path>`; `files/captures/` itself is never exposed; the session is marked exported; exports older than a day cleared at app start and when the list opens (a share target reads the ZIP after the share sheet closes, with no signal when it is done). `adb` + `run-as` documented as the bulk fallback |
 | Viewing frames around a prompt | On the PC: `scripts/capture/contact_sheet.py` renders ±N s around a `prompt_outcome` (centred on the offering frame: trace `sourceSequenceNumber` → `frameTimestamp` = capture `sensorTimestampNanos`) or a marker (its `elapsedRealtimeNanos` against frame receipt times) |
-| Storage | Estimated ≈ 0.7–1 GB/hour; measured on SM8850: 0.56–0.74 GB/hour of field evidence (0.65 on a 4-minute outdoor walk), plus 41 MB per timing burst; measured in M0a with `scripts/capture/capture_stats.py` (also cadence, gaps, drops, counter balance, wall-clock jumps) and written back into the manual |
+| Storage | Estimated ≈ 0.7–1 GB/hour; measured: 0.56–0.74 GB/hour of field evidence on SM8850 (0.65 on a 4-minute outdoor walk), 0.73 on SM8450, plus 41 MB per timing burst; measured in M0a with `scripts/capture/capture_stats.py` (also cadence, gaps, drops, counter balance, wall-clock jumps) and written back into the manual |
 | Retention | Runs at debug app start (whether or not capture is on), before a capture starts, when the capture list opens, and every 30 s during a capture. A session older than 7 days, not exported or pinned, is deleted at the next of these. The 2 GB cap is enforced during capture: older unpinned sessions go first, and if the active capture alone would exceed it, it ends as incomplete with `failureReason = storage_limit_reached` (checked after every frame) instead of writing until the disk is full |
-| **"Missed alert" marker** | Volume Down while capture is active: only `ACTION_DOWN` with `repeatCount == 0` counts, the key is consumed only then, the time, session and last stored frame are fixed when the press is observed (a busy writer delays the write, not the event), and a short vibration confirms only once the marker was written. Plus a large on-screen button. Works eyes-free in a foreground Guidance session; no promise for a locked screen or background (there is no background Guidance yet). TalkBack behaviour verified on device |
+| **"Missed alert" marker** | Volume Down while capture is active: only `ACTION_DOWN` with `repeatCount == 0` counts, the key is consumed only then, the time, session and last stored frame are fixed when the press is observed (a busy writer delays the write, not the event), and a short vibration confirms only once the marker was written. Plus a large on-screen button. Works eyes-free in a foreground Guidance session; no promise for a locked screen or background (there is no background Guidance yet). Verified under TalkBack on SM8850 and SM8450 |
 
 **Privacy.** Captures contain faces and places (accepted). They are excluded from Auto Backup
 (`backup_rules.xml`) and from cloud backup and device transfer (`data_extraction_rules.xml`); export
@@ -358,6 +363,35 @@ Volume Down under TalkBack; whether the default Guidance session exposes a logic
 that switches physical cameras (`LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_ID`) — static intrinsics
 describe the active physical camera, so if it switches, per-frame physical id / dynamic intrinsics
 are added then, not before.
+
+**M0a results (2026-09-27/28; capture code as merged in #15, `1137c3e`; Guidance running during every capture)**
+
+| | SM8850 — OnePlus CPH2747, SDK 36 | SM8450 — Samsung SM-S9010 (S22), SDK 36 |
+|---|---|---|
+| Camera timestamp source | `REALTIME` (all cameras) | `REALTIME` |
+| Back camera | Logical multi-camera: ultrawide 2.31 mm, main 5.59 mm, tele 12.19 mm; zoom 0.67–20; recorded intrinsics are the main camera's | Logical multi-camera (physical 2/5/6); zoom 0.6–10; recorded intrinsics are the 5.4 mm main camera's |
+| Physical-camera switching | None seen: close-up at a few cm, dim room, outdoor walk | None seen: close-up at 5–10 cm, dim room |
+| Analysis stream / frame rate | 1280×720 (16:9 crop of the 4:3 array), 30 fps (AE range 10–30) | 1280×720, 30 fps (fixed 10–30 and 7–30 ranges offered) |
+| Lens distortion reported | All zeros (not reported in practice) | Reported: 0.073, −0.107, 0.047, 0, 0 |
+| Gyroscope rate (`SENSOR_DELAY_GAME`) | 46.8 Hz, very regular | 49.7 Hz |
+| Burst throughput (30 fps, Guidance running) | 0% loss in every burst | 0–0.4%; the first burst after start ~5%, before the analyzer (warm-up) |
+| **Frame→gyro offset, camera clock** (gyro ≈ frame + δ) | **+2.3 ms** median, range −5.2…+8.6, sd 4.8 (11 bursts) | **+12.9 ms** median, range +8.2…+17.2, sd 3.5 (8 bursts) |
+| Camera time → app receipt (latency) | **60.8 ms**, ±1 ms across bursts | **67.4 ms** |
+| Field evidence | 4.3–5 Hz; 0.56–0.74 GB/h | 4.29 Hz; 0.73 GB/h; no drops |
+| Volume Down marker under TalkBack | Works (vibration confirms) | Works |
+
+What this settles for M3o:
+- **Use camera timestamps**, not receipt times: both devices are `REALTIME`, and receipt adds
+  60–70 ms of delivery latency.
+- The camera clock itself is stable — camera-to-receipt time stays within ±1 ms — but where the
+  image content sits relative to its start-of-exposure timestamp varies by 9–14 ms between bursts
+  on the same phone (in clusters by session). Exposure time is the likely cause and is not recorded;
+  M3o either designs for **±10 ms** or, if its budget is tighter, first records per-frame
+  `SENSOR_EXPOSURE_TIME` / `SENSOR_ROLLING_SHUTTER_SKEW` (the same Camera2 capture-result hook
+  would also give `LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_ID`). For scale: 10 ms at a walking turn
+  rate of 0.2–0.5 rad/s is 0.1–0.3°.
+- Physical-camera switching was not seen, so static intrinsics stand; the per-frame physical id is
+  not added now.
 
 **Operating envelope doc** (`docs/guidance-operating-envelope.md`): phone placement and orientation,
 walking only, lighting, weather, indoor/outdoor, stairs, road crossings, crowd density, headphones,
