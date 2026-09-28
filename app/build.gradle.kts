@@ -1,3 +1,4 @@
+import java.security.MessageDigest
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
@@ -35,17 +36,63 @@ val availableLitertNpuRuntimeFeatures = litertNpuRuntimeFeatureModules
     .map { moduleName -> ":litert_npu_runtime_libraries_jit:$moduleName" }
     .toSet()
 
-// Build identity for recorded data: the commit this APK was built from, with "-dirty" when tracked
-// files were modified. Field captures record it, so data from different builds is never pooled.
-// Empty when git is unavailable (a source archive); captures then record no SHA and the PC tools
-// refuse to produce a per-build result from them.
-val gitSha: String = runCatching {
+// Build provenance for recorded data (field captures): which code and which model weights produced
+// the APK. Guidance's behaviour depends on both, and the weights are not in git (bring your own
+// model), so the commit alone does not identify a baseline.
+//
+// Commit: HEAD, with "-dirty" when `git status --porcelain` lists anything -- modified or untracked
+// files alike (an untracked source file is compiled too). The ignored weights under assets/ never
+// appear there. Empty when git is unavailable (a source archive); the PC tools then refuse to pool
+// such captures. scripts/test_build_identity.py locks this command's semantics.
+val buildGitSha: String = runCatching {
     val sha = providers.exec { commandLine("git", "rev-parse", "HEAD") }
         .standardOutput.asText.get().trim()
-    val dirty = providers.exec { commandLine("git", "status", "--porcelain", "--untracked-files=no") }
+    val dirty = providers.exec { commandLine("git", "status", "--porcelain") }
         .standardOutput.asText.get().isNotBlank()
     if (Regex("[0-9a-f]{40}").matches(sha)) sha + (if (dirty) "-dirty" else "") else ""
 }.getOrDefault("")
+
+/**
+ * Writes `build_provenance.json` into a generated assets directory: the commit and the SHA-256 of
+ * every packaged `.tflite`. Hashing happens here, once per changed model, never at capture time.
+ */
+abstract class GenerateBuildProvenance : DefaultTask() {
+    @get:Input
+    abstract val gitSha: Property<String>
+
+    @get:InputFiles
+    @get:PathSensitive(PathSensitivity.NAME_ONLY)
+    abstract val models: ConfigurableFileCollection
+
+    @get:OutputDirectory
+    abstract val outputDir: DirectoryProperty
+
+    @TaskAction
+    fun generate() {
+        val hashes = models.files.filter { it.isFile }.sortedBy { it.name }.map { file ->
+            val digest = MessageDigest.getInstance("SHA-256")
+            file.inputStream().use { input ->
+                val buffer = ByteArray(1 shl 16)
+                while (true) {
+                    val read = input.read(buffer)
+                    if (read < 0) break
+                    digest.update(buffer, 0, read)
+                }
+            }
+            file.name to "sha256:" + digest.digest().joinToString("") { "%02x".format(it) }
+        }
+        val artifacts = hashes.joinToString(",") { (name, hash) -> "\"$name\":\"$hash\"" }
+        val out = outputDir.get().asFile
+        out.mkdirs()
+        out.resolve("build_provenance.json")
+            .writeText("{\"gitSha\":\"${gitSha.get()}\",\"modelArtifacts\":{$artifacts}}\n")
+    }
+}
+
+val generateBuildProvenance = tasks.register<GenerateBuildProvenance>("generateBuildProvenance") {
+    gitSha.set(buildGitSha)
+    models.from(fileTree("src/main/assets") { include("*.tflite") })
+}
 
 android {
     namespace = "com.sailens"
@@ -68,7 +115,6 @@ android {
         // and nothing else.
         buildConfigField("String", "APP_LICENSE", "\"Apache-2.0\"")
         buildConfigField("String", "APP_SOURCE_URL", "\"https://github.com/wnbotoo/sailens-android\"")
-        buildConfigField("String", "GIT_SHA", "\"$gitSha\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -119,6 +165,12 @@ android {
             // NOTE: native-lib load failures surface at runtime, not build — smoke-test a release build.
             useLegacyPackaging = enableLitertNpuRuntime
         }
+    }
+}
+
+androidComponents {
+    onVariants { variant ->
+        variant.sources.assets?.addGeneratedSourceDirectory(generateBuildProvenance, GenerateBuildProvenance::outputDir)
     }
 }
 

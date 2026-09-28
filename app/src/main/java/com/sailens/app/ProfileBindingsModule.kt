@@ -10,9 +10,9 @@ import com.sailens.runtime.hardware.DeviceHardwareProfileProvider
 import com.sailens.guidance.config.PerceptionConfig
 import com.sailens.guidance.config.PipelinePerformanceBudget
 import com.sailens.guidance.config.TraceRuntimeConfig
-import com.sailens.shell.app.BuildIdentity
 import com.sailens.shell.guidance.overlay.SceneOverlayConfig
 import com.sailens.shell.guidance.settings.PerceptionSettingsStore
+import org.koin.android.ext.koin.androidContext
 import org.koin.dsl.module
 
 /**
@@ -24,8 +24,8 @@ import org.koin.dsl.module
  * cohesive preset" and "each consumer gets its slice".
  */
 val profileBindingsModule = module {
-    // Provenance for field captures (debug builds): which commit recorded the data.
-    single { BuildIdentity(gitSha = BuildConfig.GIT_SHA.ifEmpty { null }) }
+    // Provenance for field captures (debug builds): which commit and model weights recorded the data.
+    single { readBuildIdentity(androidContext()) }
     single {
         SailensRuntimeProfile.standard(
             targetHardwareProfile = DeviceHardwareProfileProvider.detect(),

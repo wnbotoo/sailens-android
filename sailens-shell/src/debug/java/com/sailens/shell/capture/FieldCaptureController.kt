@@ -70,6 +70,7 @@ internal data class CaptureDeviceInfo(
     val manufacturer: String,
     val model: String,
     val sdkInt: Int,
+    val modelArtifacts: Map<String, String> = emptyMap(),
 )
 
 /** One row of the capture list. */
@@ -403,6 +404,7 @@ internal class FieldCaptureController(
             appVersionName = deviceInfo.appVersionName,
             appVersionCode = deviceInfo.appVersionCode,
             gitSha = deviceInfo.gitSha,
+            modelArtifacts = deviceInfo.modelArtifacts,
             deviceManufacturer = deviceInfo.manufacturer,
             deviceModel = deviceInfo.model,
             sdkInt = deviceInfo.sdkInt,

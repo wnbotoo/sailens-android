@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -172,6 +173,7 @@ def summarize(directory):
         "failureReason": m.get("failureReason"),
         "device": f"{m.get('deviceManufacturer')} {m.get('deviceModel')} (SDK {m.get('sdkInt')})",
         "gitSha": m.get("gitSha"),
+        "modelArtifacts": m.get("modelArtifacts", {}),
         "timestampSource": (m.get("camera") or {}).get("timestampSource"),
         "durationS": round(duration_s, 1) if duration_s is not None else None,
         "bytes": size,
@@ -193,6 +195,8 @@ def summarize(directory):
 def print_summary(s):
     print(f"== {s['sessionId']}  [{s['mode']}]  {'complete' if s['complete'] else 'INCOMPLETE: ' + str(s['failureReason'])}")
     print(f"   {s['device']}, build {s['gitSha'] or 'unknown (no git SHA recorded)'}, camera timestamp source: {s['timestampSource']}")
+    models = s["modelArtifacts"]
+    print("   models: " + (", ".join(f"{name} {digest}" for name, digest in sorted(models.items())) or "not recorded"))
     print(f"   duration {s['durationS']} s, {s['bytes'] / 1e6:.1f} MB, {s['mbPerHour']} MB/hour")
     f = s["frames"]
     print(f"   frames {f['count']} @ {f['rateHz']} Hz (median {f['medianMs']} ms, p95 {f['p95Ms']}, max {f['maxMs']}), "
@@ -216,21 +220,76 @@ def print_summary(s):
         print(f"   ~ {warning}")
 
 
+def parse_baseline_tag(message):
+    """Model hashes from a baseline tag's message: lines "model <file> sha256:<hex>"."""
+    models = {}
+    for line in message.splitlines():
+        parts = line.split()
+        if len(parts) == 3 and parts[0] == "model" and parts[2].startswith("sha256:"):
+            models[parts[1]] = parts[2]
+    return models
+
+
+def read_baseline_tag(tag, repo="."):
+    """(commit SHA, model hashes) of an annotated baseline tag, via git."""
+    def run(*args):
+        return subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, text=True).stdout
+    sha = run("rev-parse", f"{tag}^{{commit}}").strip()
+    return sha, parse_baseline_tag(run("tag", "-l", "--format=%(contents)", tag))
+
+
+def provenance_problems(summary, expected_sha, expected_models):
+    """Why a capture does not come from the expected build: code commit and every model hash."""
+    problems = []
+    if expected_sha is not None and summary["gitSha"] != expected_sha:
+        problems.append(f"built from {summary['gitSha'] or 'an unknown commit'}, baseline is {expected_sha}")
+    recorded = summary["modelArtifacts"]
+    for name, digest in sorted((expected_models or {}).items()):
+        if recorded.get(name) != digest:
+            problems.append(f"{name} is {recorded.get(name) or 'not recorded'}, baseline is {digest}")
+    if expected_models:
+        for name in sorted(set(recorded) - set(expected_models)):
+            problems.append(f"{name} is packaged but not part of the baseline")
+    return problems
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("path", help="a capture directory, or a folder containing captures")
     parser.add_argument("--json", action="store_true", help="print JSON instead of text")
+    parser.add_argument("--baseline-tag", help="check every capture against this annotated tag: its commit "
+                        "and the 'model <file> sha256:<hex>' lines in its message")
+    parser.add_argument("--expect-git-sha", help="check every capture was built from this commit")
+    parser.add_argument("--expect-model", action="append", default=[], metavar="FILE=sha256:HEX",
+                        help="check every capture packaged this model (repeatable)")
     args = parser.parse_args(argv)
     summaries = [summarize(d) for d in find_captures(args.path)]
     if not summaries:
         print(f"no captures under {args.path}", file=sys.stderr)
         return 1
+
+    expected_sha = args.expect_git_sha
+    expected_models = dict(item.split("=", 1) for item in args.expect_model)
+    if args.baseline_tag:
+        expected_sha, expected_models = read_baseline_tag(args.baseline_tag)
+        if not expected_models:
+            print(f"{args.baseline_tag} lists no 'model <file> sha256:<hex>' lines", file=sys.stderr)
+            return 1
+    checking = expected_sha is not None or bool(expected_models)
+    for s in summaries:
+        s["provenanceProblems"] = provenance_problems(s, expected_sha, expected_models) if checking else []
+
     if args.json:
         print(json.dumps(summaries, indent=2))
     else:
         for s in summaries:
             print_summary(s)
-    return 0
+            for problem in s["provenanceProblems"]:
+                print(f"   ! NOT THE BASELINE: {problem}")
+        if checking:
+            bad = sum(1 for s in summaries if s["provenanceProblems"])
+            print(f"== baseline check: {len(summaries) - bad} of {len(summaries)} captures match")
+    return 3 if any(s["provenanceProblems"] for s in summaries) else 0
 
 
 if __name__ == "__main__":

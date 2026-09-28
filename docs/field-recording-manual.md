@@ -52,11 +52,25 @@ Capture is controlled on **Settings → Diagnostics → Field capture** (debug b
 
 ## 3. Pre-recording checklist (every outing)
 
-1. **The build is the baseline.** Recordings must come from the debug APK built from the tag
-   **`baseline/stage2-1`** (a clean checkout of that tag; local weights in the ignored `assets/` do not
-   count as changes). Every stage 3 change is compared against this data; mixing builds breaks the
-   comparison. Each capture records the commit it was built from: `capture_stats.py` prints it, and it
-   must equal `git rev-parse baseline/stage2-1` with no `-dirty` suffix.
+1. **The build is the baseline — code and model weights.** Guidance's prompts depend on both, and the
+   weights are not in git, so the baseline is the annotated tag **`baseline/stage2-1`** *plus* the model
+   files it names. Every stage 3 change is compared against this data; mixing builds or weights breaks
+   the comparison.
+   - **Recording build:** a clean checkout of the tag, with exactly the tag's model files in
+     `app/src/main/assets/` (they are ignored by git, so they do not make the build dirty).
+   - **Every day, check the captures:**
+     ```bash
+     python3 scripts/capture/capture_stats.py <folder> --baseline-tag baseline/stage2-1
+     ```
+     Each capture records the commit it was built from and the SHA-256 of every packaged model. Any
+     mismatch — another commit, `-dirty`, other weights — prints `NOT THE BASELINE`; such captures do
+     not belong in the baseline set.
+   - **Creating the tag (once, after the manual's PR is merged):** on that merge commit, with the
+     chosen weights' hashes (`sha256sum app/src/main/assets/*.tflite`):
+     ```bash
+     git tag -a baseline/stage2-1 <merge commit> -m "Stage 2 baseline" -m "model det.tflite sha256:<hex>
+     model sem.tflite sha256:<hex>"
+     ```
 2. **Run the full device test suite first, then install the recording build.**
    `connectedDebugAndroidTest` **uninstalls** the app when it finishes, so the order is:
    ```bash

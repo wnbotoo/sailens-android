@@ -75,7 +75,10 @@ internal class RecordingLog : LogService {
     override fun error(tag: String, message: String, throwable: Throwable?) = Unit
 }
 
-internal val TEST_DEVICE = CaptureDeviceInfo("1.0", 1, null, "Acme", "Phone", 35)
+internal val TEST_DEVICE = CaptureDeviceInfo(
+    "1.0", 1, "0123456789abcdef0123456789abcdef01234567", "Acme", "Phone", 35,
+    modelArtifacts = mapOf("sem.tflite" to "sha256:5e", "det.tflite" to "sha256:de"),
+)
 
 /**
  * A YUV_420_888 frame with padded rows and interleaved chroma (pixel stride 2), the layout a real

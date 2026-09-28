@@ -145,6 +145,7 @@ internal fun captureDeviceInfo(context: Context, build: BuildIdentity?): Capture
         appVersionName = packageInfo?.versionName,
         appVersionCode = packageInfo?.longVersionCode,
         gitSha = build?.gitSha,
+        modelArtifacts = build?.modelArtifacts.orEmpty(),
         manufacturer = Build.MANUFACTURER,
         model = Build.MODEL,
         sdkInt = Build.VERSION.SDK_INT,

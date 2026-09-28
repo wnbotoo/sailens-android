@@ -46,10 +46,23 @@
 
 ## 3. 录制前检查（每次出门前）
 
-1. **版本是基线版本。** 录制必须用从 tag **`baseline/stage2-1`** 构建的 debug 包（该 tag 的干净 checkout；
-   被忽略的 `assets/` 里的本地权重不算改动）。阶段 3 的所有改动都拿这批数据对比；混进别的版本，对比就失效了。
-   每份采集都记录了构建它的 commit：`capture_stats.py` 会打印出来，它必须等于 `git rev-parse baseline/stage2-1`，
-   且没有 `-dirty` 后缀。
+1. **版本是基线版本——代码和模型权重都算。** Guidance 的提示取决于两者，而权重不在 git 里，所以基线是带注释的
+   tag **`baseline/stage2-1`** *加上*它列出的模型文件。阶段 3 的所有改动都拿这批数据对比；混进别的版本或别的权重，
+   对比就失效了。
+   - **录制用的包：** 该 tag 的干净 checkout，`app/src/main/assets/` 里放的正是 tag 列出的模型文件（它们被 git 忽略，
+     不会让构建变成 dirty）。
+   - **每天检查采集：**
+     ```bash
+     python3 scripts/capture/capture_stats.py <文件夹> --baseline-tag baseline/stage2-1
+     ```
+     每份采集都记录了构建它的 commit 和每个打包模型的 SHA-256。任何不一致——别的 commit、`-dirty`、别的权重——都会
+     打印 `NOT THE BASELINE`；这样的采集不能算进基线数据。
+   - **创建 tag（只做一次，在本手册的 PR 合入之后）：** 打在那个合入 commit 上，写上所选权重的哈希
+     （`sha256sum app/src/main/assets/*.tflite`）：
+     ```bash
+     git tag -a baseline/stage2-1 <合入 commit> -m "Stage 2 baseline" -m "model det.tflite sha256:<hex>
+     model sem.tflite sha256:<hex>"
+     ```
 2. **先跑一次全量真机测试，再装录制用的包。** `connectedDebugAndroidTest` 跑完会**卸载** app，所以
    顺序是：
    ```bash

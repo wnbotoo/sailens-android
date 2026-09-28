@@ -135,6 +135,29 @@ class StatsTest(unittest.TestCase):
             self.assertIsNone(f["knownLoss"])
             self.assertIsNone(f["upstreamEstimate"])
 
+    def test_baseline_check_needs_the_same_commit_and_the_same_model_weights(self):
+        sem, det = "sha256:" + "5e" * 32, "sha256:" + "de" * 32
+        with tempfile.TemporaryDirectory() as root:
+            same = write_capture(root, "same", manifest_overrides={
+                "gitSha": BUILD_A, "modelArtifacts": {"sem.tflite": sem, "det.tflite": det}})
+            expect = ["--expect-git-sha", BUILD_A, "--expect-model", f"sem.tflite={sem}", "--expect-model", f"det.tflite={det}"]
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(capture_stats.main([same, *expect]), 0)
+            # Same code, different weights: not the baseline.
+            other = write_capture(root, "other", manifest_overrides={
+                "gitSha": BUILD_A, "modelArtifacts": {"sem.tflite": "sha256:" + "00" * 32, "det.tflite": det}})
+            with redirect_stdout(io.StringIO()) as out:
+                self.assertEqual(capture_stats.main([other, *expect]), 3)
+            self.assertIn("NOT THE BASELINE: sem.tflite", out.getvalue())
+            # No provenance at all (an older capture): not the baseline either.
+            old = write_capture(root, "old")
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(capture_stats.main([old, *expect]), 3)
+
+    def test_a_baseline_tag_message_lists_its_model_hashes(self):
+        message = "Stage 2 baseline\n\nmodel sem.tflite sha256:ab\nmodel det.tflite sha256:cd\nnot a model line\n"
+        self.assertEqual(capture_stats.parse_baseline_tag(message), {"sem.tflite": "sha256:ab", "det.tflite": "sha256:cd"})
+
     def test_unbalanced_counters_are_reported(self):
         with tempfile.TemporaryDirectory() as root:
             directory = write_capture(root, "s", stats={"framesOffered": 3, "framesEncoded": 1, "framesDroppedByEncoder": 0})
