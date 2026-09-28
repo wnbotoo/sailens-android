@@ -169,6 +169,9 @@ class FieldCaptureControllerTest {
         val session = read("s1")
         assertTrue(session.manifest.complete)
         assertEquals("sm8850", session.manifest.targetHardwareProfile)
+        // Build provenance: the code and the model weights Guidance ran with.
+        assertEquals(TEST_DEVICE.gitSha, session.manifest.gitSha)
+        assertEquals(TEST_DEVICE.modelArtifacts, session.manifest.modelArtifacts)
         assertEquals(listOf("gravity", "gyroscope"), session.manifest.sensorsAvailable)
         assertEquals(3L, session.manifest.stats.framesOffered)
         assertEquals(

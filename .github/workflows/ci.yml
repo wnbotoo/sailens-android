@@ -45,9 +45,11 @@ jobs:
       - name: Verify release keeps announcement strings
         run: python3 scripts/verify-release-strings.py
 
-      # The PC capture tools read what the app writes; keep them in step with the capture schema.
-      - name: Test capture tools
+      # The PC tools read what the app writes (captures, traces); keep them in step with the schemas.
+      - name: Test PC tools and build provenance
         run: |
           python3 -m venv /tmp/capture-tools
           /tmp/capture-tools/bin/pip install --quiet -r scripts/capture/requirements.txt
           /tmp/capture-tools/bin/python -m unittest discover -s scripts/capture -v
+          /tmp/capture-tools/bin/python -m unittest discover -s scripts -p "test_export_prompt_labels.py" -v
+          /tmp/capture-tools/bin/python -m unittest discover -s scripts -p "test_build_identity.py" -v

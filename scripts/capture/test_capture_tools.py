@@ -18,10 +18,14 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import capture_stats  # noqa: E402
 import contact_sheet  # noqa: E402
 import timing_align  # noqa: E402
-from sailens_capture import UnsupportedCapture, load_capture  # noqa: E402
+from sailens_capture import UnsupportedCapture, find_captures, load_capture  # noqa: E402
 
 START_NS = 5_000_000_000
 START_WALL = 1_700_000_000_000
+BUILD_A = "a" * 40
+BUILD_B = "b" * 40
+MODELS_A = {"det.tflite": "sha256:" + "d1" * 32, "sem.tflite": "sha256:" + "51" * 32}
+MODELS_B = {"det.tflite": "sha256:" + "d1" * 32, "sem.tflite": "sha256:" + "52" * 32}
 
 
 def write_capture(root, session_id, mode="field_evidence", frames=(), sensors=(), markers=(), anchors=None,
@@ -133,6 +137,29 @@ class StatsTest(unittest.TestCase):
             self.assertIsNone(f["knownLoss"])
             self.assertIsNone(f["upstreamEstimate"])
 
+    def test_baseline_check_needs_the_same_commit_and_the_same_model_weights(self):
+        sem, det = "sha256:" + "5e" * 32, "sha256:" + "de" * 32
+        with tempfile.TemporaryDirectory() as root:
+            same = write_capture(root, "same", manifest_overrides={
+                "gitSha": BUILD_A, "modelArtifacts": {"sem.tflite": sem, "det.tflite": det}})
+            expect = ["--expect-git-sha", BUILD_A, "--expect-model", f"sem.tflite={sem}", "--expect-model", f"det.tflite={det}"]
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(capture_stats.main([same, *expect]), 0)
+            # Same code, different weights: not the baseline.
+            other = write_capture(root, "other", manifest_overrides={
+                "gitSha": BUILD_A, "modelArtifacts": {"sem.tflite": "sha256:" + "00" * 32, "det.tflite": det}})
+            with redirect_stdout(io.StringIO()) as out:
+                self.assertEqual(capture_stats.main([other, *expect]), 3)
+            self.assertIn("NOT THE BASELINE: sem.tflite", out.getvalue())
+            # No provenance at all (an older capture): not the baseline either.
+            old = write_capture(root, "old")
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(capture_stats.main([old, *expect]), 3)
+
+    def test_a_baseline_tag_message_lists_its_model_hashes(self):
+        message = "Stage 2 baseline\n\nmodel sem.tflite sha256:ab\nmodel det.tflite sha256:cd\nnot a model line\n"
+        self.assertEqual(capture_stats.parse_baseline_tag(message), {"sem.tflite": "sha256:ab", "det.tflite": "sha256:cd"})
+
     def test_unbalanced_counters_are_reported(self):
         with tempfile.TemporaryDirectory() as root:
             directory = write_capture(root, "s", stats={"framesOffered": 3, "framesEncoded": 1, "framesDroppedByEncoder": 0})
@@ -171,13 +198,14 @@ class ContactSheetTest(unittest.TestCase):
 
 def synthetic_burst(root, offset_s=0.012, latency_s=0.028, focal=180.0, seconds=8.0, moving=True,
                     camera_origin_ns=0, timestamp_source="realtime", stats=None, gyro_hz=200.0,
-                    gyro_independent=False, keep_every=1):
+                    gyro_independent=False, keep_every=1, gyro_still=False, git_sha=BUILD_A, models=MODELS_A):
     """A timing_sync capture of a camera turning over a smooth texture. The frame at camera time t
     shows the orientation the gyroscope reports at t + offset_s; receipt = camera + latency_s. A
     non-REALTIME camera clock is modelled by camera_origin_ns added to every camera timestamp.
     gyro_independent: the gyroscope reports a different motion than the images show (a negative
     control: real image motion, no relation to the gyro). keep_every=2 stores every other frame (the
-    rest lost in capture), sequence numbers staying those of all frames."""
+    rest lost in capture), sequence numbers staying those of all frames. gyro_still: the images move
+    but the phone does not turn, as when walking forward holding it steady."""
     rng = np.random.default_rng(7)
     size, crop_h, crop_w = 256, 96, 128
     spectrum = np.fft.fft2(rng.random((size, size)))
@@ -209,13 +237,15 @@ def synthetic_burst(root, offset_s=0.012, latency_s=0.028, focal=180.0, seconds=
         frames.append((luma_record(i + 1, t_ns + camera_origin_ns, received, crop_w, crop_h), crop.tobytes()))
     gyro = []
     gyro_x, gyro_y = (y_terms[::-1], [(a, f * 1.37, p + 2.0) for a, f, p in x_terms]) if gyro_independent else (x_terms, y_terms)
+    if gyro_still:
+        gyro_x, gyro_y = [(0.01, 0.37, 0.0)], [(0.01, 0.53, 0.5)]
     for k in range(int((seconds + 0.4) * gyro_hz)):
         t = -0.2 + k / gyro_hz
         gyro.append({"sensor": "gyroscope", "timestampNanos": START_NS + int(t * 1e9), "accuracy": 3,
                      "values": [rate(gyro_x, t) + rng.normal(0, 0.005), rate(gyro_y, t) + rng.normal(0, 0.005), 0.0]})
     camera = {"cameraId": "0", "capturedAtElapsedRealtimeNanos": START_NS, "timestampSource": timestamp_source}
     return write_capture(root, "burst", mode="timing_sync", frames=frames, sensors=gyro, stats=stats,
-                         manifest_overrides={"camera": camera})
+                         manifest_overrides={"camera": camera, "gitSha": git_sha, "modelArtifacts": models})
 
 
 class TimingAlignTest(unittest.TestCase):
@@ -225,18 +255,26 @@ class TimingAlignTest(unittest.TestCase):
             with self.subTest(offset_ms=offset_ms, gyro_hz=gyro_hz), tempfile.TemporaryDirectory() as root:
                 directory = synthetic_burst(root, offset_s=offset_ms / 1000, gyro_hz=gyro_hz)
                 result = timing_align.analyse(directory, max_lag_ms=100)
-                self.assertTrue(result["usableForQualification"])
+                self.assertTrue(result["usable"])
                 self.assertAlmostEqual(result["camera"]["offsetMs"], offset_ms, delta=2.0)
                 self.assertAlmostEqual(result["received"]["offsetMs"], offset_ms - 28.0, delta=3.0)
                 self.assertGreater(result["camera"]["peakCorrelation"], 0.9)
                 self.assertAlmostEqual(result["camera"]["focalPxEstimate"], 180.0, delta=180.0 * 0.15)
                 self.assertFalse(result["warnings"])
 
+    def test_walking_forward_is_not_turning(self):
+        # Seen on SM8850: the phone held steady while walking. The image moves, the gyroscope does not.
+        with tempfile.TemporaryDirectory() as root:
+            result = timing_align.analyse(synthetic_burst(root, gyro_still=True), max_lag_ms=100)
+        self.assertLess(result["turnRateMedianRadPerS"], 0.05)
+        self.assertFalse(result["usable"])
+        self.assertTrue(any("barely turned" in w for w in result["warnings"]))
+
     def test_negative_control_real_motion_unrelated_to_the_gyro_never_qualifies(self):
         with tempfile.TemporaryDirectory() as root:
             result = timing_align.analyse(synthetic_burst(root, gyro_independent=True), max_lag_ms=100)
         self.assertGreater(result["pairsMoving"], 200)  # passes the motion gate: this tests correlation
-        self.assertFalse(result["usableForQualification"])
+        self.assertFalse(result["usable"])
         self.assertTrue(any("correlate only" in w for w in result["warnings"]))
 
     def test_steady_frame_loss_is_reported_from_the_counters(self):
@@ -251,14 +289,14 @@ class TimingAlignTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             result = timing_align.analyse(synthetic_burst(root, seconds=1.5), max_lag_ms=100)
         self.assertGreater(result["camera"]["peakCorrelation"], 0.9)  # otherwise a good result
-        self.assertFalse(result["usableForQualification"])
+        self.assertFalse(result["usable"])
         self.assertTrue(any("parts of the burst could be checked" in w for w in result["warnings"]))
 
     def test_a_burst_without_motion_asks_for_a_new_recording(self):
         with tempfile.TemporaryDirectory() as root:
             result = timing_align.analyse(synthetic_burst(root, moving=False), max_lag_ms=100)
         self.assertTrue(any("insufficient motion" in w for w in result["warnings"]))
-        self.assertFalse(result["usableForQualification"])
+        self.assertFalse(result["usable"])
 
     def test_an_unknown_camera_clock_is_never_qualified_and_receipt_time_is_authoritative(self):
         with tempfile.TemporaryDirectory() as root:
@@ -269,7 +307,7 @@ class TimingAlignTest(unittest.TestCase):
             self.assertEqual(result["authoritativeClock"], "received")
             self.assertIsNone(result["camera"])
             self.assertAlmostEqual(result["received"]["offsetMs"], 12.0 - 28.0, delta=3.0)
-            self.assertTrue(result["usableForQualification"])
+            self.assertTrue(result["usable"])
             self.assertTrue(any("not comparable" in w for w in result["warnings"]))
 
             diagnostic = timing_align.analyse(directory, max_lag_ms=100, diagnose_camera_clock=True)["camera"]
@@ -279,8 +317,82 @@ class TimingAlignTest(unittest.TestCase):
     def test_dropped_gyroscope_samples_disqualify_the_burst(self):
         with tempfile.TemporaryDirectory() as root:
             result = timing_align.analyse(synthetic_burst(root, stats={"sensorEventsDropped": 5}), max_lag_ms=100)
-        self.assertFalse(result["usableForQualification"])
+        self.assertFalse(result["usable"])
         self.assertTrue(any("dropped by capture" in w for w in result["warnings"]))
+
+
+class DeviceSummaryTest(unittest.TestCase):
+    """B': a device result is the median over repeated usable bursts, with their spread as the
+    uncertainty; per-burst segment disagreement does not reject a burst."""
+
+    def test_repeated_bursts_give_a_median_and_a_spread_and_rejected_ones_are_left_out(self):
+        with tempfile.TemporaryDirectory() as root:
+            for i, offset_ms in enumerate((10.0, 12.0, 16.0)):
+                synthetic_burst(os.path.join(root, f"b{i}"), offset_s=offset_ms / 1000)
+            synthetic_burst(os.path.join(root, "still"), moving=False)
+            with redirect_stdout(io.StringIO()) as out:
+                code = timing_align.main([root, "--max-lag-ms", "100"])
+            results = [timing_align.analyse(d, 100) for d in find_captures(root)]
+        device = timing_align.device_summary(results)[0]
+        self.assertEqual(code, 0, out.getvalue())
+        self.assertEqual((device["bursts"], device["usableBursts"]), (4, 3))
+        self.assertTrue(device["enough"])
+        self.assertEqual(device["clock"], "camera")
+        self.assertAlmostEqual(device["offsetMedianMs"], 12.0, delta=2.0)
+        self.assertAlmostEqual(device["offsetMaxMs"] - device["offsetMinMs"], 6.0, delta=3.0)
+        self.assertAlmostEqual(device["receiptLatencyMedianMs"], 28.0, delta=3.0)
+
+    def test_fewer_than_three_usable_bursts_give_no_device_result(self):
+        with tempfile.TemporaryDirectory() as root:
+            for i in range(2):
+                synthetic_burst(os.path.join(root, f"b{i}"))
+            with redirect_stdout(io.StringIO()):
+                code = timing_align.main([root, "--max-lag-ms", "100"])
+        self.assertEqual(code, 2)
+
+
+    def test_bursts_from_different_builds_are_never_pooled(self):
+        # Two usable bursts of build A and one of build B on the same phone model: three bursts in
+        # all, but no build has three, so there is no result.
+        with tempfile.TemporaryDirectory() as root:
+            for i, build in enumerate((BUILD_A, BUILD_A, BUILD_B)):
+                synthetic_burst(os.path.join(root, f"b{i}"), git_sha=build)
+            results = [timing_align.analyse(d, 100) for d in find_captures(root)]
+            with redirect_stdout(io.StringIO()):
+                code = timing_align.main([root, "--max-lag-ms", "100"])
+        summaries = timing_align.device_summary(results)
+        self.assertEqual([(s["gitSha"], s["usableBursts"]) for s in summaries], [(BUILD_A, 2), (BUILD_B, 1)])
+        self.assertFalse(any(s["enough"] for s in summaries))
+        self.assertEqual(code, 2)
+
+    def test_bursts_with_different_model_weights_are_never_pooled(self):
+        # Same phone, same commit, but the semantic model differs: a different build (the weights are
+        # not in git, and the burst runs with Guidance, whose load depends on them).
+        with tempfile.TemporaryDirectory() as root:
+            for i, models in enumerate((MODELS_A, MODELS_A, MODELS_B)):
+                synthetic_burst(os.path.join(root, f"b{i}"), models=models)
+            results = [timing_align.analyse(d, 100) for d in find_captures(root)]
+            with redirect_stdout(io.StringIO()):
+                code = timing_align.main([root, "--max-lag-ms", "100"])
+        summaries = timing_align.device_summary(results)
+        self.assertEqual(sorted((s["modelArtifacts"]["sem.tflite"][-2:], s["usableBursts"]) for s in summaries),
+                         [("51", 2), ("52", 1)])
+        self.assertTrue(all(s["gitSha"] == BUILD_A for s in summaries))
+        self.assertFalse(any(s["enough"] for s in summaries))
+        self.assertEqual(code, 2)
+
+    def test_captures_without_a_build_identity_give_no_result_unless_allowed(self):
+        with tempfile.TemporaryDirectory() as root:
+            for i in range(3):
+                synthetic_burst(os.path.join(root, f"b{i}"), git_sha=None)
+            results = [timing_align.analyse(d, 100) for d in find_captures(root)]
+        refused = timing_align.device_summary(results)[0]
+        self.assertFalse(refused["enough"])
+        self.assertTrue(refused["warning"].startswith("no result"))
+        allowed = timing_align.device_summary(results, allow_unknown_build=True)[0]
+        self.assertTrue(allowed["enough"])
+        self.assertIn("build unknown", allowed["warning"])
+
 
 
 if __name__ == "__main__":

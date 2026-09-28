@@ -33,8 +33,8 @@ import kotlinx.serialization.json.Json
  */
 object CaptureSchema {
     const val MAJOR: Int = 1
-    /** 1: `CaptureStats.framesMissedBySubscriber`. */
-    const val MINOR: Int = 1
+    /** 1: `CaptureStats.framesMissedBySubscriber`. 2: `CaptureManifest.modelArtifacts`. */
+    const val MINOR: Int = 2
 
     const val MANIFEST_FILE: String = "manifest.json"
     const val FRAMES_FILE: String = "frames.jsonl"
@@ -66,7 +66,7 @@ object CaptureSchema {
  * the whole manifest unreadable.
  */
 object CaptureModes {
-    /** Reduced frames (5 Hz, 640 px JPEG) + sensors + camera facts: labelling and geometry. */
+    /** Reduced frames (4.3–5 Hz, 640 px JPEG) + sensors + camera facts: labelling and geometry. */
     const val FIELD_EVIDENCE: String = "field_evidence"
 
     /**
@@ -89,7 +89,13 @@ data class CaptureManifest(
     val startedElapsedRealtimeNanos: Long,
     val appVersionName: String? = null,
     val appVersionCode: Long? = null,
+    /** Commit the app was built from, "-dirty" if the tree differed; null if the build could not tell. */
     val gitSha: String? = null,
+    /**
+     * Packaged model file name → "sha256:<hex>", computed when the app was built. The weights are not
+     * in git, so this and [gitSha] together identify the build Guidance ran. Since schema 1.2.
+     */
+    val modelArtifacts: Map<String, String> = emptyMap(),
     val deviceManufacturer: String,
     val deviceModel: String,
     val sdkInt: Int,

@@ -13,6 +13,7 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.os.SystemClock
 import com.sailens.guidance.trace.capture.CaptureModes
+import com.sailens.shell.app.BuildIdentity
 import com.sailens.guidance.trace.capture.CaptureSensor
 import com.sailens.guidance.trace.capture.SensorRecord
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -136,14 +137,15 @@ internal class AndroidCaptureSensorSource(context: Context) : CaptureSensorSourc
     }
 }
 
-internal fun captureDeviceInfo(context: Context): CaptureDeviceInfo {
+internal fun captureDeviceInfo(context: Context, build: BuildIdentity?): CaptureDeviceInfo {
     val packageInfo = runCatching {
         context.packageManager.getPackageInfo(context.packageName, 0)
     }.getOrNull()
     return CaptureDeviceInfo(
         appVersionName = packageInfo?.versionName,
         appVersionCode = packageInfo?.longVersionCode,
-        gitSha = null,
+        gitSha = build?.gitSha,
+        modelArtifacts = build?.modelArtifacts.orEmpty(),
         manufacturer = Build.MANUFACTURER,
         model = Build.MODEL,
         sdkInt = Build.VERSION.SDK_INT,

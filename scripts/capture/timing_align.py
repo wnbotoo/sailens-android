@@ -1,9 +1,11 @@
 """Frame-to-gyroscope time alignment from a timing-sync burst (M0a).
 
-    python timing_align.py <timing_sync capture dir> [--max-lag-ms 300] [--json] [--diagnose-camera-clock]
+    python timing_align.py <timing_sync capture dir or folder> [...] [--max-lag-ms 300] [--json] [--diagnose-camera-clock]
 
-Record the burst by arming it on the field capture page, starting Guidance, and turning the phone
-slowly left-right then up-down at a detailed scene for the ~15 s it lasts.
+Record the burst by arming it on the field capture page, standing still, starting Guidance, and at
+once turning the phone in place (briskly left-right about once a second, then up-down, pivoting at
+the wrist) at a detailed scene a few metres away for the ~15 s it lasts. Walking forward is not
+turning: the gyroscope sees almost nothing and the burst is rejected.
 
 Method. Between consecutive frames the image moves by about f·θ, θ being the camera rotation about
 the two axes across the optical axis (roll moves nothing at the centre). So:
@@ -24,19 +26,24 @@ Result, per frame time base: ``gyro_time ≈ frame_time + δ``.
 - source receipt times (``receivedElapsedRealtimeNanos``) are on elapsedRealtime by construction:
   δ is negative by the camera-to-app delivery latency, and jitter in it lowers the correlation.
   This is the authoritative measurement when the camera clock is not REALTIME.
-The estimate is repeated on four consecutive parts of the burst; their spread is the error bar (hand
-motion is smooth, so the correlation peak is broad) and would also reveal drift. It does not catch
-a consistent bias. On synthetic bursts (gyro at 200 Hz and at 50 Hz, the typical SENSOR_DELAY_GAME
-rate) the estimate is within ~1.5 ms of the truth: that is the method's numerical accuracy only,
-not a measurement floor on a device. The real error comes from the device's actual gyro cadence
-and from repeated bursts (their spread), measured per target device in M0a.
+Within a burst the estimate is repeated on four consecutive parts; their spread is reported, but
+hand-made motion often leaves one weak ~4 s part, so it is a warning, not a rejection. The
+uncertainty that counts is the spread **across repeated bursts** (see below). On synthetic bursts
+(gyro at 200 Hz and at 50 Hz, the typical SENSOR_DELAY_GAME rate) the method is within ~1.5 ms of
+the truth: numerical accuracy only, not a device measurement floor.
 
-``usableForQualification`` (exit code 0, else 2) needs a complete capture, no sensor samples
-dropped by capture, enough motion, and on the authoritative clock: correlation r >= 0.5 (a
-negative control -- real image motion unrelated to the gyro -- gives about 0.3), all four parts
-checked and agreeing within 5 ms, and the offset not at the search edge. Otherwise record the burst
-again. Heavy frame loss is a warning. The thresholds are conservative until real bursts from the
-target devices are in: a false rejection only costs another burst.
+A burst is ``usable`` (single burst: exit code 0, else 2) if the capture is complete, capture
+dropped no sensor samples, the phone really turned (median gyro rate across the optical axis
+>= 0.15 rad/s), there is enough texture, and on the authoritative clock the correlation is
+r >= 0.5 (a negative control -- real image motion unrelated to the gyro -- gives about 0.3), all
+four parts could be checked (a full ~15 s burst) and the offset is not at the search edge.
+
+Device result (several captures or a folder; exit code 0 once every device has >= 3 usable
+bursts): the median offset over that device's usable bursts, with its range and standard
+deviation as the uncertainty. M0a reports it; it does not gate on it. On SM8450 and SM8850 the
+camera-clock offset varied by 9-14 ms between bursts while camera-to-receipt time stayed constant,
+so the camera clock is stable and what moves is where the image content sits relative to its
+start-of-exposure timestamp -- plausibly exposure time, which capture does not record yet.
 """
 from __future__ import annotations
 
@@ -49,12 +56,17 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from capture_stats import frame_losses  # noqa: E402
-from sailens_capture import load_capture, read_image  # noqa: E402
+from sailens_capture import find_captures, load_capture, read_image  # noqa: E402
 
 MIN_PEAK = 0.05  # phase-correlation peak below which a pair is too blurred or bare to use
 MIN_PAIRS = 30
-MIN_MOVING_FRACTION = 0.3  # of pairs whose image moved by more than half a pixel
+# Median gyro rate across the optical axis while frames were stored. This gate only tells turning
+# from not turning; quality is judged by correlation and segment agreement. Measured: the phone held
+# steady while walking 0.01-0.09 rad/s (SM8850); turning in place 0.20-0.24 rad/s (SM8450), with three
+# bursts agreeing within ~4 ms. The threshold sits between the two.
+MIN_TURN_RATE = 0.15
 SEGMENTS = 4
+MIN_BURSTS = 3  # usable bursts per device for a device result
 MAX_SEGMENT_SPREAD_MS = 5.0
 MAX_FRAME_LOSS = 0.10
 # Pearson r between image motion and gyro rotation on the authoritative clock. Conservative until the
@@ -182,11 +194,19 @@ def analyse(directory, max_lag_ms=300.0, diagnose_camera_clock=False):
     good = [p for p in pairs if p[3] >= MIN_PEAK]
     moving = sum(1 for p in good if p[2] > 0.5)
     t, theta = cumulative_rotation(gyro)
+    # Whether the phone actually turned is the gyroscope's call: image motion cannot tell turning
+    # from walking forward, and on a real device noise alone reaches about half a pixel per frame.
+    first, last = capture.frames[0]["sensorTimestampNanos"], capture.frames[-1]["sensorTimestampNanos"]
+    during = [s["values"] for s in gyro if first <= s["timestampNanos"] <= last]
+    turn_rate = float(np.median([np.hypot(v[0], v[1]) for v in during])) if during else 0.0
     frame_dt = np.diff([f["sensorTimestampNanos"] for f in capture.frames]) / 1e6
     losses = frame_losses(capture)
     stats = capture.manifest.get("stats", {})
     result = {
         "sessionId": capture.manifest.get("sessionId"),
+        "device": f"{capture.manifest.get('deviceManufacturer')} {capture.manifest.get('deviceModel')}",
+        "gitSha": capture.manifest.get("gitSha"),
+        "modelArtifacts": capture.manifest.get("modelArtifacts", {}),
         "timestampSource": source,
         "cameraComparable": camera_comparable,
         # The clock whose offset M0 may record as the frame-to-gyro alignment.
@@ -200,9 +220,10 @@ def analyse(directory, max_lag_ms=300.0, diagnose_camera_clock=False):
         "sensorEventsDropped": stats.get("sensorEventsDropped", 0),
         "pairsUsable": len(good),
         "pairsMoving": moving,
+        "turnRateMedianRadPerS": round(turn_rate, 3),
         "camera": None,
         "received": None,
-        "usableForQualification": False,
+        "usable": False,
         "warnings": warnings,
     }
 
@@ -211,8 +232,13 @@ def analyse(directory, max_lag_ms=300.0, diagnose_camera_clock=False):
         blocking.append("the capture is incomplete")
     if result["sensorEventsDropped"]:
         blocking.append(f"{result['sensorEventsDropped']} sensor samples were dropped by capture")
-    if len(good) < MIN_PAIRS or moving < MIN_MOVING_FRACTION * len(good):
-        blocking.append("insufficient motion or texture: turn the phone steadily at a detailed scene")
+    if turn_rate < MIN_TURN_RATE:
+        blocking.append(
+            f"insufficient motion: the phone barely turned (median {turn_rate:.2f} rad/s, need {MIN_TURN_RATE}); stand still "
+            "and turn it in place, briskly left-right about once a second, then up-down. Walking forward does not count"
+        )
+    if len(good) < MIN_PAIRS:
+        blocking.append("too little texture or too much blur: point at a detailed scene a few metres away")
     if losses["overallLossFraction"] is not None and losses["overallLossFraction"] > MAX_FRAME_LOSS:
         warnings.append(
             f"~{losses['overallLossFraction'] * 100:.0f}% of frames were lost: known {losses['knownLossFraction'] * 100:.0f}% "
@@ -257,34 +283,67 @@ def analyse(directory, max_lag_ms=300.0, diagnose_camera_clock=False):
         if len(r["segmentOffsetsMs"]) < SEGMENTS or r["segmentSpreadMs"] is None:
             problems.append(f"{name}: only {len(r['segmentOffsetsMs'])} of {SEGMENTS} parts of the burst could be checked; record a longer burst")
         elif r["segmentSpreadMs"] > MAX_SEGMENT_SPREAD_MS:
-            problems.append(f"{name}: parts of the burst disagree by {r['segmentSpreadMs']} ms (drift, or too little motion in parts)")
+            # A warning only: hand-made motion often leaves one weak ~4 s part. The device result's
+            # spread over repeated bursts is the uncertainty that counts (see device_summary).
+            warnings.append(f"{name}: parts of the burst disagree by {r['segmentSpreadMs']} ms (one weak part of the motion, or drift)")
         (blocking if r is authoritative else warnings).extend(problems)
     if authoritative is None:
         blocking.append(f"not enough overlapping frame and gyroscope data on the {result['authoritativeClock']} clock")
 
-    result["usableForQualification"] = not blocking
+    result["usable"] = not blocking
     result["warnings"] = blocking + warnings
     return result
 
 
-def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    parser.add_argument("capture", help="a timing_sync capture directory")
-    parser.add_argument("--max-lag-ms", type=float, default=300.0)
-    parser.add_argument("--diagnose-camera-clock", action="store_true",
-                        help="also estimate a non-REALTIME camera clock empirically (diagnostic only)")
-    parser.add_argument("--json", action="store_true")
-    args = parser.parse_args(argv)
-    r = analyse(args.capture, args.max_lag_ms, args.diagnose_camera_clock)
-    exit_code = 0 if r["usableForQualification"] else 2
-    if args.json:
-        print(json.dumps(r, indent=2))
-        return exit_code
+def device_summary(results, allow_unknown_build=False):
+    """One result per device **and build** from its usable bursts: the median offset on the
+    authoritative clock and its spread across bursts, which is the measurement's uncertainty (M0a
+    reports it; it does not gate on it). Needs at least MIN_BURSTS usable bursts of that build.
+
+    A build is the git SHA **and** the packaged model hashes (the weights are not in git; the burst
+    runs with Guidance, whose load depends on them). Bursts are never pooled across builds. A capture
+    without a recorded git SHA cannot be placed in a build, so it gets no result unless
+    ``allow_unknown_build`` (for captures made before build identity was recorded; the result then
+    says so)."""
+    by_build = {}
+    for r in results:
+        models = tuple(sorted(r["modelArtifacts"].items()))
+        by_build.setdefault((r["device"], r["gitSha"], models), []).append(r)
+    summaries = []
+    for (device, sha, models), rows in sorted(by_build.items(), key=lambda item: (item[0][0], item[0][1] or "", item[0][2])):
+        usable = [r for r in rows if r["usable"]]
+        summary = {"device": device, "gitSha": sha, "modelArtifacts": dict(models), "bursts": len(rows),
+                   "usableBursts": len(usable),
+                   "enough": len(usable) >= MIN_BURSTS and (sha is not None or allow_unknown_build)}
+        if sha is None:
+            summary["warning"] = ("build unknown (no git SHA recorded): bursts may come from different builds"
+                                  if allow_unknown_build else
+                                  "no result: these captures record no git SHA, so they cannot be tied to one build")
+        if usable:
+            clock = usable[0]["authoritativeClock"]
+            offsets = np.array([r[clock]["offsetMs"] for r in usable])
+            received = np.array([r["received"]["offsetMs"] for r in usable])
+            summary.update(
+                clock=clock,
+                offsetMedianMs=round(float(np.median(offsets)), 1),
+                offsetMinMs=round(float(offsets.min()), 1),
+                offsetMaxMs=round(float(offsets.max()), 1),
+                offsetSdMs=round(float(offsets.std()), 1),
+                receiptOffsetMedianMs=round(float(np.median(received)), 1),
+            )
+            if clock == "camera":
+                # Camera time to receipt time: the delivery latency, from the same bursts.
+                summary["receiptLatencyMedianMs"] = round(float(np.median(offsets - received)), 1)
+        summaries.append(summary)
+    return summaries
+
+
+def print_burst(r):
     comparable = "comparable with the gyroscope" if r["cameraComparable"] else "NOT comparable with the gyroscope"
-    print(f"== {r['sessionId']}  camera timestamp source: {r['timestampSource']} ({comparable})")
+    print(f"== {r['sessionId']}  {r['device']}, camera timestamp source: {r['timestampSource']} ({comparable})")
     print(f"   {r['frames']} frames, median interval {r['frameIntervalMedianMs']} ms, frame loss known {r['knownFrameLossFraction']} / overall ~{r['overallFrameLossFraction']}; "
           f"gyro median interval {r['gyroIntervalMedianMs']} ms, sensor samples dropped {r['sensorEventsDropped']}")
-    print(f"   frame pairs usable {r['pairsUsable']}, of which moving {r['pairsMoving']}")
+    print(f"   frame pairs usable {r['pairsUsable']}, of which moving {r['pairsMoving']}; phone turn rate median {r['turnRateMedianRadPerS']} rad/s")
     for name, label in (("camera", "camera timestamp"), ("received", "source receipt time")):
         a = r[name]
         if a is None:
@@ -299,9 +358,70 @@ def main(argv=None):
             tag = ""
         print(f"   {label}: gyro = frame {a['offsetMs']:+.2f} ms +/- {a['segmentSpreadMs']} (r={a['peakCorrelation']}, "
               f"per segment {a['segmentOffsetsMs']}, pairs {a['pairs']}, focal ~{a['focalPxEstimate']} px){tag}")
-    print(f"   usable for M0 qualification: {'yes' if r['usableForQualification'] else 'NO - record the burst again'}")
+    print(f"   usable for the device measurement: {'yes' if r['usable'] else 'NO - record the burst again'}")
     for warning in r["warnings"]:
         print(f"   ! {warning}")
+
+
+def print_device(s):
+    build = s["gitSha"] or "unknown"
+    models = ", ".join(f"{name} {digest[:15]}" for name, digest in sorted(s["modelArtifacts"].items())) or "no models recorded"
+    print(f"== device {s['device']}, build {build} ({models}): {s['usableBursts']} of {s['bursts']} bursts usable")
+    if s["gitSha"] is None and not s["enough"] and "warning" in s and s["warning"].startswith("no result"):
+        print(f"   ! {s['warning']} (--allow-unknown-build for captures made before build identity was recorded)")
+        return
+    if not s["usableBursts"]:
+        print(f"   no result: record at least {MIN_BURSTS} usable bursts")
+        return
+    print(f"   {s['clock']} clock: gyro = frame {s['offsetMedianMs']:+.1f} ms (median), range {s['offsetMinMs']:+.1f} .. "
+          f"{s['offsetMaxMs']:+.1f}, sd {s['offsetSdMs']}; receipt time {s['receiptOffsetMedianMs']:+.1f} ms"
+          + (f"; camera-to-app latency {s['receiptLatencyMedianMs']} ms" if "receiptLatencyMedianMs" in s else ""))
+    if "warning" in s:
+        print(f"   ! {s['warning']}")
+    if s["usableBursts"] < MIN_BURSTS:
+        print(f"   ! only {s['usableBursts']} usable bursts of this build; record at least {MIN_BURSTS}")
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    parser.add_argument("captures", nargs="+", help="timing_sync capture directories, or folders containing them")
+    parser.add_argument("--max-lag-ms", type=float, default=300.0)
+    parser.add_argument("--diagnose-camera-clock", action="store_true",
+                        help="also estimate a non-REALTIME camera clock empirically (diagnostic only)")
+    parser.add_argument("--allow-unknown-build", action="store_true",
+                        help="pool captures that record no git SHA (made before build identity was recorded)")
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args(argv)
+    directories = []
+    for path in args.captures:
+        if os.path.exists(os.path.join(path, "manifest.json")):
+            directories.append(path)  # named explicitly: analysed whatever its mode
+        else:
+            directories += [d for d in find_captures(path) if load_capture(d).mode == "timing_sync"]
+    if not directories:
+        print("no timing_sync captures found", file=sys.stderr)
+        return 1
+    results = [analyse(d, args.max_lag_ms, args.diagnose_camera_clock) for d in directories]
+    devices = device_summary(results, args.allow_unknown_build)
+    if len(results) == 1:
+        exit_code = 0 if results[0]["usable"] else 2
+    else:
+        exit_code = 0 if all(s["enough"] for s in devices) else 2
+    if args.json:
+        print(json.dumps({"bursts": results, "devices": devices}, indent=2))
+        return exit_code
+    if len(results) == 1:
+        print_burst(results[0])
+        return exit_code
+    for r in results:
+        a = r[r["authoritativeClock"]]
+        offset = f"{a['offsetMs']:+7.2f} ms r={a['peakCorrelation']:.2f}" if a else "    n/a"
+        reason = "" if r["usable"] else "  <- " + r["warnings"][0]
+        build = (r['gitSha'] or 'no-sha')[:8]
+        print(f"   {r['sessionId'][:8]}  {r['device']} @{build}  turn {r['turnRateMedianRadPerS']:.2f}  {offset}  "
+              f"{'usable' if r['usable'] else 'REJECTED'}{reason}")
+    for s in devices:
+        print_device(s)
     return exit_code
 
 
