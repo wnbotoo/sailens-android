@@ -48,7 +48,8 @@ Capture is controlled on **Settings → Diagnostics → Field capture** (debug b
   "Exported" only means the ZIP was made and the share sheet opened, not that your computer received
   it. So: **tap Keep on every session you want**, export it the same day, check the ZIP is actually on
   your computer, and only then tap "Stop keeping" or Delete on the phone.
-- Record indoors only where you are allowed to (your home, areas your workplace permits).
+- Record indoors only where you are allowed to. Malls and other public places may forbid filming; check
+  the signs or ask. People in the frame are third parties, which is one more reason the data stays local.
 
 ## 3. Pre-recording checklist (every outing)
 
@@ -109,26 +110,41 @@ Keep the hold the same across the whole recording, or the geometry calibration i
 
 ## 5. Scene list
 
-Record each class for "count × duration". About 90–120 minutes in total, spread over several days.
-**★** marks scenes needed for #5 threshold calibration; **regression** marks scenes that must be
-recorded again with model regression recording once M0b is built (it does not exist yet; record them
-as field evidence now).
+Scenes come in an **outdoor group** and an **indoor group**, each recorded in one outing; do not mix
+them. Record each class for "count × duration". **★** marks scenes needed for #5 threshold calibration;
+**regression** marks scenes recorded with "field evidence + model regression" (once M0b exists).
+
+**Scope (decided 2026-10-09):** outdoors is the main supported setting. Indoors is **best effort** and
+covers only **large public interiors such as shopping malls** (wide corridors, atriums, entrances).
+Homes and other small buildings are out of scope; do not record them.
+
+### 5.1 Outdoor group (one outing, about 60–75 minutes)
 
 | Class | Scene | Count × duration | Notes |
 |---|---|---|---|
 | A | Open sidewalk, few people | 3 × 3 min | The "quiet" part of the baseline; false alarms should be rare |
-| B | Sidewalk with static obstacles (poles, trees, parked bikes, bins, benches) | 3 × 3 min | Pass obstacles at the side, and also walk straight at one and step around |
+| B ★ | Sidewalk with static obstacles (poles, trees, parked bikes, bins, benches), including **wide granite/stone paving** and **rows of shared bikes** | 3 × 3 min | Pass obstacles at the side, and also walk straight at one and step around. In the pilot, sem read such paving as building and the #5 gate engaged |
 | C | Crowded (shopping street, station entrance) | 2 × 5 min | Once at peak, once off-peak |
 | D | Crossings: approach, wait for the light, cross | 4 crossings | Stand still at least 30 s while waiting (tests cooldown while stationary) |
 | E | Kerbs, steps, ramps: approach slowly and stop | 2 each | **regression**; today's model does not see steps; this is material for the geometry layer |
 | F ★ | Grass edges, park paths, dirt paths | 2 × 3 min | Terrain is not passable; check whether "path blocked" repeats |
-| G ★ | Indoors: corridor, hall, home | 3 × 3 min | Good light; the #5 gate should engage and say "Can't see the ground…" |
-| H ★ | Indoor/outdoor transitions: entering, leaving | 4 each | Check the gate's entry (1.5 s) and exit (1 s) feel right |
-| I ★ | Facing a wall / building facade: approach slowly from 5 m, stop 1 m away | 2 outdoors, 2 indoors | **regression**; safety-critical: "path blocked" must be announced while the wall is still distant; watch the gate as it gets close |
+| I ★ | Facing a building facade: approach slowly from 5 m, stop 1 m away | 2 | **regression**; safety-critical: "path blocked" must be announced while the wall is still distant; watch the gate as it gets close |
 | J | Car park, cars parked at the kerb | 2 × 3 min | Vehicle prompts are CRITICAL; watch for false alarms |
-| K | Lighting: street lights at night, strong backlight | 2 × 3 min each | Night triggers "too dark to see"; record as is |
 | L | Standing still (waiting, talking) | 2 × 2 min | Cooldown lengthens when stationary; watch for repeats |
 | M ★ | Hold edges: phone level / pointed at the sky, pointed at your feet | 1 × 1 min each | How the gate behaves when no ground is in view |
+
+**K lighting** (street lights at night, strong backlight; 2 × 3 min each) needs a separate outing at
+another time and is optional. Night triggers "too dark to see"; record as is.
+
+### 5.2 Indoor group: shopping mall (one outing, about 25–30 minutes, best effort)
+
+| Class | Scene | Count × duration | Notes |
+|---|---|---|---|
+| G ★ | Mall corridors and atrium | 3 × 3 min | How the gate behaves on large, smooth floors |
+| H ★ | Entering and leaving the mall: **start recording outside**, walk in, walk out | 2 each | Check the gate's entry (1.5 s) and exit (1 s) feel right |
+| I ★ | Facing a shop front, glass window or wall: approach slowly from 5 m, stop 1 m away | 2 | **regression**; safety-critical, as outdoor I |
+
+Escalators and stairs are **not** recorded, for safety.
 
 ## 6. Recording one segment
 
@@ -138,14 +154,16 @@ Capture starts and stops with the Guidance session; there is no separate start/s
 1. Go to the start, check the capture switch is on, and fill in the first half of the scene-card row
    (class, place type, light).
 2. Tap "Start guidance" in the app (capture starts with it).
-3. **Sync mark: cover the camera fully with your palm for 3 s**, until you hear "Camera is covered", then
-   uncover. It leaves an `event_camera_blocked` in the trace and dark frames in the capture — the
-   segment's start, afterwards.
+3. ~~Sync mark: cover the camera with your palm for 3 s~~ **No longer needed.** Each segment is one
+   Guidance session, and its start and end are already in the capture and the trace. The pilot
+   (2026-10-09) found that **outdoors in daylight a palm over the lens glows red and does not trigger
+   "Camera is covered"**, so the mark is unreliable outdoors (and that is itself a detection defect to
+   fix). If another sync or segmentation method is needed, M0b's instructions take precedence.
 4. Walk the scene. **If you notice a miss** (an obvious hazard with no prompt), **press volume down once**
    (a short buzz confirms, only once the marker is written), or tap "Mark missed alert" on screen. It
    records the moment you pressed and the last stored frame, which labelling uses to find misses. No
    need to look at the screen; keep your eyes on the path. Works with TalkBack on (checked on SM8850).
-5. Before finishing, cover the camera for 3 s again as the end mark.
+5. (The former "cover the camera for 3 s before finishing" is dropped too.)
 6. Tap "Stop guidance" (capture stops with it).
 7. Complete the scene-card row (duration, anything unusual).
 
