@@ -351,7 +351,7 @@ when more bursts showed a real spread of 9–14 ms per device (below).
 | Keep, delete | Capture list: per session start time, size, status (recording / complete / incomplete with reason), kept, exported, frames and markers; keep, delete and export are refused while any capture is recording (the list is read-only then; the tool must not disturb the evidence it is collecting); delete asks for confirmation, and a refused or failed action is reported |
 | Export | Finished sessions only. ZIP built into `cacheDir/capture_exports/` (free space checked first) off the capture writer thread, with the session protected from retention and delete meanwhile. Capture and export never overlap in either direction: while a ZIP is being built, starting Guidance is refused with "finish exporting first" (debug `GuidanceStartGate`), and a capture that starts anyway ends at once as incomplete with `failureReason = export_in_progress`. A ZIP whose session cannot be marked exported is discarded and reported as a failure. The ZIP is then shared via FileProvider `<cache-path>`; `files/captures/` itself is never exposed; the session is marked exported; exports older than a day cleared at app start and when the list opens (a share target reads the ZIP after the share sheet closes, with no signal when it is done). `adb` + `run-as` documented as the bulk fallback |
 | Viewing frames around a prompt | On the PC: `scripts/capture/contact_sheet.py` renders ±N s around a `prompt_outcome` (centred on the offering frame: trace `sourceSequenceNumber` → `frameTimestamp` = capture `sensorTimestampNanos`) or a marker (its `elapsedRealtimeNanos` against frame receipt times) |
-| Storage | Estimated ≈ 0.7–1 GB/hour; measured: 0.56–0.74 GB/hour of field evidence on SM8850 (0.65 on a 4-minute outdoor walk), 0.73 on SM8450, plus 41 MB per timing burst; measured in M0a with `scripts/capture/capture_stats.py` (also cadence, gaps, drops, counter balance, wall-clock jumps) and written back into the manual |
+| Storage | Estimated ≈ 0.7–1 GB/hour; measured: 0.56–0.74 GB/hour of field evidence on SM8850 in the M0a device sessions (mostly indoors), 0.73 on SM8450, plus 41 MB per timing burst. The SM8850 pilot (2026-10-08) measured **1.15–1.27 GB/hour on three outdoor walks** and 0.47–0.60 indoors, so outdoor recording needs about twice the indoor estimate. An earlier "0.65 on a 4-minute outdoor walk" is withdrawn: that session's gyro and frames suggest the camera was pointed at a video on a screen. Rates are measured with `scripts/capture/capture_stats.py` (also cadence, gaps, drops, counter balance, wall-clock jumps) and written back into the manual |
 | Retention | Runs at debug app start (whether or not capture is on), before a capture starts, when the capture list opens, and every 30 s during a capture. A session older than 7 days, not exported or pinned, is deleted at the next of these. The 2 GB cap is enforced during capture: older unpinned sessions go first, and if the active capture alone would exceed it, it ends as incomplete with `failureReason = storage_limit_reached` (checked after every frame) instead of writing until the disk is full |
 | **"Missed alert" marker** | Volume Down while capture is active: only `ACTION_DOWN` with `repeatCount == 0` counts, the key is consumed only then, the time, session and last stored frame are fixed when the press is observed (a busy writer delays the write, not the event), and a short vibration confirms only once the marker was written. Plus a large on-screen button. Works eyes-free in a foreground Guidance session; no promise for a locked screen or background (there is no background Guidance yet). Verified under TalkBack on SM8850 and SM8450 |
 
@@ -377,14 +377,14 @@ the in-app burst instructions differed. The table was computed with
 |---|---|---|
 | Camera timestamp source | `REALTIME` (all cameras) | `REALTIME` |
 | Back camera | Logical multi-camera: ultrawide 2.31 mm, main 5.59 mm, tele 12.19 mm; zoom 0.67–20; recorded intrinsics are the main camera's | Logical multi-camera (physical 2/5/6); zoom 0.6–10; recorded intrinsics are the 5.4 mm main camera's |
-| Physical-camera switching | None seen: close-up at a few cm, dim room, outdoor walk | None seen: close-up at 5–10 cm, dim room |
+| Physical-camera switching | None seen: close-up at a few cm, dim room | None seen: close-up at 5–10 cm, dim room |
 | Analysis stream / frame rate | 1280×720 (16:9 crop of the 4:3 array), 30 fps (AE range 10–30) | 1280×720, 30 fps (fixed 10–30 and 7–30 ranges offered) |
 | Lens distortion reported | All zeros (not reported in practice) | Reported: 0.073, −0.107, 0.047, 0, 0 |
 | Gyroscope rate (`SENSOR_DELAY_GAME`) | 46.8 Hz, very regular | 49.7 Hz |
 | Burst throughput (30 fps, Guidance running) | 0% loss in every burst | 0–0.4%; the first burst after start ~5%, before the analyzer (warm-up) |
 | **Frame→gyro offset, camera clock** (gyro ≈ frame + δ) | **+2.3 ms** median, range −5.2…+8.6, sd 4.8 (11 bursts) | **+12.9 ms** median, range +8.2…+17.2, sd 3.5 (8 bursts) |
 | Camera time → app receipt (latency) | **60.8 ms**, ±1 ms across bursts | **67.4 ms** |
-| Field evidence | 4.3–5 Hz; 0.56–0.74 GB/h | 4.29 Hz; 0.73 GB/h; no drops |
+| Field evidence | 4.3–5 Hz; 0.56–0.74 GB/h (pilot outdoors: 1.15–1.27 GB/h) | 4.29 Hz; 0.73 GB/h; no drops |
 | Volume Down marker under TalkBack | Works (vibration confirms) | Works |
 
 What this settles for M3o:
@@ -465,14 +465,18 @@ health. Mapping (the rule: output problems degrade *delivery*, not the judgement
 `EventConflictResolver` exactly. It does **not** add queue revocation. Proof: unit tests for the
 mapping and transitions, and a device alarm timeline identical to the baseline.
 
-**M1b (behaviour change, after M2)**: entering `StopRequired` / `Interrupted` revokes queued normal
+**M1b (behaviour change, after M2b)**: entering `StopRequired` / `Interrupted` revokes queued normal
 events and blocks new ones; leaving needs N consecutive qualified results (hysteresis). Proven with
 simulator stop/recovery scenarios and a device run against the baseline.
 
 **Tests**: exhaustive `when` over states; mapping table as a parameterised test; transition tests;
 (M1b) "normal event cannot be delivered while StopRequired", "stale result cannot re-qualify".
 
-## 6. M2 — Simulator
+## 6. M2a / M2b — Simulator
+
+Split in two (decided 2026-10-09): **M2a** is the harness plus the geometry scenarios M3a and M3b
+depend on, and comes before M3o; **M2b** is the remaining scenarios and the M1 state timeline, which
+M1b and M8 depend on.
 
 - A scenario is a script over a fake clock: synthetic perception results (masks, detections,
   frame quality), sensor timeline (gravity, rotation), failures (dropped frames, stale frames,
@@ -480,10 +484,16 @@ simulator stop/recovery scenarios and a device run against the baseline.
 - Runs the real `AnalyzeSceneUseCase` → `DecideEventsUseCase` path plus new components with fakes
   only at the model boundary. Deterministic: fixed seeds, injected clock (already injectable).
 - Golden outputs are checked in; a golden change must be explained in the PR.
-- First set: straight clear path, centre / left / right obstacle, narrowing, full blockage,
-  segmentation flicker, false detection for one frame, stale frame burst, camera covered, phone
-  tilt up / down with a fixed obstacle (for M3a), partially occluded person (for M3a validity),
-  recovery after stop (for M1b), walking user with a vanished obstacle (for M4).
+- Pose and camera are written as **M0a raw facts** — gravity / rotation / gyro samples, camera
+  characteristics, `sensorToBufferTransform` and crop — not as resolved geometry. M2a therefore does
+  not wait for M3o, and when M3o lands it resolves a scenario exactly as it resolves a recorded
+  capture. Until then a geometry scenario pins today's behaviour, which ignores pose.
+- **M2a set**: straight clear path (the harness's reference scenario); phone pitch up / down with a
+  fixed obstacle (for M3a); phone-height change (for M3a); ground / no ground in view (for M3b);
+  curb and drop-off (for M3b); partially occluded person (for M3a ground-contact validity).
+- **M2b set**: centre / left / right obstacle, narrowing, full blockage, segmentation flicker, false
+  detection for one frame, frame drops, stale frame burst, camera covered, recovery after stop (for
+  M1b), the M1 state timeline, walking user with a vanished obstacle (for M4).
 - Later: a capture adapter feeds M0b model-regression records through the same harness.
 
 ## 7. M3o — Orientation and camera geometry
