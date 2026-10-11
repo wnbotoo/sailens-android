@@ -4,6 +4,7 @@ import com.sailens.guidance.model.common.ObstacleProviderType
 import com.sailens.guidance.model.common.PerceptionProfile
 import com.sailens.guidance.model.common.SemanticProviderType
 import com.sailens.guidance.model.common.ZoneMode
+import kotlinx.serialization.Serializable
 
 /**
  * 感知配置
@@ -28,6 +29,7 @@ import com.sailens.guidance.model.common.ZoneMode
  * KEEP_ONLY_LATEST 自适应丢帧，天然自限流。各 *Fps 字段默认 0（不限频），正值上限
  * 是留给动态降级 / 按设备调参的旋钮，不作为产品默认限定。
  */
+@Serializable
 data class PerceptionConfig(
     val runtimeProfileName: String = "standard",
     val targetHardwareProfile: String = "unknown_hardware",
