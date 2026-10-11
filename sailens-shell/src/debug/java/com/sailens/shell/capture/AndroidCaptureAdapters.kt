@@ -44,19 +44,72 @@ internal class FieldCaptureSettingsStore(context: Context) {
         _timingSyncArmed.value = armed
     }
 
+    private val _modelRegression = MutableStateFlow(preferences.getBoolean(KEY_MODEL_REGRESSION, false))
+
+    /** With the switch on, record the model-regression record (M0b) as well as field evidence. */
+    val modelRegression: StateFlow<Boolean> = _modelRegression.asStateFlow()
+
+    fun setModelRegression(on: Boolean) {
+        preferences.edit().putBoolean(KEY_MODEL_REGRESSION, on).apply()
+        _modelRegression.value = on
+    }
+
+    private val _group = MutableStateFlow(preferences.getString(KEY_GROUP, null))
+
+    /** The recording group for the next sessions (`CaptureGroups`), or null when not set. */
+    val group: StateFlow<String?> = _group.asStateFlow()
+
+    fun setGroup(group: String?) {
+        preferences.edit().putString(KEY_GROUP, group).apply()
+        _group.value = group
+    }
+
+    private val _sceneLabel = MutableStateFlow(preferences.getString(KEY_SCENE_LABEL, "").orEmpty())
+    val sceneLabel: StateFlow<String> = _sceneLabel.asStateFlow()
+
+    fun setSceneLabel(label: String) {
+        preferences.edit().putString(KEY_SCENE_LABEL, label).apply()
+        _sceneLabel.value = label
+    }
+
+    private val _capGigabytes = MutableStateFlow(
+        preferences.getInt(KEY_CAP_GB, DEFAULT_CAP_GB).takeIf { it in CAP_CHOICES_GB } ?: DEFAULT_CAP_GB,
+    )
+
+    /** The capture directory's cap, in GB (one of [CAP_CHOICES_GB]). */
+    val capGigabytes: StateFlow<Int> = _capGigabytes.asStateFlow()
+
+    fun setCapGigabytes(gigabytes: Int) {
+        if (gigabytes !in CAP_CHOICES_GB) return
+        preferences.edit().putInt(KEY_CAP_GB, gigabytes).apply()
+        _capGigabytes.value = gigabytes
+    }
+
+    fun capBytes(): Long = _capGigabytes.value.toLong() * 1024 * 1024 * 1024
+
+    fun sessionLabels(): SessionLabels =
+        SessionLabels(group = _group.value, sceneLabel = _sceneLabel.value.trim().ifEmpty { null })
+
     /**
      * The capture mode for a Guidance session starting now, or null for none. An armed burst is
      * used up here, whether or not the switch is on; otherwise the switch decides.
      */
     fun takeSessionMode(): String? = when {
         _timingSyncArmed.compareAndSet(expect = true, update = false) -> CaptureModes.TIMING_SYNC
+        _enabled.value && _modelRegression.value -> CaptureModes.MODEL_REGRESSION
         _enabled.value -> CaptureModes.FIELD_EVIDENCE
         else -> null
     }
 
-    private companion object {
-        const val PREFERENCES_NAME = "field_capture_settings"
-        const val KEY_ENABLED = "enabled"
+    companion object {
+        val CAP_CHOICES_GB: List<Int> = listOf(2, 5, 10)
+        const val DEFAULT_CAP_GB: Int = 10
+        private const val PREFERENCES_NAME = "field_capture_settings"
+        private const val KEY_ENABLED = "enabled"
+        private const val KEY_MODEL_REGRESSION = "model_regression"
+        private const val KEY_GROUP = "group"
+        private const val KEY_SCENE_LABEL = "scene_label"
+        private const val KEY_CAP_GB = "cap_gb"
     }
 }
 

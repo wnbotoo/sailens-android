@@ -1,6 +1,11 @@
 package com.sailens.shell.di
 
+import com.sailens.guidance.config.AnalysisConfig
 import com.sailens.guidance.config.PerceptionConfig
+import com.sailens.guidance.processor.perception.PerceptionProfileManager
+import com.sailens.guidance.trace.capture.CaptureSchema
+import com.sailens.guidance.trace.capture.RegressionManifest
+import com.sailens.guidance.trace.regression.RegressionRecorder
 import com.sailens.guidance.semantics.NavigationSemantics
 import com.sailens.guidance.service.TraceServiceDecorator
 import com.sailens.shell.capture.AndroidCaptureClock
@@ -9,6 +14,7 @@ import com.sailens.shell.app.BuildIdentity
 import com.sailens.shell.app.GuidanceStartGate
 import com.sailens.shell.app.HardwareKeyHandler
 import com.sailens.shell.capture.CaptureExporter
+import com.sailens.shell.capture.CaptureRetention
 import com.sailens.shell.capture.CapturingTraceService
 import com.sailens.shell.capture.FieldCaptureController
 import com.sailens.shell.capture.FieldCaptureStartGate
@@ -16,6 +22,7 @@ import com.sailens.shell.capture.FieldCaptureSettingsStore
 import com.sailens.shell.capture.FieldCaptureViewModel
 import com.sailens.shell.capture.GuidanceSessionMonitor
 import com.sailens.shell.capture.MissedAlertMarkers
+import com.sailens.shell.capture.RegressionCapture
 import com.sailens.shell.capture.VolumeDownMarkerKeyHandler
 import com.sailens.shell.capture.YuvImageJpegEncoder
 import com.sailens.shell.capture.captureDeviceInfo
@@ -28,7 +35,9 @@ import org.koin.android.ext.koin.androidContext
 import org.koin.core.module.Module
 import org.koin.core.module.dsl.viewModel
 import org.koin.dsl.module
+import kotlinx.coroutines.asCoroutineDispatcher
 import java.io.File
+import java.util.concurrent.Executors
 
 /**
  * Debug-only DI: the trace-replay ViewModel, field capture (M0a) and the model consistency check exist
@@ -46,11 +55,37 @@ val shellDebugModule: Module = module {
     }
 
     single { FieldCaptureSettingsStore(androidContext()) }
+    // The model-regression record (M0b). Guidance's DI finds it as its RegressionRecorder.
+    single {
+        val profiles = get<PerceptionProfileManager>()
+        val analysis = get<AnalysisConfig>()
+        val semantics = get<NavigationSemantics>()
+        RegressionCapture(
+            manifestBase = {
+                RegressionManifest(
+                    // The config the session runs with: the profile was activated before the trace
+                    // session (and so this capture) started.
+                    perceptionConfig = CaptureSchema.json.encodeToJsonElement(PerceptionConfig.serializer(), profiles.activeConfig),
+                    analysisConfig = CaptureSchema.json.encodeToJsonElement(AnalysisConfig.serializer(), analysis),
+                    taxonomyId = semantics.taxonomyId.value,
+                    // DefaultDepthRepository without a hardware depth source estimates from position.
+                    depthSource = "position",
+                )
+            },
+            encoder = YuvImageJpegEncoder,
+            clock = AndroidCaptureClock,
+            log = get(),
+            writerDispatcher = Executors.newSingleThreadExecutor { runnable -> Thread(runnable, "regression-capture") }
+                .asCoroutineDispatcher(),
+        )
+    }
+    single<RegressionRecorder> { get<RegressionCapture>() }
     // Created at app start so retention runs then, even when capture is switched off.
     single(createdAtStart = true) {
         val settings = get<FieldCaptureSettingsStore>()
+        val root = File(androidContext().filesDir, CAPTURES_DIR)
         FieldCaptureController(
-            root = File(androidContext().filesDir, CAPTURES_DIR),
+            root = root,
             sessionMode = settings::takeSessionMode,
             frameSource = get(),
             cameraFacts = get(),
@@ -60,15 +95,19 @@ val shellDebugModule: Module = module {
             deviceInfo = captureDeviceInfo(androidContext(), getOrNull<BuildIdentity>()),
             log = get(),
             exporter = CaptureExporter(
-                root = File(androidContext().filesDir, CAPTURES_DIR),
+                root = root,
                 exportDir = File(androidContext().cacheDir, EXPORTS_DIR),
             ),
+            retention = CaptureRetention(root, maxTotalBytesSetting = settings::capBytes),
+            regression = get(),
+            sessionLabels = settings::sessionLabels,
         )
     }
     single<TraceServiceDecorator> {
         val controller = get<FieldCaptureController>()
         val sessions = get<GuidanceSessionMonitor>()
-        TraceServiceDecorator { base -> CapturingTraceService(base, controller, sessions) }
+        val regression = get<RegressionCapture>()
+        TraceServiceDecorator { base -> CapturingTraceService(base, controller, sessions, regression) }
     }
     single { MissedAlertMarkers(androidContext(), get()) }
     single<HardwareKeyHandler> { VolumeDownMarkerKeyHandler(get(), get()) }

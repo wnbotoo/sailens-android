@@ -3,10 +3,10 @@ package com.sailens.guidance.trace.regression
 import com.sailens.core.frame.ImageFrame
 import com.sailens.core.mask.BinaryMask
 import com.sailens.guidance.model.analysis.ConnectivityStats
+import com.sailens.guidance.model.perception.ObstacleDetection
 import com.sailens.guidance.model.perception.SegmentationOutput
 import com.sailens.guidance.model.scene.SceneEvent
 import com.sailens.guidance.processor.analysis.FrameQualityResult
-import com.sailens.vision.detection.Detection
 import java.util.UUID
 
 /**
@@ -33,8 +33,8 @@ interface RegressionRecorder {
      */
     fun onSemantic(frame: ImageFrame, ran: Boolean, output: SegmentationOutput?, failure: Throwable?) {}
 
-    /** The detector's raw output on [frame], when the detector ran on it. */
-    fun onDetection(frame: ImageFrame, detections: List<Detection>?, failure: Throwable?) {}
+    /** The detector's output on [frame] as Guidance's provider returned it, when the detector ran. */
+    fun onDetection(frame: ImageFrame, detections: List<ObstacleDetection>?, failure: Throwable?) {}
 
     /** One call to the connectivity statistics: its input, and the native kernel's answer (null = none). */
     fun onConnectivity(passableMask: BinaryMask, stats: ConnectivityStats?) {}

@@ -180,6 +180,8 @@ data class DetectionItem(
     val y: Float,
     val width: Float,
     val height: Float,
+    /** `ObstacleCategory` name Guidance's provider resolved for the class. */
+    val category: String? = null,
 )
 
 /**

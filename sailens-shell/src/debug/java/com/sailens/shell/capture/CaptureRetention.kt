@@ -21,8 +21,15 @@ import java.io.File
 internal class CaptureRetention(
     private val root: File,
     private val maxAgeMs: Long = DEFAULT_MAX_AGE_MS,
-    val maxTotalBytes: Long = DEFAULT_MAX_TOTAL_BYTES,
+    private val fixedMaxTotalBytes: Long = DEFAULT_MAX_TOTAL_BYTES,
+    /** The cap chosen on the capture page (2 / 5 / 10 GB); overrides [fixedMaxTotalBytes] when given. */
+    private val maxTotalBytesSetting: (() -> Long)? = null,
 ) {
+    constructor(root: File, maxAgeMs: Long = DEFAULT_MAX_AGE_MS, maxTotalBytes: Long) :
+        this(root, maxAgeMs, fixedMaxTotalBytes = maxTotalBytes, maxTotalBytesSetting = null)
+
+    val maxTotalBytes: Long get() = maxTotalBytesSetting?.invoke() ?: fixedMaxTotalBytes
+
 
     /**
      * @param activeBytes the active session's current size, counted towards the cap.
@@ -93,6 +100,7 @@ internal class CaptureRetention(
 
     companion object {
         const val DEFAULT_MAX_AGE_MS: Long = 7L * 24 * 60 * 60 * 1000
-        const val DEFAULT_MAX_TOTAL_BYTES: Long = 2L * 1024 * 1024 * 1024
+        /** 10 GB since M0b (decided 2026-10-09); 2 / 5 / 10 GB selectable on the capture page. */
+        const val DEFAULT_MAX_TOTAL_BYTES: Long = 10L * 1024 * 1024 * 1024
     }
 }

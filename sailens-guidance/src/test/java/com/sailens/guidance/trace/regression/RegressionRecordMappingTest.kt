@@ -10,7 +10,9 @@ import com.sailens.guidance.model.common.DistanceLevel
 import com.sailens.guidance.model.common.EventCategory
 import com.sailens.guidance.model.common.EventPriority
 import com.sailens.guidance.model.common.GroundType
+import com.sailens.guidance.model.common.ObstacleCategory
 import com.sailens.guidance.model.common.Severity
+import com.sailens.guidance.model.perception.ObstacleDetection
 import com.sailens.guidance.model.perception.SegmentationAnalysisStats
 import com.sailens.guidance.model.scene.SceneEvent
 import com.sailens.guidance.trace.capture.CaptureSchema
@@ -101,5 +103,7 @@ class RegressionRecordMappingTest {
         assertEquals(stats.copy(suggestedBias = null), stats.copy(suggestedBias = null).toRecord().toStats())
         val detection = Detection(56, "chair", 0.92f, NormalizedRect(0.3f, 0.4f, 0.2f, 0.5f))
         assertEquals(detection, detection.toItem().toDetection())
+        val obstacle = ObstacleDetection(0, "person", 0.81f, NormalizedRect(0.1f, 0.2f, 0.3f, 0.6f), ObstacleCategory.values().first())
+        assertEquals(obstacle, obstacle.toItem().toObstacleDetection())
     }
 }

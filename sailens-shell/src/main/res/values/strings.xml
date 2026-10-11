@@ -382,4 +382,13 @@
     <string name="model_consistency_coverage">Compared %1$d of %2$d models that run on an accelerator</string>
     <string name="model_consistency_status_incomplete">Inconclusive: %1$s. Every frame must be compared to pass; keep the camera on a steady view and run again</string>
     <string name="model_consistency_report_saved">Report saved: %1$s</string>
+    <!-- Field capture: model-regression record (M0b) -->
+    <string name="field_capture_model_regression">Also record the model-regression record</string>
+    <string name="field_capture_model_regression_supporting">Every frame\'s model outputs and decisions, for exact replay, plus full-resolution frames around delivered prompts and markers. About 3.5 GB an hour outdoors. Record on SM8850 only.</string>
+    <string name="field_capture_group_label">Group</string>
+    <string name="field_capture_group_outdoor">Outdoor</string>
+    <string name="field_capture_group_indoor">Indoor</string>
+    <string name="field_capture_scene_label">Scene name</string>
+    <string name="field_capture_cap_label">Storage cap for captures</string>
+    <string name="field_capture_cap_value">%1$d GB</string>
 </resources>

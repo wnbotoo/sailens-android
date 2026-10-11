@@ -32,8 +32,12 @@ import com.sailens.guidance.usecase.trace.EvaluateTraceReplayBudgetUseCase
 import com.sailens.guidance.usecase.trace.ListTraceSessionsUseCase
 import com.sailens.guidance.usecase.trace.LoadLatestTraceReplayReportUseCase
 import com.sailens.guidance.usecase.trace.LoadTraceReplayReportUseCase
+import com.sailens.guidance.trace.capture.RegressionClocks
+import com.sailens.guidance.trace.regression.RegressionRecorder
+import com.sailens.guidance.trace.regression.recordingClock
 import org.koin.android.ext.koin.androidContext
 import org.koin.core.qualifier.named
+import org.koin.core.scope.Scope
 import org.koin.dsl.module
 
 /**
@@ -63,7 +67,7 @@ val domainBindingsModule = module {
         GroundRecognitionAnalyzer(
             config = get(),
             navigationSemantics = get(),
-            clock = { android.os.SystemClock.elapsedRealtime() },
+            clock = regressionRecorder().recordingClock(RegressionClocks.GROUND) { android.os.SystemClock.elapsedRealtime() },
         )
     }
     single { EventGenerator(config = get()) }
@@ -86,7 +90,8 @@ val domainBindingsModule = module {
             obstacleTracker = get(),
             // 调度间隔与轨迹 TTL 必须用单调时钟：墙钟（currentTimeMillis）会被
             // NTP 校时/手动改时间跳变，回跳会让过期轨迹迟迟不清、持续播报
-            clock = { android.os.SystemClock.elapsedRealtime() },
+            clock = regressionRecorder().recordingClock(RegressionClocks.PERCEPTION) { android.os.SystemClock.elapsedRealtime() },
+            regressionRecorder = regressionRecorder(),
         )
     }
     factory {
@@ -109,10 +114,11 @@ val domainBindingsModule = module {
             deviceSensorRepository = get(),
             // 与 ProcessFrameUseCase 同理：冷却和过期都靠时间差，必须用单调时钟。shell 的 TTS 过期
             // 判定和状态卡片用的是同一个时钟（SystemClock.elapsedRealtime）。
-            clock = { android.os.SystemClock.elapsedRealtime() },
+            clock = regressionRecorder().recordingClock(RegressionClocks.DECIDE) { android.os.SystemClock.elapsedRealtime() },
+            regressionRecorder = regressionRecorder(),
         )
     }
-    factory { RevokeUndeliveredEventUseCase(cooldownManager = get()) }
+    factory { RevokeUndeliveredEventUseCase(cooldownManager = get(), regressionRecorder = regressionRecorder()) }
     factory {
         StartSceneAnalysisUseCase(
             profileManager = get(),
@@ -126,6 +132,7 @@ val domainBindingsModule = module {
             traceService = get(),
             traceRuntimeConfig = get(),
             pipelineBudget = get(),
+            regressionRecorder = regressionRecorder(),
         )
     }
     factory {
@@ -169,3 +176,6 @@ val domainBindingsModule = module {
     factory { LoadTraceReplayReportUseCase(get(), get()) }
     factory { LoadLatestTraceReplayReportUseCase(get(), get()) }
 }
+
+/** The model-regression recorder (M0b) the debug shell binds; release binds none and records nothing. */
+private fun Scope.regressionRecorder(): RegressionRecorder = getOrNull<RegressionRecorder>() ?: RegressionRecorder.None

@@ -13,7 +13,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -33,6 +36,7 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.sailens.guidance.trace.capture.CaptureGroups
 import com.sailens.guidance.trace.capture.CaptureModes
 import com.sailens.shell.R
 import com.sailens.shell.design.components.SailensScaffold
@@ -108,6 +112,13 @@ internal fun FieldCaptureScreen(
                 onCheckedChange = viewModel::setEnabled,
                 supportingText = stringResource(R.string.field_capture_switch_supporting),
                 enabled = !state.capturing,
+            )
+            RegressionSection(
+                state = state,
+                onModelRegressionChange = viewModel::setModelRegression,
+                onGroupChange = viewModel::setGroup,
+                onSceneLabelChange = viewModel::setSceneLabel,
+                onCapChange = viewModel::setCapGigabytes,
             )
             TimingSyncSection(
                 armed = state.timingSyncArmed,
@@ -258,3 +269,61 @@ private fun TimingSyncSection(armed: Boolean, enabled: Boolean, onArmedChange: (
         }
     }
 }
+
+/**
+ * The model-regression record (M0b) and how sessions are named: one scene is one Guidance session,
+ * labelled with a group and a free-text scene name. Locked while recording, like the switch.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun RegressionSection(
+    state: FieldCaptureUiState,
+    onModelRegressionChange: (Boolean) -> Unit,
+    onGroupChange: (String?) -> Unit,
+    onSceneLabelChange: (String) -> Unit,
+    onCapChange: (Int) -> Unit,
+) {
+    val editable = !state.capturing
+    Column(verticalArrangement = Arrangement.spacedBy(SailensDimens.spaceSm)) {
+        ToggleRow(
+            label = stringResource(R.string.field_capture_model_regression),
+            checked = state.modelRegression,
+            onCheckedChange = onModelRegressionChange,
+            supportingText = stringResource(R.string.field_capture_model_regression_supporting),
+            enabled = editable,
+        )
+        Text(stringResource(R.string.field_capture_group_label), style = MaterialTheme.typography.labelLarge)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(SailensDimens.spaceSm)) {
+            listOf(
+                CaptureGroups.OUTDOOR to R.string.field_capture_group_outdoor,
+                CaptureGroups.INDOOR to R.string.field_capture_group_indoor,
+            ).forEach { (group, label) ->
+                FilterChip(
+                    selected = state.group == group,
+                    onClick = { onGroupChange(if (state.group == group) null else group) },
+                    label = { Text(stringResource(label)) },
+                    enabled = editable,
+                )
+            }
+        }
+        OutlinedTextField(
+            value = state.sceneLabel,
+            onValueChange = onSceneLabelChange,
+            label = { Text(stringResource(R.string.field_capture_scene_label)) },
+            singleLine = true,
+            enabled = editable,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Text(stringResource(R.string.field_capture_cap_label), style = MaterialTheme.typography.labelLarge)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(SailensDimens.spaceSm)) {
+            FieldCaptureSettingsStore.CAP_CHOICES_GB.forEach { gb ->
+                FilterChip(
+                    selected = state.capGigabytes == gb,
+                    onClick = { onCapChange(gb) },
+                    label = { Text(stringResource(R.string.field_capture_cap_value, gb)) },
+                )
+            }
+        }
+    }
+}
+

@@ -449,8 +449,9 @@ Replay is exact only over an unbroken run of frames: the first frame the record 
 to watch: transcendental functions may differ by an ulp between ART and HotSpot.
 
 **Event windows.** Full analysis-resolution frames around delivered prompts (1.0 s before to 0.5 s
-after) and markers (3 s before), at 10 fps, JPEG. The frames are copied into a ring before Guidance
-returns them and encoded only when a trigger fires. Revoked prompts do not trigger: at about 14 a
+after) and markers (2 s before), at 10 fps, JPEG. The frames are copied into a ring before Guidance
+returns them (planes only, 2.5 s at 10 Hz, about 46 MB on SM8850; the 3 s first proposed for markers
+would cost another 20 MB of heap) and encoded only when a trigger fires. Revoked prompts do not trigger: at about 14 a
 minute they would multiply the storage. The frames are for re-running models offline; old and new
 models compared on them see the same pixels.
 
