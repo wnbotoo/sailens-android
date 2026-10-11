@@ -186,17 +186,29 @@ in front of the first behaviour change.
 |---|---|
 | M1, M2a, M2b, M3o; M3a code (default off); M3b; any other work that does not change what users hear or feel | M1b; enabling M3a; Stage 3 sem downsampling; any other behaviour-changing perception or navigation change |
 
-**Order of work** (decided 2026-10-09; work is serial): **M0b → M2a → M3o → M3b**, then M1, M1b,
-M2b and the rest. Two reasons:
+**Order of work** (decided 2026-10-09, extended 2026-10-11; work is serial):
+
+1. **sem performance with the v0.6.6 model exports** — behaviour-neutral (bit-identical outputs),
+   just enough to bring SM8850 frame drops back to single digits (§9, GPU row).
+2. **GPU/CPU result consistency check** — a documented model requirement plus a debug tool.
+3. **M0b**, then the Stage 2 baseline recorded on SM8850 with the v0.6.6 exports (`baseline/stage2-2`).
+4. **M2a → M3o → M3b**, then M1, M1b, M2b and the rest.
+5. **After all milestones: a performance and upgrade pass** — LiteRT and model upgrade (with the
+   GPU op located), the zero-copy fast paths newer LiteRT loses, SM8450 support, and M10 — then
+   a new baseline. During milestone development only SM8850 is used.
+
+Reasons for the milestone order:
 
 - **M3b moved earlier.** The SM8850 pilot (2026-10-08) found that outdoors the #5 ground gate fires
-  almost only on light grey granite or stone-tile sidewalks, which sem reads as `building`: 31% of
-  outdoor frames had at least 60% unrecognised ground, and episodes lasted up to 47 s. Path
-  judgement is unavailable on a common sidewalk type; class-free ground (M3b) is the systematic fix.
-  M3b stays non-user-visible; letting confirmed ground lift the #5 gate is a separate later decision
-  that needs M0b replay and device evidence. Before M3b is implemented, a PC feasibility check runs
-  the geometry probe ([experiment record](experiments/geometry-probe-2026-09.md)) on the pilot's
-  granite-sidewalk frames.
+  almost only on light grey granite or stone-tile sidewalks, which sem read as `building`: 31% of
+  outdoor frames had at least 60% unrecognised ground, and episodes lasted up to 47 s. **Revised
+  2026-10-11:** this was largely the GPU error in the old model exports (§9), not the model; with
+  correct sem output these episodes mostly disappear. M3b's value (class-free ground, curbs,
+  drop-offs) is unchanged but its urgency is lower; revisit its position when M3o lands. A PC check
+  on the pilot's granite frames found the geometry route feasible: gravity + 1.3 m + DA V2 Small
+  finds the ground there ([experiment record](experiments/geometry-probe-2026-09.md)). M3b stays
+  non-user-visible; letting confirmed ground lift the #5 gate is a separate later decision that
+  needs M0b replay and device evidence.
 - **M2a before M3o**, so pose and camera geometry can be checked in the simulator as soon as they
   exist. M2a's geometry scenarios express pose and camera as M0a raw facts (implementation §6), so
   they do not wait for M3o.
@@ -403,7 +415,8 @@ no thermal status ≥ SEVERE within 15 minutes.
 | P3 GPU arbitration | VLM integration is postponed; the depth model is the next GPU tenant | Folded into M3b |
 | P3 sem downsampling | Changes behaviour | After baseline, as already planned |
 | #5 ground-recognition threshold calibration | Needs field data | Uses M0a captures; no separate calibration run |
-| #5 gate on granite / stone-tile sidewalks (pilot 2026-10-08) | sem reads them as `building`; a model domain gap, not a threshold | M3b moved earlier (§7 order); lifting the gate on confirmed ground is a separate decision after M0b replay and device evidence |
+| **sem and det wrong on the GPU** (found 2026-10-11) | The old exports (onnx2tf, float16, NHWC) give results on the LiteRT GPU accelerator that differ from CPU on the same input, on SM8850 and SM8450: indoor floors and pale paving read as `building`, an office chair the CPU detects at 92% is never detected. Not precision (FP32 same), not LiteRT 2.3.0, not resize or zero-copy. The Ultralytics v0.6.6 exports (litert-torch, NCHW) of the same models are correct on the GPU, but their sem is slower (SM8850 pipeline 28 → 40–50 ms, drops 20–36%; SM8450 ≈ 7 fps) | Switch the working models to the v0.6.6 exports now (weights are BYO; no code change); the pilot and `baseline/stage2-1` measured the faulty pipeline. sem performance and the consistency check come first (§7 order); locating the GPU op waits for the post-milestone upgrade pass |
+| #5 gate on granite / stone-tile sidewalks (pilot 2026-10-08) | Largely the GPU error above, not a domain gap | Re-check on the v0.6.6 exports with the new baseline; lifting the gate on confirmed ground stays a separate decision after M0b replay and device evidence |
 | Daylight palm over the lens not detected (pilot 2026-10-08) | `FrameQualityAnalyzer`'s luma rules miss a sunlit hand; sharpness drops by an order of magnitude | Behaviour change, so after M0b; M0b records luma mean, luma std and sharpness per frame to calibrate and replay the fix |
 | Connectivity perspective divergence | Affects anything consuming connectivity geometry | Decide before M6 |
 
