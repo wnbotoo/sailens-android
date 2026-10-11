@@ -16,15 +16,18 @@ import com.sailens.guidance.service.TraceService
 internal class CapturingTraceService(
     private val base: TraceService,
     private val capture: FieldCaptureController,
+    private val sessions: GuidanceSessionMonitor? = null,
 ) : TraceService by base {
 
     override fun startSession(metadata: SessionTraceMetadata) {
         base.startSession(metadata)
+        sessions?.onStarted()
         runCatching { capture.onSessionStarted(metadata.sessionId, metadata.targetHardwareProfile) }
     }
 
     override fun finishSession(summary: SessionTraceSummary) {
         base.finishSession(summary)
+        sessions?.onFinished()
         runCatching { capture.onSessionFinished() }
     }
 

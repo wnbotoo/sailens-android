@@ -45,7 +45,7 @@ private const val TAG = "LiteRtDetectionRunner"
  */
 class LiteRtDetectionRunner(
     private val context: Context,
-    /** Class ids worth decoding. Empty means "all of them". */
+    /** Class ids worth decoding. Empty means none: every detection is dropped. */
     private val allowedClassIds: IntArray,
     private val confidenceThreshold: Float,
     private val maxDetections: Int,

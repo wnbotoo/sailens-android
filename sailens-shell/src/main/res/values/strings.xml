@@ -352,4 +352,28 @@
     <string name="btn_open_describe">Describe scene</string>
     <string name="config_reason_model_output">the model output cannot be read</string>
     <string name="config_reason_class_count">the model has a different number of classes than this build expects</string>
+    <!-- Model consistency check (debug diagnostics) -->
+    <string name="btn_open_model_consistency">Model consistency check</string>
+    <string name="settings_diagnostics_model_consistency_supporting">Compare each model on its accelerator with the CPU, on live frames</string>
+    <string name="title_model_consistency_page">Model consistency check</string>
+    <string name="model_consistency_intro">Hold the phone still, pointed at the floor with an object in view, such as a chair or a person. Each model then runs twice on 8 frames, on its accelerator and on the CPU, and the answers are compared. A model can run on the GPU without any error and still compute wrongly there.</string>
+    <string name="btn_model_consistency_run">Run check</string>
+    <string name="model_consistency_guidance_active">Stop Guidance first.</string>
+    <string name="model_consistency_running">Checking, frame %1$d of %2$d</string>
+    <string name="model_consistency_failed">Check failed: %1$s</string>
+    <string name="model_consistency_semantic">Semantic segmentation</string>
+    <string name="model_consistency_detection">Object detection</string>
+    <string name="model_consistency_verdict_pass">Consistent with the CPU</string>
+    <string name="model_consistency_verdict_fail">Inconsistent: do not use this model on this accelerator</string>
+    <string name="model_consistency_verdict_inconclusive">Inconclusive: nothing detected to compare. Point the camera at objects and run again</string>
+    <string name="model_consistency_status_not_applicable">Already runs on the CPU; nothing to compare</string>
+    <string name="model_consistency_status_unavailable">Not checked: %1$s</string>
+    <string name="model_consistency_status_no_frames">No camera frames arrived</string>
+    <string name="model_consistency_accelerators">%1$s compared with %2$s (reference)</string>
+    <string name="model_consistency_semantic_metrics">Pixel agreement: mean %1$s, lowest frame %2$s</string>
+    <string name="model_consistency_confusions">Largest differences: %1$s</string>
+    <string name="model_consistency_detection_metrics">CPU objects also found: %1$s of %2$d. Extra on the accelerator: %3$s of %4$d</string>
+    <string name="model_consistency_semantic_inconclusive">Inconclusive: differences in the uncertain range, usually from a shaking phone or a blurred view. Hold the phone still on a clear scene and run again</string>
+    <string name="model_consistency_frames_changed">%1$d frames changed during the comparison and were left out. This points to a camera snapshot bug</string>
+    <string name="model_consistency_report_saved">Report saved: %1$s</string>
 </resources>

@@ -29,5 +29,9 @@ data object TraceSessionsKey : NavKey
 @Serializable
 data object FieldCaptureKey : NavKey
 
+/** Debug-only destination (model accelerator/CPU consistency check); release registers no entry. */
+@Serializable
+data object ModelConsistencyKey : NavKey
+
 @Serializable
 data class TraceReportKey(val sessionId: String? = null) : NavKey
