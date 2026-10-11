@@ -17,7 +17,7 @@ plus the trace of every prompt. It serves:
 | **False-alarm / miss baseline** (every stage 3 change is compared against it) | every prompt the user actually received, and the frames around it |
 | **#5 ground-gate threshold calibration** | `unrecognizedGroundRatio` indoors, on sidewalks, at grass edges, facing walls |
 | **Ground geometry evidence** (M3) | frames + gravity/rotation/gyro + camera intrinsics, time-aligned |
-| **Scenario design for the simulator** (M2), and choosing the scenes M0b must re-record | the frames and prompts of each scene |
+| **Scenario design for the simulator** (M2a, M2b), and choosing the scenes M0b must re-record | the frames and prompts of each scene |
 
 It does **not** give exact replay of perception. Field evidence stores a sample of frames, not the
 model outputs Guidance acted on, so a decision cannot be re-run from it. That is **M0b** (model
@@ -88,9 +88,10 @@ Capture is controlled on **Settings → Diagnostics → Field capture** (debug b
    - Perception profile: **Standard** (sem + det).
    - TalkBack off (unless the segment tests the screen reader).
    - Debug panel on. It shows "Ground: … (unrecognised N%)", so the #5 gate state is visible live.
-5. Battery above 60%, free storage above 5 GB. Field evidence takes **0.56–0.74 GB/hour** (measured on
-   SM8850; 0.65 on an outdoor walk), a timing burst 41 MB. The phone heats up; rest about every 20
-   minutes, since thermal throttling makes the data unrepresentative.
+5. Battery above 60%, free storage above 5 GB. Field evidence takes **about 0.5–0.75 GB/hour
+   indoors and 1.15–1.27 GB/hour on outdoor walks** (measured on SM8850), a timing burst 41 MB. The
+   phone heats up; rest about every 20 minutes, since thermal throttling makes the data
+   unrepresentative.
 6. The **capture switch** ("Capture during Guidance") is on. It takes effect when the next Guidance
    session starts and is locked while one is recording.
 7. **Once per device and build**: three usable timing-sync bursts (section 6a).
