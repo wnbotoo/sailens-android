@@ -27,7 +27,12 @@ internal data class ModelConsistencyReport(
     val framesUsed: Int,
     val framesChanged: Int,
     val thresholds: ReportThresholds,
+    /** PASS only when every applicable model was compared and passed (see `overallVerdict`). */
     val overall: String?,
+    /** Models the profile runs on an accelerator. */
+    val modelsApplicable: Int,
+    /** Of those, how many were actually compared. */
+    val modelsChecked: Int,
     val semantic: ReportModel,
     val detection: ReportModel,
 )
@@ -45,6 +50,8 @@ internal data class ReportThresholds(
 internal data class ReportModel(
     val status: String,
     val failure: String? = null,
+    /** The one physical model both runs loaded. */
+    val modelSource: String? = null,
     val candidateAccelerator: String? = null,
     val referenceAccelerator: String? = null,
     val verdict: String? = null,
@@ -84,10 +91,13 @@ internal fun ConsistencyRunResult.toReport(
         maxExtraDetectionFraction = thresholds.maxExtraDetectionFraction,
     ),
     overall = overall?.name,
+    modelsApplicable = modelsApplicable,
+    modelsChecked = modelsChecked,
     semantic = semantic.result?.let { r ->
         val c = r.consistency
         ReportModel(
             status = semantic.status.name,
+            modelSource = semantic.modelSource,
             candidateAccelerator = r.accelerators.candidate,
             referenceAccelerator = r.accelerators.reference,
             verdict = c.verdict.name,
@@ -98,11 +108,12 @@ internal fun ConsistencyRunResult.toReport(
                 "${semanticLabel(pair.first)}->${semanticLabel(pair.second)} ${"%.3f".format(fraction)}"
             },
         )
-    } ?: ReportModel(status = semantic.status.name, failure = semantic.failure),
+    } ?: ReportModel(status = semantic.status.name, failure = semantic.failure, modelSource = semantic.modelSource),
     detection = detection.result?.let { r ->
         val c = r.consistency
         ReportModel(
             status = detection.status.name,
+            modelSource = detection.modelSource,
             candidateAccelerator = r.accelerators.candidate,
             referenceAccelerator = r.accelerators.reference,
             verdict = c.verdict.name,
@@ -111,7 +122,7 @@ internal fun ConsistencyRunResult.toReport(
             referenceDetections = c.frames.sumOf { it.referenceCount },
             candidateDetections = c.frames.sumOf { it.candidateCount },
         )
-    } ?: ReportModel(status = detection.status.name, failure = detection.failure),
+    } ?: ReportModel(status = detection.status.name, failure = detection.failure, modelSource = detection.modelSource),
 )
 
 /** The per-frame confusions averaged over all frames, largest first. */

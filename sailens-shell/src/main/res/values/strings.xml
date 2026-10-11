@@ -375,5 +375,10 @@
     <string name="model_consistency_detection_metrics">CPU objects also found: %1$s of %2$d. Extra on the accelerator: %3$s of %4$d</string>
     <string name="model_consistency_semantic_inconclusive">Inconclusive: differences in the uncertain range, usually from a shaking phone or a blurred view. Hold the phone still on a clear scene and run again</string>
     <string name="model_consistency_frames_changed">%1$d frames changed during the comparison and were left out. This points to a camera snapshot bug</string>
+    <string name="model_consistency_overall_pass">Overall: consistent</string>
+    <string name="model_consistency_overall_fail">Overall: inconsistent</string>
+    <string name="model_consistency_overall_inconclusive">Overall: inconclusive, not every model could be compared and passed</string>
+    <string name="model_consistency_overall_none">Overall: no model runs on an accelerator</string>
+    <string name="model_consistency_coverage">Compared %1$d of %2$d models that run on an accelerator</string>
     <string name="model_consistency_report_saved">Report saved: %1$s</string>
 </resources>

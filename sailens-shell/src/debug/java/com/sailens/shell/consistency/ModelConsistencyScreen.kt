@@ -89,6 +89,21 @@ private fun Results(done: ConsistencyPhase.Done, semanticLabel: (Int) -> String)
         verticalArrangement = Arrangement.spacedBy(SailensDimens.spaceSm),
         modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
     ) {
+        Text(
+            text = when (result.overall) {
+                ConsistencyVerdict.PASS -> stringResource(R.string.model_consistency_overall_pass)
+                ConsistencyVerdict.FAIL -> stringResource(R.string.model_consistency_overall_fail)
+                ConsistencyVerdict.INCONCLUSIVE -> stringResource(R.string.model_consistency_overall_inconclusive)
+                null -> stringResource(R.string.model_consistency_overall_none)
+            },
+            style = MaterialTheme.typography.titleMedium,
+            color = if (result.overall == ConsistencyVerdict.FAIL) MaterialTheme.colorScheme.error else Color.Unspecified,
+            modifier = Modifier.semantics { heading() },
+        )
+        Text(
+            text = stringResource(R.string.model_consistency_coverage, result.modelsChecked, result.modelsApplicable),
+            style = MaterialTheme.typography.bodySmall,
+        )
         if (result.framesChanged > 0) {
             Text(
                 text = stringResource(R.string.model_consistency_frames_changed, result.framesChanged),

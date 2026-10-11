@@ -187,8 +187,11 @@ compared:
 | sem | pixel agreement ≥ 95% on average and ≥ 90% on every frame | average < 80% | inconclusive: usually a shaking phone or a blurred view (a correct model measured 86–96% while shaken); retry held still |
 | det | of the CPU's detections, ≥ 90% also found on the accelerator (same class, IoU ≥ 0.5), and ≤ 10% extra | either bound missed | inconclusive when nothing was detected: point at objects |
 
-Detections are decoded slightly below the production threshold on both sides, so a confidence of
-0.49 against 0.51 does not count as a difference. A correct accelerator differs from the CPU only
+Detections are judged by the production decision at the threshold. A detection that crosses it on
+one side only counts as jitter when the two confidences are within 0.10 of each other (0.41 against
+0.36); 0.90 against 0.26 is an object the accelerator loses in production and fails the check.
+PASS overall means every model that runs on an accelerator was compared and passed; the report
+records how many were. A correct accelerator differs from the CPU only
 along class boundaries; a wrong one replaces whole regions, which the result names (for example
 `car→building 31%`). The report is written to `files/diagnostics/consistency/` with the model
 hashes, numbers only.

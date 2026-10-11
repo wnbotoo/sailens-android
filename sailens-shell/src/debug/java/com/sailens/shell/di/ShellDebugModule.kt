@@ -80,7 +80,7 @@ val shellDebugModule: Module = module {
         val perception = get<PerceptionConfig>()
         val semantics = get<NavigationSemantics>()
         ModelConsistencyViewModel(
-            checker = ModelConsistencyChecker(
+            checker = ModelConsistencyChecker.liteRt(
                 context = androidContext(),
                 semanticConfig = get(),
                 detectionConfig = get(),

@@ -60,9 +60,25 @@ class AcceleratorConsistencyTest {
     }
 
     @Test
-    fun `a detection just under the threshold on the candidate still matches`() {
-        val a = compareDetections(listOf(det(56, 0.52f)), listOf(det(56, 0.47f)), threshold = 0.5f)
+    fun `jitter that straddles the threshold still matches`() {
+        val a = compareDetections(listOf(det(56, 0.41f)), listOf(det(56, 0.36f)), threshold = 0.4f)
         assertEquals(DetectionAgreement(referenceCount = 1, matchedReference = 1, candidateCount = 0, extraCandidate = 0), a)
+        assertEquals(ConsistencyVerdict.PASS, judgeDetection(listOf(a)).verdict)
+    }
+
+    @Test
+    fun `a detection the accelerator pushes far below the threshold is lost, not jitter`() {
+        // Production threshold 0.4: the CPU finds the chair, the accelerator's 0.26 drops it.
+        val a = compareDetections(listOf(det(56, 0.90f)), listOf(det(56, 0.26f)), threshold = 0.4f)
+        assertEquals(DetectionAgreement(referenceCount = 1, matchedReference = 0, candidateCount = 0, extraCandidate = 0), a)
+        assertEquals(ConsistencyVerdict.FAIL, judgeDetection(listOf(a)).verdict)
+    }
+
+    @Test
+    fun `a detection only the accelerator is sure of is extra, not jitter`() {
+        val a = compareDetections(listOf(det(56, 0.26f)), listOf(det(56, 0.90f)), threshold = 0.4f)
+        assertEquals(DetectionAgreement(referenceCount = 0, matchedReference = 0, candidateCount = 1, extraCandidate = 1), a)
+        assertEquals(ConsistencyVerdict.FAIL, judgeDetection(listOf(a)).verdict)
     }
 
     @Test

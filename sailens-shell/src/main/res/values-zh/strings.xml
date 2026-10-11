@@ -363,5 +363,10 @@
     <string name="model_consistency_detection_metrics">CPU 检出的物体，加速器也检出：%1$s（共 %2$d 个）。加速器多检出：%3$s（共 %4$d 个）</string>
     <string name="model_consistency_semantic_inconclusive">无法判断：差异处在不确定区间，通常是手机晃动或画面模糊造成的。请拿稳手机、对着清晰的画面重试</string>
     <string name="model_consistency_frames_changed">有 %1$d 帧在比对过程中被改动，已排除。这说明相机快照有 bug</string>
+    <string name="model_consistency_overall_pass">总体：一致</string>
+    <string name="model_consistency_overall_fail">总体：不一致</string>
+    <string name="model_consistency_overall_inconclusive">总体：无法判断，并非每个模型都完成了比对并通过</string>
+    <string name="model_consistency_overall_none">总体：没有在加速器上运行的模型</string>
+    <string name="model_consistency_coverage">在加速器上运行的 %2$d 个模型中，比对了 %1$d 个</string>
     <string name="model_consistency_report_saved">报告已保存：%1$s</string>
 </resources>

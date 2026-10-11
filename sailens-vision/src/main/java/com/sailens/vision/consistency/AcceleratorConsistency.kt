@@ -84,13 +84,15 @@ data class DetectionAgreement(
 )
 
 /**
- * Matches two detection lists of the same frame: same class, IoU at least [minIou], each detection
- * used once, best overlaps first.
+ * Matches two detection lists of the same frame against the production decision at [threshold]:
+ * same class, IoU at least [minIou], each detection used once, best overlaps first.
  *
- * A detection near the confidence threshold may land just above it on one accelerator and just
- * below on the other; that is ordinary numeric jitter, not a broken model. So a detection at or
- * above [threshold] on one side may be matched by one down to `threshold - margin` on the other,
- * and both lists should be decoded down to that lower confidence.
+ * What matters is whether both sides make the same production decision. A detection at or above
+ * [threshold] on one side is matched by the same object at or above [threshold] on the other. The
+ * one excuse is numeric jitter at the threshold: 0.41 against 0.36 is the same answer that happens
+ * to straddle it. So a match across the threshold counts only when the two confidences are within
+ * [margin] of each other -- 0.90 against 0.26 is a detection the accelerator loses in production,
+ * not jitter. Decode both lists down to `threshold - margin` so the weaker side is visible.
  */
 fun compareDetections(
     reference: List<Detection>,
@@ -104,19 +106,27 @@ fun compareDetections(
     val strongCandidate = candidate.filter { it.confidence >= threshold }
     return DetectionAgreement(
         referenceCount = strongReference.size,
-        matchedReference = matchCount(strongReference, candidate.filter { it.confidence >= lower }, minIou),
+        matchedReference = matchCount(strongReference, candidate.filter { it.confidence >= lower }, threshold, margin, minIou),
         candidateCount = strongCandidate.size,
         extraCandidate = strongCandidate.size -
-            matchCount(strongCandidate, reference.filter { it.confidence >= lower }, minIou),
+            matchCount(strongCandidate, reference.filter { it.confidence >= lower }, threshold, margin, minIou),
     )
 }
 
-private fun matchCount(wanted: List<Detection>, offered: List<Detection>, minIou: Float): Int {
+/** [wanted] are all at or above [threshold]; an [offered] one below it matches only within [margin]. */
+private fun matchCount(
+    wanted: List<Detection>,
+    offered: List<Detection>,
+    threshold: Float,
+    margin: Float,
+    minIou: Float,
+): Int {
     data class Overlap(val wanted: Int, val offered: Int, val iou: Float)
     val pairs = buildList {
         wanted.forEachIndexed { w, a ->
             offered.forEachIndexed { o, b ->
-                if (a.classId == b.classId) {
+                val sameDecision = b.confidence >= threshold || a.confidence - b.confidence <= margin
+                if (a.classId == b.classId && sameDecision) {
                     val iou = a.boundingBox.iou(b.boundingBox)
                     if (iou >= minIou) add(Overlap(w, o, iou))
                 }
@@ -215,5 +225,5 @@ fun judgeDetection(
     return DetectionConsistency(frames, recall, extraFraction, verdict)
 }
 
-const val DEFAULT_CONFIDENCE_MARGIN: Float = 0.15f
+const val DEFAULT_CONFIDENCE_MARGIN: Float = 0.10f
 const val DEFAULT_MIN_IOU: Float = 0.5f
