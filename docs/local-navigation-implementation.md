@@ -474,7 +474,12 @@ on and off decides identically, and its record replays exactly.
 **Delivery.** R1 contracts: schema 1.3, records and their mapping, Kotlin and Python readers, the
 `RegressionRecorder` seam, the frame-quality split, serializable configs. R2 recording engine
 (debug): the taps, the writer, event windows, the storage cap and free-space floor, group and scene
-in the capture UI. R3 replay: the JVM harness and its diff report. Then the device exit.
+in the capture UI. R3 replay: the JVM harness (`RegressionReplay`) and its report. Then the device exit.
+
+**Replaying a capture** (local only; captures never enter the repository or CI):
+`gradlew :sailens-guidance:testDebugUnitTest --tests "*CaptureReplayTest*" -PreplayCapture=<capture dir or a folder of them>`.
+One report per capture goes to `sailens-guidance/build/replay/<sessionId>.txt`: frames replayed, the
+first mismatch (frame, what, expected, actual), approximate frames, where a lost frame stopped it.
 
 ## 5. M1 — Qualification and safety state (exact reproduction); M1b — stop pre-emption
 

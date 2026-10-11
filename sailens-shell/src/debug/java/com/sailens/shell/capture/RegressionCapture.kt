@@ -13,22 +13,15 @@ import com.sailens.guidance.model.trace.PromptOutcomeTrace
 import com.sailens.guidance.processor.analysis.FrameQualityResult
 import com.sailens.guidance.trace.capture.CaptureSchema
 import com.sailens.guidance.trace.capture.ClassMapStore
-import com.sailens.guidance.trace.capture.ConnectivityRecord
-import com.sailens.guidance.trace.capture.DetectionRunRecord
 import com.sailens.guidance.trace.capture.FrameEncoding
-import com.sailens.guidance.trace.capture.FrameQualityRecord
 import com.sailens.guidance.trace.capture.RegressionFrameRecord
 import com.sailens.guidance.trace.capture.RegressionManifest
 import com.sailens.guidance.trace.capture.RegressionRevokeRecord
 import com.sailens.guidance.trace.capture.RegressionStats
-import com.sailens.guidance.trace.capture.SemanticRunRecord
-import com.sailens.guidance.trace.capture.SemanticRuns
 import com.sailens.guidance.trace.capture.WindowFrameRecord
 import com.sailens.guidance.trace.capture.WindowTriggers
+import com.sailens.guidance.trace.regression.RegressionFrameAssembler
 import com.sailens.guidance.trace.regression.RegressionRecorder
-import com.sailens.guidance.trace.regression.regressionCrc32
-import com.sailens.guidance.trace.regression.toItem
-import com.sailens.guidance.trace.regression.toRecord
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -194,20 +187,6 @@ internal class RegressionCapture(
         class Window(val copy: YuvCopy, val trigger: String, val triggerRef: String?) : Item
     }
 
-    /** What one frame contributed so far; guarded by the session lock. */
-    private class FrameBuilder(val frame: ImageFrame) {
-        val clocks = LinkedHashMap<String, MutableList<Long>>()
-        var semantic: SemanticRunRecord? = null
-        var classIds: IntArray? = null
-        var classWidth = 0
-        var classHeight = 0
-        var detection: DetectionRunRecord? = null
-        val connectivity = mutableListOf<ConnectivityRecord>()
-        var quality: FrameQualityRecord? = null
-        var stationary: Boolean? = null
-        var incomplete: String? = null
-    }
-
     private inner class Session(val id: String) {
         @Volatile var recording = true
         val scope = CoroutineScope(SupervisorJob() + writerDispatcher)
@@ -215,11 +194,9 @@ internal class RegressionCapture(
         val queue = Channel<Item>(config.queueCapacity)
         val windows = WindowKeeper()
 
-        private val lock = Any()
-        private var current: FrameBuilder? = null
         private val classMapPool = ArrayDeque<IntArray>()
         private var classMapsInFlight = 0
-        private var crcScratch = LongArray(0)
+        private val assembler = RegressionFrameAssembler(::borrowClassMap)
 
         /** The last frame that began; a lost revoke ends exact replay there. */
         @Volatile private var lastSeq = 0L
@@ -249,13 +226,7 @@ internal class RegressionCapture(
         /** A hook threw: the frame being recorded cannot be complete. */
         fun hookFailed(hook: String, e: Exception) {
             if (hookFailures++ == 0L) log.warning(TAG, "Regression hook $hook failed", throwable = e)
-            val marked = synchronized(lock) {
-                current?.let { builder ->
-                    builder.incomplete = "$hook failed: ${e.javaClass.simpleName}"
-                    true
-                } ?: false
-            }
-            if (!marked) lose(lastSeq, "$hook failed")
+            if (!assembler.markIncomplete("$hook failed: ${e.javaClass.simpleName}")) lose(lastSeq, "$hook failed")
         }
 
         fun lose(seq: Long, why: String) {
@@ -268,111 +239,44 @@ internal class RegressionCapture(
 
         fun beginFrame(frame: ImageFrame) {
             lastSeq = frame.sequenceNumber
-            synchronized(lock) {
-                current?.let { lose(it.frame.sequenceNumber, "frame ${it.frame.sequenceNumber} never ended") }
-                current = FrameBuilder(frame)
-            }
+            assembler.beginFrame(frame)?.let(::giveUp)
             windows.offer(frame)
         }
 
-        fun onClock(component: String, value: Long) = synchronized(lock) {
-            val builder = current
-            if (builder == null) {
-                if (strayClockReads++ == 0L) log.warning(TAG, "A clock was read outside a frame ($component)")
-            } else {
-                builder.clocks.getOrPut(component) { mutableListOf() } += value
+        fun onClock(component: String, value: Long) {
+            if (!assembler.onClock(component, value) && strayClockReads++ == 0L) {
+                log.warning(TAG, "A clock was read outside a frame ($component)")
             }
         }
 
-        fun onSemantic(frame: ImageFrame, ran: Boolean, output: SegmentationOutput?, failure: Throwable?) = synchronized(lock) {
-            val builder = current?.takeIf { it.frame === frame } ?: return@synchronized
-            builder.semantic = when {
-                failure != null -> SemanticRunRecord(SemanticRuns.FAILED, failure = failure.toString())
-                !ran -> SemanticRunRecord(SemanticRuns.CACHED)
-                output == null -> SemanticRunRecord(SemanticRuns.FAILED, failure = "no output")
-                else -> {
-                    val mask = output.mask
-                    val copy = borrowClassMap(mask.width * mask.height)
-                    if (copy == null) {
-                        builder.incomplete = "class map pool exhausted"
-                    } else {
-                        // Owned by the frame before copying, so a failed copy still returns it.
-                        builder.classIds = copy
-                        System.arraycopy(mask.classMap, 0, copy, 0, mask.width * mask.height)
-                        builder.classWidth = mask.width
-                        builder.classHeight = mask.height
+        fun onSemantic(frame: ImageFrame, ran: Boolean, output: SegmentationOutput?, failure: Throwable?) =
+            assembler.onSemantic(frame, ran, output, failure)
+
+        fun onDetection(frame: ImageFrame, detections: List<ObstacleDetection>?, failure: Throwable?) =
+            assembler.onDetection(frame, detections, failure)
+
+        fun onConnectivity(passableMask: BinaryMask, stats: ConnectivityStats?) = assembler.onConnectivity(passableMask, stats)
+
+        fun onFrameQuality(result: FrameQualityResult) = assembler.onFrameQuality(result)
+
+        fun onStationary(stationary: Boolean) = assembler.onStationary(stationary)
+
+        fun endFrame(frame: ImageFrame, events: List<SceneEvent>, failure: Throwable?) {
+            when (val outcome = assembler.endFrame(frame, events, failure)) {
+                is RegressionFrameAssembler.Outcome.Lost -> giveUp(outcome)
+                is RegressionFrameAssembler.Outcome.Frame -> {
+                    val item = Item.Frame(outcome.record, outcome.classIds, outcome.width, outcome.height)
+                    if (queue.trySend(item).isFailure) {
+                        outcome.classIds?.let(::returnClassMap)
+                        lose(outcome.seq, "writer queue full")
                     }
-                    SemanticRunRecord(SemanticRuns.RAN, stats = output.analysisStats?.toRecord())
                 }
             }
         }
 
-        fun onDetection(frame: ImageFrame, detections: List<ObstacleDetection>?, failure: Throwable?) = synchronized(lock) {
-            val builder = current?.takeIf { it.frame === frame } ?: return@synchronized
-            builder.detection = DetectionRunRecord(
-                detections = detections?.map { it.toItem() }.orEmpty(),
-                failure = failure?.toString(),
-            )
-        }
-
-        fun onConnectivity(passableMask: BinaryMask, stats: ConnectivityStats?) = synchronized(lock) {
-            val builder = current ?: return@synchronized
-            val words = (passableMask.width * passableMask.height + Long.SIZE_BITS - 1) / Long.SIZE_BITS
-            if (crcScratch.size < words) crcScratch = LongArray(words)
-            builder.connectivity += ConnectivityRecord(
-                inputCrc32 = passableMask.regressionCrc32(crcScratch),
-                width = passableMask.width,
-                height = passableMask.height,
-                stats = stats?.toRecord(),
-            )
-        }
-
-        fun onFrameQuality(result: FrameQualityResult) = synchronized(lock) {
-            current?.quality = FrameQualityRecord(
-                meanLuma = result.measurement?.meanLuma,
-                stdLuma = result.measurement?.stdLuma,
-                sharpness = result.measurement?.sharpness,
-                classified = result.classified.name,
-            )
-        }
-
-        fun onStationary(stationary: Boolean) = synchronized(lock) {
-            current?.stationary = stationary
-        }
-
-        fun endFrame(frame: ImageFrame, events: List<SceneEvent>, failure: Throwable?) {
-            val builder = synchronized(lock) {
-                current?.takeIf { it.frame === frame }.also { current = null }
-            }
-            if (builder == null) {
-                lose(frame.sequenceNumber, "frame ended without beginning")
-                return
-            }
-            builder.incomplete?.let { why ->
-                builder.classIds?.let(::returnClassMap)
-                lose(frame.sequenceNumber, why)
-                return
-            }
-            val record = RegressionFrameRecord(
-                seq = frame.sequenceNumber,
-                sensorTimestampNanos = frame.timestamp,
-                width = frame.width,
-                height = frame.height,
-                rotationDegrees = frame.rotationDegrees,
-                clocks = builder.clocks,
-                semantic = builder.semantic,
-                detection = builder.detection,
-                connectivity = builder.connectivity,
-                quality = builder.quality,
-                stationary = builder.stationary,
-                events = events.map { it.toRecord() },
-                failure = failure?.toString(),
-            )
-            val item = Item.Frame(record, builder.classIds, builder.classWidth, builder.classHeight)
-            if (queue.trySend(item).isFailure) {
-                builder.classIds?.let(::returnClassMap)
-                lose(frame.sequenceNumber, "writer queue full")
-            }
+        private fun giveUp(lost: RegressionFrameAssembler.Outcome.Lost) {
+            lost.classIds?.let(::returnClassMap)
+            lose(lost.seq, lost.why)
         }
 
         fun onRevoke(eventId: UUID, decisionsBefore: Long) {

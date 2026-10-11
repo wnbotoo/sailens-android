@@ -396,7 +396,12 @@ JPEG。帧在 Guidance 归还之前拷进一个环形缓冲区（只拷平面，
 
 **交付。** R1 契约：schema 1.3、记录及其映射、Kotlin 与 Python 读取器、`RegressionRecorder` 接缝、帧质量拆分、
 可序列化的配置。R2 录制引擎（debug）：各个观测点、写入器、事件窗口、存储上限与剩余空间下限、采集页的分组和场景。
-R3 回放：JVM 回放框架及其差异报告。然后是真机验收。
+R3 回放：JVM 回放框架（`RegressionReplay`）及其报告。然后是真机验收。
+
+**回放一段采集**（只在本地；采集数据从不进仓库或 CI）：
+`gradlew :sailens-guidance:testDebugUnitTest --tests "*CaptureReplayTest*" -PreplayCapture=<采集目录或其上层目录>`。
+每段采集一份报告，写到 `sailens-guidance/build/replay/<sessionId>.txt`：回放了多少帧、第一处不一致（帧、内容、
+期望值、实际值）、近似帧、因丢帧停在哪里。
 
 ## 5. M1 — 资格与安全状态（精确复现现状）；M1b — 停止压住已排队事件
 
