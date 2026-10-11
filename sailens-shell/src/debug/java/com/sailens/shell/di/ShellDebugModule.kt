@@ -85,7 +85,6 @@ val shellDebugModule: Module = module {
                 semanticConfig = get(),
                 detectionConfig = get(),
                 detectionThreshold = perception.minObstacleConfidence,
-                maxDetections = perception.maxObstacles,
                 modelSourceResolver = get(),
                 snapshots = get(),
                 log = get(),

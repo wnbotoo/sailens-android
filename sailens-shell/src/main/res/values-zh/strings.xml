@@ -368,5 +368,6 @@
     <string name="model_consistency_overall_inconclusive">总体：无法判断，并非每个模型都完成了比对并通过</string>
     <string name="model_consistency_overall_none">总体：没有在加速器上运行的模型</string>
     <string name="model_consistency_coverage">在加速器上运行的 %2$d 个模型中，比对了 %1$d 个</string>
+    <string name="model_consistency_status_incomplete">无法判断：%1$s。必须每一帧都完成比对才能通过；请让镜头稳定对准画面后重试</string>
     <string name="model_consistency_report_saved">报告已保存：%1$s</string>
 </resources>

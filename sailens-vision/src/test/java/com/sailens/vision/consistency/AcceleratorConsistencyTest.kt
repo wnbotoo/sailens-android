@@ -100,6 +100,15 @@ class AcceleratorConsistencyTest {
     }
 
     @Test
+    fun `objects beyond the first ten are compared too`() {
+        // Twelve objects side by side; the accelerator misses the eleventh and twelfth.
+        fun objects(n: Int) = List(n) { i -> Detection(56, "chair", 0.9f - i * 0.01f, NormalizedRect(i * 0.08f, 0.2f, 0.07f, 0.4f)) }
+        val a = compareDetections(objects(12), objects(10), threshold = 0.4f)
+        assertEquals(DetectionAgreement(referenceCount = 12, matchedReference = 10, candidateCount = 10, extraCandidate = 0), a)
+        assertEquals(ConsistencyVerdict.FAIL, judgeDetection(listOf(a)).verdict) // 10/12 < 0.9
+    }
+
+    @Test
     fun `detection verdict is pooled over frames`() {
         // The 2026-10-11 failure: the CPU sees the chair on every frame, the GPU never.
         val blind = List(8) { DetectionAgreement(1, 0, 0, 0) }

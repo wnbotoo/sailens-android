@@ -54,7 +54,10 @@ internal data class ReportModel(
     val modelSource: String? = null,
     val candidateAccelerator: String? = null,
     val referenceAccelerator: String? = null,
+    /** What the evidence supports (`effectiveVerdict`): never PASS on fewer frames than requested. */
     val verdict: String? = null,
+    /** The comparison's own verdict over the frames that were compared. */
+    val comparedVerdict: String? = null,
     // Semantic
     val meanClassAgreement: Float? = null,
     val minClassAgreement: Float? = null,
@@ -97,10 +100,12 @@ internal fun ConsistencyRunResult.toReport(
         val c = r.consistency
         ReportModel(
             status = semantic.status.name,
+            failure = semantic.failure,
             modelSource = semantic.modelSource,
             candidateAccelerator = r.accelerators.candidate,
             referenceAccelerator = r.accelerators.reference,
-            verdict = c.verdict.name,
+            verdict = semanticVerdict?.name,
+            comparedVerdict = c.verdict.name,
             meanClassAgreement = c.meanAgreement,
             minClassAgreement = c.minAgreement,
             frameClassAgreement = c.frames.map { it.agreement },
@@ -113,10 +118,12 @@ internal fun ConsistencyRunResult.toReport(
         val c = r.consistency
         ReportModel(
             status = detection.status.name,
+            failure = detection.failure,
             modelSource = detection.modelSource,
             candidateAccelerator = r.accelerators.candidate,
             referenceAccelerator = r.accelerators.reference,
-            verdict = c.verdict.name,
+            verdict = detectionVerdict?.name,
+            comparedVerdict = c.verdict.name,
             recall = c.recall,
             extraFraction = c.extraFraction,
             referenceDetections = c.frames.sumOf { it.referenceCount },

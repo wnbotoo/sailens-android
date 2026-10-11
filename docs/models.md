@@ -190,8 +190,11 @@ compared:
 Detections are judged by the production decision at the threshold. A detection that crosses it on
 one side only counts as jitter when the two confidences are within 0.10 of each other (0.41 against
 0.36); 0.90 against 0.26 is an object the accelerator loses in production and fails the check.
-PASS overall means every model that runs on an accelerator was compared and passed; the report
-records how many were. A correct accelerator differs from the CPU only
+PASS needs all 8 frames compared: a camera timeout, or a frame whose pixels changed during the
+comparison, leaves the model inconclusive (still failed if the compared frames already fail).
+Detections are compared model-wide, every class and up to 100 per frame, not Guidance's 10. PASS
+overall means every model that runs on an accelerator was compared and passed; the report records
+how many were. A correct accelerator differs from the CPU only
 along class boundaries; a wrong one replaces whole regions, which the result names (for example
 `car→building 31%`). The report is written to `files/diagnostics/consistency/` with the model
 hashes, numbers only.

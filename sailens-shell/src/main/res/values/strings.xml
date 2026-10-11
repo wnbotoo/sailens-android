@@ -380,5 +380,6 @@
     <string name="model_consistency_overall_inconclusive">Overall: inconclusive, not every model could be compared and passed</string>
     <string name="model_consistency_overall_none">Overall: no model runs on an accelerator</string>
     <string name="model_consistency_coverage">Compared %1$d of %2$d models that run on an accelerator</string>
+    <string name="model_consistency_status_incomplete">Inconclusive: %1$s. Every frame must be compared to pass; keep the camera on a steady view and run again</string>
     <string name="model_consistency_report_saved">Report saved: %1$s</string>
 </resources>

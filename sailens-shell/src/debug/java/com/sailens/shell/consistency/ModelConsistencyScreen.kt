@@ -115,7 +115,7 @@ private fun Results(done: ConsistencyPhase.Done, semanticLabel: (Int) -> String)
             inconclusiveText = stringResource(R.string.model_consistency_semantic_inconclusive),
             status = result.semantic.status,
             failure = result.semantic.failure,
-            verdict = result.semantic.result?.consistency?.verdict,
+            verdict = result.semanticVerdict,
             accelerators = result.semantic.result?.accelerators,
             details = result.semantic.result?.consistency?.let { c ->
                 listOfNotNull(
@@ -134,7 +134,7 @@ private fun Results(done: ConsistencyPhase.Done, semanticLabel: (Int) -> String)
             inconclusiveText = stringResource(R.string.model_consistency_verdict_inconclusive),
             status = result.detection.status,
             failure = result.detection.failure,
-            verdict = result.detection.result?.consistency?.verdict,
+            verdict = result.detectionVerdict,
             accelerators = result.detection.result?.accelerators,
             details = result.detection.result?.consistency?.let { c ->
                 listOf(
@@ -171,6 +171,11 @@ private fun ModelCard(
         ) {
             Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
             val (line, color) = when (status) {
+                ModelCheckStatus.INCOMPLETE -> if (verdict == ConsistencyVerdict.FAIL) {
+                    stringResource(R.string.model_consistency_verdict_fail) to MaterialTheme.colorScheme.error
+                } else {
+                    stringResource(R.string.model_consistency_status_incomplete, failure.orEmpty()) to Color.Unspecified
+                }
                 ModelCheckStatus.CHECKED -> when (verdict) {
                     ConsistencyVerdict.PASS -> stringResource(R.string.model_consistency_verdict_pass) to Color.Unspecified
                     ConsistencyVerdict.FAIL -> stringResource(R.string.model_consistency_verdict_fail) to MaterialTheme.colorScheme.error

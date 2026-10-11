@@ -3,6 +3,7 @@ package com.sailens.shell.consistency
 import com.sailens.camera.FrameLease
 import com.sailens.camera.FrameSnapshotProvider
 import com.sailens.core.frame.ImageFrame
+import com.sailens.guidance.config.PerceptionConfig
 import com.sailens.shell.capture.RecordingLog
 import com.sailens.shell.capture.yuvFrame
 import com.sailens.vision.consistency.ClassMapAgreement
@@ -23,10 +24,12 @@ import java.util.concurrent.atomic.AtomicLong
 
 class ModelConsistencyCheckerTest {
 
-    private class Snapshots : FrameSnapshotProvider {
+    /** Hands out fresh frames; after [available] of them the camera times out (null). */
+    private class Snapshots(private val available: Int = Int.MAX_VALUE) : FrameSnapshotProvider {
         private val seq = AtomicLong()
-        override fun currentFrame(maxAgeMs: Long): ImageFrame = yuvFrame(seq.incrementAndGet())
-        override suspend fun awaitCurrentFrame(maxAgeMs: Long, timeoutMs: Long): ImageFrame = currentFrame(maxAgeMs)
+        override fun currentFrame(maxAgeMs: Long): ImageFrame? =
+            if (seq.get() < available) yuvFrame(seq.incrementAndGet()) else null
+        override suspend fun awaitCurrentFrame(maxAgeMs: Long, timeoutMs: Long): ImageFrame? = currentFrame(maxAgeMs)
         override fun openSnapshotLease(): FrameLease = object : FrameLease {
             override fun close() = Unit
         }
@@ -51,7 +54,8 @@ class ModelConsistencyCheckerTest {
     private fun checker(
         semantic: ComparisonPairFactory<ClassMapAgreement>,
         detection: ComparisonPairFactory<DetectionAgreement>,
-    ) = ModelConsistencyChecker(semantic, detection, Snapshots(), RecordingLog(), frameCount = 3, frameIntervalMs = 0)
+        snapshots: FrameSnapshotProvider = Snapshots(),
+    ) = ModelConsistencyChecker(semantic, detection, snapshots, RecordingLog(), frameCount = 3, frameIntervalMs = 0)
 
     @Test
     fun `cancelling while the second pair initialises releases the first`() = runBlocking {
@@ -111,6 +115,53 @@ class ModelConsistencyCheckerTest {
     }
 
     @Test
+    fun `one agreeing frame out of three is not enough to pass`() = runBlocking {
+        // Three requested: the first two change under the comparison, the third agrees.
+        var calls = 0
+        val result = checker(
+            semantic = { pair(agreeing, AtomicBoolean()) { frame -> if (++calls <= 2) frame.yuvData!!.y.bytes[0]++ } },
+            detection = { ComparisonPair.notApplicable() },
+        ).run()
+        assertEquals(1, result.framesUsed)
+        assertEquals(2, result.framesChanged)
+        assertEquals(ModelCheckStatus.INCOMPLETE, result.semantic.status)
+        assertEquals(ConsistencyVerdict.PASS, result.semantic.result!!.consistency.verdict) // the one frame agreed...
+        assertEquals(ConsistencyVerdict.INCONCLUSIVE, result.semanticVerdict) // ...which is not evidence
+        assertEquals(ConsistencyVerdict.INCONCLUSIVE, result.overall)
+        assertEquals(0, result.modelsChecked)
+    }
+
+    @Test
+    fun `a camera timeout after one frame is not a pass`() = runBlocking {
+        val result = checker(
+            semantic = { pair(agreeing, AtomicBoolean()) },
+            detection = { pair(DetectionAgreement(1, 1, 1, 0), AtomicBoolean()) },
+            snapshots = Snapshots(available = 1),
+        ).run()
+        assertEquals(1, result.framesUsed)
+        assertEquals(ModelCheckStatus.INCOMPLETE, result.detection.status)
+        assertEquals(ConsistencyVerdict.INCONCLUSIVE, result.overall)
+    }
+
+    @Test
+    fun `a failure seen on partial evidence still fails`() = runBlocking {
+        val result = checker(
+            semantic = { pair(ClassMapAgreement(0.3f, 48, emptyList()), AtomicBoolean()) },
+            detection = { ComparisonPair.notApplicable() },
+            snapshots = Snapshots(available = 2),
+        ).run()
+        assertEquals(ModelCheckStatus.INCOMPLETE, result.semantic.status)
+        assertEquals(ConsistencyVerdict.FAIL, result.semanticVerdict)
+        assertEquals(ConsistencyVerdict.FAIL, result.overall)
+    }
+
+    @Test
+    fun `the diagnostic decodes far more detections than Guidance keeps`() {
+        // With every class allowed, Guidance's cap would let the top ten hide the eleventh.
+        assertTrue(DIAGNOSTIC_MAX_DETECTIONS > PerceptionConfig().maxObstacles * 5)
+    }
+
+    @Test
     fun `pass needs every applicable model compared and passed`() {
         val checkedPass = ModelCheckStatus.CHECKED to ConsistencyVerdict.PASS
         val checkedFail = ModelCheckStatus.CHECKED to ConsistencyVerdict.FAIL
@@ -128,6 +179,10 @@ class ModelConsistencyCheckerTest {
         )
         // A known failure is a failure whatever else happened.
         assertEquals(ConsistencyVerdict.FAIL, overallVerdict(listOf(checkedFail, unavailable)))
+        assertEquals(
+            ConsistencyVerdict.INCONCLUSIVE,
+            overallVerdict(listOf(checkedPass, ModelCheckStatus.INCOMPLETE to ConsistencyVerdict.INCONCLUSIVE)),
+        )
         assertNull(overallVerdict(listOf(notApplicable, notApplicable)))
     }
 }

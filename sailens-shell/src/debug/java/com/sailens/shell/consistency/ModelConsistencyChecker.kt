@@ -41,6 +41,12 @@ import java.util.zip.CRC32
  *
  * Results do not depend on GPU contention, only timings do; Guidance is still kept stopped by the
  * caller so the check never competes with live guidance for the camera or the GPU.
+ *
+ * Evidence invariant: a model passes only when all [frameCount] snapshots were compared. The
+ * thresholds and the device evidence behind them are for 8 frames; one frame that happened to
+ * agree proves nothing. A camera timeout or a snapshot that changed under the comparison leaves
+ * the model [ModelCheckStatus.INCOMPLETE] -- still a failure if the frames that were compared
+ * already fail, never a pass.
  */
 internal class ModelConsistencyChecker(
     private val semanticPairs: ComparisonPairFactory<ClassMapAgreement>,
@@ -117,8 +123,12 @@ internal class ModelConsistencyChecker(
             framesRequested = frameCount,
             framesUsed = framesUsed,
             framesChanged = framesChanged,
-            semantic = semantic.outcome(framesUsed) { SemanticModelResult(semAccelerators, judgeSemantic(semFrames)) },
-            detection = detection.outcome(framesUsed) { DetectionModelResult(detAccelerators, judgeDetection(detFrames)) },
+            semantic = semantic.outcome(framesUsed, frameCount) {
+                SemanticModelResult(semAccelerators, judgeSemantic(semFrames))
+            },
+            detection = detection.outcome(framesUsed, frameCount) {
+                DetectionModelResult(detAccelerators, judgeDetection(detFrames))
+            },
         )
     }
 
@@ -135,14 +145,13 @@ internal class ModelConsistencyChecker(
             detectionConfig: DetectionModelConfig,
             /** The production confidence threshold; detections are decoded [DEFAULT_CONFIDENCE_MARGIN] lower. */
             detectionThreshold: Float,
-            maxDetections: Int,
             modelSourceResolver: ModelSourceResolver,
             snapshots: FrameSnapshotProvider,
             log: LogService,
         ): ModelConsistencyChecker = ModelConsistencyChecker(
             semanticPairs = { liteRtSemanticPair(context, semanticConfig, modelSourceResolver, log) },
             detectionPairs = {
-                liteRtDetectionPair(context, detectionConfig, detectionThreshold, maxDetections, modelSourceResolver, log)
+                liteRtDetectionPair(context, detectionConfig, detectionThreshold, modelSourceResolver, log)
             },
             snapshots = snapshots,
             log = log,
@@ -172,9 +181,15 @@ internal class ComparisonPair<A>(
 
     suspend fun compare(frame: ImageFrame): Pair<A, AcceleratorPair> = requireNotNull(runFrame)(frame)
 
-    fun <R> outcome(framesUsed: Int, result: () -> R): ModelOutcome<R> = when {
+    fun <R> outcome(framesUsed: Int, framesRequested: Int, result: () -> R): ModelOutcome<R> = when {
         status != ModelCheckStatus.CHECKED -> ModelOutcome(status, failure, modelSource, null)
         framesUsed == 0 -> ModelOutcome(ModelCheckStatus.NO_FRAMES, "no camera frame arrived", modelSource, null)
+        framesUsed < framesRequested -> ModelOutcome(
+            ModelCheckStatus.INCOMPLETE,
+            "only $framesUsed of $framesRequested frames compared",
+            modelSource,
+            result(),
+        )
         else -> ModelOutcome(status, null, modelSource, result())
     }
 
@@ -247,7 +262,6 @@ private suspend fun liteRtDetectionPair(
     context: Context,
     config: DetectionModelConfig,
     threshold: Float,
-    maxDetections: Int,
     resolver: ModelSourceResolver,
     log: LogService,
 ): ComparisonPair<DetectionAgreement> {
@@ -259,7 +273,9 @@ private suspend fun liteRtDetectionPair(
         // Every class: the check is about the model, not about which classes Guidance uses.
         allowedClassIds = IntArray(c.classCount) { it },
         confidenceThreshold = decodeThreshold,
-        maxDetections = maxDetections,
+        // Not Guidance's cap (maxObstacles = 10): with every class allowed, a production cap would
+        // let the top ten hide a difference in the eleventh.
+        maxDetections = DIAGNOSTIC_MAX_DETECTIONS,
         modelConfig = c,
         modelSourceResolver = pinned,
         preprocessCache = null,
@@ -290,6 +306,9 @@ private fun DetectionModelConfig.onCpu() =
 
 private const val MIN_DECODE_CONFIDENCE: Float = 0.05f
 
+/** Detections decoded per run for the comparison: model-wide, far above any production cap. */
+internal const val DIAGNOSTIC_MAX_DETECTIONS: Int = 100
+
 /** CRC32 of the frame's pixels: the YUV planes when present, otherwise the packed bytes. */
 internal fun frameChecksum(frame: ImageFrame): Long {
     val crc = CRC32()
@@ -318,6 +337,9 @@ internal enum class ModelCheckStatus {
 
     /** The camera delivered no frame (no preview bound, or permission missing). */
     NO_FRAMES,
+
+    /** Compared, but on fewer frames than requested: not enough evidence to pass. */
+    INCOMPLETE,
 }
 
 internal data class ModelOutcome<R>(
@@ -326,6 +348,18 @@ internal data class ModelOutcome<R>(
     val modelSource: String?,
     val result: R?,
 )
+
+/**
+ * The verdict this model's evidence supports: its comparison verdict when every frame was compared;
+ * on partial evidence a failure still fails but anything else is inconclusive; null when nothing
+ * was compared.
+ */
+internal fun effectiveVerdict(status: ModelCheckStatus, compared: ConsistencyVerdict?): ConsistencyVerdict? = when (status) {
+    ModelCheckStatus.CHECKED -> compared
+    ModelCheckStatus.INCOMPLETE ->
+        if (compared == ConsistencyVerdict.FAIL) ConsistencyVerdict.FAIL else ConsistencyVerdict.INCONCLUSIVE
+    else -> null
+}
 
 internal data class SemanticModelResult(
     val accelerators: AcceleratorPair,
@@ -345,16 +379,19 @@ internal data class ConsistencyRunResult(
     val semantic: ModelOutcome<SemanticModelResult>,
     val detection: ModelOutcome<DetectionModelResult>,
 ) {
+    val semanticVerdict: ConsistencyVerdict?
+        get() = effectiveVerdict(semantic.status, semantic.result?.consistency?.verdict)
+
+    val detectionVerdict: ConsistencyVerdict?
+        get() = effectiveVerdict(detection.status, detection.result?.consistency?.verdict)
+
     private val models: List<Pair<ModelCheckStatus, ConsistencyVerdict?>>
-        get() = listOf(
-            semantic.status to semantic.result?.consistency?.verdict,
-            detection.status to detection.result?.consistency?.verdict,
-        )
+        get() = listOf(semantic.status to semanticVerdict, detection.status to detectionVerdict)
 
     /** Models the profile runs on an accelerator, so there is something to compare. */
     val modelsApplicable: Int get() = models.count { it.first != ModelCheckStatus.NOT_APPLICABLE }
 
-    /** Of those, how many were actually compared. */
+    /** Of those, how many were compared on every requested frame. */
     val modelsChecked: Int get() = models.count { it.first == ModelCheckStatus.CHECKED }
 
     /** See [overallVerdict]. */
@@ -362,9 +399,10 @@ internal data class ConsistencyRunResult(
 }
 
 /**
- * PASS means every model there was something to compare for was compared and passed -- not "no
- * failure among the ones that ran". Any failure fails; anything not compared (no model, no frames)
- * or inconclusive leaves the run inconclusive. Null when no model runs on an accelerator.
+ * PASS means every model there was something to compare for was compared on every frame and passed
+ * -- not "no failure among the ones that ran". Any failure fails; anything not compared (no model,
+ * no frames), compared on too few frames, or inconclusive leaves the run inconclusive. Null when no
+ * model runs on an accelerator. [models] carry effective verdicts ([effectiveVerdict]).
  */
 internal fun overallVerdict(models: List<Pair<ModelCheckStatus, ConsistencyVerdict?>>): ConsistencyVerdict? {
     val applicable = models.filter { it.first != ModelCheckStatus.NOT_APPLICABLE }
