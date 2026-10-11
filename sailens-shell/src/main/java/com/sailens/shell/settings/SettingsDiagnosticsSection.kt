@@ -11,6 +11,7 @@ import com.sailens.shell.design.components.SettingsSection
 internal fun SettingsDiagnosticsSection(
     onOpenTraceReports: () -> Unit,
     onOpenFieldCapture: () -> Unit,
+    onOpenModelConsistency: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     SettingsSection(
@@ -26,6 +27,11 @@ internal fun SettingsDiagnosticsSection(
             title = stringResource(R.string.btn_open_field_capture),
             supportingText = stringResource(R.string.settings_diagnostics_field_capture_supporting),
             onClick = onOpenFieldCapture,
+        )
+        SettingRow(
+            title = stringResource(R.string.btn_open_model_consistency),
+            supportingText = stringResource(R.string.settings_diagnostics_model_consistency_supporting),
+            onClick = onOpenModelConsistency,
         )
     }
 }

@@ -4,6 +4,7 @@ import androidx.navigation3.runtime.EntryProviderScope
 import androidx.navigation3.runtime.NavBackStack
 import androidx.navigation3.runtime.NavKey
 import com.sailens.shell.capture.FieldCaptureScreen
+import com.sailens.shell.consistency.ModelConsistencyScreen
 import com.sailens.shell.trace.TraceReportScreen
 import com.sailens.shell.trace.TraceSessionsScreen
 
@@ -26,5 +27,8 @@ fun EntryProviderScope<NavKey>.sailensDebugEntries(backStack: NavBackStack<NavKe
     }
     entry<FieldCaptureKey> {
         FieldCaptureScreen(onNavigateBack = { backStack.removeLastOrNull() })
+    }
+    entry<ModelConsistencyKey> {
+        ModelConsistencyScreen(onNavigateBack = { backStack.removeLastOrNull() })
     }
 }

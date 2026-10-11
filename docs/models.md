@@ -163,10 +163,50 @@ det:  postprocessBackend = "native_bbox_nms_float_handle"
 **No change should break them.** Note they only hold under a **float, single-tensor** contract:
 uint8 outputs or multi-tensor outputs fall back to the Kotlin decode path.
 
-## Layout: prefer NHWC
+## 🔴 Accelerator result consistency
+
+> 🔴 **A model that runs on the GPU without an error can still compute wrongly there.** Like the
+> class order, nothing in the output looks broken; a user who cannot see the scene is the one
+> misled. Before using a model on an accelerator, check that it gives the CPU's answer.
+
+On 2026-10-11 the sem and det exports this repository had been developed against (onnx2tf, float16,
+NHWC) ran on the LiteRT GPU accelerator on SM8850 and SM8450 with no error, and answered wrongly:
+indoor floors and pale paving came out as `building`, and an office chair the CPU detected at 92% on
+every frame was never detected. Forcing FP32, LiteRT 2.3.0, the resize filter and the zero-copy read
+were all ruled out. Other exports of the same models (Ultralytics v0.6.6, litert-torch, NCHW) were
+correct on the same GPUs. The cause is in how a particular graph meets the accelerator, so it can
+reappear with any new model file, LiteRT version or device.
+
+**Check** with the debug build: Settings → Diagnostics → **Model consistency check**. Hold the phone
+still, pointed at the floor with an object in view (a chair, a person). Each model runs twice on 8
+camera frames, once on its configured accelerator and once on the CPU, and the two answers are
+compared:
+
+| Model | Pass | Fail | Otherwise |
+|---|---|---|---|
+| sem | pixel agreement ≥ 95% on average and ≥ 90% on every frame | average < 80% | inconclusive: usually a shaking phone or a blurred view (a correct model measured 86–96% while shaken); retry held still |
+| det | of the CPU's detections, ≥ 90% also found on the accelerator (same class, IoU ≥ 0.5), and ≤ 10% extra | either bound missed | inconclusive when nothing was detected: point at objects |
+
+Detections are judged by the production decision at the threshold. A detection that crosses it on
+one side only counts as jitter when the two confidences are within 0.10 of each other (0.41 against
+0.36); 0.90 against 0.26 is an object the accelerator loses in production and fails the check.
+PASS needs all 8 frames compared: a camera timeout, or a frame whose pixels changed during the
+comparison, leaves the model inconclusive (still failed if the compared frames already fail).
+Detections are compared model-wide, every class and up to 100 per frame, not Guidance's 10. PASS
+overall means every model that runs on an accelerator was compared and passed; the report records
+how many were. A correct accelerator differs from the CPU only
+along class boundaries; a wrong one replaces whole regions, which the result names (for example
+`car→building 31%`). The report is written to `files/diagnostics/consistency/` with the model
+hashes, numbers only.
+
+Run it whenever the model file, the LiteRT version or the target device changes. A distribution
+that ships models is responsible for running it on the devices it supports.
+
+## Layout: NHWC is faster, correctness first
 
 NCHW exports with a float32 I/O wrapper cost a per-frame host transpose and fragment on the GPU/NPU
-delegates. Prefer NHWC graphs.
+delegates, so an NHWC graph is usually faster. Speed only counts after the accelerator consistency
+check passes: the fast NHWC exports above were the ones that computed wrongly on the GPU.
 
 ## Backend selection
 
