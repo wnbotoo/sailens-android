@@ -696,6 +696,45 @@ sem/det first, depth pre-emptible.
 steps, step height within tolerance; device test comparing output with the PC reference on stored
 frames; binding coverage if any native kernel is added.
 
+### M3b as built: part 1, transform and ground fit (pure JVM)
+
+- `sailens-vision` `…vision.depth`:
+  - `ResizePolicy`.
+  - `DepthInputTransform` (`create(analysis size, tensor size, policy)`, `toTensor*` /
+    `toAnalysis*`, `covers`).
+  - `DisparityMap`: `sampleAt(u, v)` is bilinear between the content's pixel centres and returns
+    null where the model did not see the point, so padding never blends in.
+- `…guidance.geometry` `GroundFitter` follows steps 1–6 above, with these as-built details:
+  - **Sampling** covers only the image below 40 % of its height. Far ground is where a small step
+    or a gentle slope stays within the 4 % threshold, and sampling it bent the fit: a 15 cm curb's
+    far road pulled `t` from 0.20 to 0.10.
+  - **RANSAC is run over both slopes.** A better negative slope means **inverse output**, which
+    marks the observation invalid.
+  - **A flat line is no ground.** Across the inliers the near end must be ≥ 15 % above the far end,
+    because a wall filling the view fits a flat line just as well.
+  - **Validity**: `VALID`, `TOO_FEW_SAMPLES`, `DEGENERATE_VIEW` (camera pointing straight down),
+    `NO_GROUND` or `INVERSE_OUTPUT`.
+  - **Gravity agreement**: a free 3-parameter plane on the inliers must lean within 10° and ±33 %
+    of what gravity predicts.
+  - **Confidence** is the product of three terms: inlier ratio (0.2 → 0.6), agreement (×0.5 when it
+    fails) and the stability of ground coverage over the last 3 fits.
+  - `GroundObservation.heightAboveGroundM` implements step 5.
+- The simulator renders synthetic disparity (`renderDisparity`, `a/Z + b`) through any transform.
+  The tests check:
+  - the street fits to `A = a/h`, `t = b`;
+  - the three policies agree, and what a crop cut away stays unknown;
+  - a 15 cm curb is not ground, and its height comes out at −0.15 m;
+  - a 1.5 m drop is below ground;
+  - a wall and a person are above ground, with their heights;
+  - an indoor floor that sem calls `building` is ground;
+  - noise of 3 % still fits;
+  - a depth-output model is refused;
+  - a wall filling the view, and a camera pointing straight down, give no fit;
+  - a wrong gravity roll is noticed.
+- **Part 2** covers the runner, the depth `ModelType` and catalog entry, the `docs/models.md`
+  contract, 2–5 Hz scheduling, GPU sharing, trace fields and the overlay. It needs the device for
+  its exit: the latency budget, and agreement with the PC experiment.
+
 ## 10. M4 — Local world model
 
 **V0 (frame-local)**

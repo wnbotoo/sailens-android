@@ -159,25 +159,27 @@ fun render(camera: SyntheticCamera, pose: Pose, world: World): RenderedFrame {
     val f = pose.forward
     val r = pose.right
     val d = pose.down
+    val hit = Hit()
     for (v in 0 until h) {
         val yn = (v + 0.5 - camera.cy) / camera.focal
         for (u in 0 until w) {
             val xn = (u + 0.5 - camera.cx) / camera.focal
-            ids[v * w + u] = castRay(
-                o.x, o.y, o.z,
-                f.x + r.x * xn + d.x * yn,
-                f.y + r.y * xn + d.y * yn,
-                f.z + r.z * xn + d.z * yn,
-                world,
-            )
+            firstHit(o.x, o.y, o.z, f.x + r.x * xn + d.x * yn, f.y + r.y * xn + d.y * yn, f.z + r.z * xn + d.z * yn, world, hit)
+            ids[v * w + u] = hit.cls
         }
     }
     val detections = world.boxes.mapNotNull { box -> box.detection?.let { project(camera, pose, box, it) } }
     return RenderedFrame(ids, detections)
 }
 
-/** The class of the first surface along the ray; primitives only, it runs for every pixel. */
-private fun castRay(ox: Double, oy: Double, oz: Double, dx: Double, dy: Double, dz: Double, world: World): Int {
+/** The first surface along a ray: its distance (camera z-depth, since rays have unit forward) and class. */
+private class Hit {
+    var t = Double.POSITIVE_INFINITY
+    var cls = SceneClasses.SKY
+}
+
+/** The first surface along the ray; primitives only, it runs for every pixel. */
+private fun firstHit(ox: Double, oy: Double, oz: Double, dx: Double, dy: Double, dz: Double, world: World, hit: Hit) {
     var best = Double.MAX_VALUE
     var cls = -1
     if (abs(dy) > 1e-9) {
@@ -199,13 +201,64 @@ private fun castRay(ox: Double, oy: Double, oz: Double, dx: Double, dy: Double, 
             cls = box.classId
         }
     }
-    if (cls >= 0) return cls
+    if (cls >= 0) {
+        hit.t = best
+        hit.cls = cls
+        return
+    }
     // Background: a row of buildings at backgroundZ, sky above them.
     if (dz > 1e-9) {
-        val y = oy + dy * (world.backgroundZ - oz) / dz
-        return if (y < world.backgroundHeight) SceneClasses.BUILDING else SceneClasses.SKY
+        val t = (world.backgroundZ - oz) / dz
+        if (oy + dy * t < world.backgroundHeight) {
+            hit.t = t
+            hit.cls = SceneClasses.BUILDING
+            return
+        }
     }
-    return SceneClasses.SKY
+    hit.t = Double.POSITIVE_INFINITY
+    hit.cls = SceneClasses.SKY
+}
+
+/**
+ * What a relative-depth model would output for [world] seen from [pose]: disparity `a/Z + b` (Z the
+ * camera z-depth; sky gives b) on the model's [width] × [height] tensor, whose pixels map to the
+ * upright analysis image ([analysisWidth] × [analysisHeight], the class map scaled up) through
+ * [toAnalysis]. Padding (outside the analysis image) is 0. [noise] multiplies each value by
+ * 1 ± noise, seeded.
+ */
+fun renderDisparity(
+    camera: SyntheticCamera,
+    pose: Pose,
+    world: World,
+    width: Int,
+    height: Int,
+    analysisWidth: Int,
+    analysisHeight: Int,
+    toAnalysis: (x: Float, y: Float) -> Pair<Float, Float>,
+    a: Double = 10.0,
+    b: Double = 0.2,
+    noise: Double = 0.0,
+    seed: Int = 7,
+): FloatArray {
+    val scale = analysisWidth.toDouble() / camera.mapWidth
+    val focal = camera.focal * scale
+    val cx = camera.cx * scale
+    val cy = camera.cy * scale
+    val o = pose.position
+    val f = pose.forward
+    val r = pose.right
+    val d = pose.down
+    val random = kotlin.random.Random(seed)
+    val hit = Hit()
+    return FloatArray(width * height) { index ->
+        val (u, v) = toAnalysis(index % width + 0.5f, index / width + 0.5f)
+        if (u < 0 || v < 0 || u >= analysisWidth || v >= analysisHeight) return@FloatArray 0f
+        val xn = (u - cx) / focal
+        val yn = (v - cy) / focal
+        firstHit(o.x, o.y, o.z, f.x + r.x * xn + d.x * yn, f.y + r.y * xn + d.y * yn, f.z + r.z * xn + d.z * yn, world, hit)
+        val clean = a / hit.t + b
+        (clean * (1 + noise * (2 * random.nextDouble() - 1))).toFloat()
+    }
 }
 
 /** Slab intersection with an axis-aligned box: the entry distance, or +infinity for a miss. */
