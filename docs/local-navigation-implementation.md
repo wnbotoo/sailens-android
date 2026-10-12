@@ -545,6 +545,41 @@ M1b and M8 depend on.
 - **Tests**: rotation/axis conventions on synthetic sensor data for each analysis rotation; intrinsics
   mapping through crop and rotation.
 
+### M3o as built: part 1, resolution (pure JVM)
+
+- `…guidance.geometry`:
+  - `CameraFacts` / `FrameFacts`: the raw facts, built from a live frame (`FrameFacts.of(ImageFrame)`)
+    or from a capture (`CaptureCameraRecord.toCameraFacts()`, `FrameFacts.of(FrameRecord)`), so a
+    recording resolves through the same code as the camera.
+  - `CameraIntrinsicsResolver`: calibration (shifted from the pre-correction to the active array)
+    or a focal-length estimate, mapped through `sensorToBufferTransform`, then rotated upright.
+    - The **crop rectangle is not applied**: the models see the whole buffer.
+    - With no transform, the buffer is assumed to be a centred fill of the active array, and the
+      result is flagged.
+    - A transform that is not an axis-aligned scale/offset (possibly with swapped or flipped axes)
+      is refused.
+    - Continuous pixel coordinates: the 90° rotation maps buffer y to upright x as `H − y`.
+  - `GravityInCamera`: device `TYPE_GRAVITY` (the reaction, pointing up) → unit down vector in the
+    upright camera frame, for the back camera, from `SENSOR_ORIENTATION` and the frame's rotation.
+  - `CameraGeometryResolver`: one `CameraGeometry` per frame, with its time basis, intrinsics,
+    nearest gravity and its age, and phone settings.
+    - **Unavailable** when there is no frame time, no intrinsics, no sensor orientation or no
+      gravity.
+    - **Degraded** for receipt-time alignment (unmeasured), estimated intrinsics or an assumed
+      mapping, or gravity more than 100 ms from the frame.
+  - `PhoneGeometrySettings` (seed 1.3 m).
+- `…guidance.motion`:
+  - `MotionTracker` (pure; fed game-rotation-vector samples): the camera heading, increasing when
+    the phone turns right, and the yaw rate.
+    - Within about 10° of vertical, the heading is carried over (DEGRADED) and no rate is claimed
+      across that stretch.
+    - With no sample for 200 ms the state is UNAVAILABLE.
+  - `SensorSampleBuffer`: a ring of recent samples with nearest lookup.
+- Checked against the M2a scenarios: every simulated frame resolves to its own pitch and to the
+  class-map intrinsics (449.625 / 180 / 320).
+- Part 2 wires it into the running app: the Android sensor source, camera facts from the shell, a
+  geometry per frame in the pipeline, and its fields in the trace.
+
 ## 8. M3a — Ground-contact distance
 
 **Inputs**: `CameraGeometry`; a box in analysis-image coordinates; the frame's other detections and
