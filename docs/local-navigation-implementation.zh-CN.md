@@ -420,6 +420,31 @@ trace 调用、manifest 原子地完成。PR-C——标记去抖、导出内容�
   停止后的恢复（给 M1b）、M1 状态时间线、用户在走而障碍物消失（给 M4）。
 - 以后：加一个采集适配器，把 M0b 的模型回归记录送进同一套框架。
 
+### M2a 实际实现
+
+- **位置**：`sailens-guidance/src/test/java/com/sailens/guidance/sim/`。`SyntheticScene.kt` 是物理
+  真值：M0a 记录下来的 SM8850 相机（4096×3072 有效像素阵列，f = 2877.6 px，1280×720 缓冲区，传感器
+  方向 90°，换算到 360×640 的类别图上是 449.625 / 180 / 320 px）、一个姿态（相机高度、低于水平的俯
+  角、已走过的距离），以及由若干给定高度的地面块、直立的箱体和远处背景组成的世界。光线投射渲染器把它
+  变成模型会报告的内容：类别图和检测框（检测框可以只覆盖某个高度以上的部分，用来模拟站在墙后的人）。
+  `Scenario.facts(i)` 给出同一帧的 M0a 原始事实：相机记录、带 `sensorToBufferTransform` 的帧记录、
+  重力采样。
+- `SyntheticSceneTest` 检查两者描述的是同一台相机：只用原始事实（内参 → 变换 → 旋转，俯角取自重
+  力）投影的世界点，落在渲染器画出的位置上。M3o 解析场景的原始事实时，必须得到同样的数值。
+- `GuidanceSimulator` 跑完整的 `StartSceneAnalysisUseCase` 路径，装配方式与 `DomainBindingsModule`
+  装配 app 相同，只有两个模型、时钟和静止标志是 fake。因为 native 库只有 arm64，JVM 上不得不做两处替
+  换：连通性用 Kotlin 回退实现而不是 native 内核（两者在变窄的走廊上结果不同，见 `architecture.md`
+  里关于连通性的说明），语义统计用 Kotlin 提取器。所以基准里的阻塞、宽度和洪泛数值是回退实现的。
+- **基准**：`sailens-guidance/src/test/resources/scenarios/<name>.golden.txt`，首行是场景描述，之后每
+  帧一行：决定播报的事件（key、优先级、参数）、跟踪中的障碍物（类别 / 区域 / 距离）、地面识别状态和
+  连通性数值，保留 4 位小数。`ScenarioGoldenTest` 在第一处不同的行失败。有意改变行为后，重新生成基准
+  并和改动一起提交 diff：
+  `gradlew :sailens-guidance:testDebugUnitTest --tests "*ScenarioGoldenTest*" -PupdateGoldens`。
+- **第一批基准固定下来的行为**（是今天的行为，不代表认可；M3a、M3b 正是为这些而做）：3 m 外站着不
+  动的人，是 MEDIUM 还是 FAR 只取决于俯角，也取决于手机高度；被模型读成 building 的室内地面，会先报
+  CRITICAL 的"前方受阻"，之后才报"地面无法识别"；下到路面的 15 cm 路沿完全看不出来；走向 1.5 m 的落
+  差，阻塞值升到 1.0 却没有提示；下半身被墙挡住的人，整个接近过程都被读成 FAR，从未播报。
+
 ## 7. M3o — 姿态与相机几何
 
 - 解析 M0a 的原始事实（§3）：时间基准（来源为 `REALTIME` 时用 `CAMERA_REALTIME`，否则
