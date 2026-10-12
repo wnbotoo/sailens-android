@@ -71,6 +71,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.random.Random
 
@@ -205,7 +206,7 @@ class RegressionReplayRoundTripTest {
 
     private class Session(val events: List<List<SceneEvent>>, val recorder: MemoryRecorder?, val activeConfig: PerceptionConfig)
 
-    /** Frames whose semantic run fails: they produce no result. */
+    /** Frames whose semantic run fails when it runs: such a frame produces no result. */
     private val failingFrames = setOf(30L, 31L)
 
     private fun runSession(record: Boolean): Session = runBlocking {
@@ -213,13 +214,17 @@ class RegressionReplayRoundTripTest {
         val regression: RegressionRecorder = recorder ?: RegressionRecorder.None
         val now = AtomicLong(1_000_000)
         val clock = { now.incrementAndGet() }
+        val failures = AtomicInteger()
         val stationary = MutableStateFlow(false)
         val repository = object : PerceptionRepository {
             override val isInitialized = true
             override suspend fun initialize() = Unit
             override suspend fun release() = Unit
             override suspend fun segment(frame: ImageFrame): Result<SegmentationOutput> {
-                if (frame.sequenceNumber in failingFrames) return Result.failure(IllegalStateException("model failed"))
+                if (frame.sequenceNumber in failingFrames) {
+                    failures.incrementAndGet()
+                    return Result.failure(IllegalStateException("model failed"))
+                }
                 val ids = classMap(frame.sequenceNumber)
                 return Result.success(SegmentationOutput(SegmentationMask(width, height, ids), 1, 2, 3, analysisStats = stats(ids, frame.sequenceNumber)))
             }
@@ -285,15 +290,16 @@ class RegressionReplayRoundTripTest {
         // it may decide several frames ahead of a revoke. The live recording copes (each revoke
         // records how many decisions preceded it); this comparison needs the revoke at a fixed
         // point, so each frame waits until the collector has handled every earlier result.
-        val handled = MutableStateFlow(0)
+        // A frame yields a result unless its semantic run fails, and that run is skipped when the
+        // cached analysis is reused -- so count the failures that happened, not the frames scripted
+        // to fail. Both are known once emit returns: the frame has been processed by then.
+        val handled = MutableStateFlow(0L)
         val frames = flow {
-            var expected = 0
             for (seq in 1L..frameCount) {
-                handled.first { it >= expected }
+                handled.first { it >= seq - 1 - failures.get() }
                 now.addAndGet(200)
                 stationary.value = seq in 50L..80L
                 emit(cameraFrame(seq))
-                if (seq !in failingFrames) expected++
             }
         }
         val decided = mutableListOf<List<SceneEvent>>()
