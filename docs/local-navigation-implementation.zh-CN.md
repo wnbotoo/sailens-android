@@ -460,6 +460,35 @@ trace 调用、manifest 原子地完成。PR-C——标记去抖、导出内容�
   行为；基础资格不变。
 - **测试**：在每种分析旋转下，用合成传感器数据检查旋转和坐标轴约定；检查内参经过裁剪和旋转后的映射。
 
+### M3o 实际实现：第一部分，解析（纯 JVM）
+
+- `…guidance.geometry`：
+  - `CameraFacts` / `FrameFacts`：原始事实，可以从实时帧构造（`FrameFacts.of(ImageFrame)`），也可以从
+    采集数据构造（`CaptureCameraRecord.toCameraFacts()`、`FrameFacts.of(FrameRecord)`），所以录制数据
+    和相机走同一套解析代码。
+  - `CameraIntrinsicsResolver`：用标定值（从 pre-correction 阵列平移到 active 阵列），没有时用焦距估
+    算；经 `sensorToBufferTransform` 映射，再旋转到正向。
+    - **不应用裁剪矩形**：模型看到的是整个缓冲区。
+    - 没有变换时，假定缓冲区是 active 阵列居中填充的结果，并打上标记。
+    - 不是轴对齐缩放/平移（可以交换或翻转轴）的变换一律拒绝。
+    - 用连续像素坐标：旋转 90° 时，缓冲区的 y 映射为正向图像的 `H − y`。
+  - `GravityInCamera`：设备 `TYPE_GRAVITY`（反作用力，朝上）→ 正向相机坐标系里的单位"向下"向量，
+    适用于后置相机，依据 `SENSOR_ORIENTATION` 和该帧的旋转。
+  - `CameraGeometryResolver`：每帧一个 `CameraGeometry`，含时间基准、内参、最近的重力采样及其时长差、
+    手机设置。
+    - 没有帧时间、内参、传感器方向或重力时为 **Unavailable**。
+    - 用接收时间对齐（未测量）、内参是估算或映射是假定的、重力离帧超过 100 ms 时为 **Degraded**。
+  - `PhoneGeometrySettings`（默认 1.3 m）。
+- `…guidance.motion`：
+  - `MotionTracker`（纯逻辑，输入 game rotation vector 采样）：相机朝向，手机右转时增大，以及偏航角
+    速度。
+    - 离竖直约 10° 以内时，朝向沿用上一次的值（DEGRADED），这一段不给角速度。
+    - 200 ms 没有采样时为 UNAVAILABLE。
+  - `SensorSampleBuffer`：最近采样的环形缓冲，按时间找最近的一个。
+- 用 M2a 场景检查过：每个仿真帧都解析回它自己的俯角和类别图内参（449.625 / 180 / 320）。
+- 第二部分把它接进运行中的 app：Android 传感器源、shell 提供的相机事实、管线里每帧一个几何结果，
+  以及 trace 里的对应字段。
+
 ## 8. M3a — 接地点距离
 
 **输入**：`CameraGeometry`；分析图像坐标下的一个框；该帧的其他检测结果和 sem 掩码（用于有效性检查）。
