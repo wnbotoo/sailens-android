@@ -248,6 +248,17 @@ object TraceReplayParser {
         obstacleAcceleratorSelection = entry.optionalString("obstacleAcceleratorSelection") ?: "unknown",
         obstaclePreprocessBackend = entry.optionalString("obstaclePreprocessBackend") ?: "unknown",
         obstaclePostprocessBackend = entry.optionalString("obstaclePostprocessBackend") ?: "unknown",
+        geometryQuality = entry.optionalString("geometryQuality") ?: "none",
+        geometryIssues = entry.optionalStringArray("geometryIssues").orEmpty(),
+        geometryTimeBasis = entry.optionalString("geometryTimeBasis") ?: "none",
+        gravityAgeMs = entry.optionalDouble("gravityAgeMs"),
+        pitchDownDeg = entry.optionalDouble("pitchDownDeg"),
+        rollDeg = entry.optionalDouble("rollDeg"),
+        intrinsicsSource = entry.optionalString("intrinsicsSource") ?: "none",
+        focalPx = entry.optionalDouble("focalPx"),
+        headingDeg = entry.optionalDouble("headingDeg"),
+        yawRateDegPerS = entry.optionalDouble("yawRateDegPerS"),
+        orientationQuality = entry.optionalString("orientationQuality") ?: "none",
     )
 
     private fun parseOverlayRender(entry: JsonObject, lineIndex: Int) = OverlayRenderTrace(

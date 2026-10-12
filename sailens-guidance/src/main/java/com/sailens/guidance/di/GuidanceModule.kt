@@ -1,5 +1,7 @@
 package com.sailens.guidance.di
 
+import com.sailens.guidance.motion.AndroidOrientationSource
+import com.sailens.guidance.motion.OrientationSource
 import android.content.Context
 import com.sailens.core.log.LogService
 import com.sailens.guidance.config.PerceptionConfig
@@ -107,6 +109,7 @@ val guidanceModule = module {
     single { DeviceMotionDataSource(context = androidContext()) }
 
     single<DepthRepository> { DefaultDepthRepository(get(), null) }
+    single<OrientationSource> { AndroidOrientationSource(androidContext()) }
     single<DeviceSensorRepository> { DefaultDeviceSensorRepository(get(), get()) }
 
     // Trace / replay

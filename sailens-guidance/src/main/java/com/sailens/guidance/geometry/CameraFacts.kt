@@ -39,6 +39,14 @@ data class CameraFacts(
 )
 
 /**
+ * The facts of the camera bound now, or null when none is bound. The host that owns the camera
+ * provides it; a host that does not leaves Guidance without geometry, which is a legal state.
+ */
+fun interface CameraFactsSource {
+    fun current(): CameraFacts?
+}
+
+/**
  * Per-frame facts: the buffer the models see (the whole buffer -- the pipeline does not apply the
  * source's crop rectangle) and how it maps to the sensor.
  *
