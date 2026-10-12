@@ -63,6 +63,7 @@ import com.sailens.guidance.usecase.perception.ProcessFrameUseCase
 import com.sailens.guidance.usecase.scene.StartSceneAnalysisUseCase
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -204,6 +205,9 @@ class RegressionReplayRoundTripTest {
 
     private class Session(val events: List<List<SceneEvent>>, val recorder: MemoryRecorder?, val activeConfig: PerceptionConfig)
 
+    /** Frames whose semantic run fails: they produce no result. */
+    private val failingFrames = setOf(30L, 31L)
+
     private fun runSession(record: Boolean): Session = runBlocking {
         val recorder = if (record) MemoryRecorder() else null
         val regression: RegressionRecorder = recorder ?: RegressionRecorder.None
@@ -215,7 +219,7 @@ class RegressionReplayRoundTripTest {
             override suspend fun initialize() = Unit
             override suspend fun release() = Unit
             override suspend fun segment(frame: ImageFrame): Result<SegmentationOutput> {
-                if (frame.sequenceNumber == 30L || frame.sequenceNumber == 31L) return Result.failure(IllegalStateException("model failed"))
+                if (frame.sequenceNumber in failingFrames) return Result.failure(IllegalStateException("model failed"))
                 val ids = classMap(frame.sequenceNumber)
                 return Result.success(SegmentationOutput(SegmentationMask(width, height, ids), 1, 2, 3, analysisStats = stats(ids, frame.sequenceNumber)))
             }
@@ -277,11 +281,19 @@ class RegressionReplayRoundTripTest {
             pipelineBudget = PipelinePerformanceBudget(),
             regressionRecorder = regression,
         )
+        // The pipeline runs on its own dispatcher with a buffer before the collector, so on its own
+        // it may decide several frames ahead of a revoke. The live recording copes (each revoke
+        // records how many decisions preceded it); this comparison needs the revoke at a fixed
+        // point, so each frame waits until the collector has handled every earlier result.
+        val handled = MutableStateFlow(0)
         val frames = flow {
+            var expected = 0
             for (seq in 1L..frameCount) {
+                handled.first { it >= expected }
                 now.addAndGet(200)
                 stationary.value = seq in 50L..80L
                 emit(cameraFrame(seq))
+                if (seq !in failingFrames) expected++
             }
         }
         val decided = mutableListOf<List<SceneEvent>>()
@@ -290,6 +302,7 @@ class RegressionReplayRoundTripTest {
             decided += result.events
             // The output side refuses every third prompt; its cooldown entry is revoked between frames.
             result.events.firstOrNull()?.let { if (offered++ % 3 == 1) revoke(it) }
+            handled.value++
         }
         Session(decided, recorder, profiles.activeConfig)
     }

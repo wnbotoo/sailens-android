@@ -32,7 +32,7 @@ class CaptureReplayTest {
         val out = File(System.getProperty("sailens.replay.out").orEmpty().ifBlank { "build/replay" }).apply { mkdirs() }
         val captures = File(path).walkTopDown()
             .filter { it.isFile && it.name == CaptureSchema.MANIFEST_FILE }
-            .map { it.parentFile }
+            .mapNotNull { it.parentFile }
             .toList()
         assertTrue("no capture under $path", captures.isNotEmpty())
 
