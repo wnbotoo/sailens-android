@@ -706,18 +706,40 @@ frames; binding coverage if any native kernel is added.
   - `ResizePolicy`.
   - `DepthInputTransform` (`create(analysis size, tensor size, policy)`, `toTensor*` /
     `toAnalysis*`, `covers`).
-  - `DisparityMap`: `sampleAt(u, v)` is bilinear between the content's pixel centres and returns
-    null where the model did not see the point, so padding never blends in.
+  - `DisparityMap`: `sampleAt(u, v)` is bilinear and returns null where the model did not see the
+    point. It is clamped to the integer range of pixels whose centres lie in the content, so
+    padding never blends in, even when it is fractional (960×1280 → 518×518 pads 64.75 px).
 - `…guidance.geometry` `GroundFitter` follows steps 1–6 above, with these as-built details:
   - **Sampling** covers only the image below 40 % of its height. Far ground is where a small step
     or a gentle slope stays within the 4 % threshold, and sampling it bent the fit: a 15 cm curb's
     far road pulled `t` from 0.20 to 0.10.
+  - **Every decision uses the depth ratio `(d − t)/(A·q) = Z_ground/Z`**: the inlier test, the
+    above / below labels and the recession check. Relative-depth models output `a/Z + b` with a and
+    b free per frame. With a residual relative to `d` itself, a large b hid a 15 cm curb and a
+    1.5 m drop (review finding); the depth ratio is unchanged by any a and b.
   - **RANSAC is run over both slopes.** A better negative slope means **inverse output**, which
     marks the observation invalid.
-  - **A flat line is no ground.** Across the inliers the near end must be ≥ 15 % above the far end,
-    because a wall filling the view fits a flat line just as well.
+  - **The ground is the plane under the user.**
+    - Samples are ordered nearest first and grouped into 20 bins.
+    - A candidate is scored by the unbroken run of bins it explains from the nearest outward. The
+      run stops at the first bin it explains less than half of.
+    - A tie goes to the candidate matching less outside the run.
+    - The refit uses only the run's inliers, and the run must span ≥ 25 % in depth. If not, the
+      result is `NO_SUPPORT`.
+    - Ranked by total inliers instead, the floor of a drop being approached became "the ground"
+      once it filled more of the view (review finding). A line through the last strip of near
+      ground that also clipped the floor did the same.
+    - Selection and refit are deliberately redundant: each alone fixes the approach sequence.
+  - **Support-switch guard.**
+    - Trigger: more than half of the cells the last valid fit saw below ground now read as ground,
+      on a grid where at least 2 % was below.
+    - Result: `SUPPORT_SWITCH`, which is unknown. Relative depth cannot tell "stepped down" from
+      "looking over the edge".
+    - Release: when a fit sees a level below its ground again, or after 30 fits.
+  - **A flat line is no ground.** A wall filling the view fits a flat line too; the run-span check
+    rejects it.
   - **Validity**: `VALID`, `TOO_FEW_SAMPLES`, `DEGENERATE_VIEW` (camera pointing straight down),
-    `NO_GROUND` or `INVERSE_OUTPUT`.
+    `NO_GROUND`, `NO_SUPPORT`, `SUPPORT_SWITCH` or `INVERSE_OUTPUT`.
   - **Gravity agreement**: a free 3-parameter plane on the inliers must lean within 10° and ±33 %
     of what gravity predicts.
   - **Confidence** is the product of three terms: inlier ratio (0.2 → 0.6), agreement (×0.5 when it
@@ -734,7 +756,12 @@ frames; binding coverage if any native kernel is added.
   - noise of 3 % still fits;
   - a depth-output model is refused;
   - a wall filling the view, and a camera pointing straight down, give no fit;
-  - a wrong gravity roll is noticed.
+  - a wrong gravity roll is noticed;
+  - walking up to a 1.5 m drop and past the point where only its floor is in view: every valid fit
+    is the sidewalk, and the end is `SUPPORT_SWITCH`;
+  - the switch hold is released by seeing both levels again, by its limit, and by `reset`;
+  - five pairs of (a, b), including a negative b, give identical labels in four scenes;
+  - fractional padding never blends into an edge sample.
 - **Part 2** covers the runner, the depth `ModelType` and catalog entry, the `docs/models.md`
   contract, 2–5 Hz scheduling, GPU sharing, trace fields and the overlay. It needs the device for
   its exit: the latency budget, and agreement with the PC experiment.

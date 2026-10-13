@@ -21,6 +21,19 @@ enum class GroundFitValidity {
     NO_GROUND,
 
     /**
+     * Ground is visible, but none of it is the surface at the user's feet: the nearest samples are
+     * an obstacle, or split between levels. The plane further out may be a level the user is not on.
+     */
+    NO_SUPPORT,
+
+    /**
+     * The fitted ground jumped to a level the previous fits saw below ground -- the floor of a drop
+     * now filling the near view. Relative depth cannot tell "stepped down" from "looking over the
+     * edge", so the fit is unknown until two levels are seen together again (or the hold expires).
+     */
+    SUPPORT_SWITCH,
+
+    /**
      * Disparity falls toward the bottom of the image: the model outputs depth, not disparity (§9).
      * Static preflight cannot see this; the output is refused rather than read upside down.
      */
@@ -35,6 +48,8 @@ enum class GroundFitValidity {
  * Fitted model: `disparity = A·q + t`, with `q = g·r` for the pixel's ray r (z = 1) and g the unit
  * down vector. On ground at camera height h, `A = a/h` and `t = b` for a model whose disparity is
  * `a/Z + b`, which is what relative-depth models output (scale and shift unknown, per frame).
+ * Every decision uses `(d − t) / (A·q)`, which is `Z_ground / Z` -- a ratio of depths that no
+ * choice of a and b changes.
  */
 data class GroundObservation(
     val frameTimeNanos: Long?,
@@ -66,13 +81,18 @@ data class GroundObservation(
 }
 
 /**
- * Gravity-constrained ground fit on a disparity map (§9): sample below the horizon, RANSAC the
- * line `d = A·q + t` with a relative inlier threshold, refit on the inliers, then label a grid by
- * signed relative residual. Deterministic (seeded). Not thread-safe: one per pipeline; it keeps the
- * last few results to rate stability. [reset] between sessions.
+ * Gravity-constrained ground fit on a disparity map (§9): sample the lower image below the horizon,
+ * RANSAC the line `d = A·q + t`, refit on the inliers, then label a grid. Deterministic (seeded).
+ * Not thread-safe: one per pipeline. It keeps a little history -- coverage for stability, the last
+ * below-ground region for the support-switch guard -- so [reset] between sessions.
  *
- * @param inlierThreshold relative residual for ground (4 %).
- * @param structureFactor residual beyond this many thresholds is above / below ground (3×).
+ * Which plane is "the ground": the one under the user. Samples are taken nearest first (the bottom
+ * of the view, closest to the feet), and a candidate is scored by the unbroken run of them it
+ * explains from the nearest outward. A larger plane further out -- the floor of a drop being
+ * approached -- has no run from the feet, however many samples it explains.
+ *
+ * @param inlierThreshold ground when the depth ratio `Z_ground / Z` is within this of 1 (4 %).
+ * @param structureFactor beyond this many thresholds a point is above / below ground (3×).
  * @param minQ samples closer to the horizon than this (radians, roughly) are not used: their
  *   ground prediction is too flat to tell ground from far structure.
  * @param minInlierRatio below this, there is no ground in view.
@@ -80,6 +100,7 @@ data class GroundObservation(
  *   lower part"). Near ground dominates there; far ground is where a small step or a gentle slope
  *   differs from the plane by less than the threshold, and would bend the fit if it were sampled.
  *   The labels still cover the whole image.
+ * @param maxSwitchHoldFits after a support switch, fits stay unknown at most this long.
  */
 class GroundFitter(
     private val inlierThreshold: Float = 0.04f,
@@ -92,10 +113,19 @@ class GroundFitter(
     private val iterations: Int = 200,
     private val maxGravityAngleDeg: Float = 10f,
     private val stabilityFrames: Int = 3,
+    private val maxSwitchHoldFits: Int = 30,
 ) {
     private val recentCoverage = ArrayDeque<Float>()
 
-    fun reset() = recentCoverage.clear()
+    /** The below-ground cells of the last valid fit: the guard compares the next fit with them. */
+    private var lastBelow: BinaryMask? = null
+    private var switchHold = 0
+
+    fun reset() {
+        recentCoverage.clear()
+        lastBelow = null
+        switchHold = 0
+    }
 
     /**
      * @param intrinsics of the analysis image the depth input was made from (same size as
@@ -116,12 +146,14 @@ class GroundFitter(
         }
         val g = gravityDown.normalized()
         fun q(u: Float, v: Float) = g.x * (u - intrinsics.cx) / intrinsics.fx + g.y * (v - intrinsics.cy) / intrinsics.fy + g.z
+        val empty = { validity: GroundFitValidity -> invalid(validity, gridWidth, gridHeight, frameTimeNanos) }
 
         // 1. Samples below the horizon, on a coarse grid of the lower part of the analysis image.
-        val qs = FloatArray(sampleColumns * sampleRows)
-        val ds = FloatArray(sampleColumns * sampleRows)
-        val xs = FloatArray(sampleColumns * sampleRows)
-        val ys = FloatArray(sampleColumns * sampleRows)
+        val capacity = sampleColumns * sampleRows
+        val qs = FloatArray(capacity)
+        val ds = FloatArray(capacity)
+        val xs = FloatArray(capacity)
+        val ys = FloatArray(capacity)
         var n = 0
         val top = sampleFromRow * transform.analysisHeight
         for (row in 0 until sampleRows) {
@@ -137,51 +169,85 @@ class GroundFitter(
                 n++
             }
         }
-        val empty = { validity: GroundFitValidity -> invalid(validity, gridWidth, gridHeight, frameTimeNanos) }
         if (n < MIN_SAMPLES) return empty(GroundFitValidity.TOO_FEW_SAMPLES)
         var qMin = Float.MAX_VALUE
         var qMax = -Float.MAX_VALUE
         for (i in 0 until n) { qMin = minOf(qMin, qs[i]); qMax = maxOf(qMax, qs[i]) }
         if (qMax - qMin < MIN_Q_SPAN) return empty(GroundFitValidity.DEGENERATE_VIEW)
+        // Samples nearest first, in bins: the support level runs outward from the feet without a gap.
+        val byNearness = (0 until n).sortedByDescending { qs[it] }.toIntArray()
+        val binSize = maxOf(1, n / SUPPORT_BINS)
 
-        // 2. RANSAC over both slopes: the better negative one means inverse output.
+        // 2. RANSAC over both slopes. Any positive line counts toward "is there ground at all"; a
+        // better negative one means inverse output. The ground is the line explaining the longest
+        // unbroken run outward from the feet; on a tie, the one that matches less outside that run. Ranked by total inliers instead, a
+        // line through the shrinking near ground that also clips a drop's floor beats the true
+        // near ground as it runs out: a short run does not pin a line by itself.
         val random = Random(SEED)
-        var bestPositive = Line(0f, 0f, 0)
-        var bestNegative = Line(0f, 0f, 0)
+        var bestPositive = 0
+        var bestNegative = 0
+        var bestSupported = Line(0f, 0f, 0)
+        var bestConnected = -1
+        var bestOutside = Int.MAX_VALUE
         repeat(iterations) {
             val i = random.nextInt(n)
             val j = random.nextInt(n)
             val dq = qs[j] - qs[i]
             if (abs(dq) < MIN_PAIR_Q_SPAN) return@repeat
             val a = (ds[j] - ds[i]) / dq
+            if (a == 0f) return@repeat
             val t = ds[i] - a * qs[i]
-            val count = countInliers(a, t, qs, ds, n)
-            if (a > 0 && count > bestPositive.inliers) bestPositive = Line(a, t, count)
-            if (a < 0 && count > bestNegative.inliers) bestNegative = Line(a, t, count)
+            var count = 0
+            for (k in 0 until n) if (isInlier(a, t, qs[k], ds[k])) count++
+            if (a < 0) {
+                bestNegative = maxOf(bestNegative, count)
+            } else {
+                bestPositive = maxOf(bestPositive, count)
+                val end = runEnd(a, t, qs, ds, byNearness, binSize)
+                if (end > 0) {
+                    val connected = runInliers(a, t, qs, ds, byNearness, end)
+                    val outside = count - connected
+                    if (connected > bestConnected || (connected == bestConnected && outside < bestOutside)) {
+                        bestSupported = Line(a, t, count)
+                        bestConnected = connected
+                        bestOutside = outside
+                    }
+                }
+            }
         }
-        if (bestNegative.inliers > bestPositive.inliers && bestNegative.inliers >= minInlierRatio * n) {
-            return empty(GroundFitValidity.INVERSE_OUTPUT)
-        }
-        if (bestPositive.inliers < minInlierRatio * n) return empty(GroundFitValidity.NO_GROUND)
+        if (bestNegative > bestPositive && bestNegative >= minInlierRatio * n) return empty(GroundFitValidity.INVERSE_OUTPUT)
+        if (bestPositive < minInlierRatio * n) return empty(GroundFitValidity.NO_GROUND)
+        if (bestSupported.inliers == 0) return empty(GroundFitValidity.NO_SUPPORT)
 
-        // 3. Least squares on the inliers, then the inliers of the refit.
-        val refit = refit(bestPositive, qs, ds, n) ?: return empty(GroundFitValidity.NO_GROUND)
+        // 3. Least squares on the run's inliers only, so nothing beyond the near level pulls it;
+        // then the refit's own run, which must still start at the feet and span enough depth to
+        // pin a line.
+        val chosenEnd = runEnd(bestSupported.a, bestSupported.t, qs, ds, byNearness, binSize)
+        val refit = refit(bestSupported, qs, ds, byNearness, chosenEnd) ?: return empty(GroundFitValidity.NO_SUPPORT)
+        if (refit.a <= 0f) return empty(GroundFitValidity.NO_SUPPORT)
+        val end = runEnd(refit.a, refit.t, qs, ds, byNearness, binSize)
+        if (end == 0) return empty(GroundFitValidity.NO_SUPPORT)
+        var runCount = 0
+        var runQMin = Float.MAX_VALUE
+        var runQMax = -Float.MAX_VALUE
+        for (k in 0 until end) {
+            val i = byNearness[k]
+            if (!isInlier(refit.a, refit.t, qs[i], ds[i])) continue
+            runCount++
+            runQMin = minOf(runQMin, qs[i]); runQMax = maxOf(runQMax, qs[i])
+        }
+        if (runCount < minInlierRatio * n) return empty(GroundFitValidity.NO_GROUND)
+        // Ground recedes: the run must span a real range of depth (Z ∝ 1/q on ground). A wall
+        // filling the view has none; the last strip of ground before a drop has too little to
+        // pin both A and t.
+        if (runQMax / runQMin < 1f + MIN_DEPTH_SPAN) return empty(GroundFitValidity.NO_SUPPORT)
         val inlier = BooleanArray(n) { isInlier(refit.a, refit.t, qs[it], ds[it]) }
-        val inlierCount = inlier.count { it }
-        val inlierRatio = inlierCount.toFloat() / n
-        if (refit.a <= 0f || inlierRatio < minInlierRatio) return empty(GroundFitValidity.NO_GROUND)
-        // Ground recedes: across the inliers, the near end must be clearly nearer than the far end.
-        // A surface at one distance -- a wall filling the view -- fits a flat line just as well.
-        var inQMin = Float.MAX_VALUE
-        var inQMax = -Float.MAX_VALUE
-        for (i in 0 until n) if (inlier[i]) { inQMin = minOf(inQMin, qs[i]); inQMax = maxOf(inQMax, qs[i]) }
-        val far = refit.a * inQMin + refit.t
-        if (far <= 0f || (refit.a * inQMax + refit.t) / far < 1f + MIN_RELATIVE_RISE) return empty(GroundFitValidity.NO_GROUND)
+        val inlierRatio = inlier.count { it }.toFloat() / n
 
         // 6a. Agreement: a free plane d = k1·x + k2·y + k0 on the inliers should lean as gravity says.
         val agrees = freePlaneAgrees(refit.a, g, xs, ys, ds, inlier, n)
 
-        // 3–4. Label the grid.
+        // 3–4. Label the grid by depth ratio.
         val ground = BinaryMask(gridWidth, gridHeight)
         val above = BinaryMask(gridWidth, gridHeight)
         val below = BinaryMask(gridWidth, gridHeight)
@@ -191,14 +257,43 @@ class GroundFitter(
                 val u = (gx + 0.5f) * transform.analysisWidth / gridWidth
                 val d = disparity.sampleAt(u, v) ?: continue
                 val qv = q(u, v)
-                val predicted = refit.a * qv + refit.t
-                if (predicted <= 0f) continue
-                val residual = (d - predicted) / predicted
-                when {
-                    qv >= minQ && abs(residual) <= inlierThreshold -> ground.set(gx, gy, true)
-                    residual > inlierThreshold * structureFactor -> above.set(gx, gy, true)
-                    qv >= minQ && residual < -inlierThreshold * structureFactor -> below.set(gx, gy, true)
+                val inverseDepth = d - refit.t
+                if (qv < minQ) {
+                    // At or above the horizon nothing is ground; nearer than the ground at minQ is structure.
+                    if (inverseDepth > refit.a * minQ) above.set(gx, gy, true)
+                    continue
                 }
+                val ratio = inverseDepth / (refit.a * qv) - 1f
+                when {
+                    abs(ratio) <= inlierThreshold -> ground.set(gx, gy, true)
+                    ratio > inlierThreshold * structureFactor -> above.set(gx, gy, true)
+                    ratio < -inlierThreshold * structureFactor -> below.set(gx, gy, true)
+                }
+            }
+        }
+
+        // 5. The support-switch guard: the cells the last valid fit saw below ground now read as
+        // ground. The floor of a drop has taken over the near view; that is not the user's level
+        // until shown otherwise.
+        val previousBelow = lastBelow
+        if (previousBelow != null && previousBelow.width == gridWidth && previousBelow.height == gridHeight) {
+            val previousCount = previousBelow.countTrue()
+            if (switchHold > 0 || previousCount >= MIN_BELOW_CELLS_FRACTION * gridWidth * gridHeight) {
+                var flipped = 0
+                if (switchHold == 0) {
+                    for (gy in 0 until gridHeight) for (gx in 0 until gridWidth) {
+                        if (previousBelow.get(gx, gy) && ground.get(gx, gy)) flipped++
+                    }
+                }
+                val switched = switchHold == 0 && flipped >= SWITCH_FLIP_FRACTION * previousCount
+                // Held until a fit again sees a level below its ground (two levels together, the
+                // near one under the user), or the hold runs out.
+                val twoLevelsAgain = below.countTrue() >= MIN_BELOW_CELLS_FRACTION * gridWidth * gridHeight
+                if (switched || (switchHold > 0 && !twoLevelsAgain && switchHold < maxSwitchHoldFits)) {
+                    switchHold++
+                    return empty(GroundFitValidity.SUPPORT_SWITCH)
+                }
+                switchHold = 0
             }
         }
 
@@ -208,6 +303,7 @@ class GroundFitter(
         while (recentCoverage.size > stabilityFrames) recentCoverage.removeFirst()
         val confidence = ((inlierRatio - minInlierRatio) / (GOOD_INLIER_RATIO - minInlierRatio)).coerceIn(0f, 1f) *
             (if (agrees) 1f else 0.5f) * stability()
+        lastBelow = below
 
         return GroundObservation(
             frameTimeNanos, GroundFitValidity.VALID, ground, above, below,
@@ -217,20 +313,36 @@ class GroundFitter(
 
     private data class Line(val a: Float, val t: Float, val inliers: Int)
 
-    private fun isInlier(a: Float, t: Float, q: Float, d: Float): Boolean {
-        val predicted = a * q + t
-        return predicted > 0f && abs(d - predicted) <= inlierThreshold * predicted
+    /**
+     * How far, in samples nearest first, the line's support runs from the feet: up to the first
+     * bin it explains less than half of.
+     */
+    private fun runEnd(a: Float, t: Float, qs: FloatArray, ds: FloatArray, byNearness: IntArray, binSize: Int): Int {
+        var start = 0
+        while (start < byNearness.size) {
+            val end = minOf(start + binSize, byNearness.size)
+            var hits = 0
+            for (k in start until end) if (isInlier(a, t, qs[byNearness[k]], ds[byNearness[k]])) hits++
+            if (hits * 2 < end - start) break
+            start = end
+        }
+        return start
     }
 
-    private fun countInliers(a: Float, t: Float, qs: FloatArray, ds: FloatArray, n: Int): Int {
+    private fun runInliers(a: Float, t: Float, qs: FloatArray, ds: FloatArray, byNearness: IntArray, end: Int): Int {
         var count = 0
-        for (i in 0 until n) if (isInlier(a, t, qs[i], ds[i])) count++
+        for (k in 0 until end) if (isInlier(a, t, qs[byNearness[k]], ds[byNearness[k]])) count++
         return count
     }
 
-    private fun refit(line: Line, qs: FloatArray, ds: FloatArray, n: Int): Line? {
+    /** Within the threshold of the line in depth ratio: `|d − (A·q + t)| ≤ thr · |A|·q`. */
+    private fun isInlier(a: Float, t: Float, q: Float, d: Float): Boolean = abs(d - (a * q + t)) <= inlierThreshold * abs(a) * q
+
+    /** Least squares on [line]'s inliers among the first [end] samples, nearest first. */
+    private fun refit(line: Line, qs: FloatArray, ds: FloatArray, byNearness: IntArray, end: Int): Line? {
         var sq = 0.0; var sd = 0.0; var sqq = 0.0; var sqd = 0.0; var m = 0
-        for (i in 0 until n) {
+        for (k in 0 until end) {
+            val i = byNearness[k]
             if (!isInlier(line.a, line.t, qs[i], ds[i])) continue
             sq += qs[i]; sd += ds[i]; sqq += qs[i].toDouble() * qs[i]; sqd += qs[i].toDouble() * ds[i]; m++
         }
@@ -282,8 +394,19 @@ class GroundFitter(
         const val MIN_Q_SPAN = 0.05f
         const val MIN_PAIR_Q_SPAN = 0.02f
         const val GOOD_INLIER_RATIO = 0.6f
-        const val MIN_RELATIVE_RISE = 0.15f
         const val STABILITY_SPREAD = 0.2f
+
+        /** The support run is measured in this many bins of samples, nearest first. */
+        const val SUPPORT_BINS = 20
+
+        /** The support run must span at least this much in depth (far / near − 1) to pin a line. */
+        const val MIN_DEPTH_SPAN = 0.25f
+
+        /** A below-ground region smaller than this fraction of the grid does not arm the switch guard. */
+        const val MIN_BELOW_CELLS_FRACTION = 0.02f
+
+        /** The switch: at least this fraction of the last below-ground cells now read as ground. */
+        const val SWITCH_FLIP_FRACTION = 0.5f
 
         /** Gaussian elimination with partial pivoting; null when singular. */
         fun solve3(m: Array<DoubleArray>, b: DoubleArray): DoubleArray? {

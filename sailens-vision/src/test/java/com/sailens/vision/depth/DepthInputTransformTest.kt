@@ -67,6 +67,25 @@ class DepthInputTransformTest {
         assertTrue("edge sample $edge must not mix in padding", edge!! < 100f)
     }
 
+    /**
+     * Fractional padding (review finding on #25): 960x1280 padded into 518x518 leaves 64.75 tensor
+     * pixels each side, so the first content pixel is not where the padding ends.
+     */
+    @Test
+    fun `fractional padding never blends in at the image edges`() {
+        val transform = DepthInputTransform.create(960, 1280, 518, 518, ResizePolicy.PAD_KEEP_ASPECT)
+        assertEquals(64.75f, transform.padLeft, 1e-3f)
+        // Content pixels (centre inside [pad, size − pad)) hold 1, padding 1000.
+        val values = FloatArray(518 * 518) { i ->
+            val centre = i % 518 + 0.5f
+            if (centre < transform.padLeft || centre > 518 - transform.padLeft) 1000f else 1f
+        }
+        val map = DisparityMap(518, 518, values, transform)
+        for (u in listOf(0f, 0.5f, 1f, 2f, 480f, 958f, 959f, 959.9f)) {
+            for (v in listOf(0f, 640f, 1279.9f)) assertEquals("u=$u v=$v", 1f, map.sampleAt(u, v)!!, 0f)
+        }
+    }
+
     @Test
     fun `an unseen point samples as unknown`() {
         val transform = DepthInputTransform.create(720, 1280, 518, 518, ResizePolicy.CROP_KEEP_ASPECT)

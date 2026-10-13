@@ -50,9 +50,11 @@ class GroundFitterTest {
         mh: Int = 518,
         noise: Double = 0.0,
         asDepth: Boolean = false,
+        a: Double = 10.0,
+        b: Double = 0.2,
     ): DisparityMap {
         val transform = DepthInputTransform.create(aw, ah, mw, mh, policy)
-        var values = renderDisparity(camera, pose, world, mw, mh, aw, ah, { x, y -> transform.toAnalysisX(x) to transform.toAnalysisY(y) }, noise = noise)
+        var values = renderDisparity(camera, pose, world, mw, mh, aw, ah, { x, y -> transform.toAnalysisX(x) to transform.toAnalysisY(y) }, a = a, b = b, noise = noise)
         // A model that outputs depth: Z = a / (d - b), sky capped far away.
         if (asDepth) values = FloatArray(values.size) { i -> if (values[i] > 0.2001f) (10f / (values[i] - 0.2f)).coerceAtMost(200f) else 200f }
         return DisparityMap(mw, mh, values, transform)
@@ -176,6 +178,86 @@ class GroundFitterTest {
         val (u, v, _) = project(pose, 0.0, 0.0, 3.0)
         val (gx, gy) = cell(u, v)
         assertTrue(observation.groundMask.get(gx, gy))
+    }
+
+    /**
+     * Walking up to a 1.5 m drop and on until only its floor is in view (review finding on #25).
+     * The floor is a bigger, perfectly fittable plane; it must never become "the ground".
+     */
+    @Test
+    fun `approaching a drop never takes its floor for the ground`() {
+        val drop = Scenarios.curbAndDrop.frames[40].world
+        val fitter = GroundFitter()
+        var valid = 0
+        for (i in 0 until 50) {
+            val walked = Pose(1.3f, 25f, walkedM = i * 0.08f)
+            val observation = fitter.fit(disparity(drop, pose = walked), intrinsics, gravity(walked), gridW, gridH)
+            val where = "walked ${walked.walkedM} m (edge ${4f - walked.walkedM} m ahead)"
+            if (observation.isValid) {
+                valid++
+                assertEquals(where, 10f / 1.3f, observation.disparityScale, 0.01f * 10f / 1.3f)
+            }
+            // While the sidewalk spans enough depth to pin a line, the fit is the sidewalk.
+            if (walked.walkedM <= 2.8f) assertTrue(where, observation.isValid)
+            // Once only the drop's floor is in view, the support is unknown.
+            if (walked.walkedM >= 3.3f) assertEquals(where, GroundFitValidity.SUPPORT_SWITCH, observation.validity)
+        }
+        assertTrue(valid >= 35)
+    }
+
+    @Test
+    fun `seeing both levels again ends the hold, and so does its limit`() {
+        val drop = Scenarios.curbAndDrop.frames[40].world
+        val atEdge = Pose(1.3f, 25f, walkedM = 3.6f)
+        val back = Pose(1.3f, 25f, walkedM = 2.0f)
+        fun approach(fitter: GroundFitter) {
+            // Up to the last fit that still sees the sidewalk under the user.
+            for (i in 0..36) {
+                val walked = Pose(1.3f, 25f, walkedM = i * 0.08f)
+                fitter.fit(disparity(drop, pose = walked), intrinsics, gravity(walked), gridW, gridH)
+            }
+        }
+        val fitter = GroundFitter()
+        approach(fitter)
+        assertEquals(GroundFitValidity.SUPPORT_SWITCH, fitter.fit(disparity(drop, pose = atEdge), intrinsics, gravity(atEdge), gridW, gridH).validity)
+        // Stepping back: sidewalk and drop together again, the sidewalk under the user.
+        val again = fitter.fit(disparity(drop, pose = back), intrinsics, gravity(back), gridW, gridH)
+        assertTrue(again.isValid)
+        assertEquals(10f / 1.3f, again.disparityScale, 0.01f * 10f / 1.3f)
+
+        // Standing at the edge past the hold, the one level in view is taken as the support.
+        val brief = GroundFitter(maxSwitchHoldFits = 3)
+        approach(brief)
+        val held = (0 until 4).map { brief.fit(disparity(drop, pose = atEdge), intrinsics, gravity(atEdge), gridW, gridH).validity }
+        assertEquals(GroundFitValidity.VALID, held.last())
+        assertTrue(held.first() == GroundFitValidity.SUPPORT_SWITCH)
+
+        // A new session forgets the drop.
+        val fresh = GroundFitter()
+        approach(fresh)
+        fresh.reset()
+        assertTrue(fresh.fit(disparity(drop, pose = atEdge), intrinsics, gravity(atEdge), gridW, gridH).isValid)
+    }
+
+    /**
+     * Relative-depth models output `a/Z + b` with a and b unknown and free per frame (review finding
+     * on #25): no choice of them may change a label.
+     */
+    @Test
+    fun `labels do not depend on the model's scale and shift`() {
+        val scenes = listOf(street, Scenarios.curbAndDrop.frames[0].world, Scenarios.curbAndDrop.frames[40].world, Scenarios.partiallyOccludedPerson.frames[0].world)
+        for (world in scenes) {
+            val reference = fit(disparity(world))
+            for ((a, b) in listOf(10.0 to 3.0, 10.0 to 10.0, 1.0 to 0.05, 50.0 to 5.0, 10.0 to -0.15)) {
+                val observation = fit(disparity(world, a = a, b = b))
+                assertTrue("a=$a b=$b", observation.isValid)
+                assertEquals("a=$a b=$b", (a / 1.3).toFloat(), observation.disparityScale, (0.01 * a / 1.3).toFloat())
+                assertEquals("a=$a b=$b", b.toFloat(), observation.disparityShift, (0.005 * a).toFloat())
+                assertEquals("a=$a b=$b ground", reference.groundMask, observation.groundMask)
+                assertEquals("a=$a b=$b above", reference.aboveGroundMask, observation.aboveGroundMask)
+                assertEquals("a=$a b=$b below", reference.belowGroundMask, observation.belowGroundMask)
+            }
+        }
     }
 
     @Test

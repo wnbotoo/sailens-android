@@ -1,5 +1,8 @@
 package com.sailens.vision.depth
 
+import kotlin.math.ceil
+import kotlin.math.floor
+
 /**
  * How a depth model's input was made from the upright analysis image. Part of the model's
  * configured contract (local-navigation-implementation §9): it cannot be read from the TFLite
@@ -98,19 +101,27 @@ class DisparityMap(val width: Int, val height: Int, val values: FloatArray, val 
         require(width == transform.modelWidth && height == transform.modelHeight) { "map and transform disagree on the tensor size" }
     }
 
+    // The content spans [pad, size − pad) in tensor pixels; pixel i is content when its centre
+    // i + 0.5 lies inside that span.
+    private val firstContentX = ceil(transform.padLeft - 0.5f).toInt().coerceIn(0, width - 1)
+    private val lastContentX = floor(width - transform.padLeft - 0.5f).toInt().coerceIn(firstContentX, width - 1)
+    private val firstContentY = ceil(transform.padTop - 0.5f).toInt().coerceIn(0, height - 1)
+    private val lastContentY = floor(height - transform.padTop - 0.5f).toInt().coerceIn(firstContentY, height - 1)
+
     /**
      * The disparity seen at analysis point (u, v), bilinear between tensor pixel centres; null when
      * the model did not see the point (§9: unknown, never extrapolated) or it falls in padding.
      */
     fun sampleAt(u: Float, v: Float): Float? {
         if (!transform.covers(u, v)) return null
-        // Pixel-centre coordinates, kept on the content's centres so padding never blends in.
-        val cx = (transform.toTensorX(u) - 0.5f).coerceIn(maxOf(0f, transform.padLeft), minOf(width - 1f, width - 1f - transform.padLeft))
-        val cy = (transform.toTensorY(v) - 0.5f).coerceIn(maxOf(0f, transform.padTop), minOf(height - 1f, height - 1f - transform.padTop))
+        // Pixel-centre coordinates, kept between the first and last pixels whose centres lie in the
+        // content, so both interpolation neighbours are content even when the padding is fractional.
+        val cx = (transform.toTensorX(u) - 0.5f).coerceIn(firstContentX.toFloat(), lastContentX.toFloat())
+        val cy = (transform.toTensorY(v) - 0.5f).coerceIn(firstContentY.toFloat(), lastContentY.toFloat())
         val x0 = cx.toInt()
         val y0 = cy.toInt()
-        val x1 = minOf(x0 + 1, width - 1)
-        val y1 = minOf(y0 + 1, height - 1)
+        val x1 = minOf(x0 + 1, lastContentX)
+        val y1 = minOf(y0 + 1, lastContentY)
         val fx = cx - x0
         val fy = cy - y0
         val top = values[y0 * width + x0] * (1 - fx) + values[y0 * width + x1] * fx
