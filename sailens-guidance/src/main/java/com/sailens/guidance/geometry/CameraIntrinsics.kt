@@ -39,8 +39,13 @@ data class CameraIntrinsics(
 
 /**
  * Resolves [CameraIntrinsics] from the raw facts (§7): calibration when reported, else an estimate
- * from focal length and sensor size; mapped from the active array into the buffer through the
- * frame's `sensorToBufferTransform`, then rotated upright. Null when neither source is usable.
+ * from focal length and sensor size; mapped into the buffer through the frame's
+ * `sensorToBufferTransform`, then rotated upright. Null when neither source is usable.
+ *
+ * Coordinates: the transform takes **sensor coordinates** -- the system in which Camera2 gives the
+ * active array's Rect, origin offset included (CameraX maps that Rect onto the buffer). Calibration
+ * is relative to the pre-correction array's top-left, so it is moved into sensor coordinates by
+ * that array's origin before the transform.
  */
 object CameraIntrinsicsResolver {
 
@@ -61,12 +66,9 @@ object CameraIntrinsicsResolver {
     private fun calibration(camera: CameraFacts, active: SensorRect): Pinhole? {
         val k = camera.lensIntrinsicCalibration?.takeIf { it.size >= 4 } ?: return null
         if (k[0] <= 0f || k[1] <= 0f) return null
-        // Calibration is in pre-correction active array pixels; the transform starts from the
-        // active array, whose origin may sit inside it.
+        // Relative to the pre-correction array's top-left: add its origin for sensor coordinates.
         val pre = camera.preCorrectionActiveArray ?: active
-        val dx = active.left - pre.left
-        val dy = active.top - pre.top
-        return Pinhole(k[0].toDouble(), k[1].toDouble(), (k[2] - dx).toDouble(), (k[3] - dy).toDouble(), IntrinsicsSource.CALIBRATION)
+        return Pinhole(k[0].toDouble(), k[1].toDouble(), (k[2] + pre.left).toDouble(), (k[3] + pre.top).toDouble(), IntrinsicsSource.CALIBRATION)
     }
 
     private fun estimate(camera: CameraFacts, active: SensorRect): Pinhole? {
@@ -79,8 +81,9 @@ object CameraIntrinsicsResolver {
         return Pinhole(
             fx = focalMm / widthMm * pixelsWide,
             fy = focalMm / heightMm * pixelsHigh,
-            cx = active.width / 2.0,
-            cy = active.height / 2.0,
+            // The active array's centre, in sensor coordinates.
+            cx = active.left + active.width / 2.0,
+            cy = active.top + active.height / 2.0,
             source = IntrinsicsSource.FOCAL_LENGTH_ESTIMATE,
         )
     }
@@ -116,8 +119,9 @@ object CameraIntrinsicsResolver {
             fun centredFill(active: SensorRect, width: Int, height: Int): Affine? {
                 if (active.width <= 0 || active.height <= 0 || width <= 0 || height <= 0) return null
                 val scale = maxOf(width.toDouble() / active.width, height.toDouble() / active.height)
-                val ox = (width - active.width * scale) / 2
-                val oy = (height - active.height * scale) / 2
+                // Sensor coordinates: the active array starts at its own origin, not at 0.
+                val ox = (width - active.width * scale) / 2 - active.left * scale
+                val oy = (height - active.height * scale) / 2 - active.top * scale
                 return Affine(listOf(scale, 0.0, ox, 0.0, scale, oy, 0.0, 0.0, 1.0))
             }
         }

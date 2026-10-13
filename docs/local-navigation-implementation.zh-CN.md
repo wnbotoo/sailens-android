@@ -466,8 +466,11 @@ trace 调用、manifest 原子地完成。PR-C——标记去抖、导出内容�
   - `CameraFacts` / `FrameFacts`：原始事实，可以从实时帧构造（`FrameFacts.of(ImageFrame)`），也可以从
     采集数据构造（`CaptureCameraRecord.toCameraFacts()`、`FrameFacts.of(FrameRecord)`），所以录制数据
     和相机走同一套解析代码。
-  - `CameraIntrinsicsResolver`：用标定值（从 pre-correction 阵列平移到 active 阵列），没有时用焦距估
-    算；经 `sensorToBufferTransform` 映射，再旋转到正向。
+  - `CameraIntrinsicsResolver`：用标定值，没有时用焦距估算；经 `sensorToBufferTransform` 映射，再旋转
+    到正向。
+    - 变换的输入是**传感器坐标**，也就是 active 阵列的 Rect 所在的坐标系，包含它的原点偏移。标定值
+      相对于 pre-correction 阵列的左上角，所以先加上该阵列的原点。估算时的主点取 active 阵列在同一
+      坐标系里的中心。
     - **不应用裁剪矩形**：模型看到的是整个缓冲区。
     - 没有变换时，假定缓冲区是 active 阵列居中填充的结果，并打上标记。
     - 不是轴对齐缩放/平移（可以交换或翻转轴）的变换一律拒绝。
