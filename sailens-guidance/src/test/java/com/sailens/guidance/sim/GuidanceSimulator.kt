@@ -104,7 +104,7 @@ class GuidanceSimulator(
                 .minByOrNull { abs(it.timestampNanos - timeNanos) }
                 ?.let { SensorSample(it.timestampNanos, Vec3(it.values[0], it.values[1], it.values[2])) }
             // Scenarios carry no rotation vector yet.
-            override fun motionState(nowNanos: Long, isStationary: Boolean) = noRotation.state(nowNanos, isStationary)
+            override fun motionState(atNanos: Long, isStationary: Boolean) = noRotation.state(atNanos, isStationary)
         }
         fun out(frame: ImageFrame) = rendered[(frame.sequenceNumber - 1).toInt()]
 

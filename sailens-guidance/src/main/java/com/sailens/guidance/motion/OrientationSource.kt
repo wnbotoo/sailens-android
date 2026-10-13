@@ -21,7 +21,8 @@ interface OrientationSource {
     /** The gravity sample nearest [timeNanos] (elapsed realtime), or null when there is none. */
     fun gravityNear(timeNanos: Long): SensorSample?
 
-    fun motionState(nowNanos: Long, isStationary: Boolean): MotionState
+    /** The rotation at [atNanos] (elapsed realtime): a frame's time, which is already past when asked. */
+    fun motionState(atNanos: Long, isStationary: Boolean): MotionState
 }
 
 /** No sensors: every geometry comes out unavailable and consumers keep today's behaviour. */
@@ -30,7 +31,7 @@ object NoOrientationSource : OrientationSource {
     override fun start() = Unit
     override fun stop() = Unit
     override fun gravityNear(timeNanos: Long): SensorSample? = null
-    override fun motionState(nowNanos: Long, isStationary: Boolean) = tracker.state(nowNanos, isStationary)
+    override fun motionState(atNanos: Long, isStationary: Boolean) = tracker.state(atNanos, isStationary)
 }
 
 /**
@@ -88,5 +89,5 @@ class AndroidOrientationSource(context: Context) : OrientationSource {
 
     override fun gravityNear(timeNanos: Long): SensorSample? = gravity.nearest(timeNanos)
 
-    override fun motionState(nowNanos: Long, isStationary: Boolean) = tracker.state(nowNanos, isStationary)
+    override fun motionState(atNanos: Long, isStationary: Boolean) = tracker.state(atNanos, isStationary)
 }

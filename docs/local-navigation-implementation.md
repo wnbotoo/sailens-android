@@ -577,7 +577,9 @@ M1b and M8 depend on.
     the phone turns right, and the yaw rate.
     - Within about 10° of vertical, the heading is carried over (DEGRADED) and no rate is claimed
       across that stretch.
-    - With no sample for 200 ms the state is UNAVAILABLE.
+    - It keeps the last 128 samples and answers for a given time (the frame's), interpolating
+      between the samples either side. No sample within 200 ms of that time, on either side,
+      makes the state UNAVAILABLE.
   - `SensorSampleBuffer`: a ring of recent samples with nearest lookup.
 - Checked against the M2a scenarios: every simulated frame resolves to its own pitch and to the
   class-map intrinsics (449.625 / 180 / 320).
