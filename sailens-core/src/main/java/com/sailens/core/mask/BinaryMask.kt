@@ -41,12 +41,13 @@ public class BinaryMask private constructor(
     public fun copyPackedBitsInto(reusable: LongArray): LongArray {
         val wordCount = (width * height + Long.SIZE_BITS - 1) / Long.SIZE_BITS
         val target = if (reusable.size >= wordCount) reusable else LongArray(wordCount)
-        target.fill(0L, 0, wordCount)
-        var i = bits.nextSetBit(0)
-        while (i >= 0) {
-            target[i ushr 6] = target[i ushr 6] or (1L shl (i and 63))
-            i = bits.nextSetBit(i + 1)
-        }
+        // BitSet 的内部字就是这里要的打包格式；整块复制。逐位 nextSetBit 在 360×640 的掩码上要走
+        // 十万次左右，SM8850 上每次调用 1–3 ms，而它在每帧的 native 连通性路径上（M0b ABAB 实测）。
+        // toLongArray 只到最后一个非零字，余下的补零。代价是每次一个约 29 KB 的临时数组。
+        val words = bits.toLongArray()
+        val copied = minOf(words.size, wordCount)
+        System.arraycopy(words, 0, target, 0, copied)
+        target.fill(0L, copied, wordCount)
         return target
     }
 
