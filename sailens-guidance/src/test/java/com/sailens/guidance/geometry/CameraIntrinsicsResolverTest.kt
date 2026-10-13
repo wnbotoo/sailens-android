@@ -79,13 +79,40 @@ class CameraIntrinsicsResolverTest {
     }
 
     @Test
-    fun `calibration is shifted from the pre-correction array into the active array`() {
+    fun `calibration is moved by the pre-correction array's origin`() {
         val withMargin = camera(preCorrection = SensorRect(-8, -6, 4008, 3006))
         val plain = checkNotNull(CameraIntrinsicsResolver.resolve(camera(), frame(0)))
         val shifted = checkNotNull(CameraIntrinsicsResolver.resolve(withMargin, frame(0)))
         // The active array starts 8 / 6 px into the pre-correction array: the centre moves by that much, scaled.
         assertEquals(plain.cx - 8 * 0.32f, shifted.cx, 1e-3f)
         assertEquals(plain.cy - 6 * 0.32f, shifted.cy, 1e-3f)
+    }
+
+    /**
+     * An active array that does not start at the sensor origin. CameraX's transform maps the active
+     * Rect, offset included, onto the buffer: here (20, 20) → buffer (0, −120) at scale 0.32.
+     */
+    @Test
+    fun `a non-zero active array origin is counted once`() {
+        val offsetActive = SensorRect(20, 20, 4020, 3020)
+        val offsetTransform = listOf(0.32f, 0f, -6.4f, 0f, 0.32f, -126.4f, 0f, 0f, 1f)
+        val facts = camera(calibration = listOf(3000f, 3100f, 2000f, 1500f, 0f), preCorrection = SensorRect(10, 10, 4030, 3030))
+            .copy(activeArray = offsetActive)
+
+        // Calibration centre (2000, 1500) from the pre-correction origin (10, 10): sensor (2010, 1510).
+        val calibrated = checkNotNull(CameraIntrinsicsResolver.resolve(facts, frame(0, transform = offsetTransform)))
+        assertEquals(636.8f, calibrated.cx, 1e-3f)
+        assertEquals(356.8f, calibrated.cy, 1e-3f)
+
+        // The estimate's centre is the active array's centre: the middle of the buffer.
+        val estimated = checkNotNull(CameraIntrinsicsResolver.resolve(facts.copy(lensIntrinsicCalibration = null), frame(0, transform = offsetTransform)))
+        assertEquals(640f, estimated.cx, 1e-3f)
+        assertEquals(360f, estimated.cy, 1e-3f)
+
+        // With no transform reported, the assumed centred fill is that same mapping.
+        val assumed = checkNotNull(CameraIntrinsicsResolver.resolve(facts, frame(0, transform = null)))
+        assertEquals(calibrated.cx, assumed.cx, 1e-3f)
+        assertEquals(calibrated.cy, assumed.cy, 1e-3f)
     }
 
     @Test

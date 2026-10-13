@@ -551,8 +551,12 @@ M1b and M8 depend on.
   - `CameraFacts` / `FrameFacts`: the raw facts, built from a live frame (`FrameFacts.of(ImageFrame)`)
     or from a capture (`CaptureCameraRecord.toCameraFacts()`, `FrameFacts.of(FrameRecord)`), so a
     recording resolves through the same code as the camera.
-  - `CameraIntrinsicsResolver`: calibration (shifted from the pre-correction to the active array)
-    or a focal-length estimate, mapped through `sensorToBufferTransform`, then rotated upright.
+  - `CameraIntrinsicsResolver`: calibration or a focal-length estimate, mapped through
+    `sensorToBufferTransform`, then rotated upright.
+    - The transform takes **sensor coordinates**, the system in which the active array's Rect is
+      given, origin offset included. Calibration is relative to the pre-correction array's
+      top-left, so it is moved by that array's origin first. The estimate's centre is the active
+      array's centre in the same coordinates.
     - The **crop rectangle is not applied**: the models see the whole buffer.
     - With no transform, the buffer is assumed to be a centred fill of the active array, and the
       result is flagged.

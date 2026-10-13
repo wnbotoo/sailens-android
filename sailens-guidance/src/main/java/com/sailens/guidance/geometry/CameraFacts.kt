@@ -23,7 +23,8 @@ data class SensorRect(val left: Int, val top: Int, val right: Int, val bottom: I
  * Per-binding camera facts. Only the back camera is supported: the axis conventions in
  * [GravityInCamera] assume it.
  *
- * @param lensIntrinsicCalibration fx, fy, cx, cy, s in pixels of the pre-correction active array.
+ * @param lensIntrinsicCalibration fx, fy, cx, cy, s; the centre relative to the pre-correction
+ *   active array's top-left.
  */
 data class CameraFacts(
     val sensorOrientationDegrees: Int?,
@@ -52,7 +53,8 @@ fun interface CameraFactsSource {
  *
  * @param sensorTimestampNanos the camera timestamp, in the base [CameraFacts.clock] names.
  * @param receivedElapsedRealtimeNanos taken at the source before any queueing; 0 when unknown.
- * @param sensorToBufferTransform 3×3 row-major, active-array coordinates → buffer pixels.
+ * @param sensorToBufferTransform 3×3 row-major, sensor coordinates (where the active array's Rect
+ *   lives, origin offset included) → buffer pixels.
  */
 data class FrameFacts(
     val width: Int,
