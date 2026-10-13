@@ -19,6 +19,8 @@ import com.sailens.guidance.trace.capture.DetectionItem
 import com.sailens.guidance.trace.capture.EventRecord
 import com.sailens.guidance.trace.capture.SemanticStatsRecord
 import com.sailens.vision.detection.Detection
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.util.UUID
 import java.util.zip.CRC32
 
@@ -154,24 +156,26 @@ fun DetectionItem.toDetection(): Detection = Detection(classId, label, confidenc
  * CRC32 of a mask's size and bits (packed as `BinaryMask.copyPackedBits` packs them, each word
  * little-endian), so two masks with the same pixels have the same value on any JVM.
  *
+ * Runs on Guidance's thread for every recorded frame, so the words go to CRC32 in one call: fed a
+ * word at a time it made about 3,600 native calls per class-map-sized mask, 3–7 ms each on an
+ * SM8850 -- the bulk of the recording's cost (M0b ABAB, 2026-10-13). The bytes are the same.
+ *
  * @param scratch reused word buffer; pass one to avoid a per-call allocation in a per-frame path.
  */
 fun BinaryMask.regressionCrc32(scratch: LongArray = LongArray(0)): Long {
     val words = copyPackedBitsInto(scratch)
     val wordCount = (width * height + Long.SIZE_BITS - 1) / Long.SIZE_BITS
+    val bytes = crcBytes.get().let { if (it.capacity() >= wordCount * 8) it else ByteBuffer.allocate(wordCount * 8).order(ByteOrder.LITTLE_ENDIAN).also(crcBytes::set) }
+    bytes.clear()
+    bytes.asLongBuffer().put(words, 0, wordCount)
     val crc = CRC32()
     crc.update(intBytes(width))
     crc.update(intBytes(height))
-    val bytes = ByteArray(8)
-    for (w in 0 until wordCount) {
-        var v = words[w]
-        for (b in 0 until 8) {
-            bytes[b] = (v and 0xFF).toByte()
-            v = v ushr 8
-        }
-        crc.update(bytes)
-    }
+    crc.update(bytes.array(), 0, wordCount * 8)
     return crc.value
 }
+
+/** Per thread: recording and replay may run on different threads. */
+private val crcBytes = ThreadLocal.withInitial { ByteBuffer.allocate(0).order(ByteOrder.LITTLE_ENDIAN) }
 
 private fun intBytes(v: Int) = byteArrayOf(v.toByte(), (v ushr 8).toByte(), (v ushr 16).toByte(), (v ushr 24).toByte())

@@ -94,6 +94,23 @@ class RegressionRecordMappingTest {
         assertEquals(a.regressionCrc32(), a.regressionCrc32(LongArray(64))) // with a reused buffer
     }
 
+    /** Recorded captures hold CRCs from the word-at-a-time version: the bulk one must match it. */
+    @Test
+    fun `mask CRC is unchanged from the word-at-a-time version`() {
+        val random = java.util.Random(11)
+        for ((w, h) in listOf(1 to 1, 7 to 10, 64 to 1, 63 to 3, 360 to 640)) {
+            val m = mask(w, h) { _, _ -> random.nextInt(3) == 0 }
+            val words = m.copyPackedBits()
+            val crc = java.util.zip.CRC32()
+            for (v in listOf(w, h)) crc.update(byteArrayOf(v.toByte(), (v ushr 8).toByte(), (v ushr 16).toByte(), (v ushr 24).toByte()))
+            for (word in 0 until (w * h + 63) / 64) {
+                val value = words.getOrElse(word) { 0L }
+                crc.update(ByteArray(8) { b -> (value ushr (8 * b)).toByte() })
+            }
+            assertEquals("${w}x$h", crc.value, m.regressionCrc32())
+        }
+    }
+
     @Test
     fun `connectivity stats and detections round-trip`() {
         val stats = ConnectivityStats(4, 6, 0.81f, 0.6f, -0.12f, 0.93f, 0.55f, 0.41f, DirectionBias.values().last())
