@@ -1,5 +1,6 @@
 package com.sailens.guidance.sim
 
+import com.sailens.core.frame.FrameSourceGeometry
 import com.sailens.core.frame.ImageFrame
 import com.sailens.core.frame.ImagePixelFormat
 import com.sailens.core.frame.Yuv420FrameData
@@ -11,6 +12,12 @@ import com.sailens.guidance.config.PipelinePerformanceBudget
 import com.sailens.guidance.config.TraceRuntimeConfig
 import com.sailens.guidance.depth.DefaultDepthRepository
 import com.sailens.guidance.depth.ImagePositionDepthEstimator
+import com.sailens.guidance.geometry.CameraFactsSource
+import com.sailens.guidance.geometry.SensorSample
+import com.sailens.guidance.geometry.Vec3
+import com.sailens.guidance.geometry.toCameraFacts
+import com.sailens.guidance.motion.MotionTracker
+import com.sailens.guidance.motion.OrientationSource
 import com.sailens.guidance.model.common.ObstacleProviderType
 import com.sailens.guidance.model.common.PerceptionProfile
 import com.sailens.guidance.model.perception.ObstacleModelOutput
@@ -49,6 +56,7 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.runBlocking
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicLong
+import kotlin.math.abs
 import kotlin.random.Random
 
 /**
@@ -64,9 +72,10 @@ import kotlin.random.Random
  * - semantic stats are computed by the Kotlin extractor from the class map, where the device gets
  *   them from the fused native postprocess.
  *
- * Today's Guidance reads no pose; the scenario's pose shapes only what the models report (the class
- * map and boxes move with pitch and height). When M3o lands, the same scenarios feed it the raw
- * facts ([Scenario.facts]) as well.
+ * Today's Guidance decides on no pose; the scenario's pose shapes what the models report (the class
+ * map and boxes move with pitch and height). M3o's geometry is fed the scenario's own raw facts
+ * ([Scenario.facts]) -- camera record, sensor-to-buffer transform, gravity -- exactly as the app
+ * feeds it a live camera, and its pitch is part of the golden line.
  */
 class GuidanceSimulator(
     private val analysisConfig: AnalysisConfig = AnalysisConfig(),
@@ -85,6 +94,18 @@ class GuidanceSimulator(
         val now = AtomicLong(1_000_000)
         val clock = { now.get() }
         val stationary = MutableStateFlow(false)
+        var current = 0
+        val cameraFacts = scenario.facts(0).camera.toCameraFacts()
+        val orientation = object : OrientationSource {
+            private val noRotation = MotionTracker()
+            override fun start() = Unit
+            override fun stop() = Unit
+            override fun gravityNear(timeNanos: Long) = scenario.facts(current).gravity
+                .minByOrNull { abs(it.timestampNanos - timeNanos) }
+                ?.let { SensorSample(it.timestampNanos, Vec3(it.values[0], it.values[1], it.values[2])) }
+            // Scenarios carry no rotation vector yet.
+            override fun motionState(atNanos: Long, isStationary: Boolean) = noRotation.state(atNanos, isStationary)
+        }
         fun out(frame: ImageFrame) = rendered[(frame.sequenceNumber - 1).toInt()]
 
         val repository = object : PerceptionRepository {
@@ -145,12 +166,16 @@ class GuidanceSimulator(
             traceService = NoOpTraceService,
             traceRuntimeConfig = TraceRuntimeConfig(enabled = false),
             pipelineBudget = PipelinePerformanceBudget(),
+            orientationSource = orientation,
+            cameraFactsSource = CameraFactsSource { cameraFacts },
+            isStationary = { stationary.value },
         )
         val frames = flow {
             scenario.frames.forEachIndexed { index, frame ->
                 now.addAndGet(scenario.stepMs)
                 stationary.value = frame.stationary
-                emit(cameraFrame(index + 1L, frame.lensCovered, scenario.stepMs))
+                current = index
+                emit(cameraFrame(scenario, index, frame.lensCovered))
             }
         }
         val results = mutableListOf<SceneResult>()
@@ -158,16 +183,23 @@ class GuidanceSimulator(
         results
     }
 
-    /** Camera pixels for the frame-quality check: textured, or flat when the lens is covered. */
-    private fun cameraFrame(seq: Long, covered: Boolean, stepMs: Long): ImageFrame {
-        val w = 64
-        val h = 36
-        val random = Random(seq)
+    /**
+     * The analysis frame as the camera would deliver it: the scenario camera's buffer size, rotation,
+     * timestamps and sensor-to-buffer transform (what M3o reads), and luma for the frame-quality
+     * check -- textured, or flat when the lens is covered. Only the luma the check samples is filled.
+     */
+    private fun cameraFrame(scenario: Scenario, index: Int, covered: Boolean): ImageFrame {
+        val record = scenario.facts(index).frame
+        val w = record.sourceWidth
+        val h = record.sourceHeight
+        val random = Random(record.seq)
         val y = ByteArray(w * h) { if (covered) 6 else (110 + random.nextInt(-35, 35)).toByte() }
         val chroma = YuvPlaneData(ByteArray(w * h / 2), w, 2)
         return ImageFrame(
-            w, h, ByteArray(0), ImagePixelFormat.YUV_420_888, seq * stepMs * 1_000_000, 90, seq,
+            w, h, ByteArray(0), ImagePixelFormat.YUV_420_888, record.sensorTimestampNanos, record.rotationDegrees, record.seq,
             yuvData = Yuv420FrameData(YuvPlaneData(y, w, 1), chroma, chroma),
+            receivedElapsedRealtimeNanos = record.receivedElapsedRealtimeNanos,
+            sourceGeometry = FrameSourceGeometry(checkNotNull(record.sensorToBufferTransform), 0, 0, w, h),
         )
     }
 
@@ -203,6 +235,10 @@ class GuidanceSimulator(
                     append(" widthP25=").append(r(d.widthRetentionP25))
                     append(" flood=").append(r(d.floodReachRatio))
                     append(" vertical=").append(r(d.verticalReachRatio))
+                }
+                result.cameraGeometry?.let { geometry ->
+                    append(" geometry=").append(geometry.quality.javaClass.simpleName.lowercase())
+                    geometry.pitchDownDegrees?.let { append('/').append(String.format(Locale.ROOT, "%.2f", it)) }
                 }
             }
         }

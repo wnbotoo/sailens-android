@@ -1,5 +1,7 @@
 package com.sailens.app
 
+import com.sailens.guidance.geometry.CameraFactsSource
+import com.sailens.guidance.repository.DeviceSensorRepository
 import com.sailens.guidance.processor.analysis.ConnectivityAnalysisProcessor
 import com.sailens.guidance.processor.analysis.ConnectivityChecker
 import com.sailens.guidance.processor.analysis.CrossValidator
@@ -126,6 +128,10 @@ val domainBindingsModule = module {
             traceService = get(),
             traceRuntimeConfig = get(),
             pipelineBudget = get(),
+            orientationSource = get(),
+            // A host without a camera-facts binding runs Guidance without geometry.
+            cameraFactsSource = getOrNull() ?: CameraFactsSource { null },
+            isStationary = get<DeviceSensorRepository>().let { sensors -> { sensors.isStationary.value } },
         )
     }
     factory {
