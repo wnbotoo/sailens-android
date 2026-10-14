@@ -29,7 +29,7 @@ enum class GroundFitValidity {
     /**
      * The fitted ground jumped to a level the previous fits saw below ground -- the floor of a drop
      * now filling the near view. Relative depth cannot tell "stepped down" from "looking over the
-     * edge", so the fit is unknown until two levels are seen together again (or the hold expires).
+     * edge", so the fit is unknown until two levels are seen together again, or a new session.
      */
     SUPPORT_SWITCH,
 
@@ -100,7 +100,6 @@ data class GroundObservation(
  *   lower part"). Near ground dominates there; far ground is where a small step or a gentle slope
  *   differs from the plane by less than the threshold, and would bend the fit if it were sampled.
  *   The labels still cover the whole image.
- * @param maxSwitchHoldFits after a support switch, fits stay unknown at most this long.
  */
 class GroundFitter(
     private val inlierThreshold: Float = 0.04f,
@@ -113,18 +112,17 @@ class GroundFitter(
     private val iterations: Int = 200,
     private val maxGravityAngleDeg: Float = 10f,
     private val stabilityFrames: Int = 3,
-    private val maxSwitchHoldFits: Int = 30,
 ) {
     private val recentCoverage = ArrayDeque<Float>()
 
     /** The below-ground cells of the last valid fit: the guard compares the next fit with them. */
     private var lastBelow: BinaryMask? = null
-    private var switchHold = 0
+    private var holdingSwitch = false
 
     fun reset() {
         recentCoverage.clear()
         lastBelow = null
-        switchHold = 0
+        holdingSwitch = false
     }
 
     /**
@@ -278,22 +276,25 @@ class GroundFitter(
         val previousBelow = lastBelow
         if (previousBelow != null && previousBelow.width == gridWidth && previousBelow.height == gridHeight) {
             val previousCount = previousBelow.countTrue()
-            if (switchHold > 0 || previousCount >= MIN_BELOW_CELLS_FRACTION * gridWidth * gridHeight) {
+            if (holdingSwitch || previousCount >= MIN_BELOW_CELLS_FRACTION * gridWidth * gridHeight) {
                 var flipped = 0
-                if (switchHold == 0) {
+                if (!holdingSwitch) {
                     for (gy in 0 until gridHeight) for (gx in 0 until gridWidth) {
                         if (previousBelow.get(gx, gy) && ground.get(gx, gy)) flipped++
                     }
                 }
-                val switched = switchHold == 0 && flipped >= SWITCH_FLIP_FRACTION * previousCount
-                // Held until a fit again sees a level below its ground (two levels together, the
-                // near one under the user), or the hold runs out.
+                val switched = !holdingSwitch && flipped >= SWITCH_FLIP_FRACTION * previousCount
+                // Held until a fit again sees a level below its ground: two levels together, the
+                // near one under the user. Nothing else releases it -- not time: a user standing at
+                // the edge gives any number of identical frames, and none of them shows a step down
+                // (review finding). Rotation-only motion cannot show one either; a translation
+                // estimate (M5b) could, later. A new session starts clear ([reset]).
                 val twoLevelsAgain = below.countTrue() >= MIN_BELOW_CELLS_FRACTION * gridWidth * gridHeight
-                if (switched || (switchHold > 0 && !twoLevelsAgain && switchHold < maxSwitchHoldFits)) {
-                    switchHold++
+                if (switched || (holdingSwitch && !twoLevelsAgain)) {
+                    holdingSwitch = true
                     return empty(GroundFitValidity.SUPPORT_SWITCH)
                 }
-                switchHold = 0
+                holdingSwitch = false
             }
         }
 

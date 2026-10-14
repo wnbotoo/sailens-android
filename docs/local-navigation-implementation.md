@@ -731,7 +731,8 @@ frames; binding coverage if any native kernel is added.
     `toAnalysis*`, `covers`).
   - `DisparityMap`: `sampleAt(u, v)` is bilinear and returns null where the model did not see the
     point. It is clamped to the integer range of pixels whose centres lie in the content, so
-    padding never blends in, even when it is fractional (960×1280 → 518×518 pads 64.75 px).
+    padding never blends in, even when it is fractional (960×1280 → 518×518 pads 64.75 px) or a
+    half pixel (640×1280 → 518×518 pads 129.5 px; a centre exactly on the open right end is padding).
 - `…guidance.geometry` `GroundFitter` follows steps 1–6 above, with these as-built details:
   - **Sampling** covers only the image below 40 % of its height. Far ground is where a small step
     or a gentle slope stays within the 4 % threshold, and sampling it bent the fit: a 15 cm curb's
@@ -758,7 +759,10 @@ frames; binding coverage if any native kernel is added.
       on a grid where at least 2 % was below.
     - Result: `SUPPORT_SWITCH`, which is unknown. Relative depth cannot tell "stepped down" from
       "looking over the edge".
-    - Release: when a fit sees a level below its ground again, or after 30 fits.
+    - Release: only when a fit sees a level below its ground again (two levels together, the near
+      one under the user), or a new session. Not after some number of fits: a user standing at the
+      edge gives any number of identical frames (review finding). A translation estimate (M5b)
+      could release it later.
   - **A flat line is no ground.** A wall filling the view fits a flat line too; the run-span check
     rejects it.
   - **Validity**: `VALID`, `TOO_FEW_SAMPLES`, `DEGENERATE_VIEW` (camera pointing straight down),
@@ -782,7 +786,8 @@ frames; binding coverage if any native kernel is added.
   - a wrong gravity roll is noticed;
   - walking up to a 1.5 m drop and past the point where only its floor is in view: every valid fit
     is the sidewalk, and the end is `SUPPORT_SWITCH`;
-  - the switch hold is released by seeing both levels again, by its limit, and by `reset`;
+  - the switch hold is released by seeing both levels again and by `reset`, and holds over 60
+    identical frames at 0.4 m from the edge;
   - five pairs of (a, b), including a negative b, give identical labels in four scenes;
   - fractional padding never blends into an edge sample.
 - **Part 2** covers the runner, the depth `ModelType` and catalog entry, the `docs/models.md`

@@ -54,7 +54,7 @@ class DepthInputTransformTest {
         val values = FloatArray(518 * 518) { i ->
             val x = i % 518 + 0.5f
             val y = i / 518 + 0.5f
-            if (x < transform.padLeft || x > 518 - transform.padLeft) 1000f else 0.01f * x + 0.02f * y
+            if (x < transform.padLeft || x >= 518 - transform.padLeft) 1000f else 0.01f * x + 0.02f * y
         }
         val map = DisparityMap(518, 518, values, transform)
         val u = 360f
@@ -75,13 +75,31 @@ class DepthInputTransformTest {
     fun `fractional padding never blends in at the image edges`() {
         val transform = DepthInputTransform.create(960, 1280, 518, 518, ResizePolicy.PAD_KEEP_ASPECT)
         assertEquals(64.75f, transform.padLeft, 1e-3f)
-        // Content pixels (centre inside [pad, size − pad)) hold 1, padding 1000.
+        // Content pixels (centre in [pad, size − pad)) hold 1, padding 1000.
         val values = FloatArray(518 * 518) { i ->
             val centre = i % 518 + 0.5f
-            if (centre < transform.padLeft || centre > 518 - transform.padLeft) 1000f else 1f
+            if (centre < transform.padLeft || centre >= 518 - transform.padLeft) 1000f else 1f
         }
         val map = DisparityMap(518, 518, values, transform)
         for (u in listOf(0f, 0.5f, 1f, 2f, 480f, 958f, 959f, 959.9f)) {
+            for (v in listOf(0f, 640f, 1279.9f)) assertEquals("u=$u v=$v", 1f, map.sampleAt(u, v)!!, 0f)
+        }
+    }
+
+    /**
+     * Half-pixel padding (review finding on #25): 640x1280 into 518x518 pads 129.5 each side, so
+     * pixel 388's centre sits exactly on the open right end of the content and is padding.
+     */
+    @Test
+    fun `half-pixel padding leaves the pixel on the right edge out`() {
+        val transform = DepthInputTransform.create(640, 1280, 518, 518, ResizePolicy.PAD_KEEP_ASPECT)
+        assertEquals(129.5f, transform.padLeft, 1e-3f)
+        val values = FloatArray(518 * 518) { i ->
+            val centre = i % 518 + 0.5f
+            if (centre < transform.padLeft || centre >= 518 - transform.padLeft) 1000f else 1f
+        }
+        val map = DisparityMap(518, 518, values, transform)
+        for (u in listOf(0f, 0.3f, 320f, 639.5f, 639.9f)) {
             for (v in listOf(0f, 640f, 1279.9f)) assertEquals("u=$u v=$v", 1f, map.sampleAt(u, v)!!, 0f)
         }
     }

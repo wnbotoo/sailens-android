@@ -1,7 +1,6 @@
 package com.sailens.vision.depth
 
 import kotlin.math.ceil
-import kotlin.math.floor
 
 /**
  * How a depth model's input was made from the upright analysis image. Part of the model's
@@ -102,11 +101,12 @@ class DisparityMap(val width: Int, val height: Int, val values: FloatArray, val 
     }
 
     // The content spans [pad, size − pad) in tensor pixels; pixel i is content when its centre
-    // i + 0.5 lies inside that span.
+    // i + 0.5 lies inside that span -- strictly below the open right end, so a centre exactly on it
+    // (half-pixel padding: 640x1280 into 518x518 pads 129.5) is padding.
     private val firstContentX = ceil(transform.padLeft - 0.5f).toInt().coerceIn(0, width - 1)
-    private val lastContentX = floor(width - transform.padLeft - 0.5f).toInt().coerceIn(firstContentX, width - 1)
+    private val lastContentX = (ceil(width - transform.padLeft - 0.5f).toInt() - 1).coerceIn(firstContentX, width - 1)
     private val firstContentY = ceil(transform.padTop - 0.5f).toInt().coerceIn(0, height - 1)
-    private val lastContentY = floor(height - transform.padTop - 0.5f).toInt().coerceIn(firstContentY, height - 1)
+    private val lastContentY = (ceil(height - transform.padTop - 0.5f).toInt() - 1).coerceIn(firstContentY, height - 1)
 
     /**
      * The disparity seen at analysis point (u, v), bilinear between tensor pixel centres; null when

@@ -206,7 +206,7 @@ class GroundFitterTest {
     }
 
     @Test
-    fun `seeing both levels again ends the hold, and so does its limit`() {
+    fun `only seeing both levels again, or a new session, ends the hold`() {
         val drop = Scenarios.curbAndDrop.frames[40].world
         val atEdge = Pose(1.3f, 25f, walkedM = 3.6f)
         val back = Pose(1.3f, 25f, walkedM = 2.0f)
@@ -225,12 +225,15 @@ class GroundFitterTest {
         assertTrue(again.isValid)
         assertEquals(10f / 1.3f, again.disparityScale, 0.01f * 10f / 1.3f)
 
-        // Standing at the edge past the hold, the one level in view is taken as the support.
-        val brief = GroundFitter(maxSwitchHoldFits = 3)
-        approach(brief)
-        val held = (0 until 4).map { brief.fit(disparity(drop, pose = atEdge), intrinsics, gravity(atEdge), gridW, gridH).validity }
-        assertEquals(GroundFitValidity.VALID, held.last())
-        assertTrue(held.first() == GroundFitValidity.SUPPORT_SWITCH)
+        // Standing 0.4 m from the edge, the same depth frame over and over (review finding on #25:
+        // a hold that ran out after 30 fits took the drop's floor for the ground on the 31st). No
+        // number of frames shows the user stepped down.
+        val standing = GroundFitter()
+        approach(standing)
+        val atEdgeFrame = disparity(drop, pose = atEdge)
+        repeat(60) { k ->
+            assertEquals("fit ${k + 1} at the edge", GroundFitValidity.SUPPORT_SWITCH, standing.fit(atEdgeFrame, intrinsics, gravity(atEdge), gridW, gridH).validity)
+        }
 
         // A new session forgets the drop.
         val fresh = GroundFitter()
