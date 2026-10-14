@@ -723,6 +723,77 @@ sem/det first, depth pre-emptible.
 steps, step height within tolerance; device test comparing output with the PC reference on stored
 frames; binding coverage if any native kernel is added.
 
+### M3b as built: part 1, transform and ground fit (pure JVM)
+
+- `sailens-vision` `…vision.depth`:
+  - `ResizePolicy`.
+  - `DepthInputTransform` (`create(analysis size, tensor size, policy)`, `toTensor*` /
+    `toAnalysis*`, `covers`).
+  - `DisparityMap`: `sampleAt(u, v)` is bilinear and returns null where the model did not see the
+    point. It is clamped to the integer range of pixels whose centres lie in the content, so
+    padding never blends in, even when it is fractional (960×1280 → 518×518 pads 64.75 px) or a
+    half pixel (640×1280 → 518×518 pads 129.5 px; a centre exactly on the open right end is padding).
+- `…guidance.geometry` `GroundFitter` follows steps 1–6 above, with these as-built details:
+  - **Sampling** covers only the image below 40 % of its height. Far ground is where a small step
+    or a gentle slope stays within the 4 % threshold, and sampling it bent the fit: a 15 cm curb's
+    far road pulled `t` from 0.20 to 0.10.
+  - **Every decision uses the depth ratio `(d − t)/(A·q) = Z_ground/Z`**: the inlier test, the
+    above / below labels and the recession check. Relative-depth models output `a/Z + b` with a and
+    b free per frame. With a residual relative to `d` itself, a large b hid a 15 cm curb and a
+    1.5 m drop (review finding); the depth ratio is unchanged by any a and b.
+  - **RANSAC is run over both slopes.** A better negative slope means **inverse output**, which
+    marks the observation invalid.
+  - **The ground is the plane under the user.**
+    - Samples are ordered nearest first and grouped into 20 bins.
+    - A candidate is scored by the unbroken run of bins it explains from the nearest outward. The
+      run stops at the first bin it explains less than half of.
+    - A tie goes to the candidate matching less outside the run.
+    - The refit uses only the run's inliers, and the run must span ≥ 25 % in depth. If not, the
+      result is `NO_SUPPORT`.
+    - Ranked by total inliers instead, the floor of a drop being approached became "the ground"
+      once it filled more of the view (review finding). A line through the last strip of near
+      ground that also clipped the floor did the same.
+    - Selection and refit are deliberately redundant: each alone fixes the approach sequence.
+  - **Support-switch guard.**
+    - Trigger: more than half of the cells the last valid fit saw below ground now read as ground,
+      on a grid where at least 2 % was below.
+    - Result: `SUPPORT_SWITCH`, which is unknown. Relative depth cannot tell "stepped down" from
+      "looking over the edge".
+    - Release: only when a fit sees a level below its ground again (two levels together, the near
+      one under the user), or a new session. Not after some number of fits: a user standing at the
+      edge gives any number of identical frames (review finding). A translation estimate (M5b)
+      could release it later.
+  - **A flat line is no ground.** A wall filling the view fits a flat line too; the run-span check
+    rejects it.
+  - **Validity**: `VALID`, `TOO_FEW_SAMPLES`, `DEGENERATE_VIEW` (camera pointing straight down),
+    `NO_GROUND`, `NO_SUPPORT`, `SUPPORT_SWITCH` or `INVERSE_OUTPUT`.
+  - **Gravity agreement**: a free 3-parameter plane on the inliers must lean within 10° and ±33 %
+    of what gravity predicts.
+  - **Confidence** is the product of three terms: inlier ratio (0.2 → 0.6), agreement (×0.5 when it
+    fails) and the stability of ground coverage over the last 3 fits.
+  - `GroundObservation.heightAboveGroundM` implements step 5.
+- The simulator renders synthetic disparity (`renderDisparity`, `a/Z + b`) through any transform.
+  The tests check:
+  - the street fits to `A = a/h`, `t = b`;
+  - the three policies agree, and what a crop cut away stays unknown;
+  - a 15 cm curb is not ground, and its height comes out at −0.15 m;
+  - a 1.5 m drop is below ground;
+  - a wall and a person are above ground, with their heights;
+  - an indoor floor that sem calls `building` is ground;
+  - noise of 3 % still fits;
+  - a depth-output model is refused;
+  - a wall filling the view, and a camera pointing straight down, give no fit;
+  - a wrong gravity roll is noticed;
+  - walking up to a 1.5 m drop and past the point where only its floor is in view: every valid fit
+    is the sidewalk, and the end is `SUPPORT_SWITCH`;
+  - the switch hold is released by seeing both levels again and by `reset`, and holds over 60
+    identical frames at 0.4 m from the edge;
+  - five pairs of (a, b), including a negative b, give identical labels in four scenes;
+  - fractional padding never blends into an edge sample.
+- **Part 2** covers the runner, the depth `ModelType` and catalog entry, the `docs/models.md`
+  contract, 2–5 Hz scheduling, GPU sharing, trace fields and the overlay. It needs the device for
+  its exit: the latency budget, and agreement with the PC experiment.
+
 ## 10. M4 — Local world model
 
 **V0 (frame-local)**
