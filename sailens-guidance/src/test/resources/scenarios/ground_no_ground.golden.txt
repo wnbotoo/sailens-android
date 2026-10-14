@@ -1,101 +1,101 @@
 # ground_no_ground: Recognized sidewalk; an indoor floor the model reads as building; looking up so little ground is in view; back to the sidewalk; the lens covered; uncovered again.
-seq=1 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000
-seq=2 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000
-seq=3 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000
-seq=4 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000
-seq=5 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000
-seq=6 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000
-seq=7 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000
-seq=8 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000
-seq=9 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000
-seq=10 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000
-seq=11 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000
-seq=12 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000
-seq=13 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000
-seq=14 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000
-seq=15 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000
-seq=16 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000
-seq=17 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000
-seq=18 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000
-seq=19 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000
-seq=20 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000
-seq=21 events=[] obstacles=[] ground=uncertain unrecognized=1.0000 passable=0.8000 blockage=1.0000/vertical+flood+width widthP25=0.0000 flood=0.0000 vertical=0.0000
-seq=22 events=[] obstacles=[] ground=uncertain unrecognized=1.0000 passable=0.6000 blockage=1.0000/vertical+flood+width widthP25=0.0000 flood=0.0000 vertical=0.0000
-seq=23 events=[] obstacles=[] ground=uncertain unrecognized=1.0000 passable=0.4000 blockage=1.0000/vertical+flood+width widthP25=0.0000 flood=0.0000 vertical=0.0000
-seq=24 events=[event_blocked:CRITICAL] obstacles=[] ground=uncertain unrecognized=1.0000 passable=0.2000 blockage=1.0000/vertical+flood+width widthP25=0.0000 flood=0.0000 vertical=0.0000
-seq=25 events=[] obstacles=[] ground=uncertain unrecognized=1.0000 passable=0.0000 blockage=1.0000/vertical+flood+width widthP25=0.0000 flood=0.0000 vertical=0.0000
-seq=26 events=[] obstacles=[] ground=uncertain unrecognized=1.0000 passable=0.0000 blockage=1.0000/vertical+flood+width widthP25=0.0000 flood=0.0000 vertical=0.0000
-seq=27 events=[] obstacles=[] ground=uncertain unrecognized=1.0000 passable=0.0000 blockage=1.0000/vertical+flood+width widthP25=0.0000 flood=0.0000 vertical=0.0000
-seq=28 events=[] obstacles=[] ground=uncertain unrecognized=1.0000 passable=0.0000 blockage=1.0000/vertical+flood+width widthP25=0.0000 flood=0.0000 vertical=0.0000
-seq=29 events=[] obstacles=[] ground=uncertain unrecognized=1.0000 passable=0.0000 blockage=1.0000/vertical+flood+width widthP25=0.0000 flood=0.0000 vertical=0.0000
-seq=30 events=[] obstacles=[] ground=uncertain unrecognized=1.0000 passable=0.0000 blockage=1.0000/vertical+flood+width widthP25=0.0000 flood=0.0000 vertical=0.0000
-seq=31 events=[] obstacles=[] ground=uncertain unrecognized=1.0000 passable=0.0000 blockage=1.0000/vertical+flood+width widthP25=0.0000 flood=0.0000 vertical=0.0000
-seq=32 events=[] obstacles=[] ground=uncertain unrecognized=1.0000 passable=0.0000 blockage=1.0000/vertical+flood+width widthP25=0.0000 flood=0.0000 vertical=0.0000
-seq=33 events=[] obstacles=[] ground=uncertain unrecognized=1.0000 passable=0.0000 blockage=1.0000/vertical+flood+width widthP25=0.0000 flood=0.0000 vertical=0.0000
-seq=34 events=[] obstacles=[] ground=uncertain unrecognized=1.0000 passable=0.0000 blockage=1.0000/vertical+flood+width widthP25=0.0000 flood=0.0000 vertical=0.0000
-seq=35 events=[] obstacles=[] ground=uncertain unrecognized=1.0000 passable=0.0000 blockage=1.0000/vertical+flood+width widthP25=0.0000 flood=0.0000 vertical=0.0000
-seq=36 events=[event_ground_unrecognized:LOW] obstacles=[] ground=unrecognized unrecognized=1.0000 passable=0.0000 blockage=1.0000/vertical+flood+width widthP25=0.0000 flood=0.0000 vertical=0.0000
-seq=37 events=[] obstacles=[] ground=unrecognized unrecognized=1.0000 passable=0.0000 blockage=1.0000/vertical+flood+width widthP25=0.0000 flood=0.0000 vertical=0.0000
-seq=38 events=[] obstacles=[] ground=unrecognized unrecognized=1.0000 passable=0.0000 blockage=1.0000/vertical+flood+width widthP25=0.0000 flood=0.0000 vertical=0.0000
-seq=39 events=[] obstacles=[] ground=unrecognized unrecognized=1.0000 passable=0.0000 blockage=1.0000/vertical+flood+width widthP25=0.0000 flood=0.0000 vertical=0.0000
-seq=40 events=[] obstacles=[] ground=unrecognized unrecognized=1.0000 passable=0.0000 blockage=1.0000/vertical+flood+width widthP25=0.0000 flood=0.0000 vertical=0.0000
-seq=41 events=[] obstacles=[] ground=unrecognized unrecognized=0.0000 passable=0.1343 blockage=0.0569/flood widthP25=0.8558 flood=0.1178 vertical=0.6667
-seq=42 events=[] obstacles=[] ground=unrecognized unrecognized=0.0000 passable=0.2686 blockage=0.0569/flood widthP25=0.8558 flood=0.1178 vertical=0.6667
-seq=43 events=[] obstacles=[] ground=unrecognized unrecognized=0.0000 passable=0.4030 blockage=0.0569/flood widthP25=0.8558 flood=0.1178 vertical=0.6667
-seq=44 events=[] obstacles=[] ground=unrecognized unrecognized=0.0000 passable=0.5373 blockage=0.0569/flood widthP25=0.8558 flood=0.1178 vertical=0.6667
-seq=45 events=[] obstacles=[] ground=unrecognized unrecognized=0.0000 passable=0.6716 blockage=0.0569/flood widthP25=0.8558 flood=0.1178 vertical=0.6667
-seq=46 events=[] obstacles=[] ground=unrecognized unrecognized=0.0000 passable=0.6716 blockage=0.0569/flood widthP25=0.8558 flood=0.1178 vertical=0.6667
-seq=47 events=[] obstacles=[] ground=unrecognized unrecognized=0.0000 passable=0.6716 blockage=0.0569/flood widthP25=0.8558 flood=0.1178 vertical=0.6667
-seq=48 events=[] obstacles=[] ground=unrecognized unrecognized=0.0000 passable=0.6716 blockage=0.0569/flood widthP25=0.8558 flood=0.1178 vertical=0.6667
-seq=49 events=[] obstacles=[] ground=unrecognized unrecognized=0.0000 passable=0.6716 blockage=0.0569/flood widthP25=0.8558 flood=0.1178 vertical=0.6667
-seq=50 events=[] obstacles=[] ground=unrecognized unrecognized=0.0000 passable=0.6716 blockage=0.0569/flood widthP25=0.8558 flood=0.1178 vertical=0.6667
-seq=51 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=0.6716 blockage=0.0569/flood widthP25=0.8558 flood=0.1178 vertical=0.6667
-seq=52 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=0.6716 blockage=0.0569/flood widthP25=0.8558 flood=0.1178 vertical=0.6667
-seq=53 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=0.6716 blockage=0.0569/flood widthP25=0.8558 flood=0.1178 vertical=0.6667
-seq=54 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=0.6716 blockage=0.0569/flood widthP25=0.8558 flood=0.1178 vertical=0.6667
-seq=55 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=0.6716 blockage=0.0569/flood widthP25=0.8558 flood=0.1178 vertical=0.6667
-seq=56 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=0.6716 blockage=0.0569/flood widthP25=0.8558 flood=0.1178 vertical=0.6667
-seq=57 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=0.6716 blockage=0.0569/flood widthP25=0.8558 flood=0.1178 vertical=0.6667
-seq=58 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=0.6716 blockage=0.0569/flood widthP25=0.8558 flood=0.1178 vertical=0.6667
-seq=59 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=0.6716 blockage=0.0569/flood widthP25=0.8558 flood=0.1178 vertical=0.6667
-seq=60 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=0.6716 blockage=0.0569/flood widthP25=0.8558 flood=0.1178 vertical=0.6667
-seq=61 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=0.7373 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000
-seq=62 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=0.8030 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000
-seq=63 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=0.8686 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000
-seq=64 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=0.9343 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000
-seq=65 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000
-seq=66 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000
-seq=67 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000
-seq=68 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000
-seq=69 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000
-seq=70 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000
-seq=71 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000
-seq=72 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000
-seq=73 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000
-seq=74 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000
-seq=75 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000
-seq=76 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000
-seq=77 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000
-seq=78 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000
-seq=79 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000
-seq=80 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000
-seq=81 events=[event_camera_blocked:CRITICAL] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000
-seq=82 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000
-seq=83 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000
-seq=84 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000
-seq=85 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000
-seq=86 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000
-seq=87 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000
-seq=88 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000
-seq=89 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000
-seq=90 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000
-seq=91 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000
-seq=92 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000
-seq=93 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000
-seq=94 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000
-seq=95 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000
-seq=96 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000
-seq=97 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000
-seq=98 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000
-seq=99 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000
-seq=100 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000
+seq=1 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000 geometry=ok/25.00
+seq=2 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000 geometry=ok/25.00
+seq=3 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000 geometry=ok/25.00
+seq=4 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000 geometry=ok/25.00
+seq=5 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000 geometry=ok/25.00
+seq=6 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000 geometry=ok/25.00
+seq=7 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000 geometry=ok/25.00
+seq=8 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000 geometry=ok/25.00
+seq=9 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000 geometry=ok/25.00
+seq=10 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000 geometry=ok/25.00
+seq=11 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000 geometry=ok/25.00
+seq=12 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000 geometry=ok/25.00
+seq=13 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000 geometry=ok/25.00
+seq=14 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000 geometry=ok/25.00
+seq=15 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000 geometry=ok/25.00
+seq=16 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000 geometry=ok/25.00
+seq=17 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000 geometry=ok/25.00
+seq=18 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000 geometry=ok/25.00
+seq=19 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000 geometry=ok/25.00
+seq=20 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000 geometry=ok/25.00
+seq=21 events=[] obstacles=[] ground=uncertain unrecognized=1.0000 passable=0.8000 blockage=1.0000/vertical+flood+width widthP25=0.0000 flood=0.0000 vertical=0.0000 geometry=ok/25.00
+seq=22 events=[] obstacles=[] ground=uncertain unrecognized=1.0000 passable=0.6000 blockage=1.0000/vertical+flood+width widthP25=0.0000 flood=0.0000 vertical=0.0000 geometry=ok/25.00
+seq=23 events=[] obstacles=[] ground=uncertain unrecognized=1.0000 passable=0.4000 blockage=1.0000/vertical+flood+width widthP25=0.0000 flood=0.0000 vertical=0.0000 geometry=ok/25.00
+seq=24 events=[event_blocked:CRITICAL] obstacles=[] ground=uncertain unrecognized=1.0000 passable=0.2000 blockage=1.0000/vertical+flood+width widthP25=0.0000 flood=0.0000 vertical=0.0000 geometry=ok/25.00
+seq=25 events=[] obstacles=[] ground=uncertain unrecognized=1.0000 passable=0.0000 blockage=1.0000/vertical+flood+width widthP25=0.0000 flood=0.0000 vertical=0.0000 geometry=ok/25.00
+seq=26 events=[] obstacles=[] ground=uncertain unrecognized=1.0000 passable=0.0000 blockage=1.0000/vertical+flood+width widthP25=0.0000 flood=0.0000 vertical=0.0000 geometry=ok/25.00
+seq=27 events=[] obstacles=[] ground=uncertain unrecognized=1.0000 passable=0.0000 blockage=1.0000/vertical+flood+width widthP25=0.0000 flood=0.0000 vertical=0.0000 geometry=ok/25.00
+seq=28 events=[] obstacles=[] ground=uncertain unrecognized=1.0000 passable=0.0000 blockage=1.0000/vertical+flood+width widthP25=0.0000 flood=0.0000 vertical=0.0000 geometry=ok/25.00
+seq=29 events=[] obstacles=[] ground=uncertain unrecognized=1.0000 passable=0.0000 blockage=1.0000/vertical+flood+width widthP25=0.0000 flood=0.0000 vertical=0.0000 geometry=ok/25.00
+seq=30 events=[] obstacles=[] ground=uncertain unrecognized=1.0000 passable=0.0000 blockage=1.0000/vertical+flood+width widthP25=0.0000 flood=0.0000 vertical=0.0000 geometry=ok/25.00
+seq=31 events=[] obstacles=[] ground=uncertain unrecognized=1.0000 passable=0.0000 blockage=1.0000/vertical+flood+width widthP25=0.0000 flood=0.0000 vertical=0.0000 geometry=ok/25.00
+seq=32 events=[] obstacles=[] ground=uncertain unrecognized=1.0000 passable=0.0000 blockage=1.0000/vertical+flood+width widthP25=0.0000 flood=0.0000 vertical=0.0000 geometry=ok/25.00
+seq=33 events=[] obstacles=[] ground=uncertain unrecognized=1.0000 passable=0.0000 blockage=1.0000/vertical+flood+width widthP25=0.0000 flood=0.0000 vertical=0.0000 geometry=ok/25.00
+seq=34 events=[] obstacles=[] ground=uncertain unrecognized=1.0000 passable=0.0000 blockage=1.0000/vertical+flood+width widthP25=0.0000 flood=0.0000 vertical=0.0000 geometry=ok/25.00
+seq=35 events=[] obstacles=[] ground=uncertain unrecognized=1.0000 passable=0.0000 blockage=1.0000/vertical+flood+width widthP25=0.0000 flood=0.0000 vertical=0.0000 geometry=ok/25.00
+seq=36 events=[event_ground_unrecognized:LOW] obstacles=[] ground=unrecognized unrecognized=1.0000 passable=0.0000 blockage=1.0000/vertical+flood+width widthP25=0.0000 flood=0.0000 vertical=0.0000 geometry=ok/25.00
+seq=37 events=[] obstacles=[] ground=unrecognized unrecognized=1.0000 passable=0.0000 blockage=1.0000/vertical+flood+width widthP25=0.0000 flood=0.0000 vertical=0.0000 geometry=ok/25.00
+seq=38 events=[] obstacles=[] ground=unrecognized unrecognized=1.0000 passable=0.0000 blockage=1.0000/vertical+flood+width widthP25=0.0000 flood=0.0000 vertical=0.0000 geometry=ok/25.00
+seq=39 events=[] obstacles=[] ground=unrecognized unrecognized=1.0000 passable=0.0000 blockage=1.0000/vertical+flood+width widthP25=0.0000 flood=0.0000 vertical=0.0000 geometry=ok/25.00
+seq=40 events=[] obstacles=[] ground=unrecognized unrecognized=1.0000 passable=0.0000 blockage=1.0000/vertical+flood+width widthP25=0.0000 flood=0.0000 vertical=0.0000 geometry=ok/25.00
+seq=41 events=[] obstacles=[] ground=unrecognized unrecognized=0.0000 passable=0.1343 blockage=0.0569/flood widthP25=0.8558 flood=0.1178 vertical=0.6667 geometry=ok/-10.00
+seq=42 events=[] obstacles=[] ground=unrecognized unrecognized=0.0000 passable=0.2686 blockage=0.0569/flood widthP25=0.8558 flood=0.1178 vertical=0.6667 geometry=ok/-10.00
+seq=43 events=[] obstacles=[] ground=unrecognized unrecognized=0.0000 passable=0.4030 blockage=0.0569/flood widthP25=0.8558 flood=0.1178 vertical=0.6667 geometry=ok/-10.00
+seq=44 events=[] obstacles=[] ground=unrecognized unrecognized=0.0000 passable=0.5373 blockage=0.0569/flood widthP25=0.8558 flood=0.1178 vertical=0.6667 geometry=ok/-10.00
+seq=45 events=[] obstacles=[] ground=unrecognized unrecognized=0.0000 passable=0.6716 blockage=0.0569/flood widthP25=0.8558 flood=0.1178 vertical=0.6667 geometry=ok/-10.00
+seq=46 events=[] obstacles=[] ground=unrecognized unrecognized=0.0000 passable=0.6716 blockage=0.0569/flood widthP25=0.8558 flood=0.1178 vertical=0.6667 geometry=ok/-10.00
+seq=47 events=[] obstacles=[] ground=unrecognized unrecognized=0.0000 passable=0.6716 blockage=0.0569/flood widthP25=0.8558 flood=0.1178 vertical=0.6667 geometry=ok/-10.00
+seq=48 events=[] obstacles=[] ground=unrecognized unrecognized=0.0000 passable=0.6716 blockage=0.0569/flood widthP25=0.8558 flood=0.1178 vertical=0.6667 geometry=ok/-10.00
+seq=49 events=[] obstacles=[] ground=unrecognized unrecognized=0.0000 passable=0.6716 blockage=0.0569/flood widthP25=0.8558 flood=0.1178 vertical=0.6667 geometry=ok/-10.00
+seq=50 events=[] obstacles=[] ground=unrecognized unrecognized=0.0000 passable=0.6716 blockage=0.0569/flood widthP25=0.8558 flood=0.1178 vertical=0.6667 geometry=ok/-10.00
+seq=51 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=0.6716 blockage=0.0569/flood widthP25=0.8558 flood=0.1178 vertical=0.6667 geometry=ok/-10.00
+seq=52 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=0.6716 blockage=0.0569/flood widthP25=0.8558 flood=0.1178 vertical=0.6667 geometry=ok/-10.00
+seq=53 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=0.6716 blockage=0.0569/flood widthP25=0.8558 flood=0.1178 vertical=0.6667 geometry=ok/-10.00
+seq=54 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=0.6716 blockage=0.0569/flood widthP25=0.8558 flood=0.1178 vertical=0.6667 geometry=ok/-10.00
+seq=55 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=0.6716 blockage=0.0569/flood widthP25=0.8558 flood=0.1178 vertical=0.6667 geometry=ok/-10.00
+seq=56 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=0.6716 blockage=0.0569/flood widthP25=0.8558 flood=0.1178 vertical=0.6667 geometry=ok/-10.00
+seq=57 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=0.6716 blockage=0.0569/flood widthP25=0.8558 flood=0.1178 vertical=0.6667 geometry=ok/-10.00
+seq=58 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=0.6716 blockage=0.0569/flood widthP25=0.8558 flood=0.1178 vertical=0.6667 geometry=ok/-10.00
+seq=59 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=0.6716 blockage=0.0569/flood widthP25=0.8558 flood=0.1178 vertical=0.6667 geometry=ok/-10.00
+seq=60 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=0.6716 blockage=0.0569/flood widthP25=0.8558 flood=0.1178 vertical=0.6667 geometry=ok/-10.00
+seq=61 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=0.7373 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000 geometry=ok/25.00
+seq=62 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=0.8030 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000 geometry=ok/25.00
+seq=63 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=0.8686 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000 geometry=ok/25.00
+seq=64 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=0.9343 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000 geometry=ok/25.00
+seq=65 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000 geometry=ok/25.00
+seq=66 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000 geometry=ok/25.00
+seq=67 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000 geometry=ok/25.00
+seq=68 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000 geometry=ok/25.00
+seq=69 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000 geometry=ok/25.00
+seq=70 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000 geometry=ok/25.00
+seq=71 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000 geometry=ok/25.00
+seq=72 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000 geometry=ok/25.00
+seq=73 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000 geometry=ok/25.00
+seq=74 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000 geometry=ok/25.00
+seq=75 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000 geometry=ok/25.00
+seq=76 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000 geometry=ok/25.00
+seq=77 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000 geometry=ok/25.00
+seq=78 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000 geometry=ok/25.00
+seq=79 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000 geometry=ok/25.00
+seq=80 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000 geometry=ok/25.00
+seq=81 events=[event_camera_blocked:CRITICAL] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000 geometry=ok/25.00
+seq=82 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000 geometry=ok/25.00
+seq=83 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000 geometry=ok/25.00
+seq=84 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000 geometry=ok/25.00
+seq=85 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000 geometry=ok/25.00
+seq=86 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000 geometry=ok/25.00
+seq=87 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000 geometry=ok/25.00
+seq=88 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000 geometry=ok/25.00
+seq=89 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000 geometry=ok/25.00
+seq=90 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000 geometry=ok/25.00
+seq=91 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000 geometry=ok/25.00
+seq=92 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000 geometry=ok/25.00
+seq=93 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000 geometry=ok/25.00
+seq=94 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000 geometry=ok/25.00
+seq=95 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000 geometry=ok/25.00
+seq=96 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000 geometry=ok/25.00
+seq=97 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000 geometry=ok/25.00
+seq=98 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000 geometry=ok/25.00
+seq=99 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000 geometry=ok/25.00
+seq=100 events=[] obstacles=[] ground=recognized unrecognized=0.0000 passable=1.0000 blockage=0.0561/flood widthP25=1.0000 flood=0.1193 vertical=1.0000 geometry=ok/25.00
