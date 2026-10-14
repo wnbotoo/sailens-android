@@ -6,7 +6,10 @@ import com.sailens.guidance.trace.capture.CaptureSchema
 import com.sailens.guidance.trace.capture.ClockAnchorRecord
 import com.sailens.guidance.trace.capture.FrameRecord
 import com.sailens.guidance.trace.capture.MarkerRecord
+import com.sailens.guidance.trace.capture.RegressionFrameRecord
+import com.sailens.guidance.trace.capture.RegressionRevokeRecord
 import com.sailens.guidance.trace.capture.SensorRecord
+import com.sailens.guidance.trace.capture.WindowFrameRecord
 import java.io.BufferedWriter
 import java.io.Closeable
 import java.io.File
@@ -110,6 +113,8 @@ internal class CaptureSessionWriter(
         is SensorRecord -> CaptureSchema.SENSORS_FILE
         is ClockAnchorRecord -> CaptureSchema.ANCHORS_FILE
         is MarkerRecord -> CaptureSchema.MARKERS_FILE
+        is RegressionFrameRecord, is RegressionRevokeRecord -> CaptureSchema.REGRESSION_FILE
+        is WindowFrameRecord -> CaptureSchema.WINDOWS_FILE
     }
 
     private companion object {

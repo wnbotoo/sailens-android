@@ -1,5 +1,7 @@
 package com.sailens.guidance.config
 
+import kotlinx.serialization.Serializable
+
 /**
  * 分析配置
  *
@@ -18,6 +20,7 @@ package com.sailens.guidance.config
  *
  * 驱动默认关闭提示的阈值（道路警告、地面变化、路口兜底）没有折算，开启前需按实测重调。
  */
+@Serializable
 data class AnalysisConfig(
     // 事件输出策略
     val enableNarrowingEvents: Boolean = false,

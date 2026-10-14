@@ -188,8 +188,8 @@ sealed interface GuidanceSafetyState { /* Initializing, Guiding, Degraded(reason
 ## 4. M0a — Field evidence capture; M0b — model-regression record
 
 M0 is split (roadmap §7): **M0a** is the field evidence capture described here; **M0b** (per-frame
-perception outputs for exact replay) is designed in its own review and must land before the first
-behaviour change. Nothing below promises exact replay.
+perception outputs for exact replay) is the last subsection and must land before the first behaviour
+change. Nothing in the M0a part promises exact replay.
 
 **Delivery, three PRs**
 
@@ -420,6 +420,60 @@ attribution, bursts with known offsets on both clocks, an UNKNOWN camera clock n
 steady loss is reported from the counters, never hidden by the cadence; dropped gyroscope
 samples, a negative control (real motion unrelated to the gyro) and a burst too
 short for four checked parts never qualify (run in CI).
+
+### M0b — Model-regression record
+
+Design agreed 2026-10-09 (review in the session log; the user approved all three open choices).
+Goal: replay the decision path **exactly** on the JVM, so a behaviour change can be compared frame
+by frame. A `model_regression` capture is field evidence plus the record below, in the same
+directory (schema 1.3, `RegressionSchema`).
+
+**Replay boundary.** Everything the JVM cannot compute the same way is recorded at its boundary;
+everything else -- `ProcessFrameUseCase` → `AnalyzeSceneUseCase` → frame-quality debouncing →
+`DecideEventsUseCase` -- runs as real code with fakes at the boundary:
+
+| Boundary | Recorded per frame | At replay |
+|---|---|---|
+| sem model + native fused pass | class map (`classmaps.bin`, zlib, one byte per class id); native scalars; CRC32 of the passable/obstacle masks; ran / cached / failed | masks rebuilt from the class map through `NavigationSemantics`, checked against the CRCs; scalars used as recorded (native and Kotlin float paths need not agree) |
+| det model + native decode/NMS | the detections (class, label, confidence, box), when det ran | served by a fake `ObstacleProvider` |
+| native connectivity | `ConnectivityStats` + CRC32 of the input mask | recorded stats when the replayed input has the same CRC (the JVM's Kotlin fallback is known to diverge from the kernel); otherwise upstream changed: compute in Kotlin and mark the frame approximate |
+| injected clocks (perception, ground, decide) | every value returned, per component, in call order | served back in order; exact mode asserts each list is used up |
+| frame quality | luma mean, luma std, sharpness (recorded only), per-frame classification | `FrameQualityAnalyzer.analyzeMeasured` continues from the measurement |
+| `isStationary` | the value the decision step read | fake source |
+| revocations (UI thread) | event id + number of decisions made before it, read under the cooldown lock | applied before that decision; ids mapped to replayed events by position |
+| configs | `PerceptionConfig` / `AnalysisConfig` in full, taxonomy, depth source | decoded leniently |
+| decisions | every decided event, all fields | the expected output; compared without the random id |
+
+Replay is exact only over an unbroken run of frames: the first frame the record loses
+(`RegressionStats.firstLostSeq`) ends it, because smoothers and trackers cannot be resumed. A risk
+to watch: transcendental functions may differ by an ulp between ART and HotSpot.
+
+**Event windows.** Full analysis-resolution frames around delivered prompts (1.0 s before to 0.5 s
+after) and markers (3 s before), at 10 fps, JPEG. The frames are copied into a ring before Guidance
+returns them and encoded only when a trigger fires. Revoked prompts do not trigger: at about 14 a
+minute they would multiply the storage. The frames are for re-running models offline; old and new
+models compared on them see the same pixels.
+
+**Storage** (pilot, SM8850, outdoors): field evidence about 1.2 GB/h, class maps 0.6–0.8 GB/h
+(1.0 at p90), per-frame JSONL about 0.15 GB/h, event windows about 1.2 GB/h: about 3.2–3.6 GB/h
+outdoors, half indoors. The debug cap becomes 10 GB by default (2 / 5 / 10 selectable); capture
+stops, or refuses to start, below about 2 GB free; the 7-day expiry stays.
+
+**Segmentation.** One scene is one Guidance session; the manifest's `group` (outdoor / indoor) and
+`sceneLabel` name it. No visual cue (the cover-the-lens mark failed in sunlight) and no inference
+from the images. Recording is on SM8850 only, by procedure, not by a code gate.
+
+**Exit.** (1) On SM8850, at least one indoor (mall) and one outdoor recording replay with every
+frame's events identical, every clock list used up, every CRC matching and no approximate frame.
+(2) Guidance timing on SM8850, recording off vs on, alternating ABAB, 10 minutes each, the same real
+scene with the phone on a stand: pipeline and frame-age p95 within the off-off spread + 2 ms,
+dropped frames within ±1 point, no record loss. (3) In CI: a synthetic pipeline run with recording
+on and off decides identically, and its record replays exactly.
+
+**Delivery.** R1 contracts: schema 1.3, records and their mapping, Kotlin and Python readers, the
+`RegressionRecorder` seam, the frame-quality split, serializable configs. R2 recording engine
+(debug): the taps, the writer, event windows, the storage cap and free-space floor, group and scene
+in the capture UI. R3 replay: the JVM harness and its diff report. Then the device exit.
 
 ## 5. M1 — Qualification and safety state (exact reproduction); M1b — stop pre-emption
 

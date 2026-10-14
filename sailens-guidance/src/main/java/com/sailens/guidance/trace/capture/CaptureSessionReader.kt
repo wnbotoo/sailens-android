@@ -17,6 +17,12 @@ data class CaptureSession(
     val markers: List<MarkerRecord>,
     /** Things a consumer should know about: partial capture, skipped lines, unknown types. */
     val warnings: List<String>,
+    /** `model_regression` only: one per processed frame, in processing order. */
+    val regressionFrames: List<RegressionFrameRecord> = emptyList(),
+    /** `model_regression` only: revoked prompts, in the order they were applied. */
+    val revokes: List<RegressionRevokeRecord> = emptyList(),
+    /** `model_regression` only: full-resolution event-window frames. */
+    val windowFrames: List<WindowFrameRecord> = emptyList(),
 )
 
 sealed interface CaptureReadResult {
@@ -73,12 +79,20 @@ object CaptureSessionReader {
         if (manifest.captureMode !in CaptureModes.KNOWN) {
             warnings += "capture mode '${manifest.captureMode}' is not known to this reader"
         }
+        if (manifest.captureMode == CaptureModes.MODEL_REGRESSION && manifest.regression == null) {
+            warnings += "model_regression capture without a regression block in the manifest"
+        }
+        manifest.regression?.stats?.firstLostSeq?.let { seq ->
+            warnings += "the regression record lost frames from seq $seq on; replay is exact only before it"
+        }
 
         val records = listOf(
             CaptureSchema.FRAMES_FILE,
             CaptureSchema.SENSORS_FILE,
             CaptureSchema.ANCHORS_FILE,
             CaptureSchema.MARKERS_FILE,
+            CaptureSchema.REGRESSION_FILE,
+            CaptureSchema.WINDOWS_FILE,
         ).flatMap { readRecords(File(directory, it), warnings) }
 
         return CaptureReadResult.Read(
@@ -90,12 +104,29 @@ object CaptureSessionReader {
                 anchors = records.filterIsInstance<ClockAnchorRecord>(),
                 markers = records.filterIsInstance<MarkerRecord>(),
                 warnings = warnings,
+                regressionFrames = records.filterIsInstance<RegressionFrameRecord>(),
+                revokes = records.filterIsInstance<RegressionRevokeRecord>(),
+                windowFrames = records.filterIsInstance<WindowFrameRecord>(),
             ),
         )
     }
 
     /** The stored image of a frame record, relative to the session directory. */
     fun frameFile(session: CaptureSession, frame: FrameRecord): File = File(session.directory, frame.file)
+
+    /** The stored image of an event-window frame. */
+    fun windowFile(session: CaptureSession, frame: WindowFrameRecord): File = File(session.directory, frame.file)
+
+    /**
+     * The class map a regression frame recorded, checked against its reference (see
+     * [ClassMapStore.read]); null when the frame did not run the semantic model.
+     *
+     * @throws java.io.IOException when the entry is missing or does not match.
+     */
+    fun classMap(session: CaptureSession, frame: RegressionFrameRecord): IntArray? {
+        val ref = frame.semantic?.classMap ?: return null
+        return ClassMapStore.read(File(session.directory, CaptureSchema.CLASS_MAPS_FILE), ref, frame.seq)
+    }
 
     private fun readRecords(file: File, warnings: MutableList<String>): List<CaptureRecord> {
         if (!file.isFile) return emptyList()
@@ -132,7 +163,9 @@ object CaptureSessionReader {
         return records
     }
 
-    private val KNOWN_TYPES = setOf("frame", "sensor", "clock_anchor", "marker")
+    private val KNOWN_TYPES = setOf(
+        "frame", "sensor", "clock_anchor", "marker", "regression_frame", "regression_revoke", "window_frame",
+    )
     private const val SCHEMA_MAJOR = "schemaMajor"
     private const val SCHEMA_MINOR = "schemaMinor"
 

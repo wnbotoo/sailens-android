@@ -39,32 +39,52 @@ class FrameQualityAnalyzer(
         defaultValue = FrameQuality.OK,
     )
 
-    /** 未去抖的当帧判定，仅用于诊断与测试。 */
-    fun classify(frame: ImageFrame): FrameQuality {
-        val stats = sampleLuma(frame) ?: return FrameQuality.OK
+    /**
+     * 当帧的测量值：亮度均值、亮度标准差和清晰度。帧无法采样时为 null（此时判定为 OK）。
+     *
+     * 测量与判定分开，是为了 M0b 模型回归记录：记录测量值，回放时从这里继续，阈值改了也能在录像
+     * 上重新判定。
+     */
+    fun measure(frame: ImageFrame): FrameQualityMeasurement? = sampleLuma(frame)
+
+    /** 由测量值得到的未去抖判定。 */
+    fun classify(measurement: FrameQualityMeasurement?): FrameQuality {
+        val stats = measurement ?: return FrameQuality.OK
         return when {
-            stats.stdDev < obstructedMaxStdDev -> FrameQuality.OBSTRUCTED
-            stats.mean < darkMaxMeanLuma -> FrameQuality.TOO_DARK
+            stats.stdLuma < obstructedMaxStdDev -> FrameQuality.OBSTRUCTED
+            stats.meanLuma < darkMaxMeanLuma -> FrameQuality.TOO_DARK
             else -> FrameQuality.OK
         }
     }
+
+    /** 未去抖的当帧判定，仅用于诊断与测试。 */
+    fun classify(frame: ImageFrame): FrameQuality = classify(measure(frame))
 
     /**
      * 去抖后的判定。相机自动曝光在明暗切换时会短暂产生低对比帧，直接用当帧结果会让提示闪烁，
      * 所以要求连续多帧一致才改变输出。
      */
-    fun analyze(frame: ImageFrame): FrameQuality = stabilizer.update(classify(frame))
+    fun analyze(frame: ImageFrame): FrameQuality = analyzeDetailed(frame).stabilized
+
+    /** 与 [analyze] 相同，同时给出测量值和未去抖判定（供 M0b 记录）。 */
+    fun analyzeDetailed(frame: ImageFrame): FrameQualityResult = analyzeMeasured(measure(frame))
+
+    /** 从已有的测量值继续：判定再去抖。回放用；与 [analyze] 走同一条路。 */
+    fun analyzeMeasured(measurement: FrameQualityMeasurement?): FrameQualityResult {
+        val classified = classify(measurement)
+        return FrameQualityResult(measurement, classified, stabilizer.update(classified))
+    }
 
     fun reset() = stabilizer.reset()
 
-    private data class LumaStats(val mean: Float, val stdDev: Float)
-
-    private fun sampleLuma(frame: ImageFrame): LumaStats? {
+    private fun sampleLuma(frame: ImageFrame): FrameQualityMeasurement? {
         if (frame.width <= 0 || frame.height <= 0) return null
 
         var count = 0
         var sum = 0.0
         var sumSquares = 0.0
+        var laplacianCount = 0
+        var laplacianSum = 0.0
 
         val stepX = (frame.width / gridSteps).coerceAtLeast(1)
         val stepY = (frame.height / gridSteps).coerceAtLeast(1)
@@ -78,6 +98,18 @@ class FrameQualityAnalyzer(
                     sum += luma
                     sumSquares += luma.toDouble() * luma
                     count++
+                    // 清晰度：采样点处 4 邻域拉普拉斯的绝对值。镜头被完全遮住时画面彻底失焦，
+                    // 这个值会掉一个数量级以上；只记录，不参与判定（阈值待在录像上校准）。
+                    if (x > 0 && y > 0 && x < frame.width - 1 && y < frame.height - 1) {
+                        val left = lumaAt(frame, x - 1, y)
+                        val right = lumaAt(frame, x + 1, y)
+                        val up = lumaAt(frame, x, y - 1)
+                        val down = lumaAt(frame, x, y + 1)
+                        if (left >= 0 && right >= 0 && up >= 0 && down >= 0) {
+                            laplacianSum += kotlin.math.abs(4 * luma - left - right - up - down)
+                            laplacianCount++
+                        }
+                    }
                 }
                 x += stepX
             }
@@ -88,7 +120,11 @@ class FrameQualityAnalyzer(
         val mean = sum / count
         // 方差可能因浮点误差取到极小的负数，钳到 0 再开方。
         val variance = (sumSquares / count - mean * mean).coerceAtLeast(0.0)
-        return LumaStats(mean = mean.toFloat(), stdDev = sqrt(variance).toFloat())
+        return FrameQualityMeasurement(
+            meanLuma = mean.toFloat(),
+            stdLuma = sqrt(variance).toFloat(),
+            sharpness = if (laplacianCount > 0) (laplacianSum / laplacianCount).toFloat() else 0f,
+        )
     }
 
     /** 取 (x, y) 处的亮度；越界或格式不支持时返回 -1。 */
@@ -111,3 +147,22 @@ class FrameQualityAnalyzer(
         return (r * 77 + g * 150 + b * 29) shr 8
     }
 }
+
+/**
+ * 一帧的质量测量值。[sharpness] 是采样点处 4 邻域拉普拉斯绝对值的均值（亮度单位），只用于记录和
+ * 校准，暂不参与判定。
+ */
+data class FrameQualityMeasurement(
+    val meanLuma: Float,
+    val stdLuma: Float,
+    val sharpness: Float,
+)
+
+/** 一次 [FrameQualityAnalyzer.analyzeDetailed] 的完整结果。 */
+data class FrameQualityResult(
+    val measurement: FrameQualityMeasurement?,
+    /** 未去抖的当帧判定。 */
+    val classified: FrameQuality,
+    /** 去抖后的判定，即 [FrameQualityAnalyzer.analyze] 的返回值。 */
+    val stabilized: FrameQuality,
+)
