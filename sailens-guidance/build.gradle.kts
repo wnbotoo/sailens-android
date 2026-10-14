@@ -47,6 +47,12 @@ android {
         // never touches it. Letting the stub return defaults is what makes the preflight path
         // testable on the JVM -- which is itself the proof that it loads no native runtime.
         unitTests.isReturnDefaultValues = true
+        unitTests.all { test ->
+            // M2a scenario goldens: -PupdateGoldens rewrites them in the source tree.
+            test.systemProperty("sailens.updateGoldens", project.hasProperty("updateGoldens").toString())
+            test.systemProperty("sailens.goldens.dir", file("src/test/resources/scenarios").absolutePath)
+            if (project.hasProperty("updateGoldens")) test.outputs.upToDateWhen { false }
+        }
     }
 }
 
