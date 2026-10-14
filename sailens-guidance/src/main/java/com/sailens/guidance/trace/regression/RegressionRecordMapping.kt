@@ -10,7 +10,9 @@ import com.sailens.guidance.model.common.DistanceLevel
 import com.sailens.guidance.model.common.EventCategory
 import com.sailens.guidance.model.common.EventPriority
 import com.sailens.guidance.model.common.GroundType
+import com.sailens.guidance.model.common.ObstacleCategory
 import com.sailens.guidance.model.common.Severity
+import com.sailens.guidance.model.perception.ObstacleDetection
 import com.sailens.guidance.model.perception.SegmentationAnalysisStats
 import com.sailens.guidance.model.scene.SceneEvent
 import com.sailens.guidance.trace.capture.BottomStatsRecord
@@ -151,6 +153,26 @@ fun Detection.toItem(): DetectionItem = DetectionItem(
 )
 
 fun DetectionItem.toDetection(): Detection = Detection(classId, label, confidence, NormalizedRect(x, y, width, height))
+
+fun ObstacleDetection.toItem(): DetectionItem = DetectionItem(
+    classId = classId,
+    label = className,
+    confidence = confidence,
+    x = boundingBox.x,
+    y = boundingBox.y,
+    width = boundingBox.width,
+    height = boundingBox.height,
+    category = category.name,
+)
+
+/** @throws IllegalArgumentException when the record has no category (it came from a vision detection). */
+fun DetectionItem.toObstacleDetection(): ObstacleDetection = ObstacleDetection(
+    classId = classId,
+    className = label,
+    confidence = confidence,
+    boundingBox = NormalizedRect(x, y, width, height),
+    category = ObstacleCategory.valueOf(requireNotNull(category) { "detection record without a category" }),
+)
 
 /**
  * CRC32 of a mask's size and bits (packed as `BinaryMask.copyPackedBits` packs them, each word

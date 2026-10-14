@@ -17,6 +17,7 @@ import com.sailens.guidance.repository.ObstacleProvider
 import com.sailens.guidance.repository.PerceptionRepository
 import com.sailens.core.log.LogService
 import com.sailens.guidance.service.TraceService
+import com.sailens.guidance.trace.regression.RegressionRecorder
 import com.sailens.guidance.usecase.decision.DecideEventsUseCase
 import com.sailens.guidance.usecase.perception.AnalyzeSceneUseCase
 import com.sailens.guidance.usecase.perception.ProcessFrameUseCase
@@ -54,6 +55,7 @@ class StartSceneAnalysisUseCase(
     private val traceService: TraceService,
     private val traceRuntimeConfig: TraceRuntimeConfig,
     private val pipelineBudget: PipelinePerformanceBudget,
+    private val regressionRecorder: RegressionRecorder = RegressionRecorder.None,
 ) {
     /**
      * @param releaseFrame hands each frame back to its source once this pipeline is done reading
@@ -149,9 +151,12 @@ class StartSceneAnalysisUseCase(
             frameFlow
             .mapNotNullReleasing(releaseFrame) { frame ->
                 val pipelineStart = Timestamp.now()
+                val recording = regressionRecorder.isRecording
+                if (recording) regressionRecorder.beginFrame(frame)
 
                 // 处理帧
                 val perceptionResult = processFrameUseCase(frame).getOrElse {
+                    if (recording) regressionRecorder.endFrame(frame, emptyList(), it)
                     traceService.recordError(sessionId, "process_frame", it)
                     logService.error(
                         "Perception",
@@ -180,13 +185,14 @@ class StartSceneAnalysisUseCase(
 
                 // 分析场景。帧质量单独判定后回填：它看的是原始画面而非模型输出，
                 // 恰恰要在模型"照常给出结果"时告诉用户这些结果不可信。
-                val sceneSnapshot = analyzeSceneUseCase(perceptionResult).copy(
-                    frameQuality = frameQualityAnalyzer.analyze(frame),
-                )
+                val quality = frameQualityAnalyzer.analyzeDetailed(frame)
+                if (recording) regressionRecorder.onFrameQuality(quality)
+                val sceneSnapshot = analyzeSceneUseCase(perceptionResult).copy(frameQuality = quality.stabilized)
                 val analyzeCompletedAt = Timestamp.now()
 
                 // 决策事件
                 val events = decideEventsUseCase(sceneSnapshot)
+                if (recording) regressionRecorder.endFrame(frame, events, null)
                 val decideCompletedAt = Timestamp.now()
 
                 val droppedFrames = lastSequenceNumber?.let { previousSequence ->

@@ -99,7 +99,12 @@ internal data class FieldCaptureConfig(
     val sensorQueueCapacity: Int = 4096,
     val anchorIntervalMs: Long = 30_000,
     val timingSync: TimingSyncConfig = TimingSyncConfig(),
+    /** Below this much free storage a capture does not start, and a running one stops. */
+    val minFreeBytes: Long = 2L * 1024 * 1024 * 1024,
 )
+
+/** How the person recording named the session (manifest `group` and `sceneLabel`). */
+internal data class SessionLabels(val group: String? = null, val sceneLabel: String? = null)
 
 /**
  * The timing-sync burst ([CaptureModes.TIMING_SYNC]): every frame the camera delivers, as small raw
@@ -152,6 +157,10 @@ internal class FieldCaptureController(
     private val exporter: CaptureExporter? = null,
     /** Heavy session management (listing, ZIP export): never on the writer thread. */
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    /** The model-regression part of a `model_regression` capture (M0b); null records none. */
+    private val regression: RegressionCapture? = null,
+    private val sessionLabels: () -> SessionLabels = { SessionLabels() },
+    private val freeBytes: () -> Long = { root.usableSpace },
 ) {
     private val scope = CoroutineScope(
         SupervisorJob() + writerDispatcher + CoroutineExceptionHandler { _, throwable ->
@@ -320,10 +329,20 @@ internal class FieldCaptureController(
 
     /** Called when a trace session starts. Never throws, never blocks. */
     fun onSessionStarted(sessionId: String, targetHardwareProfile: String?): Job? {
-        val mode = runCatching(sessionMode).getOrNull() ?: return null
-        if (mode != CaptureModes.FIELD_EVIDENCE && mode != CaptureModes.TIMING_SYNC) {
+        var mode = runCatching(sessionMode).getOrNull() ?: return null
+        if (mode !in CaptureModes.KNOWN) {
             log.warning(TAG, "Unknown capture mode '$mode'; not capturing")
             return null
+        }
+        if (mode == CaptureModes.MODEL_REGRESSION) {
+            if (regression == null) {
+                log.warning(TAG, "No regression recorder; recording field evidence only")
+                mode = CaptureModes.FIELD_EVIDENCE
+            } else {
+                // Synchronously, before Guidance processes its first frame: replay starts from the
+                // session's initial state, so the record must not miss the beginning.
+                regression.startSession(sessionId)
+            }
         }
         return scope.launch { begin(sessionId, mode, targetHardwareProfile) }
     }
@@ -363,6 +382,7 @@ internal class FieldCaptureController(
                 return@launch
             }
             capture.guarded("marker") {
+                if (capture.regressionMode) regression?.onMarker(observation.elapsedRealtimeNanos)
                 capture.writer.append(
                     MarkerRecord(
                         kind = MarkerKind.MISSED_ALERT,
@@ -396,6 +416,7 @@ internal class FieldCaptureController(
 
         maintain(activeSessionId = sessionId, activeBytes = 0)
 
+        val labels = runCatching(sessionLabels).getOrDefault(SessionLabels())
         val manifest = CaptureManifest(
             sessionId = sessionId,
             captureMode = mode,
@@ -410,11 +431,15 @@ internal class FieldCaptureController(
             sdkInt = deviceInfo.sdkInt,
             targetHardwareProfile = targetHardwareProfile,
             camera = runCatching { cameraFacts.currentSnapshot() }.getOrNull()?.toRecord(),
+            group = labels.group,
+            sceneLabel = labels.sceneLabel,
+            regression = if (mode == CaptureModes.MODEL_REGRESSION) regression?.manifestBlock() else null,
         )
         val writer = try {
             CaptureSessionWriter(File(root, sessionId), manifest)
         } catch (e: Exception) {
             log.warning(TAG, "Field capture could not start", throwable = e)
+            regression?.abort(sessionId, "the capture could not start")
             return
         }
         val capture = ActiveCapture(writer, mode)
@@ -425,6 +450,12 @@ internal class FieldCaptureController(
             fail(capture, EXPORT_IN_PROGRESS)
             return
         }
+        if (lowOnStorage()) {
+            // Left behind as an empty, failed capture, like the export case: the gap is visible.
+            fail(capture, STORAGE_LOW)
+            return
+        }
+        if (capture.regressionMode) regression?.attach(sessionId, writer.directory)
 
         capture.guarded("start") {
             writer.append(anchor(AnchorReason.START))
@@ -472,7 +503,7 @@ internal class FieldCaptureController(
      */
     private fun maintain(
         activeSessionId: String? = active?.sessionId,
-        activeBytes: Long = active?.writer?.bytesWritten ?: 0,
+        activeBytes: Long = active?.let(::bytesOf) ?: 0,
     ) {
         runCatching { retention.prune(clock.wallMs(), activeSessionId, activeBytes, busySessions.toSet()) }
             .onSuccess { otherSessionsBytes = it.otherSessionsBytes }
@@ -485,13 +516,24 @@ internal class FieldCaptureController(
      * as incomplete with [STORAGE_LIMIT_REACHED] instead of writing until the disk is full.
      */
     private suspend fun enforceStorageLimit(capture: ActiveCapture) {
-        if (capture.failed || !overLimit(capture)) return
+        if (capture.failed) return
+        if (lowOnStorage()) {
+            fail(capture, STORAGE_LOW)
+            return
+        }
+        if (!overLimit(capture)) return
         maintain()
         if (overLimit(capture)) fail(capture, STORAGE_LIMIT_REACHED)
     }
 
+    /** What the capture holds on disk: field evidence plus, in `model_regression`, the record. */
+    private fun bytesOf(capture: ActiveCapture): Long =
+        capture.writer.bytesWritten + if (capture.regressionMode) regression?.bytesWritten ?: 0 else 0
+
     private fun overLimit(capture: ActiveCapture) =
-        otherSessionsBytes + capture.writer.bytesWritten > retention.maxTotalBytes
+        otherSessionsBytes + bytesOf(capture) > retention.maxTotalBytes
+
+    private fun lowOnStorage(): Boolean = runCatching(freeBytes).getOrDefault(Long.MAX_VALUE) < config.minFreeBytes
 
     /**
      * Ends [only] if given (and still active), otherwise whatever capture is active. Start and end
@@ -507,11 +549,18 @@ internal class FieldCaptureController(
         // manifest all happen before `isCapturing` turns false, so whoever reacts to that (the
         // capture list) reads the finished manifest, never a half-written one.
         stopProducers(capture)
+        // The record is drained first, so the manifest's counters are final.
+        val regressionStats = if (capture.regressionMode) regression?.finish(capture.sessionId) else null
         if (!capture.failed) {
             capture.guarded("finish") {
                 capture.writer.append(anchor(AnchorReason.END))
                 capture.writer.finish {
-                    it.copy(complete = true, endedWallMs = clock.wallMs(), stats = capture.stats())
+                    it.copy(
+                        complete = true,
+                        endedWallMs = clock.wallMs(),
+                        stats = capture.stats(),
+                        regression = it.regression?.let { block -> block.copy(stats = regressionStats ?: block.stats) },
+                    )
                 }
             }
         }
@@ -540,9 +589,16 @@ internal class FieldCaptureController(
         capture.encodeQueue.close()
         capture.sensorQueue.close()
         listOfNotNull(capture.sensorWriterJob, capture.frameWriterJob, capture.anchorJob).forEach { it.cancel() }
+        val regressionStats = if (capture.regressionMode) regression?.abort(capture.sessionId, reason) else null
         runCatching {
             capture.writer.finish {
-                it.copy(complete = false, failureReason = reason, endedWallMs = clock.wallMs(), stats = capture.stats())
+                it.copy(
+                    complete = false,
+                    failureReason = reason,
+                    endedWallMs = clock.wallMs(),
+                    stats = capture.stats(),
+                    regression = it.regression?.let { block -> block.copy(stats = regressionStats ?: block.stats) },
+                )
             }
         }.onFailure { runCatching { capture.writer.close() } }
         // Inactive only once the incomplete manifest is final, as for a normal end.
@@ -680,6 +736,7 @@ internal class FieldCaptureController(
     private inner class ActiveCapture(val writer: CaptureSessionWriter, val mode: String) {
         val sessionId: String = writer.directory.name
         val timingSync: Boolean = mode == CaptureModes.TIMING_SYNC
+        val regressionMode: Boolean = mode == CaptureModes.MODEL_REGRESSION
         val offered = AtomicLong()
         val encoded = AtomicLong()
         val droppedByEncoder = AtomicLong()
@@ -740,6 +797,9 @@ internal class FieldCaptureController(
 
         /** `failureReason` of a capture that started while a ZIP export was running. */
         const val EXPORT_IN_PROGRESS: String = "export_in_progress"
+
+        /** `failureReason` of a capture refused or stopped because free storage fell below the floor. */
+        const val STORAGE_LOW: String = "storage_low"
     }
 }
 

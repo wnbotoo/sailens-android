@@ -7,6 +7,7 @@ import com.sailens.guidance.processor.decision.EventConflictResolver
 import com.sailens.guidance.processor.decision.EventGenerator
 import com.sailens.guidance.processor.decision.EventMerger
 import com.sailens.guidance.repository.DeviceSensorRepository
+import com.sailens.guidance.trace.regression.RegressionRecorder
 
 /**
  * 决策事件用例
@@ -25,12 +26,12 @@ class DecideEventsUseCase(
     private val cooldownManager: CooldownManager,
     private val deviceSensorRepository: DeviceSensorRepository,
     private val clock: () -> Long,
+    private val regressionRecorder: RegressionRecorder = RegressionRecorder.None,
 ) {
     operator fun invoke(snapshot: SceneSnapshot): List<SceneEvent> {
         val now = clock()
-
-        // 0. 把运动状态喂给冷却器：站着不动时同一个场景不该被反复播报。
-        cooldownManager.setStationary(deviceSensorRepository.isStationary.value)
+        val stationary = deviceSensorRepository.isStationary.value
+        if (regressionRecorder.isRecording) regressionRecorder.onStationary(stationary)
 
         // 1.  生成原始事件
         val rawEvents = eventGenerator.generate(snapshot, now)
@@ -41,16 +42,22 @@ class DecideEventsUseCase(
         // 3. 事件合并
         val mergedEvents = eventMerger.merge(resolvedEvents)
 
-        // 4. 冷却过滤
-        val filteredEvents = cooldownManager.filter(mergedEvents, now)
+        // 冷却的操作作为一个整体（见 CooldownManager.decide）：撤销只能落在两次决策之间。
+        return cooldownManager.decide {
+            // 把运动状态喂给冷却器：站着不动时同一个场景不该被反复播报。
+            setStationary(stationary)
 
-        // 5. 按优先级排序（稳定排序：同优先级保持生成顺序）
-        val prioritized = filteredEvents.sortedByDescending { it.priority.value }
+            // 4. 冷却过滤
+            val filteredEvents = filter(mergedEvents, now)
 
-        // 6. 只为要送达的那条记录冷却
-        prioritized.firstOrNull()?.let { cooldownManager.recordEvent(it, now) }
+            // 5. 按优先级排序（稳定排序：同优先级保持生成顺序）
+            val prioritized = filteredEvents.sortedByDescending { it.priority.value }
 
-        return prioritized
+            // 6. 只为要送达的那条记录冷却
+            prioritized.firstOrNull()?.let { recordEvent(it, now) }
+
+            prioritized
+        }
     }
 }
 
@@ -60,8 +67,10 @@ class DecideEventsUseCase(
  */
 class RevokeUndeliveredEventUseCase(
     private val cooldownManager: CooldownManager,
+    private val regressionRecorder: RegressionRecorder = RegressionRecorder.None,
 ) {
     operator fun invoke(event: SceneEvent) {
-        cooldownManager.revoke(event.id)
+        val decisionsBefore = cooldownManager.revoke(event.id)
+        if (regressionRecorder.isRecording) regressionRecorder.onRevoke(event.id, decisionsBefore)
     }
 }

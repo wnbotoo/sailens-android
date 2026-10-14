@@ -19,6 +19,11 @@ internal data class FieldCaptureUiState(
     val exporting: Boolean = false,
     /** The one-shot timing-sync burst will run at the next Guidance start. */
     val timingSyncArmed: Boolean = false,
+    /** Record the model-regression record (M0b) with field evidence. */
+    val modelRegression: Boolean = false,
+    val group: String? = null,
+    val sceneLabel: String = "",
+    val capGigabytes: Int = FieldCaptureSettingsStore.DEFAULT_CAP_GB,
     val sessions: List<CaptureSummary> = emptyList(),
     val busySessionId: String? = null,
 )
@@ -49,6 +54,10 @@ internal class FieldCaptureViewModel(
     init {
         viewModelScope.launch { settings.enabled.collect { on -> _state.update { it.copy(enabled = on) } } }
         viewModelScope.launch { settings.timingSyncArmed.collect { on -> _state.update { it.copy(timingSyncArmed = on) } } }
+        viewModelScope.launch { settings.modelRegression.collect { on -> _state.update { it.copy(modelRegression = on) } } }
+        viewModelScope.launch { settings.group.collect { g -> _state.update { it.copy(group = g) } } }
+        viewModelScope.launch { settings.sceneLabel.collect { l -> _state.update { it.copy(sceneLabel = l) } } }
+        viewModelScope.launch { settings.capGigabytes.collect { gb -> _state.update { it.copy(capGigabytes = gb) } } }
         viewModelScope.launch {
             controller.isCapturing.collect { on ->
                 _state.update { it.copy(capturing = on) }
@@ -70,6 +79,21 @@ internal class FieldCaptureViewModel(
     fun setTimingSyncArmed(armed: Boolean) {
         if (!_state.value.capturing) settings.setTimingSyncArmed(armed)
     }
+
+    // Read when a session starts, so locked while one is recording, like the switch.
+    fun setModelRegression(on: Boolean) {
+        if (!_state.value.capturing) settings.setModelRegression(on)
+    }
+
+    fun setGroup(group: String?) {
+        if (!_state.value.capturing) settings.setGroup(group)
+    }
+
+    fun setSceneLabel(label: String) {
+        if (!_state.value.capturing) settings.setSceneLabel(label)
+    }
+
+    fun setCapGigabytes(gigabytes: Int) = settings.setCapGigabytes(gigabytes)
 
     fun setKept(sessionId: String, kept: Boolean) = act(sessionId) {
         if (!controller.setPinned(sessionId, kept)) effects.send(FieldCaptureEffect.ActionFailed)

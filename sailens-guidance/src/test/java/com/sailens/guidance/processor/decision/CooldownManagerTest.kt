@@ -12,6 +12,20 @@ class CooldownManagerTest {
     private val cooldownManager = CooldownManager()
 
     @Test
+    fun `a revoke reports how many decisions came before it, and reset starts the count again`() {
+        // M0b replay puts each revoke back between the same two decisions.
+        val event = obstacleEvent(messageKey = "event_obstacle_left", dedupeKey = "obstacle_LEFT", zone = DirectionZone.LEFT)
+        assertEquals(0L, cooldownManager.revoke(event.id))
+        cooldownManager.decide { recordEvent(event, now = 10_000) }
+        cooldownManager.decide { filter(emptyList(), now = 10_100) }
+        assertEquals(2L, cooldownManager.revoke(event.id))
+        // The revoke undid the record: the same event passes again.
+        assertEquals(1, cooldownManager.decide { filter(listOf(event), now = 10_200) }.size)
+        cooldownManager.reset()
+        assertEquals(0L, cooldownManager.revoke(event.id))
+    }
+
+    @Test
     fun `cooldown suppresses repeated event with same dedupe key`() {
         val first = obstacleEvent(
             messageKey = "event_obstacle_left",
