@@ -86,6 +86,17 @@ internal object TraceJsonEncoder {
         put("obstacleAcceleratorSelection", frameTrace.obstacleAcceleratorSelection)
         put("obstaclePreprocessBackend", frameTrace.obstaclePreprocessBackend)
         put("obstaclePostprocessBackend", frameTrace.obstaclePostprocessBackend)
+        put("geometryQuality", frameTrace.geometryQuality)
+        put("geometryIssues", JSONArray(frameTrace.geometryIssues))
+        put("geometryTimeBasis", frameTrace.geometryTimeBasis)
+        frameTrace.gravityAgeMs?.let { put("gravityAgeMs", it) }
+        frameTrace.pitchDownDeg?.let { put("pitchDownDeg", it) }
+        frameTrace.rollDeg?.let { put("rollDeg", it) }
+        put("intrinsicsSource", frameTrace.intrinsicsSource)
+        frameTrace.focalPx?.let { put("focalPx", it) }
+        frameTrace.headingDeg?.let { put("headingDeg", it) }
+        frameTrace.yawRateDegPerS?.let { put("yawRateDegPerS", it) }
+        put("orientationQuality", frameTrace.orientationQuality)
     }
 
     fun encodeOverlayRender(

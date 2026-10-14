@@ -486,11 +486,30 @@ trace 调用、manifest 原子地完成。PR-C——标记去抖、导出内容�
   - `MotionTracker`（纯逻辑，输入 game rotation vector 采样）：相机朝向，手机右转时增大，以及偏航角
     速度。
     - 离竖直约 10° 以内时，朝向沿用上一次的值（DEGRADED），这一段不给角速度。
-    - 200 ms 没有采样时为 UNAVAILABLE。
+    - 保留最近 128 个采样，按给定时间（帧的时间）作答，在该时间前后两个采样之间插值。该时间前后
+      200 ms 内都没有采样时为 UNAVAILABLE。
   - `SensorSampleBuffer`：最近采样的环形缓冲，按时间找最近的一个。
 - 用 M2a 场景检查过：每个仿真帧都解析回它自己的俯角和类别图内参（449.625 / 180 / 320）。
-- 第二部分把它接进运行中的 app：Android 传感器源、shell 提供的相机事实、管线里每帧一个几何结果，
-  以及 trace 里的对应字段。
+
+### M3o 实际实现：第二部分，接线
+
+- `AndroidOrientationSource`（`…guidance.motion`）：`SENSOR_DELAY_GAME` 下的 `TYPE_GRAVITY` 和
+  `TYPE_GAME_ROTATION_VECTOR`，在单独的线程上接收。
+  - **生命周期**：由 Guidance 会话自己启停（`StartSceneAnalysisUseCase`，在它的 `finally` 里停），所以
+    更高的采样率在 Guidance 之外没有任何开销。它带引用计数，晚结束的会话不会把下一个会话的传感器关掉。
+- `CameraFactsSource`：shell 绑定 `CameraFactsAdapter`，把 `sailens-camera` 的
+  `CameraCharacteristicsSnapshot` 转成 `CameraFacts`。没有这个绑定的宿主，Guidance 照常运行，只是几何
+  不可用，这是合法状态。
+- **每帧**在决策之后（不会拖慢提示）由 `StartSceneAnalysisUseCase` 解析出 `CameraGeometry` 和
+  `MotionState`，放进 `SceneResult`。
+  - **trace 字段**：`geometryQuality`、`geometryIssues`、`geometryTimeBasis`、`gravityAgeMs`、
+    `pitchDownDeg`、`rollDeg`、`intrinsicsSource`、`focalPx`、`headingDeg`、`yawRateDegPerS`、
+    `orientationQuality`。
+  - 旧 trace 解析为 `none`。
+  - **目前没有任何决策依赖这些字段。**
+- `PhoneGeometrySettings` 仍是 1.3 m 默认值。shell 里的存储和设置界面随 M3a（第一个用到高度的地方）
+  一起做。
+- 仿真器把每个场景自己的原始事实喂给几何。基准多了一列 `geometry=<质量>/<俯角>`，其他字段一个都没变。
 
 ## 8. M3a — 接地点距离
 

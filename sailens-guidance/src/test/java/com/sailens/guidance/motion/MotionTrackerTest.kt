@@ -81,6 +81,36 @@ class MotionTrackerTest {
         assertEquals(OrientationQuality.UNAVAILABLE, tracker.state(0, false).orientationQuality)
     }
 
+    /**
+     * The pipeline asks about a frame after inference, by which time the phone may have turned.
+     * The answer must be the heading at the frame's time, not the newest one.
+     */
+    @Test
+    fun `a frame gets the heading of its own time, not the newest`() {
+        val tracker = MotionTracker()
+        tracker.onGameRotationVector(1_000_000_000, upright(0.0))
+        tracker.onGameRotationVector(1_300_000_000, upright(Math.toRadians(30.0)))
+
+        val atFrame = tracker.state(1_000_000_000, false)
+        assertEquals(0f, atFrame.headingRad, 1e-4f)
+        assertEquals(1_000_000_000L, atFrame.timestampNanos)
+        assertEquals(OrientationQuality.OK, atFrame.orientationQuality)
+
+        // Between the two samples: interpolated, with the rate of that turn.
+        val between = tracker.state(1_150_000_000, false)
+        assertEquals(Math.toRadians(15.0).toFloat(), between.headingRad, 1e-4f)
+        assertEquals(Math.toRadians(100.0).toFloat(), between.yawRateRadPerS, 1e-3f)
+    }
+
+    @Test
+    fun `a time with no sample near it on either side is unavailable`() {
+        val tracker = MotionTracker(maxSampleAgeNanos = 200_000_000)
+        tracker.onGameRotationVector(1_300_000_000, upright(0.0))
+        // 300 ms before the only sample: a sample from the future is no answer either.
+        assertEquals(OrientationQuality.UNAVAILABLE, tracker.state(1_000_000_000, false).orientationQuality)
+        assertEquals(OrientationQuality.OK, tracker.state(1_150_000_000, false).orientationQuality)
+    }
+
     @Test
     fun `three-value rotation vectors reconstruct w`() {
         val four = upright(Math.toRadians(60.0), Math.toRadians(20.0))

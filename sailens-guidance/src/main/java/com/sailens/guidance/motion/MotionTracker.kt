@@ -75,68 +75,86 @@ data class MotionState(
  * Turns `TYPE_GAME_ROTATION_VECTOR` samples into [MotionState]. Pure: the Android sensor source
  * feeds it, a recording or a simulator can feed it the same way.
  *
- * @param maxSampleAgeNanos a state asked for longer than this after the last sample is UNAVAILABLE.
+ * It keeps the last [capacity] samples and answers for a given time -- a camera frame's, which by
+ * the time the pipeline asks is tens of milliseconds old -- not just with the newest sample: the
+ * heading is interpolated between the samples either side of that time.
+ *
+ * @param maxSampleAgeNanos the state is UNAVAILABLE when no sample is this close to the time asked
+ *   for, on either side.
  */
-class MotionTracker(private val maxSampleAgeNanos: Long = 200_000_000L) {
-    private var heading: Double? = null
+class MotionTracker(
+    private val maxSampleAgeNanos: Long = 200_000_000L,
+    private val capacity: Int = 128,
+) {
+    /**
+     * One rotation sample. [headingRad] is carried over from the last measured sample when
+     * [measured] is false (the camera pointed nearly straight up or down). [yawRateRadPerS] is from
+     * the previous sample, and 0 across a degenerate stretch: the turn there was not observed.
+     */
+    private class Sample(val timestampNanos: Long, val headingRad: Double, val measured: Boolean, val yawRateRadPerS: Double)
 
-    /** When [heading] was measured; a rate needs two consecutive measurements. */
-    private var headingAt = 0L
-    private var lastSampleAt = 0L
-    private var yawRate = 0.0
-    private var degenerate = false
+    private val samples = ArrayDeque<Sample>()
 
     @Synchronized
     fun onGameRotationVector(timestampNanos: Long, values: FloatArray) {
         val forward = cameraForwardInWorld(values) ?: return
-        lastSampleAt = timestampNanos
+        val previous = samples.lastOrNull()
         val horizontal = sqrt(forward.x * forward.x + forward.y * forward.y)
-        if (horizontal < MIN_HORIZONTAL) {
+        val sample = if (horizontal < MIN_HORIZONTAL) {
             // Pointing (nearly) straight up or down: the projected axis is noise. Keep the last
             // heading rather than inventing one (§2, degenerate case), and claim no rate.
-            degenerate = true
-            yawRate = 0.0
-            return
-        }
-        // atan2(east, north): clockwise seen from above, so turning right increases it.
-        val measured = atan2(forward.x.toDouble(), forward.y.toDouble())
-        val previous = heading
-        // No rate across a degenerate stretch: the turn there was not observed.
-        yawRate = if (previous != null && !degenerate && timestampNanos > headingAt) {
-            wrap(measured - previous) / ((timestampNanos - headingAt) / 1e9)
+            previous?.let { Sample(timestampNanos, it.headingRad, measured = false, yawRateRadPerS = 0.0) } ?: return
         } else {
-            0.0
+            // atan2(east, north): clockwise seen from above, so turning right increases it.
+            val measured = atan2(forward.x.toDouble(), forward.y.toDouble())
+            val rate = if (previous != null && previous.measured && timestampNanos > previous.timestampNanos) {
+                wrap(measured - previous.headingRad) / ((timestampNanos - previous.timestampNanos) / 1e9)
+            } else {
+                0.0
+            }
+            Sample(timestampNanos, measured, measured = true, yawRateRadPerS = rate)
         }
-        degenerate = false
-        heading = measured
-        headingAt = timestampNanos
+        samples.addLast(sample)
+        while (samples.size > capacity) samples.removeFirst()
     }
 
+    /** The motion at [atNanos] (elapsed realtime, the sensors' base): a frame's time, not "now". */
     @Synchronized
-    fun state(nowNanos: Long, isStationary: Boolean): MotionState {
-        val current = heading
-        val quality = when {
-            current == null || nowNanos - lastSampleAt > maxSampleAgeNanos -> OrientationQuality.UNAVAILABLE
-            degenerate -> OrientationQuality.DEGRADED
-            else -> OrientationQuality.OK
+    fun state(atNanos: Long, isStationary: Boolean): MotionState {
+        // The newest sample at or before the time, and the first one after it.
+        var before: Sample? = null
+        var after: Sample? = null
+        for (sample in samples) {
+            if (sample.timestampNanos <= atNanos) before = sample else if (after == null) after = sample
+        }
+        val nearestGap = minOf(
+            before?.let { atNanos - it.timestampNanos } ?: Long.MAX_VALUE,
+            after?.let { it.timestampNanos - atNanos } ?: Long.MAX_VALUE,
+        )
+        if (nearestGap > maxSampleAgeNanos) {
+            return MotionState(atNanos, 0f, 0f, isStationary, OrientationQuality.UNAVAILABLE)
+        }
+        val (heading, rate, measured) = when {
+            before != null && after != null && before.measured && after.measured -> {
+                val span = after.timestampNanos - before.timestampNanos
+                val turn = wrap(after.headingRad - before.headingRad)
+                val f = (atNanos - before.timestampNanos).toDouble() / span
+                Triple(wrap(before.headingRad + turn * f), turn / (span / 1e9), true)
+            }
+            before != null -> Triple(before.headingRad, before.yawRateRadPerS, before.measured)
+            else -> Triple(after!!.headingRad, 0.0, after.measured)
         }
         return MotionState(
-            timestampNanos = nowNanos,
-            headingRad = (current ?: 0.0).toFloat(),
-            yawRateRadPerS = if (quality == OrientationQuality.UNAVAILABLE) 0f else yawRate.toFloat(),
+            timestampNanos = atNanos,
+            headingRad = heading.toFloat(),
+            yawRateRadPerS = rate.toFloat(),
             isStationary = isStationary,
-            orientationQuality = quality,
+            orientationQuality = if (measured) OrientationQuality.OK else OrientationQuality.DEGRADED,
         )
     }
 
     @Synchronized
-    fun reset() {
-        heading = null
-        headingAt = 0L
-        lastSampleAt = 0L
-        yawRate = 0.0
-        degenerate = false
-    }
+    fun reset() = samples.clear()
 
     companion object {
         /** Below this horizontal length (about 10 degrees from vertical) heading is not measured. */

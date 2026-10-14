@@ -577,12 +577,35 @@ M1b and M8 depend on.
     the phone turns right, and the yaw rate.
     - Within about 10° of vertical, the heading is carried over (DEGRADED) and no rate is claimed
       across that stretch.
-    - With no sample for 200 ms the state is UNAVAILABLE.
+    - It keeps the last 128 samples and answers for a given time (the frame's), interpolating
+      between the samples either side. No sample within 200 ms of that time, on either side,
+      makes the state UNAVAILABLE.
   - `SensorSampleBuffer`: a ring of recent samples with nearest lookup.
 - Checked against the M2a scenarios: every simulated frame resolves to its own pitch and to the
   class-map intrinsics (449.625 / 180 / 320).
-- Part 2 wires it into the running app: the Android sensor source, camera facts from the shell, a
-  geometry per frame in the pipeline, and its fields in the trace.
+
+### M3o as built: part 2, wiring
+
+- `AndroidOrientationSource` (`…guidance.motion`): `TYPE_GRAVITY` and `TYPE_GAME_ROTATION_VECTOR` at
+  `SENSOR_DELAY_GAME`, on a thread of their own.
+  - **Lifecycle**: started and stopped by the Guidance session itself (`StartSceneAnalysisUseCase`,
+    in its `finally`), so the higher sensor rate costs nothing outside Guidance. It is
+    reference-counted, so a session that ends late cannot switch the sensors off under the next
+    one.
+- `CameraFactsSource`: the shell binds `CameraFactsAdapter`, which turns `sailens-camera`'s
+  `CameraCharacteristicsSnapshot` into `CameraFacts`. A host without that binding runs Guidance with
+  geometry unavailable, which is legal.
+- **Per frame**, after the decision (so it cannot delay a prompt), `StartSceneAnalysisUseCase`
+  resolves a `CameraGeometry` and a `MotionState` and puts them on `SceneResult`.
+  - **Trace fields**: `geometryQuality`, `geometryIssues`, `geometryTimeBasis`, `gravityAgeMs`,
+    `pitchDownDeg`, `rollDeg`, `intrinsicsSource`, `focalPx`, `headingDeg`, `yawRateDegPerS`,
+    `orientationQuality`.
+  - Older traces parse as `none`.
+  - **Nothing decides on these yet.**
+- `PhoneGeometrySettings` stays at the 1.3 m seed. The shell store and the setting UI come with M3a,
+  the first consumer of the height.
+- The simulator feeds geometry each scenario's own raw facts. The goldens gained a
+  `geometry=<quality>/<pitch>` column; every other field is unchanged.
 
 ## 8. M3a — Ground-contact distance
 
