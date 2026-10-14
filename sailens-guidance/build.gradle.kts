@@ -55,6 +55,10 @@ android {
             test.systemProperty("sailens.replay.out", layout.buildDirectory.dir("replay").get().asFile.path)
             // A capture path given means this run must actually replay, not reuse a cached result.
             if (project.hasProperty("replayCapture")) test.outputs.upToDateWhen { false }
+            // M2a scenario goldens: -PupdateGoldens rewrites them in the source tree.
+            test.systemProperty("sailens.updateGoldens", project.hasProperty("updateGoldens").toString())
+            test.systemProperty("sailens.goldens.dir", file("src/test/resources/scenarios").absolutePath)
+            if (project.hasProperty("updateGoldens")) test.outputs.upToDateWhen { false }
         }
     }
 }

@@ -556,6 +556,37 @@ M1b and M8 depend on.
   M1b), the M1 state timeline, walking user with a vanished obstacle (for M4).
 - Later: a capture adapter feeds M0b model-regression records through the same harness.
 
+### M2a as built
+
+- **Where**: `sailens-guidance/src/test/java/com/sailens/guidance/sim/`. `SyntheticScene.kt` is the
+  physical truth: the SM8850 camera as M0a recorded it (4096×3072 active array, f = 2877.6 px,
+  1280×720 buffer, sensor orientation 90°, so 449.625 / 180 / 320 px in the 360×640 class map), a pose
+  (camera height, pitch below horizontal, distance walked), and a world of ground patches at given
+  heights, upright boxes and a far background. A ray-cast renderer turns it into what the models
+  would report: the class map and detection boxes (a box can be detected only above a height, for a
+  person behind a wall). `Scenario.facts(i)` gives the M0a raw facts for the same frame: camera
+  record, frame record with `sensorToBufferTransform`, gravity samples.
+- `SyntheticSceneTest` checks that the two describe one camera: world points projected from the raw
+  facts alone (intrinsics → transform → rotation, pitch from gravity) land where the renderer put
+  them. M3o must resolve a scenario's facts to the same numbers.
+- `GuidanceSimulator` runs the whole `StartSceneAnalysisUseCase` path, wired as
+  `DomainBindingsModule` wires the app, with fakes only for the two models, the clock and the
+  stationary flag. Two substitutions are forced by the JVM, because the native libraries are
+  arm64-only: connectivity runs on the Kotlin fallback, not the native kernel (the two differ on a
+  narrowing corridor, see the connectivity note in `architecture.md`), and semantic stats come from
+  the Kotlin extractor. The goldens' blockage, width and flood figures are the fallback's.
+- **Goldens**: `sailens-guidance/src/test/resources/scenarios/<name>.golden.txt`, headed by the
+  scenario's description, then one line per frame: decided events (key, priority, parameters),
+  tracked obstacles (category / zone / distance), ground recognition and the connectivity figures,
+  rounded to 4 decimals. `ScenarioGoldenTest` fails on the first differing line. After an intended
+  change, regenerate and commit the diff with the change:
+  `gradlew :sailens-guidance:testDebugUnitTest --tests "*ScenarioGoldenTest*" -PupdateGoldens`.
+- **What the first goldens pin** (today's behaviour, not endorsed; these are what M3a and M3b are for):
+  a person standing still 3 m away is MEDIUM or FAR depending only on pitch, and on phone height; an
+  indoor floor read as building gives a CRITICAL "blocked" before "ground unrecognized"; a 15 cm curb
+  down to the road is invisible; walking to a 1.5 m drop drives blockage to 1.0 without a prompt; a
+  person whose lower body is hidden by a wall reads FAR for the whole approach and is never announced.
+
 ## 7. M3o — Orientation and camera geometry
 
 - Resolves the raw M0a facts (§3): the time basis (`CAMERA_REALTIME` when the source is `REALTIME`,
