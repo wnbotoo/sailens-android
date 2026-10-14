@@ -47,7 +47,14 @@ android {
         // never touches it. Letting the stub return defaults is what makes the preflight path
         // testable on the JVM -- which is itself the proof that it loads no native runtime.
         unitTests.isReturnDefaultValues = true
+        // M0b: replay a recorded capture on the JVM (CaptureReplayTest), e.g.
+        //   gradlew :sailens-guidance:testDebugUnitTest --tests "*CaptureReplayTest*" -PreplayCapture=<dir>
+        // Captures contain faces and places: they stay on the developer's machine, never in CI.
         unitTests.all { test ->
+            test.systemProperty("sailens.replay.capture", project.findProperty("replayCapture")?.toString().orEmpty())
+            test.systemProperty("sailens.replay.out", layout.buildDirectory.dir("replay").get().asFile.path)
+            // A capture path given means this run must actually replay, not reuse a cached result.
+            if (project.hasProperty("replayCapture")) test.outputs.upToDateWhen { false }
             // M2a scenario goldens: -PupdateGoldens rewrites them in the source tree.
             test.systemProperty("sailens.updateGoldens", project.hasProperty("updateGoldens").toString())
             test.systemProperty("sailens.goldens.dir", file("src/test/resources/scenarios").absolutePath)
