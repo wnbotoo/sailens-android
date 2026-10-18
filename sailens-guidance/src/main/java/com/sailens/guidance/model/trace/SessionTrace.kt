@@ -103,6 +103,30 @@ data class FrameTrace(
     val yawRateDegPerS: Double? = null,
     /** "ok" / "degraded" / "unavailable" / "none". */
     val orientationQuality: String = "none",
+    /** The phone height the geometry assumed, metres, and where it came from ("default_seed" / "preset" / "calibrated" / "none"). */
+    val phoneHeightM: Double? = null,
+    val heightSource: String = "none",
+    /** Whether the ground-contact distance (M3a) was allowed to change levels in this session. */
+    val groundContactEnabled: Boolean = false,
+    /** M3a: per tracked obstacle, today's level, the ground-contact estimate and the level used. */
+    val obstacleDistances: List<ObstacleDistanceTrace> = emptyList(),
+)
+
+/**
+ * One tracked obstacle's distance evidence (M3a). Levels are `DistanceLevel` names, lower case;
+ * [levelNew] is the level of [lowerBoundM], null without an interval. [upperBoundM] is null when
+ * unbounded or without an interval. [contactValidity] is a `ContactValidity` name, lower case.
+ */
+data class ObstacleDistanceTrace(
+    val category: String,
+    val zone: String,
+    val contactValidity: String,
+    val lowerBoundM: Double? = null,
+    val pointM: Double? = null,
+    val upperBoundM: Double? = null,
+    val levelToday: String,
+    val levelNew: String? = null,
+    val levelUsed: String,
 )
 
 data class OverlayRenderTrace(

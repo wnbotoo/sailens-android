@@ -62,6 +62,10 @@ object Scenarios {
     private const val PITCH = 25f
 
     private val person = DetectedAs(cocoId = 0, label = "person", category = ObstacleCategory.PERSON)
+    private val car = DetectedAs(cocoId = 2, label = "car", category = ObstacleCategory.VEHICLE)
+
+    /** The pitch most field recordings were held at (median 14-19 degrees, 2026-10). */
+    private const val FIELD_PITCH = 17f
 
     /** Road on the left, a 3 m sidewalk ahead, verge on the right. */
     private fun street(sidewalkEndZ: Double = 39.9, beyond: List<GroundPatch> = emptyList()) = listOf(
@@ -150,6 +154,27 @@ object Scenarios {
         },
     )
 
+    val tiltSweepNearPerson = Scenario(
+        name = "tilt_sweep_near_person",
+        description = "Standing 1.4 m from a person, the phone swept from 30 degrees down to 10 degrees up and back. " +
+            "Today's level follows the box bottom, so the pitch alone moves it; M3a may only make it nearer.",
+        frames = run {
+            val world = World(street(), listOf(personAt(0.0, 1.4)))
+            (sweep(30f, -10f, 30) + sweep(-10f, 30f, 30)).map { ScenarioFrame(Pose(HEIGHT, it), world, stationary = true) }
+        },
+    )
+
+    val approachParkedCar = Scenario(
+        name = "approach_parked_car",
+        description = "Walking 1.2 m/s at the field pitch of 17 degrees down toward a car parked across the sidewalk " +
+            "8 m ahead, stopping 0.6 m short of it. When the first prompt and the first NEAR come is the field " +
+            "complaint of prompts arriving under 1 m from a car.",
+        frames = run {
+            val world = World(street(), listOf(Box(SceneClasses.CAR, -1.0, 1.0, 8.0, 9.8, 1.5, detection = car)))
+            (0 until 62).map { i -> ScenarioFrame(Pose(HEIGHT, FIELD_PITCH, walkedM = minOf(i * 0.12f, 7.4f)), world) }
+        },
+    )
+
     val all = listOf(
         straightClearPath,
         pitchChangeFixedObstacle,
@@ -157,5 +182,7 @@ object Scenarios {
         groundNoGround,
         curbAndDrop,
         partiallyOccludedPerson,
+        tiltSweepNearPerson,
+        approachParkedCar,
     )
 }

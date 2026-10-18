@@ -1,6 +1,8 @@
 package com.sailens.guidance.geometry
 
+import com.sailens.guidance.model.perception.DetectedObstacle
 import com.sailens.guidance.model.trace.FrameTrace
+import com.sailens.guidance.model.trace.ObstacleDistanceTrace
 import com.sailens.guidance.motion.MotionState
 import com.sailens.guidance.motion.OrientationQuality
 import kotlin.math.atan2
@@ -32,5 +34,26 @@ fun FrameTrace.withGeometry(geometry: CameraGeometry, motion: MotionState): Fram
         headingDeg = if (oriented) Math.toDegrees(motion.headingRad.toDouble()) else null,
         yawRateDegPerS = if (oriented) Math.toDegrees(motion.yawRateRadPerS.toDouble()) else null,
         orientationQuality = motion.orientationQuality.name.lowercase(),
+        phoneHeightM = geometry.phone.heightMeters.toDouble(),
+        heightSource = geometry.phone.source.name.lowercase(),
     )
 }
+
+/** [this] frame's trace with each tracked obstacle's distance evidence (M3a). */
+fun FrameTrace.withObstacleDistances(obstacles: List<DetectedObstacle>, groundContactEnabled: Boolean): FrameTrace = copy(
+    groundContactEnabled = groundContactEnabled,
+    obstacleDistances = obstacles.map { obstacle ->
+        val estimate = obstacle.distanceEstimate
+        ObstacleDistanceTrace(
+            category = obstacle.category.name.lowercase(),
+            zone = obstacle.zone.name.lowercase(),
+            contactValidity = estimate?.contact?.validity?.name?.lowercase() ?: "none",
+            lowerBoundM = estimate?.contact?.lowerM?.toDouble(),
+            pointM = estimate?.contact?.pointM?.toDouble(),
+            upperBoundM = estimate?.contact?.upperM?.toDouble(),
+            levelToday = (estimate?.today ?: obstacle.distance).name.lowercase(),
+            levelNew = estimate?.contactLevel?.name?.lowercase(),
+            levelUsed = obstacle.distance.name.lowercase(),
+        )
+    },
+)

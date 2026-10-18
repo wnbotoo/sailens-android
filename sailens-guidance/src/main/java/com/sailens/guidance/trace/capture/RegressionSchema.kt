@@ -68,6 +68,8 @@ data class RegressionStats(
  * @param detection the detector's raw output, present only when the detector ran on this frame.
  * @param connectivity each call to the connectivity statistics, in order.
  * @param stationary `DeviceSensorRepository.isStationary` as the decision step read it.
+ * @param geometry the camera geometry the frame was processed with (schema 1.4); absent in older
+ *   records, which replay without it unless the caller supplies one.
  * @param events the decided events, highest priority first (the first is the one offered).
  * @param failure set when processing the frame failed; the frame then decided nothing.
  */
@@ -85,9 +87,43 @@ data class RegressionFrameRecord(
     val connectivity: List<ConnectivityRecord> = emptyList(),
     val quality: FrameQualityRecord? = null,
     val stationary: Boolean? = null,
+    val geometry: GeometryRecord? = null,
     val events: List<EventRecord> = emptyList(),
     val failure: String? = null,
 ) : CaptureRecord
+
+/**
+ * `CameraGeometry` as resolved for a frame (M3o), enums by name. Recorded rather than re-resolved
+ * from the sensor log because the live pipeline picks the nearest gravity sample *it has* when it
+ * resolves, which a replay holding the whole log cannot know.
+ */
+@Serializable
+data class GeometryRecord(
+    val frameTimeNanos: Long? = null,
+    val timeBasis: String,
+    val intrinsics: IntrinsicsRecord? = null,
+    /** The unit down vector in the camera frame, x, y, z. */
+    val gravityInCamera: List<Float>? = null,
+    val gravityAgeNanos: Long? = null,
+    val phoneHeightM: Float,
+    val heightSource: String,
+    val placement: String? = null,
+    /** "Ok" / "Degraded" / "Unavailable". */
+    val quality: String,
+    val issues: List<String> = emptyList(),
+)
+
+@Serializable
+data class IntrinsicsRecord(
+    val fx: Float,
+    val fy: Float,
+    val cx: Float,
+    val cy: Float,
+    val width: Int,
+    val height: Int,
+    val source: String,
+    val bufferMappingAssumed: Boolean = false,
+)
 
 /** Clock components ([RegressionFrameRecord.clocks] keys): one per injected clock. */
 object RegressionClocks {

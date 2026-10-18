@@ -53,6 +53,8 @@ android {
         unitTests.all { test ->
             test.systemProperty("sailens.replay.capture", project.findProperty("replayCapture")?.toString().orEmpty())
             test.systemProperty("sailens.replay.out", layout.buildDirectory.dir("replay").get().asFile.path)
+            // M3a evaluation (GroundContactCaptureEvaluationTest): the phone height to assume, metres.
+            test.systemProperty("sailens.m3a.phoneHeight", project.findProperty("m3aPhoneHeight")?.toString().orEmpty())
             // A capture path given means this run must actually replay, not reuse a cached result.
             if (project.hasProperty("replayCapture")) test.outputs.upToDateWhen { false }
             // M2a scenario goldens: -PupdateGoldens rewrites them in the source tree.

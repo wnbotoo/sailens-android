@@ -3,6 +3,16 @@ package com.sailens.guidance.trace.regression
 import com.sailens.core.geometry.NormalizedRect
 import com.sailens.core.mask.BinaryMask
 import com.sailens.core.mask.BottomStats
+import com.sailens.guidance.geometry.CameraGeometry
+import com.sailens.guidance.geometry.CameraIntrinsics
+import com.sailens.guidance.geometry.GeometryIssue
+import com.sailens.guidance.geometry.GeometryQuality
+import com.sailens.guidance.geometry.HeightSource
+import com.sailens.guidance.geometry.IntrinsicsSource
+import com.sailens.guidance.geometry.PhoneGeometrySettings
+import com.sailens.guidance.geometry.Placement
+import com.sailens.guidance.geometry.TimeBasis
+import com.sailens.guidance.geometry.Vec3
 import com.sailens.guidance.model.analysis.ConnectivityStats
 import com.sailens.guidance.model.common.DirectionBias
 import com.sailens.guidance.model.common.DirectionZone
@@ -17,6 +27,7 @@ import com.sailens.guidance.model.perception.SegmentationAnalysisStats
 import com.sailens.guidance.model.scene.SceneEvent
 import com.sailens.guidance.trace.capture.CaptureSchema
 import com.sailens.guidance.trace.capture.EventRecord
+import com.sailens.guidance.trace.capture.GeometryRecord
 import com.sailens.vision.detection.Detection
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
@@ -122,5 +133,22 @@ class RegressionRecordMappingTest {
         assertEquals(detection, detection.toItem().toDetection())
         val obstacle = ObstacleDetection(0, "person", 0.81f, NormalizedRect(0.1f, 0.2f, 0.3f, 0.6f), ObstacleCategory.values().first())
         assertEquals(obstacle, obstacle.toItem().toObstacleDetection())
+    }
+
+    @Test
+    fun `a camera geometry round-trips through its record and JSON, for every quality`() {
+        val k = CameraIntrinsics(449.625f, 449.6123f, 180.25f, 319.875f, 360, 640, IntrinsicsSource.FOCAL_LENGTH_ESTIMATE, bufferMappingAssumed = true)
+        val geometries = listOf(
+            CameraGeometry(123_456_789L, TimeBasis.CAMERA_REALTIME, k, Vec3(0.01234567f, 0.9567891f, 0.2905f), -1_500_000L,
+                PhoneGeometrySettings(1.2345f, HeightSource.CALIBRATED, Placement.HANDHELD_CHEST), GeometryQuality.Ok),
+            CameraGeometry(1L, TimeBasis.SOURCE_RECEIPT, k, Vec3(0f, 1f, 0f), 140_000_000L, PhoneGeometrySettings.DEFAULT,
+                GeometryQuality.Degraded(setOf(GeometryIssue.STALE_GRAVITY, GeometryIssue.UNMEASURED_ALIGNMENT))),
+            CameraGeometry(null, TimeBasis.SOURCE_RECEIPT, null, null, null, PhoneGeometrySettings(1.0f, HeightSource.PRESET, Placement.WAIST),
+                GeometryQuality.Unavailable(setOf(GeometryIssue.NO_FRAME_TIME, GeometryIssue.NO_INTRINSICS))),
+        )
+        for (geometry in geometries) {
+            val json = CaptureSchema.json.encodeToString(GeometryRecord.serializer(), geometry.toRecord())
+            assertEquals(geometry, CaptureSchema.json.decodeFromString(GeometryRecord.serializer(), json).toGeometry())
+        }
     }
 }

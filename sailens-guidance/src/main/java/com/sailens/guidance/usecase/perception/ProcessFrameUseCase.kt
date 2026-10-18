@@ -1,7 +1,10 @@
 package com.sailens.guidance.usecase.perception
 
 import com.sailens.guidance.config.PerceptionConfig
-import com.sailens.guidance.model.common.DistanceLevel
+import com.sailens.guidance.depth.DistanceEstimate
+import com.sailens.guidance.depth.DistanceFrame
+import com.sailens.guidance.geometry.CameraGeometry
+import com.sailens.guidance.model.common.ObstacleCategory
 import com.sailens.core.geometry.NormalizedRect
 import com.sailens.guidance.model.common.ObstacleRunKind
 import com.sailens.guidance.model.perception.ObstacleDetection
@@ -98,7 +101,11 @@ class ProcessFrameUseCase(
         cachedSemanticAnalysis = null
     }
 
-    suspend operator fun invoke(frame: ImageFrame): Result<PerceptionResult> = coroutineScope {
+    /**
+     * @param geometry the frame's camera geometry (M3o), for the ground-contact distance (M3a). Null
+     *   leaves every distance at today's image-position estimate.
+     */
+    suspend operator fun invoke(frame: ImageFrame, geometry: CameraGeometry? = null): Result<PerceptionResult> = coroutineScope {
         val startTime = clock()
         // 挡位在会话之间可切换（PerceptionProfileManager.activateSelected），会话内不变
         val config = profileManager.activeConfig
@@ -126,7 +133,8 @@ class ProcessFrameUseCase(
             return@coroutineScope Result.failure(it)
         }
 
-        val depthEstimator: (NormalizedRect) -> DistanceLevel = { depthRepository.estimateDistance(it) }
+        fun depthEstimator(frame: DistanceFrame): (NormalizedRect, ObstacleCategory) -> DistanceEstimate =
+            { box, category -> depthRepository.estimateDistance(box, category, frame) }
         val trackingOutput = if (obstacleRun != null && obstacleDeferred != null) {
             val obstacleOutput = obstacleDeferred.await().getOrElse {
                 if (regressionRecorder.isRecording) regressionRecorder.onDetection(frame, null, it)
@@ -136,7 +144,15 @@ class ProcessFrameUseCase(
             val completedAt = clock()
             scheduler.markDetectionRun(completedAt)
 
-            val rawObstacles = obstacleExtractor.extractFromDetections(obstacleOutput.detections, depthEstimator)
+            val distanceFrame = DistanceFrame(
+                geometry = geometry,
+                otherBoxes = obstacleOutput.detections
+                    .filter { it.confidence >= config.minObstacleConfidence }
+                    .map { it.boundingBox },
+                segmentation = semanticOutput.analysis.segmentation,
+                config = config.groundContact,
+            )
+            val rawObstacles = obstacleExtractor.extractFromDetections(obstacleOutput.detections, depthEstimator(distanceFrame))
             ObstacleTrackingOutput(
                 trackedObstacles = obstacleTracker.update(rawObstacles, completedAt),
                 runKind = obstacleRun.kind,
@@ -155,7 +171,12 @@ class ProcessFrameUseCase(
             )
         } else {
             // BASIC 挡位（或未配置 det provider）：从语义分割提取障碍物
-            val rawObstacles = obstacleExtractor.extractFromSemantic(semanticOutput.analysis, depthEstimator)
+            val distanceFrame = DistanceFrame(
+                geometry = geometry,
+                segmentation = semanticOutput.analysis.segmentation,
+                config = config.groundContact,
+            )
+            val rawObstacles = obstacleExtractor.extractFromSemantic(semanticOutput.analysis, depthEstimator(distanceFrame))
             ObstacleTrackingOutput(
                 trackedObstacles = obstacleTracker.update(rawObstacles, clock()),
                 runtimeInfo = MlRuntimeInfo.unavailable("semantic_only"),

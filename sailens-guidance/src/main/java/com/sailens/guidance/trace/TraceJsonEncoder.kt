@@ -97,6 +97,27 @@ internal object TraceJsonEncoder {
         frameTrace.headingDeg?.let { put("headingDeg", it) }
         frameTrace.yawRateDegPerS?.let { put("yawRateDegPerS", it) }
         put("orientationQuality", frameTrace.orientationQuality)
+        frameTrace.phoneHeightM?.let { put("phoneHeightM", it) }
+        put("heightSource", frameTrace.heightSource)
+        put("groundContactEnabled", frameTrace.groundContactEnabled)
+        put(
+            "obstacleDistances",
+            JSONArray(
+                frameTrace.obstacleDistances.map { distance ->
+                    JSONObject().apply {
+                        put("category", distance.category)
+                        put("zone", distance.zone)
+                        put("contactValidity", distance.contactValidity)
+                        distance.lowerBoundM?.let { put("lowerBoundM", it) }
+                        distance.pointM?.let { put("pointM", it) }
+                        distance.upperBoundM?.let { put("upperBoundM", it) }
+                        put("levelToday", distance.levelToday)
+                        distance.levelNew?.let { put("levelNew", it) }
+                        put("levelUsed", distance.levelUsed)
+                    }
+                },
+            ),
+        )
     }
 
     fun encodeOverlayRender(

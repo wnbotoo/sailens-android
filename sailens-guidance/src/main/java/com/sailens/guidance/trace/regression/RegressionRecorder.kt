@@ -2,6 +2,7 @@ package com.sailens.guidance.trace.regression
 
 import com.sailens.core.frame.ImageFrame
 import com.sailens.core.mask.BinaryMask
+import com.sailens.guidance.geometry.CameraGeometry
 import com.sailens.guidance.model.analysis.ConnectivityStats
 import com.sailens.guidance.model.perception.ObstacleDetection
 import com.sailens.guidance.model.perception.SegmentationOutput
@@ -23,6 +24,9 @@ interface RegressionRecorder {
     val isRecording: Boolean
 
     fun beginFrame(frame: ImageFrame) {}
+
+    /** The camera geometry the frame was processed with (M3o), which the ground-contact distance reads. */
+    fun onGeometry(geometry: CameraGeometry) {}
 
     /** A value one of the injected clocks returned ([com.sailens.guidance.trace.capture.RegressionClocks]). */
     fun onClock(component: String, value: Long) {}

@@ -1,6 +1,7 @@
 package com.sailens.guidance.processor.perception
 
 import com.sailens.guidance.config.PerceptionConfig
+import com.sailens.guidance.depth.DistanceEstimate
 import com.sailens.guidance.model.common.DirectionZone
 import com.sailens.guidance.model.common.DistanceLevel
 import com.sailens.core.geometry.NormalizedRect
@@ -25,6 +26,7 @@ class ObstacleTracker(
         var className: String,
         var zone: DirectionZone,
         var distance: DistanceLevel,
+        var distanceEstimate: DistanceEstimate?,
         var confidence: Float,
         var stableFrames: Int,
         var missedFrames: Int,
@@ -52,6 +54,7 @@ class ObstacleTracker(
             track.className = detection.className
             track.zone = detection.zone
             track.distance = detection.distance
+            track.distanceEstimate = detection.distanceEstimate
             track.confidence = detection.confidence
             track.areaRatio = detection.areaRatio
             track.stableFrames++
@@ -72,6 +75,7 @@ class ObstacleTracker(
                     className = detection.className,
                     zone = detection.zone,
                     distance = detection.distance,
+                    distanceEstimate = detection.distanceEstimate,
                     confidence = detection.confidence,
                     stableFrames = 1,
                     missedFrames = 0,
@@ -113,6 +117,7 @@ class ObstacleTracker(
                     className = track.className,
                     zone = track.zone,
                     distance = track.distance,
+                    distanceEstimate = track.distanceEstimate,
                     urgency = calculateUrgency(track),
                     confidence = track.confidence * 0.9f,  // 预测时降低置信度
                     stableFrames = track.stableFrames,
@@ -154,6 +159,7 @@ class ObstacleTracker(
                     className = track.className,
                     zone = track.zone,
                     distance = track.distance,
+                    distanceEstimate = track.distanceEstimate,
                     urgency = calculateUrgency(track),
                     confidence = track.confidence,
                     stableFrames = track.stableFrames,

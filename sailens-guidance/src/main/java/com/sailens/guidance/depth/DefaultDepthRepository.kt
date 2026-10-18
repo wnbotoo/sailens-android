@@ -1,31 +1,30 @@
 package com.sailens.guidance.depth
 
-import com.sailens.guidance.depth.HardwareDepthSource
-import com.sailens.guidance.depth.ImagePositionDepthEstimator
-import com.sailens.guidance.model.common.DistanceLevel
 import com.sailens.core.geometry.NormalizedRect
+import com.sailens.guidance.model.common.ObstacleCategory
 import com.sailens.guidance.repository.DepthRepository
 
+/**
+ * Today's level from the box's image position, and the ground-contact estimate (M3a) beside it.
+ * The contact may make the level nearer, never farther ([DistanceFusion]); off by default, it is
+ * still computed so the trace shows it.
+ */
 class DefaultDepthRepository(
     private val imagePositionEstimator: ImagePositionDepthEstimator,
-    private val hardwareDepthSource: HardwareDepthSource?,   // 可选，ToF/LiDAR
+    private val groundContactEstimator: GroundContactDistanceEstimator,
 ) : DepthRepository {
 
-    override fun estimateDistance(boundingBox: NormalizedRect): DistanceLevel {
-        // 优先使用硬件深度
-        hardwareDepthSource?.getDepthAt(boundingBox.centerX, boundingBox.maxY)?.let {
-            return depthToDistanceLevel(it)
-        }
-
-        // 回退到基于图像位置的估计
-        return imagePositionEstimator.estimate(boundingBox)
-    }
-
-    private fun depthToDistanceLevel(depthMeters: Float): DistanceLevel {
-        return when {
-            depthMeters < 1.5f -> DistanceLevel.NEAR
-            depthMeters < 4.0f -> DistanceLevel.MEDIUM
-            else -> DistanceLevel.FAR
-        }
+    override fun estimateDistance(boundingBox: NormalizedRect, category: ObstacleCategory, frame: DistanceFrame): DistanceEstimate {
+        val today = imagePositionEstimator.estimate(boundingBox)
+        val contact = groundContactEstimator.estimate(boundingBox, category, frame)
+        val contactLevel = contact.lowerM?.let { DistanceFusion.level(it, frame.config) }
+        val used = DistanceFusion.fuse(
+            today = today,
+            contact = contact,
+            contactLevel = contactLevel,
+            enabled = frame.config.enabled,
+            heightSource = frame.geometry?.phone?.source,
+        )
+        return DistanceEstimate(used, today, contact, contactLevel)
     }
 }

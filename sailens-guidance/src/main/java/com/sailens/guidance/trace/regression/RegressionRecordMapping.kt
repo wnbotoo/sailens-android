@@ -3,6 +3,16 @@ package com.sailens.guidance.trace.regression
 import com.sailens.core.geometry.NormalizedRect
 import com.sailens.core.mask.BinaryMask
 import com.sailens.core.mask.BottomStats
+import com.sailens.guidance.geometry.CameraGeometry
+import com.sailens.guidance.geometry.CameraIntrinsics
+import com.sailens.guidance.geometry.GeometryIssue
+import com.sailens.guidance.geometry.GeometryQuality
+import com.sailens.guidance.geometry.HeightSource
+import com.sailens.guidance.geometry.IntrinsicsSource
+import com.sailens.guidance.geometry.PhoneGeometrySettings
+import com.sailens.guidance.geometry.Placement
+import com.sailens.guidance.geometry.TimeBasis
+import com.sailens.guidance.geometry.Vec3
 import com.sailens.guidance.model.analysis.ConnectivityStats
 import com.sailens.guidance.model.common.DirectionBias
 import com.sailens.guidance.model.common.DirectionZone
@@ -19,6 +29,8 @@ import com.sailens.guidance.trace.capture.BottomStatsRecord
 import com.sailens.guidance.trace.capture.ConnectivityStatsRecord
 import com.sailens.guidance.trace.capture.DetectionItem
 import com.sailens.guidance.trace.capture.EventRecord
+import com.sailens.guidance.trace.capture.GeometryRecord
+import com.sailens.guidance.trace.capture.IntrinsicsRecord
 import com.sailens.guidance.trace.capture.SemanticStatsRecord
 import com.sailens.vision.detection.Detection
 import java.nio.ByteBuffer
@@ -184,6 +196,49 @@ fun DetectionItem.toObstacleDetection(): ObstacleDetection = ObstacleDetection(
  *
  * @param scratch reused word buffer; pass one to avoid a per-call allocation in a per-frame path.
  */
+fun CameraGeometry.toRecord(): GeometryRecord = GeometryRecord(
+    frameTimeNanos = frameTimeNanos,
+    timeBasis = timeBasis.name,
+    intrinsics = intrinsics?.let {
+        IntrinsicsRecord(it.fx, it.fy, it.cx, it.cy, it.width, it.height, it.source.name, it.bufferMappingAssumed)
+    },
+    gravityInCamera = gravityInCamera?.let { listOf(it.x, it.y, it.z) },
+    gravityAgeNanos = gravityAgeNanos,
+    phoneHeightM = phone.heightMeters,
+    heightSource = phone.source.name,
+    placement = phone.placement?.name,
+    quality = when (quality) {
+        GeometryQuality.Ok -> "Ok"
+        is GeometryQuality.Degraded -> "Degraded"
+        is GeometryQuality.Unavailable -> "Unavailable"
+    },
+    issues = when (val q = quality) {
+        GeometryQuality.Ok -> emptyList()
+        is GeometryQuality.Degraded -> q.issues.map { it.name }.sorted()
+        is GeometryQuality.Unavailable -> q.issues.map { it.name }.sorted()
+    },
+)
+
+fun GeometryRecord.toGeometry(): CameraGeometry {
+    val issueSet = issues.map(GeometryIssue::valueOf).toSet()
+    return CameraGeometry(
+        frameTimeNanos = frameTimeNanos,
+        timeBasis = TimeBasis.valueOf(timeBasis),
+        intrinsics = intrinsics?.let {
+            CameraIntrinsics(it.fx, it.fy, it.cx, it.cy, it.width, it.height, IntrinsicsSource.valueOf(it.source), it.bufferMappingAssumed)
+        },
+        gravityInCamera = gravityInCamera?.let { Vec3(it[0], it[1], it[2]) },
+        gravityAgeNanos = gravityAgeNanos,
+        phone = PhoneGeometrySettings(phoneHeightM, HeightSource.valueOf(heightSource), placement?.let(Placement::valueOf)),
+        quality = when (quality) {
+            "Ok" -> GeometryQuality.Ok
+            "Degraded" -> GeometryQuality.Degraded(issueSet)
+            "Unavailable" -> GeometryQuality.Unavailable(issueSet)
+            else -> error("unknown geometry quality $quality")
+        },
+    )
+}
+
 fun BinaryMask.regressionCrc32(scratch: LongArray = LongArray(0)): Long {
     val words = copyPackedBitsInto(scratch)
     val wordCount = (width * height + Long.SIZE_BITS - 1) / Long.SIZE_BITS

@@ -3,7 +3,7 @@ package com.sailens.guidance.processor.perception
 import com.sailens.guidance.config.PerceptionConfig
 import com.sailens.core.mask.BinaryMask
 import com.sailens.guidance.model.common.DirectionZone
-import com.sailens.guidance.model.common.DistanceLevel
+import com.sailens.guidance.depth.DistanceEstimate
 import com.sailens.core.geometry.NormalizedRect
 import com.sailens.guidance.model.common.ObstacleCategory
 import com.sailens.guidance.semantics.NavigationSemantics
@@ -45,7 +45,7 @@ class ObstacleExtractor(
      */
     fun extractFromSemantic(
         analysis: SegmentationAnalysis,
-        depthEstimator: (NormalizedRect) -> DistanceLevel,
+        depthEstimator: (NormalizedRect, ObstacleCategory) -> DistanceEstimate,
     ): List<RawObstacle> {
         val obstacleMask = analysis.obstacleMask
         val segmentation = analysis.segmentation
@@ -70,16 +70,17 @@ class ObstacleExtractor(
                 if (!isSemanticObstacleRelevant(box, category, areaRatio)) return@mapNotNull null
 
                 val zone = DirectionZone.fromNormalizedX(box.centerX, config.zoneMode)
-                val distance = depthEstimator(box)
+                val distance = depthEstimator(box, category)
 
                 RawObstacle(
                     boundingBox = box,
                     category = category,
                     className = taxonomy.label(component.classId),
                     zone = zone,
-                    distance = distance,
+                    distance = distance.used,
                     confidence = 1.0f,
-                    areaRatio = areaRatio
+                    areaRatio = areaRatio,
+                    distanceEstimate = distance,
                 )
             }
             .sortedByDescending { it.areaRatio }
@@ -91,7 +92,7 @@ class ObstacleExtractor(
      */
     fun extractFromDetections(
         detections: List<ObstacleDetection>,
-        depthEstimator: (NormalizedRect) -> DistanceLevel,
+        depthEstimator: (NormalizedRect, ObstacleCategory) -> DistanceEstimate,
     ): List<RawObstacle> {
         return detections
             .filter { it.confidence >= config.minObstacleConfidence }
@@ -100,16 +101,17 @@ class ObstacleExtractor(
             .map { detection ->
                 val zone =
                     DirectionZone.fromNormalizedX(detection.boundingBox.centerX, config.zoneMode)
-                val distance = depthEstimator(detection.boundingBox)
+                val distance = depthEstimator(detection.boundingBox, detection.category)
 
                 RawObstacle(
                     boundingBox = detection.boundingBox,
                     category = detection.category,
                     className = detection.className,
                     zone = zone,
-                    distance = distance,
+                    distance = distance.used,
                     confidence = detection.confidence,
-                    areaRatio = detection.boundingBox.area
+                    areaRatio = detection.boundingBox.area,
+                    distanceEstimate = distance,
                 )
             }
             .sortedByDescending { it.areaRatio }

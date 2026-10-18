@@ -68,7 +68,8 @@ val shellDebugModule: Module = module {
                     perceptionConfig = CaptureSchema.json.encodeToJsonElement(PerceptionConfig.serializer(), profiles.activeConfig),
                     analysisConfig = CaptureSchema.json.encodeToJsonElement(AnalysisConfig.serializer(), analysis),
                     taxonomyId = semantics.taxonomyId.value,
-                    // DefaultDepthRepository without a hardware depth source estimates from position.
+                    // Today's level is the box position; the M3a ground contact beside it is governed
+                    // by perceptionConfig.groundContact, recorded above.
                     depthSource = "position",
                 )
             },

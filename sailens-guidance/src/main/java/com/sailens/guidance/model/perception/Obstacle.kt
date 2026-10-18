@@ -1,5 +1,6 @@
 package com.sailens.guidance.model.perception
 
+import com.sailens.guidance.depth.DistanceEstimate
 import com.sailens.guidance.model.common.DirectionZone
 import com.sailens.guidance.model.common.DistanceLevel
 import com.sailens.core.geometry.NormalizedRect
@@ -18,6 +19,8 @@ data class RawObstacle(
     val distance: DistanceLevel,
     val confidence: Float,
     val areaRatio: Float,
+    /** The evidence behind [distance] (M3a); null where no estimate was made. */
+    val distanceEstimate: DistanceEstimate? = null,
 )
 
 /**
@@ -35,6 +38,8 @@ data class DetectedObstacle(
     val stableFrames: Int,
     val areaRatio: Float,
     val timestamp: Long,
+    /** The evidence behind [distance] at the detection that last updated this track (M3a). */
+    val distanceEstimate: DistanceEstimate? = null,
 ) {
     fun isStable(minFrames: Int = 3): Boolean = stableFrames >= minFrames
 

@@ -6,8 +6,11 @@ import com.sailens.core.mask.BinaryMask
 import com.sailens.guidance.config.AnalysisConfig
 import com.sailens.guidance.config.PerceptionConfig
 import com.sailens.guidance.depth.DefaultDepthRepository
+import com.sailens.guidance.depth.GroundContactDistanceEstimator
 import com.sailens.guidance.depth.ImagePositionDepthEstimator
+import com.sailens.guidance.geometry.CameraGeometry
 import com.sailens.guidance.model.analysis.ConnectivityStats
+import com.sailens.guidance.model.perception.DetectedObstacle
 import com.sailens.guidance.model.perception.ObstacleModelOutput
 import com.sailens.guidance.model.perception.SegmentationMask
 import com.sailens.guidance.model.perception.SegmentationOutput
@@ -89,18 +92,31 @@ class RegressionReplay(
         val exact: Boolean get() = firstMismatch == null && approximateFrames.isEmpty()
     }
 
+    /** What the replayed path made of one frame, for evaluations that look past the decided events. */
+    data class FrameOutcome(val obstacles: List<DetectedObstacle>, val events: List<SceneEvent>)
+
     /** Stops the replay of one frame with a precise reason. */
     private class Divergence(val what: String, val expected: String, val actual: String) : RuntimeException(what)
 
     /**
      * @param classMap the class map a frame recorded (`CaptureSessionReader.classMap`).
      * @param firstLostSeq the record's `firstLostSeq`: replay stops before it.
+     * @param geometryOf the camera geometry to process a frame with: by default the one it recorded
+     *   (schema 1.4), none for older records. An evaluation can supply one resolved from the
+     *   capture's sensor log instead.
+     * @param compareDecisions false for a counterfactual run (a config the device did not run with):
+     *   decisions are not compared, and a recorded revoke applies to the replayed event with the
+     *   same dedupe key, if the frame decided one. Every other check stays.
+     * @param onFrame each successfully processed frame's tracked obstacles and decided events.
      */
     fun replay(
         frames: List<RegressionFrameRecord>,
         revokes: List<RegressionRevokeRecord>,
         classMap: (RegressionFrameRecord) -> IntArray?,
         firstLostSeq: Long? = null,
+        geometryOf: (RegressionFrameRecord) -> CameraGeometry? = { it.geometry?.toGeometry() },
+        onFrame: (RegressionFrameRecord, FrameOutcome) -> Unit = { _, _ -> },
+        compareDecisions: Boolean = true,
     ): Report {
         val world = World(classMap)
         val revokesByDecision = revokes.groupBy { it.decisionsBefore }
@@ -116,7 +132,7 @@ class RegressionReplay(
             val outcome = try {
                 world.load(record)
                 val frame = record.frame()
-                val result = runBlocking { world.processFrame(frame) }
+                val result = runBlocking { world.processFrame(frame, geometryOf(record)) }
                 val expectedFailure = record.failure != null
                 if (result.isFailure != expectedFailure) {
                     throw Divergence("frame failure", record.failure ?: "success", result.exceptionOrNull()?.toString() ?: "success")
@@ -130,8 +146,15 @@ class RegressionReplay(
                     world.stationary.value = record.stationary ?: false
                     val events = world.decide(snapshot)
                     decisions++
-                    compareEvents(record, events)
-                    record.events.zip(events).forEach { (expected, actual) -> replayedIdOf[expected.id] = actual.id }
+                    onFrame(record, FrameOutcome(result.getOrThrow().obstacles, events))
+                    if (compareDecisions) {
+                        compareEvents(record, events)
+                        record.events.zip(events).forEach { (expected, actual) -> replayedIdOf[expected.id] = actual.id }
+                    } else {
+                        record.events.forEach { expected ->
+                            events.firstOrNull { it.dedupeKey == expected.dedupeKey }?.let { replayedIdOf[expected.id] = it.id }
+                        }
+                    }
                 }
                 world.finishFrame()
             } catch (d: Divergence) {
@@ -229,7 +252,7 @@ class RegressionReplay(
             profileManager = profiles,
             perceptionRepository = repository,
             realtimeObstacleProvider = obstacles,
-            depthRepository = DefaultDepthRepository(ImagePositionDepthEstimator(), null),
+            depthRepository = DefaultDepthRepository(ImagePositionDepthEstimator(), GroundContactDistanceEstimator(navigationSemantics)),
             segmentationAnalyzer = SegmentationAnalyzer(config = analysisConfig, navigationSemantics = navigationSemantics),
             obstacleExtractor = ObstacleExtractor(config = perceptionConfig, navigationSemantics = navigationSemantics),
             obstacleTracker = ObstacleTracker(config = perceptionConfig),

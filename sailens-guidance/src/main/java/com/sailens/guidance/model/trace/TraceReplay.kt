@@ -259,6 +259,23 @@ object TraceReplayParser {
         headingDeg = entry.optionalDouble("headingDeg"),
         yawRateDegPerS = entry.optionalDouble("yawRateDegPerS"),
         orientationQuality = entry.optionalString("orientationQuality") ?: "none",
+        phoneHeightM = entry.optionalDouble("phoneHeightM"),
+        heightSource = entry.optionalString("heightSource") ?: "none",
+        groundContactEnabled = entry.optionalBoolean("groundContactEnabled") ?: false,
+        obstacleDistances = (entry["obstacleDistances"] as? JsonArray).orEmpty().map { item ->
+            val distance = item.jsonObject
+            ObstacleDistanceTrace(
+                category = distance.requireString("category", lineIndex),
+                zone = distance.requireString("zone", lineIndex),
+                contactValidity = distance.requireString("contactValidity", lineIndex),
+                lowerBoundM = distance.optionalDouble("lowerBoundM"),
+                pointM = distance.optionalDouble("pointM"),
+                upperBoundM = distance.optionalDouble("upperBoundM"),
+                levelToday = distance.requireString("levelToday", lineIndex),
+                levelNew = distance.optionalString("levelNew"),
+                levelUsed = distance.requireString("levelUsed", lineIndex),
+            )
+        },
     )
 
     private fun parseOverlayRender(entry: JsonObject, lineIndex: Int) = OverlayRenderTrace(
@@ -356,6 +373,10 @@ object TraceReplayParser {
 
     private fun JsonObject.optionalLong(key: String): Long? {
         return get(key)?.jsonPrimitive?.longOrNull
+    }
+
+    private fun JsonObject.optionalBoolean(key: String): Boolean? {
+        return get(key)?.jsonPrimitive?.booleanOrNull
     }
 
     private fun JsonObject.requireBoolean(key: String, lineIndex: Int): Boolean {
