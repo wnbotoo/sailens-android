@@ -1,7 +1,9 @@
 package com.sailens.shell.di
 
 import com.sailens.core.log.LogService
+import com.sailens.guidance.geometry.CameraFactsSource
 import com.sailens.shell.FileLogService
+import com.sailens.shell.guidance.geometry.CameraFactsAdapter
 import com.sailens.shell.diagnostics.GuidanceDiagnosticsStore
 import com.sailens.output.AccessibilityStatusProvider
 import com.sailens.shell.device.HapticManager
@@ -55,6 +57,7 @@ val shellModule = module {
         )
     }
     single { AccessibilityStatusProvider(androidContext()) }
+    single<CameraFactsSource> { CameraFactsAdapter(get()) }
     single { GuidanceSettingsStore(androidContext()) }
     single { PerceptionSettingsStore(androidContext()) }
     single { GuidanceDiagnosticsStore(sceneOverlayConfig = get(), uiFeatureFlags = get()) }

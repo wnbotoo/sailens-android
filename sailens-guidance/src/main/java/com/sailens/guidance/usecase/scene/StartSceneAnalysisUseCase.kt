@@ -5,6 +5,13 @@ import com.sailens.guidance.config.PipelinePerformanceBudget
 import com.sailens.guidance.model.common.ObstacleRunKind
 import com.sailens.guidance.processor.perception.PerceptionProfileManager
 import com.sailens.guidance.config.TraceRuntimeConfig
+import com.sailens.guidance.geometry.CameraFactsSource
+import com.sailens.guidance.geometry.CameraGeometryResolver
+import com.sailens.guidance.geometry.FrameFacts
+import com.sailens.guidance.geometry.PhoneGeometrySettings
+import com.sailens.guidance.geometry.withGeometry
+import com.sailens.guidance.motion.NoOrientationSource
+import com.sailens.guidance.motion.OrientationSource
 import com.sailens.guidance.model.trace.FrameTrace
 import com.sailens.guidance.model.trace.SessionTraceAccumulator
 import com.sailens.guidance.model.trace.SessionTraceMetadata
@@ -56,6 +63,12 @@ class StartSceneAnalysisUseCase(
     private val traceRuntimeConfig: TraceRuntimeConfig,
     private val pipelineBudget: PipelinePerformanceBudget,
     private val regressionRecorder: RegressionRecorder = RegressionRecorder.None,
+    // M3o geometry. The defaults leave it unavailable, which is legal: nothing decides on it yet.
+    private val orientationSource: OrientationSource = NoOrientationSource,
+    private val cameraFactsSource: CameraFactsSource = CameraFactsSource { null },
+    private val phoneGeometry: () -> PhoneGeometrySettings = { PhoneGeometrySettings.DEFAULT },
+    private val isStationary: () -> Boolean = { false },
+    private val cameraGeometryResolver: CameraGeometryResolver = CameraGeometryResolver(),
 ) {
     /**
      * @param releaseFrame hands each frame back to its source once this pipeline is done reading
@@ -104,6 +117,8 @@ class StartSceneAnalysisUseCase(
         processFrameUseCase.reset()
 
         try {
+        // The session owns the orientation sensors: started here, stopped in the finally below.
+        orientationSource.start()
         if (!perceptionRepository.isInitialized) {
             perceptionRepository.initialize()
             check(perceptionRepository.isInitialized) {
@@ -194,6 +209,19 @@ class StartSceneAnalysisUseCase(
                 val events = decideEventsUseCase(sceneSnapshot)
                 if (recording) regressionRecorder.endFrame(frame, events, null)
                 val decideCompletedAt = Timestamp.now()
+
+                // M3o: where the camera points, for the record. Read after the decision so it
+                // cannot slow the prompt; nothing above depends on it.
+                val geometry = cameraGeometryResolver.resolve(
+                    cameraFactsSource.current(),
+                    FrameFacts.of(frame),
+                    orientationSource::gravityNear,
+                    phoneGeometry(),
+                )
+                val motion = orientationSource.motionState(
+                    geometry.frameTimeNanos ?: frame.receivedElapsedRealtimeNanos,
+                    isStationary(),
+                )
 
                 val droppedFrames = lastSequenceNumber?.let { previousSequence ->
                     (frame.sequenceNumber - previousSequence - 1).coerceAtLeast(0).toInt()
@@ -326,7 +354,7 @@ class StartSceneAnalysisUseCase(
                     obstacleAcceleratorSelection = perceptionResult.obstacleRuntimeInfo.acceleratorSelection,
                     obstaclePreprocessBackend = perceptionResult.obstacleRuntimeInfo.preprocessBackend,
                     obstaclePostprocessBackend = perceptionResult.obstacleRuntimeInfo.postprocessBackend,
-                )
+                ).withGeometry(geometry, motion)
                 val runtimeStats = runtimeWindow.record(frameTrace, pipelineBudget)
 
                 return@mapNotNullReleasing PipelineFrameResult(
@@ -398,7 +426,9 @@ class StartSceneAnalysisUseCase(
                             roadVehicleCenterBandOverlap = sceneSnapshot.roadSafety.vehicleOnRoadCenterBandOverlap,
                             roadVehicleAreaRatio = sceneSnapshot.roadSafety.vehicleOnRoadAreaRatio,
                         ),
-                        events = events
+                        events = events,
+                        cameraGeometry = geometry,
+                        motion = motion,
                     ),
                     frameTrace = frameTrace,
                 )
@@ -435,6 +465,7 @@ class StartSceneAnalysisUseCase(
             logService.error("Navigation", "Error in navigation flow", error)
             throw error
         } finally {
+            orientationSource.stop()
             if (traceSessionStarted && accumulator != null) {
                 traceService.finishSession(
                     accumulator.build(completedAt = Timestamp.now())
