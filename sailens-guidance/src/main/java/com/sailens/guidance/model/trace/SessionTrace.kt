@@ -80,6 +80,29 @@ data class FrameTrace(
     val obstacleAcceleratorSelection: String = "unknown",
     val obstaclePreprocessBackend: String = "unknown",
     val obstaclePostprocessBackend: String = "unknown",
+    /**
+     * M3o camera geometry for this frame: "ok" / "degraded" / "unavailable"; "none" in traces
+     * written before it existed. Issues are [com.sailens.guidance.geometry.GeometryIssue] names,
+     * lower case. Nothing decides on these yet; they are here so recordings show what the
+     * geometry would have been.
+     */
+    val geometryQuality: String = "none",
+    val geometryIssues: List<String> = emptyList(),
+    /** "camera_realtime" / "source_receipt" / "none". */
+    val geometryTimeBasis: String = "none",
+    val gravityAgeMs: Double? = null,
+    /** Camera pitch below the horizon and roll (positive: gravity leans to image right), degrees. */
+    val pitchDownDeg: Double? = null,
+    val rollDeg: Double? = null,
+    /** "calibration" / "focal_length_estimate" / "none". */
+    val intrinsicsSource: String = "none",
+    /** Horizontal focal length in upright analysis-image pixels. */
+    val focalPx: Double? = null,
+    /** Device heading (not walking direction) and yaw rate, positive turning right. */
+    val headingDeg: Double? = null,
+    val yawRateDegPerS: Double? = null,
+    /** "ok" / "degraded" / "unavailable" / "none". */
+    val orientationQuality: String = "none",
 )
 
 data class OverlayRenderTrace(

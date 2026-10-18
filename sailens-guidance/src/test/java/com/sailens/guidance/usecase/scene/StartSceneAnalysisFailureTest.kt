@@ -10,6 +10,8 @@ import com.sailens.guidance.config.PipelinePerformanceBudget
 import com.sailens.guidance.config.TraceRuntimeConfig
 import com.sailens.guidance.model.common.DistanceLevel
 import com.sailens.guidance.model.common.PerceptionProfile
+import com.sailens.guidance.motion.NoOrientationSource
+import com.sailens.guidance.motion.OrientationSource
 import com.sailens.guidance.model.perception.ObstacleModelOutput
 import com.sailens.guidance.model.perception.SegmentationMask
 import com.sailens.guidance.model.perception.SegmentationOutput
@@ -141,7 +143,39 @@ class StartSceneAnalysisFailureTest {
         assertEquals(listOf(1L, 2L), released)
     }
 
-    private fun useCase(repository: PerceptionRepository, maxFailures: Int): StartSceneAnalysisUseCase {
+    @Test
+    fun `the session holds the orientation sensors exactly while it runs, failure or not`() {
+        val calls = mutableListOf<String>()
+        val sensors = object : OrientationSource by NoOrientationSource {
+            override fun start() { calls += "start" }
+            override fun stop() { calls += "stop" }
+        }
+
+        runBlocking {
+            useCase(ScriptedRepository(List(3) { true }), maxFailures = 3, orientation = sensors)(
+                frames(3), releaseFrame = {}, semanticMaskSnapshot = { false },
+            ).toList()
+        }
+        assertEquals(listOf("start", "stop"), calls)
+
+        calls.clear()
+        try {
+            runBlocking {
+                useCase(ScriptedRepository(List(5) { false }), maxFailures = 2, orientation = sensors)(
+                    frames(5), releaseFrame = {}, semanticMaskSnapshot = { false },
+                ).toList()
+            }
+            fail("the session should have ended")
+        } catch (_: GuidancePipelineFailedException) {
+        }
+        assertEquals(listOf("start", "stop"), calls)
+    }
+
+    private fun useCase(
+        repository: PerceptionRepository,
+        maxFailures: Int,
+        orientation: OrientationSource = NoOrientationSource,
+    ): StartSceneAnalysisUseCase {
         val perceptionConfig = PerceptionConfig(profile = PerceptionProfile.BASIC)
         val analysisConfig = AnalysisConfig()
         val semantics = CityscapesNavigationSemantics
@@ -188,6 +222,7 @@ class StartSceneAnalysisFailureTest {
             traceService = NoOpTraceService,
             traceRuntimeConfig = TraceRuntimeConfig(enabled = false),
             pipelineBudget = PipelinePerformanceBudget(maxConsecutiveFrameFailures = maxFailures),
+            orientationSource = orientation,
         )
     }
 
