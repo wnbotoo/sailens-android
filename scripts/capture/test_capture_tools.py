@@ -10,6 +10,7 @@ import os
 import sys
 import tempfile
 import unittest
+import zlib
 from contextlib import redirect_stdout
 
 import numpy as np
@@ -18,7 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import capture_stats  # noqa: E402
 import contact_sheet  # noqa: E402
 import timing_align  # noqa: E402
-from sailens_capture import UnsupportedCapture, find_captures, load_capture  # noqa: E402
+from sailens_capture import CLASS_MAP_HEADER, CLASS_MAP_MAGIC, UnsupportedCapture, find_captures, load_capture  # noqa: E402
 
 START_NS = 5_000_000_000
 START_WALL = 1_700_000_000_000
@@ -81,6 +82,52 @@ class ReaderTest(unittest.TestCase):
             capture = load_capture(ok)
             self.assertTrue(any("torn last line" in w for w in capture.warnings))
             self.assertTrue(any("future_record" in w for w in capture.warnings))
+
+
+class RegressionReaderTest(unittest.TestCase):
+    """Schema 1.3: the model-regression record, written here in ClassMapStore's byte format."""
+
+    @staticmethod
+    def class_map_entry(seq, ids, width, height):
+        raw = bytes(ids)
+        body = zlib.compress(raw, 1)
+        return CLASS_MAP_HEADER.pack(CLASS_MAP_MAGIC, seq, width, height, zlib.crc32(raw), len(body)) + body
+
+    def write(self, root, entries):
+        blob, frames = b"", []
+        for seq, ids in entries:
+            entry = self.class_map_entry(seq, ids, 4, 3)
+            ref = {"offset": len(blob), "length": len(entry), "width": 4, "height": 3, "crc32": zlib.crc32(bytes(ids))}
+            blob += entry
+            frames.append(json.dumps({"type": "regression_frame", "seq": seq, "sensorTimestampNanos": START_NS + seq,
+                                      "width": 1280, "height": 720, "rotationDegrees": 90,
+                                      "semantic": {"run": "ran", "classMap": ref}}))
+        frames.append(json.dumps({"type": "regression_revoke", "eventId": "e1", "decisionsBefore": 1,
+                                  "elapsedRealtimeNanos": START_NS}))
+        directory = write_capture(root, "reg", mode="model_regression", extra_lines={"regression.jsonl": frames},
+                                  manifest_overrides={"schemaMinor": 3, "group": "outdoor",
+                                                      "regression": {"recorderVersion": 1, "stats": {"framesRecorded": 2}}})
+        with open(os.path.join(directory, "classmaps.bin"), "wb") as f:
+            f.write(blob)
+        return directory
+
+    def test_regression_records_and_class_maps_read_back(self):
+        with tempfile.TemporaryDirectory() as root:
+            ids = [list(range(12)), [18 - (i % 19) for i in range(12)]]
+            capture = load_capture(self.write(root, [(1, ids[0]), (2, ids[1])]))
+            self.assertEqual(capture.warnings, [])
+            self.assertEqual(capture.group, "outdoor")
+            self.assertEqual([r["seq"] for r in capture.regression_frames], [1, 2])
+            self.assertEqual(len(capture.revokes), 1)
+            np.testing.assert_array_equal(capture.class_map(capture.regression_frames[1]),
+                                          np.array(ids[1], dtype=np.uint8).reshape(3, 4))
+
+    def test_a_class_map_entry_for_another_frame_is_refused(self):
+        with tempfile.TemporaryDirectory() as root:
+            capture = load_capture(self.write(root, [(1, [1] * 12)]))
+            wrong = dict(capture.regression_frames[0], seq=7)
+            with self.assertRaises(ValueError):
+                capture.class_map(wrong)
 
 
 class StatsTest(unittest.TestCase):

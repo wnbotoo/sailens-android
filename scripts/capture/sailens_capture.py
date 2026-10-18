@@ -1,4 +1,4 @@
-"""Reads Sailens field captures (M0a) and Guidance traces on the PC.
+"""Reads Sailens field captures (M0a), model-regression records (M0b) and Guidance traces on the PC.
 
 Mirrors the JVM reader (`CaptureSessionReader`, sailens-guidance): the schema version is read from
 the raw manifest before anything else, an unknown major version is refused as unsupported, a torn
@@ -18,13 +18,25 @@ from __future__ import annotations
 
 import json
 import os
+import struct
+import zlib
 from dataclasses import dataclass, field
 
 SUPPORTED_MAJOR = 1
 
 MANIFEST_FILE = "manifest.json"
-RECORD_FILES = ("frames.jsonl", "sensors.jsonl", "anchors.jsonl", "markers.jsonl")
-RECORD_TYPES = {"frame": "frames", "sensor": "sensors", "clock_anchor": "anchors", "marker": "markers"}
+CLASS_MAPS_FILE = "classmaps.bin"
+RECORD_FILES = (
+    "frames.jsonl", "sensors.jsonl", "anchors.jsonl", "markers.jsonl", "regression.jsonl", "windows.jsonl",
+)
+RECORD_TYPES = {
+    "frame": "frames", "sensor": "sensors", "clock_anchor": "anchors", "marker": "markers",
+    "regression_frame": "regression_frames", "regression_revoke": "revokes", "window_frame": "window_frames",
+}
+
+# classmaps.bin entry header (ClassMapStore, big-endian): magic, seq, width, height, crc32, length.
+CLASS_MAP_MAGIC = 0x53434D31
+CLASS_MAP_HEADER = struct.Struct(">IqiiIi")
 
 
 class UnsupportedCapture(Exception):
@@ -44,6 +56,10 @@ class Capture:
     anchors: list = field(default_factory=list)
     markers: list = field(default_factory=list)
     warnings: list = field(default_factory=list)
+    # model_regression only (schema 1.3)
+    regression_frames: list = field(default_factory=list)
+    revokes: list = field(default_factory=list)
+    window_frames: list = field(default_factory=list)
 
     @property
     def mode(self) -> str:
@@ -55,6 +71,18 @@ class Capture:
 
     def frame_path(self, frame: dict) -> str:
         return os.path.join(self.directory, frame["file"])
+
+    @property
+    def group(self):
+        return self.manifest.get("group")
+
+    def class_map(self, regression_frame: dict):
+        """The semantic class map of a regression frame as an H×W uint8 numpy array (not rotated),
+        checked against its reference like the JVM reader; None when the model did not run."""
+        ref = (regression_frame.get("semantic") or {}).get("classMap")
+        if ref is None:
+            return None
+        return read_class_map(os.path.join(self.directory, CLASS_MAPS_FILE), ref, regression_frame["seq"])
 
     def sensors_of(self, name: str) -> list:
         return [s for s in self.sensors if s.get("sensor") == name]
@@ -111,10 +139,37 @@ def load_capture(directory: str) -> Capture:
             getattr(capture, target).append(record)
     for kind, count in unknown.items():
         capture.warnings.append(f"{count} record(s) of unknown type '{kind}' ignored")
+    if capture.mode == "model_regression" and not raw.get("regression"):
+        capture.warnings.append("model_regression capture without a regression block in the manifest")
+    first_lost = ((raw.get("regression") or {}).get("stats") or {}).get("firstLostSeq")
+    if first_lost is not None:
+        capture.warnings.append(f"the regression record lost frames from seq {first_lost} on; replay is exact only before it")
     capture.frames.sort(key=lambda r: r["seq"])
     capture.sensors.sort(key=lambda r: r["timestampNanos"])
     capture.anchors.sort(key=lambda r: r["elapsedRealtimeNanos"])
     return capture
+
+
+def read_class_map(path: str, ref: dict, seq: int):
+    """One classmaps.bin entry, verified: it must be this frame's, of the recorded size and CRC."""
+    import numpy as np
+
+    with open(path, "rb") as f:
+        f.seek(ref["offset"])
+        entry = f.read(ref["length"])
+    if len(entry) != ref["length"] or len(entry) < CLASS_MAP_HEADER.size:
+        raise ValueError(f"frame {seq}: class map entry outside {os.path.basename(path)}")
+    magic, entry_seq, width, height, crc, length = CLASS_MAP_HEADER.unpack_from(entry)
+    if magic != CLASS_MAP_MAGIC:
+        raise ValueError(f"frame {seq}: no class map entry at offset {ref['offset']}")
+    if entry_seq != seq or width != ref["width"] or height != ref["height"] or crc != ref["crc32"]:
+        raise ValueError(f"frame {seq}: class map entry is for frame {entry_seq} {width}x{height}, not the one recorded")
+    if length != ref["length"] - CLASS_MAP_HEADER.size:
+        raise ValueError(f"frame {seq}: class map entry length mismatch")
+    raw = zlib.decompress(entry[CLASS_MAP_HEADER.size:])
+    if len(raw) != width * height or zlib.crc32(raw) != ref["crc32"]:
+        raise ValueError(f"frame {seq}: class map does not match its CRC")
+    return np.frombuffer(raw, dtype=np.uint8).reshape(height, width)
 
 
 def find_captures(root: str) -> list:

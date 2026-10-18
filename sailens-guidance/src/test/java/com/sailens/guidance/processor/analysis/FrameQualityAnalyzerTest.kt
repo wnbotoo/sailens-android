@@ -6,6 +6,7 @@ import com.sailens.core.frame.ImagePixelFormat
 import com.sailens.core.frame.Yuv420FrameData
 import com.sailens.core.frame.YuvPlaneData
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.random.Random
 
@@ -63,6 +64,39 @@ class FrameQualityAnalyzerTest {
         analyzer.reset()
 
         assertEquals(FrameQuality.OK, analyzer.analyze(texturedFrame(baseLuma = 130)))
+    }
+
+    @Test
+    fun `measure then classify then debounce is the same path as analyze`() {
+        // M0b replays from recorded measurements; that path must give the same verdicts.
+        val frames = listOf(texturedFrame(130), flatFrame(3), flatFrame(3), texturedFrame(18), flatFrame(210), texturedFrame(130))
+        val direct = FrameQualityAnalyzer(debounceFrames = 2)
+        val replayed = FrameQualityAnalyzer(debounceFrames = 2)
+        val detailed = FrameQualityAnalyzer(debounceFrames = 2)
+        for (frame in frames) {
+            val expected = direct.analyze(frame)
+            assertEquals(expected, replayed.analyzeMeasured(replayed.measure(frame)).stabilized)
+            val result = detailed.analyzeDetailed(frame)
+            assertEquals(expected, result.stabilized)
+            assertEquals(direct.classify(frame), result.classified)
+        }
+    }
+
+    @Test
+    fun `an unsampleable frame measures nothing and stays OK`() {
+        val analyzer = FrameQualityAnalyzer()
+        val empty = ImageFrame(0, 0, ByteArray(0), ImagePixelFormat.YUV_420_888, 0L, 0, 0L)
+        assertEquals(null, analyzer.measure(empty))
+        assertEquals(FrameQuality.OK, analyzer.classify(empty))
+    }
+
+    @Test
+    fun `sharpness is high on texture and zero on a flat or smooth view`() {
+        val analyzer = FrameQualityAnalyzer()
+        // A fully defocused lens: no detail at all. A linear gradient has no second derivative either.
+        assertEquals(0f, analyzer.measure(flatFrame(luma = 120))!!.sharpness, 0f)
+        assertEquals(0f, analyzer.measure(yuvFrame { x, _ -> x })!!.sharpness, 0f)
+        assertTrue(analyzer.measure(texturedFrame(baseLuma = 130))!!.sharpness > 10f)
     }
 
     /** 纹理丰富的画面：亮度围绕 [baseLuma] 有明显起伏。 */

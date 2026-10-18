@@ -19,6 +19,7 @@ import com.sailens.guidance.processor.perception.SegmentationAnalysisProcessor
 import com.sailens.guidance.repository.DepthRepository
 import com.sailens.guidance.repository.ObstacleProvider
 import com.sailens.guidance.repository.PerceptionRepository
+import com.sailens.guidance.trace.regression.RegressionRecorder
 import com.sailens.guidance.util.Timestamp
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
@@ -43,6 +44,7 @@ class ProcessFrameUseCase(
     private val obstacleExtractor: ObstacleExtractor,
     private val obstacleTracker: ObstacleTracker,
     private val clock: () -> Long = Timestamp::now,
+    private val regressionRecorder: RegressionRecorder = RegressionRecorder.None,
 ) {
     private val scheduler = PerceptionScheduler { profileManager.activeConfig }
     private var cachedSemanticAnalysis: CachedSemanticAnalysis? = null
@@ -127,8 +129,10 @@ class ProcessFrameUseCase(
         val depthEstimator: (NormalizedRect) -> DistanceLevel = { depthRepository.estimateDistance(it) }
         val trackingOutput = if (obstacleRun != null && obstacleDeferred != null) {
             val obstacleOutput = obstacleDeferred.await().getOrElse {
+                if (regressionRecorder.isRecording) regressionRecorder.onDetection(frame, null, it)
                 return@coroutineScope Result.failure(it)
             }
+            if (regressionRecorder.isRecording) regressionRecorder.onDetection(frame, obstacleOutput.detections, null)
             val completedAt = clock()
             scheduler.markDetectionRun(completedAt)
 
@@ -219,6 +223,7 @@ class ProcessFrameUseCase(
 
         // sem 是导航底线：无可复用缓存时必须运行，否则按 semanticTargetFps 间隔运行
         if (reusableCached != null && !scheduler.shouldRunSemantic(clock())) {
+            if (regressionRecorder.isRecording) regressionRecorder.onSemantic(frame, ran = false, output = null, failure = null)
             return Result.success(
                 SemanticAnalysisOutput(
                     analysis = reusableCached.analysis,
@@ -228,8 +233,11 @@ class ProcessFrameUseCase(
         }
 
         val segmentationOutput = perceptionRepository.segment(frame).getOrElse {
+            if (regressionRecorder.isRecording) regressionRecorder.onSemantic(frame, ran = true, output = null, failure = it)
             return Result.failure(it)
         }
+        // The class map is valid only now; the recorder copies what it keeps.
+        if (regressionRecorder.isRecording) regressionRecorder.onSemantic(frame, ran = true, output = segmentationOutput, failure = null)
         scheduler.markSemanticRun(clock())
         val analysis = try {
             segmentationAnalyzer.analyze(

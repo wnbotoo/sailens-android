@@ -83,6 +83,21 @@ class CooldownManager(
     /** 最近几次记录的撤销信息。送达方的回执总是紧跟在决策之后，保留少量即可。 */
     private val undoLog = LinkedHashMap<UUID, RecordUndo>()
 
+    /** 已完成的 [decide] 次数；撤销记下它，回放据此把撤销放回两次决策之间的原位。 */
+    private var decisions = 0L
+
+    /**
+     * 一次决策里对冷却的全部操作（设静止、过滤、记录）作为一个整体执行：送达方的撤销来自另一个
+     * 线程，只能落在两次决策之间，不会插进一次决策的过滤和记录之间。这样撤销的位置是确定的，
+     * M0b 回放才能精确复现。
+     */
+    @Synchronized
+    fun <T> decide(block: CooldownManager.() -> T): T {
+        val result = block()
+        decisions++
+        return result
+    }
+
     /**
      * 更新用户是否静止。由上游的运动检测驱动，见
      * [com.sailens.guidance.repository.DeviceSensorRepository.isStationary]。
@@ -161,8 +176,15 @@ class CooldownManager(
      * 只恢复仍然由这条事件写着的 key：撤销之前如果已有别的事件改写了同一个 key，那条更新的记录
      * 保持不动。未知 id（太旧或从未记录）是空操作。
      */
+    /** @return 撤销生效时已完成的决策次数（见 [decide]）。 */
     @Synchronized
-    fun revoke(eventId: UUID) {
+    fun revoke(eventId: UUID): Long {
+        val decisionsBefore = decisions
+        revokeRecord(eventId)
+        return decisionsBefore
+    }
+
+    private fun revokeRecord(eventId: UUID) {
         val undo = undoLog.remove(eventId) ?: return
         undo.previous.forEach { (key, previousRecord) ->
             if (lastEventRecords[key]?.eventId != eventId) return@forEach
@@ -181,6 +203,7 @@ class CooldownManager(
         recentEmissions.clear()
         undoLog.clear()
         isStationary = false
+        decisions = 0
     }
 
     /**

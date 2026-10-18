@@ -121,15 +121,16 @@ class CaptureSessionReaderTest {
 
     @Test
     fun `a newer minor version with a capture mode this reader does not know is read, not rejected`() {
-        // M0b adds "model_regression" in a minor bump; an older reader must carry it through.
+        // A later minor version may add a mode (as 1.3 added "model_regression"); an older reader
+        // must carry it through.
         val newer = CaptureSchema.encodeManifest(
-            manifest.copy(schemaMinor = CaptureSchema.MINOR + 1, captureMode = "model_regression"),
+            manifest.copy(schemaMinor = CaptureSchema.MINOR + 1, captureMode = "depth_survey"),
         )
 
         val read = CaptureSessionReader.read(session(manifestJson = newer)).orThrow()
 
-        assertEquals("model_regression", read.manifest.captureMode)
-        assertTrue(read.warnings.any { "capture mode 'model_regression'" in it })
+        assertEquals("depth_survey", read.manifest.captureMode)
+        assertTrue(read.warnings.any { "capture mode 'depth_survey'" in it })
     }
 
     @Test

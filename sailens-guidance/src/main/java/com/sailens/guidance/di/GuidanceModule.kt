@@ -29,6 +29,8 @@ import com.sailens.guidance.sensors.DeviceRotationDataSource
 import com.sailens.guidance.service.TraceReplayService
 import com.sailens.guidance.service.TraceService
 import com.sailens.guidance.service.TraceServiceDecorator
+import com.sailens.guidance.trace.regression.RecordingConnectivityStatsExtractor
+import com.sailens.guidance.trace.regression.RegressionRecorder
 import com.sailens.guidance.trace.FileTraceReplayService
 import com.sailens.guidance.trace.FileTraceService
 import com.sailens.guidance.trace.NoOpTraceService
@@ -69,10 +71,12 @@ val guidanceModule = module {
     }
 
     single<ConnectivityStatsExtractor> {
-        NativeConnectivityStatsExtractor(
+        val native = NativeConnectivityStatsExtractor(
             config = get(),
             logService = get(),
         )
+        // Debug builds bind a RegressionRecorder (M0b); release binds none.
+        getOrNull<RegressionRecorder>()?.let { RecordingConnectivityStatsExtractor(native, it) } ?: native
     }
 
     // Same-frame cross-provider cache. The current sem/det path starts both models concurrently, so

@@ -17,6 +17,7 @@ internal class CapturingTraceService(
     private val base: TraceService,
     private val capture: FieldCaptureController,
     private val sessions: GuidanceSessionMonitor? = null,
+    private val regression: RegressionCapture? = null,
 ) : TraceService by base {
 
     override fun startSession(metadata: SessionTraceMetadata) {
@@ -33,5 +34,9 @@ internal class CapturingTraceService(
 
     // Explicit so the delegation of the other calls is visible in review.
     override fun recordFrame(frameTrace: FrameTrace) = base.recordFrame(frameTrace)
-    override fun recordPromptOutcome(outcome: PromptOutcomeTrace) = base.recordPromptOutcome(outcome)
+    override fun recordPromptOutcome(outcome: PromptOutcomeTrace) {
+        base.recordPromptOutcome(outcome)
+        // A delivered prompt opens an event window in a model_regression capture.
+        runCatching { regression?.onPromptOutcome(outcome) }
+    }
 }

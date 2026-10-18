@@ -5,7 +5,8 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
 /**
- * Field capture format (M0a, docs/local-navigation-implementation.md §4).
+ * Field capture format (M0a, docs/local-navigation-implementation.md §4), with the model-regression
+ * record of M0b (§4, "M0b") in the same directory.
  *
  * One directory per Guidance session, named after the trace session id:
  *
@@ -17,6 +18,11 @@ import kotlinx.serialization.json.Json
  *   sensors.jsonl      SensorRecord per sensor event
  *   anchors.jsonl      ClockAnchorRecord at start, periodically and at the end
  *   markers.jsonl      MarkerRecord per "missed alert" press
+ *   regression.jsonl   model_regression only: RegressionFrameRecord per processed frame,
+ *                      RegressionRevokeRecord per revoked prompt
+ *   classmaps.bin      model_regression only: the semantic class maps (ClassMapStore)
+ *   windows.jsonl      model_regression only: WindowFrameRecord per full-resolution event frame
+ *   windows/           the event-window images
  * ```
  *
  * Every JSONL line is an object with a `type`.
@@ -33,8 +39,12 @@ import kotlinx.serialization.json.Json
  */
 object CaptureSchema {
     const val MAJOR: Int = 1
-    /** 1: `CaptureStats.framesMissedBySubscriber`. 2: `CaptureManifest.modelArtifacts`. */
-    const val MINOR: Int = 2
+    /**
+     * 1: `CaptureStats.framesMissedBySubscriber`. 2: `CaptureManifest.modelArtifacts`.
+     * 3: the `model_regression` mode -- `regression.jsonl`, `classmaps.bin`, `windows.jsonl`,
+     * `CaptureManifest.regression`, `group`, `sceneLabel`.
+     */
+    const val MINOR: Int = 3
 
     const val MANIFEST_FILE: String = "manifest.json"
     const val FRAMES_FILE: String = "frames.jsonl"
@@ -42,6 +52,10 @@ object CaptureSchema {
     const val SENSORS_FILE: String = "sensors.jsonl"
     const val ANCHORS_FILE: String = "anchors.jsonl"
     const val MARKERS_FILE: String = "markers.jsonl"
+    const val REGRESSION_FILE: String = "regression.jsonl"
+    const val CLASS_MAPS_FILE: String = "classmaps.bin"
+    const val WINDOWS_FILE: String = "windows.jsonl"
+    const val WINDOWS_DIR: String = "windows"
 
     internal const val TYPE_KEY: String = "type"
 
@@ -75,7 +89,22 @@ object CaptureModes {
      */
     const val TIMING_SYNC: String = "timing_sync"
 
-    val KNOWN: Set<String> = setOf(FIELD_EVIDENCE, TIMING_SYNC)
+    /**
+     * Field evidence plus the model-regression record (M0b): every processed frame's model outputs,
+     * clock readings and decisions, so the decision path can be replayed exactly on the JVM; and
+     * full-resolution frames around delivered prompts and markers.
+     */
+    const val MODEL_REGRESSION: String = "model_regression"
+
+    val KNOWN: Set<String> = setOf(FIELD_EVIDENCE, TIMING_SYNC, MODEL_REGRESSION)
+}
+
+/** Recording groups ([CaptureManifest.group]); an open string, like the mode. */
+object CaptureGroups {
+    const val OUTDOOR: String = "outdoor"
+    const val INDOOR: String = "indoor"
+
+    val KNOWN: Set<String> = setOf(OUTDOOR, INDOOR)
 }
 
 @Serializable
@@ -110,6 +139,16 @@ data class CaptureManifest(
     val pinned: Boolean = false,
     val exportedAtWallMs: Long? = null,
     val stats: CaptureStats = CaptureStats(),
+    /**
+     * Which recording group the session belongs to (one of [CaptureGroups], or a newer value). One
+     * scene is one Guidance session, so this and [sceneLabel] are how sessions are segmented --
+     * nothing is inferred from the images. Since schema 1.3.
+     */
+    val group: String? = null,
+    /** Free text naming the scene, set by the person recording. Since schema 1.3. */
+    val sceneLabel: String? = null,
+    /** Present when [captureMode] is [CaptureModes.MODEL_REGRESSION]. Since schema 1.3. */
+    val regression: RegressionManifest? = null,
 )
 
 /**
