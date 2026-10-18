@@ -510,6 +510,57 @@ R3 回放：JVM 回放框架（`RegressionReplay`）及其报告。然后是真�
   行为；基础资格不变。
 - **测试**：在每种分析旋转下，用合成传感器数据检查旋转和坐标轴约定；检查内参经过裁剪和旋转后的映射。
 
+### M3o 实际实现：第一部分，解析（纯 JVM）
+
+- `…guidance.geometry`：
+  - `CameraFacts` / `FrameFacts`：原始事实，可以从实时帧构造（`FrameFacts.of(ImageFrame)`），也可以从
+    采集数据构造（`CaptureCameraRecord.toCameraFacts()`、`FrameFacts.of(FrameRecord)`），所以录制数据
+    和相机走同一套解析代码。
+  - `CameraIntrinsicsResolver`：用标定值，没有时用焦距估算；经 `sensorToBufferTransform` 映射，再旋转
+    到正向。
+    - 变换的输入是**传感器坐标**，也就是 active 阵列的 Rect 所在的坐标系，包含它的原点偏移。标定值
+      相对于 pre-correction 阵列的左上角，所以先加上该阵列的原点。估算时的主点取 active 阵列在同一
+      坐标系里的中心。
+    - **不应用裁剪矩形**：模型看到的是整个缓冲区。
+    - 没有变换时，假定缓冲区是 active 阵列居中填充的结果，并打上标记。
+    - 不是轴对齐缩放/平移（可以交换或翻转轴）的变换一律拒绝。
+    - 用连续像素坐标：旋转 90° 时，缓冲区的 y 映射为正向图像的 `H − y`。
+  - `GravityInCamera`：设备 `TYPE_GRAVITY`（反作用力，朝上）→ 正向相机坐标系里的单位"向下"向量，
+    适用于后置相机，依据 `SENSOR_ORIENTATION` 和该帧的旋转。
+  - `CameraGeometryResolver`：每帧一个 `CameraGeometry`，含时间基准、内参、最近的重力采样及其时长差、
+    手机设置。
+    - 没有帧时间、内参、传感器方向或重力时为 **Unavailable**。
+    - 用接收时间对齐（未测量）、内参是估算或映射是假定的、重力离帧超过 100 ms 时为 **Degraded**。
+  - `PhoneGeometrySettings`（默认 1.3 m）。
+- `…guidance.motion`：
+  - `MotionTracker`（纯逻辑，输入 game rotation vector 采样）：相机朝向，手机右转时增大，以及偏航角
+    速度。
+    - 离竖直约 10° 以内时，朝向沿用上一次的值（DEGRADED），这一段不给角速度。
+    - 保留最近 128 个采样，按给定时间（帧的时间）作答，在该时间前后两个采样之间插值。该时间前后
+      200 ms 内都没有采样时为 UNAVAILABLE。
+  - `SensorSampleBuffer`：最近采样的环形缓冲，按时间找最近的一个。
+- 用 M2a 场景检查过：每个仿真帧都解析回它自己的俯角和类别图内参（449.625 / 180 / 320）。
+
+### M3o 实际实现：第二部分，接线
+
+- `AndroidOrientationSource`（`…guidance.motion`）：`SENSOR_DELAY_GAME` 下的 `TYPE_GRAVITY` 和
+  `TYPE_GAME_ROTATION_VECTOR`，在单独的线程上接收。
+  - **生命周期**：由 Guidance 会话自己启停（`StartSceneAnalysisUseCase`，在它的 `finally` 里停），所以
+    更高的采样率在 Guidance 之外没有任何开销。它带引用计数，晚结束的会话不会把下一个会话的传感器关掉。
+- `CameraFactsSource`：shell 绑定 `CameraFactsAdapter`，把 `sailens-camera` 的
+  `CameraCharacteristicsSnapshot` 转成 `CameraFacts`。没有这个绑定的宿主，Guidance 照常运行，只是几何
+  不可用，这是合法状态。
+- **每帧**在决策之后（不会拖慢提示）由 `StartSceneAnalysisUseCase` 解析出 `CameraGeometry` 和
+  `MotionState`，放进 `SceneResult`。
+  - **trace 字段**：`geometryQuality`、`geometryIssues`、`geometryTimeBasis`、`gravityAgeMs`、
+    `pitchDownDeg`、`rollDeg`、`intrinsicsSource`、`focalPx`、`headingDeg`、`yawRateDegPerS`、
+    `orientationQuality`。
+  - 旧 trace 解析为 `none`。
+  - **目前没有任何决策依赖这些字段。**
+- `PhoneGeometrySettings` 仍是 1.3 m 默认值。shell 里的存储和设置界面随 M3a（第一个用到高度的地方）
+  一起做。
+- 仿真器把每个场景自己的原始事实喂给几何。基准多了一列 `geometry=<质量>/<俯角>`，其他字段一个都没变。
+
 ## 8. M3a — 接地点距离
 
 **输入**：`CameraGeometry`；分析图像坐标下的一个框；该帧的其他检测结果和 sem 掩码（用于有效性检查）。
