@@ -157,9 +157,12 @@ class GroundContactDistanceTest {
     @Test
     fun `a box whose implied height does not fit its class is implausible`() {
         val g = geometry(17.0)
-        // Legs behind a 1 m wall: the box ends at the wall top, reads farther and far too tall.
-        val cut = box(5.0, 17.0, visibleFromM = 1.0)
-        assertEquals(ContactValidity.IMPLAUSIBLE_BOX, estimate(cut, g).validity)
+        // Legs behind a 1 m wall: the box ends at the wall top, so it reads farther and taller. Its
+        // contact is barely below the horizon, where the allowed gravity error spans heights from
+        // plausible to not, so the check cannot reject it -- and need not: reading farther, it can
+        // never make a level nearer.
+        val cut = estimate(box(5.0, 17.0, visibleFromM = 1.0), g)
+        assertTrue("reads farther than the truth: ${cut.lowerM}", cut.lowerM!! > 5.0)
         // A box that stops at knee height: too short for a person standing there.
         assertEquals(ContactValidity.IMPLAUSIBLE_BOX, estimate(box(3.0, 17.0, objectHeightM = 0.4), g).validity)
         // The same short box as a static obstacle has no size to check.
@@ -171,6 +174,34 @@ class GroundContactDistanceTest {
         val tall = box(1.6, 40.0)
         assertEquals(0f, tall.y)
         assertEquals(ContactValidity.VALID, estimate(tall, geometry(40.0)).validity)
+    }
+
+    @Test
+    fun `the height check allows the same gravity error as the distance interval`() {
+        // Review round 1, P2: camera at 1 m, a 0.7 m object 6 m ahead, 25 degrees down, gravity off
+        // by just under the 2 degree tolerance. The interval still holds the truth, so the contact
+        // must not be thrown out as implausible either.
+        val b = box(6.0, 25.0, heightM = 1.0, objectHeightM = 0.7)
+        for (error in listOf(-1.99, 0.0, 1.99)) {
+            val e = estimate(b, geometry(25.0 + error, heightM = 1.0f))
+            assertEquals("gravity error $error", ContactValidity.VALID, e.validity)
+            assertTrue("gravity error $error: ${e.lowerM} .. ${e.upperM}", e.lowerM!! <= 6.0 && 6.0 <= e.upperM!!)
+        }
+        // Outside every allowed error the check still bites: a person box that ends at knee height.
+        val knee = box(3.0, 25.0, heightM = 1.0, objectHeightM = 0.35)
+        for (error in listOf(-1.99, 0.0, 1.99)) {
+            assertEquals("gravity error $error", ContactValidity.IMPLAUSIBLE_BOX, estimate(knee, geometry(25.0 + error, heightM = 1.0f)).validity)
+        }
+    }
+
+    @Test
+    fun `each candidate gravity tilts both rays together`() {
+        // A gravity error tilts the whole camera, so the top and bottom rays move together and the
+        // implied height changes little. Tilting only the bottom ray would let this 0.55 m "person"
+        // reach the 0.7 m floor (0.71 with the height tolerance); moving both, it tops out at 0.68.
+        for (pitch in listOf(15.0, 25.0)) {
+            assertEquals("pitch $pitch", ContactValidity.IMPLAUSIBLE_BOX, estimate(box(3.0, pitch, objectHeightM = 0.55), geometry(pitch)).validity)
+        }
     }
 
     @Test

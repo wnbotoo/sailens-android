@@ -69,6 +69,7 @@ import com.sailens.guidance.semantics.CityscapesNavigationSemantics
 import com.sailens.guidance.service.TraceService
 import com.sailens.guidance.trace.capture.CaptureSchema
 import com.sailens.guidance.trace.capture.ClassMapStore
+import com.sailens.guidance.trace.capture.EventRecord
 import com.sailens.guidance.trace.capture.RegressionClocks
 import com.sailens.guidance.trace.capture.RegressionFrameRecord
 import com.sailens.guidance.trace.capture.RegressionRevokeRecord
@@ -393,6 +394,22 @@ class RegressionReplayRoundTripTest {
         val withoutRevokes = RegressionReplay(recorded.activeConfig, analysisConfig, semantics)
             .replay(recorder.frames, emptyList(), classMap = { recorder.classMaps[it.seq] })
         assertTrue("revokes should change later decisions", withoutRevokes.firstMismatch != null)
+
+        // Counterfactual delivery, run on the recorded config: taking each revoke where the event is
+        // unchanged must reproduce the record exactly; taking none must not.
+        fun counterfactual(delivery: RegressionReplay.CounterfactualDelivery): List<List<EventRecord>> {
+            val decided = mutableListOf<List<EventRecord>>()
+            val report = RegressionReplay(recorded.activeConfig, analysisConfig, semantics).replay(
+                recorder.frames, recorder.revokes, classMap = { recorder.classMaps[it.seq] },
+                onFrame = { _, outcome -> decided += outcome.events.map { it.toRecord().withoutId() } },
+                counterfactual = delivery,
+            )
+            assertNull(report.firstMismatch)
+            return decided
+        }
+        val asRecorded = recorder.frames.filter { it.failure == null }.map { frame -> frame.events.map(EventRecord::withoutId) }
+        assertEquals(asRecorded, counterfactual(RegressionReplay.CounterfactualDelivery.UNCHANGED_AS_RECORDED))
+        assertTrue(asRecorded != counterfactual(RegressionReplay.CounterfactualDelivery.ALL_DELIVERED))
     }
 
     @Test
