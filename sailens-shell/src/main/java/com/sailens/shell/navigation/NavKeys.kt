@@ -33,5 +33,9 @@ data object FieldCaptureKey : NavKey
 @Serializable
 data object ModelConsistencyKey : NavKey
 
+/** Debug-only destination (M3a ground-contact distance and phone height); release registers no entry. */
+@Serializable
+data object GroundContactKey : NavKey
+
 @Serializable
 data class TraceReportKey(val sessionId: String? = null) : NavKey

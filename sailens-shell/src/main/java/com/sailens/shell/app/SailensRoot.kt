@@ -1,5 +1,6 @@
 package com.sailens.shell.app
 
+import com.sailens.shell.navigation.GroundContactKey
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.material3.windowsizeclass.WindowSizeClass
@@ -155,6 +156,7 @@ fun SailensRoot(
                             onOpenTraceReports = { backStack.add(TraceSessionsKey) },
                             onOpenFieldCapture = { backStack.add(FieldCaptureKey) },
                             onOpenModelConsistency = { backStack.add(ModelConsistencyKey) },
+                            onOpenGroundContact = { backStack.add(GroundContactKey) },
                         )
                     }
                     entry<OssLicensesKey> {

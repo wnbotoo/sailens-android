@@ -1,5 +1,6 @@
 package com.sailens.shell.navigation
 
+import com.sailens.shell.groundcontact.GroundContactScreen
 import androidx.navigation3.runtime.EntryProviderScope
 import androidx.navigation3.runtime.NavBackStack
 import androidx.navigation3.runtime.NavKey
@@ -30,5 +31,8 @@ fun EntryProviderScope<NavKey>.sailensDebugEntries(backStack: NavBackStack<NavKe
     }
     entry<ModelConsistencyKey> {
         ModelConsistencyScreen(onNavigateBack = { backStack.removeLastOrNull() })
+    }
+    entry<GroundContactKey> {
+        GroundContactScreen(onNavigateBack = { backStack.removeLastOrNull() })
     }
 }

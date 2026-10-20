@@ -4,6 +4,8 @@ import com.sailens.guidance.config.PerceptionConfig
 import com.sailens.guidance.model.common.ObstacleProviderType
 import com.sailens.guidance.model.common.PerceptionProfile
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PerceptionProfileManagerTest {
@@ -59,5 +61,23 @@ class PerceptionProfileManagerTest {
         val active = manager.activateSelected()
 
         assertEquals(initialConfig, active)
+    }
+
+    @Test
+    fun `the ground contact switch takes effect at the next activation, with the profile`() {
+        val manager = PerceptionProfileManager(initialConfig)
+        manager.selectGroundContact(true)
+        assertFalse("not mid-session", manager.activeConfig.groundContact.enabled)
+
+        val on = manager.activateSelected()
+        assertTrue(on.groundContact.enabled)
+        // Everything else is the template's.
+        assertEquals(initialConfig.copy(groundContact = initialConfig.groundContact.copy(enabled = true)), on)
+
+        manager.selectProfile(PerceptionProfile.BASIC)
+        assertTrue("a profile switch keeps the switch", manager.activateSelected().groundContact.enabled)
+        manager.selectGroundContact(false)
+        assertFalse(manager.activateSelected().groundContact.enabled)
+        assertEquals(PerceptionProfile.BASIC, manager.activeConfig.profile)
     }
 }

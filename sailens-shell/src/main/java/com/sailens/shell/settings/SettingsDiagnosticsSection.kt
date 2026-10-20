@@ -12,6 +12,7 @@ internal fun SettingsDiagnosticsSection(
     onOpenTraceReports: () -> Unit,
     onOpenFieldCapture: () -> Unit,
     onOpenModelConsistency: () -> Unit,
+    onOpenGroundContact: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     SettingsSection(
@@ -32,6 +33,11 @@ internal fun SettingsDiagnosticsSection(
             title = stringResource(R.string.btn_open_model_consistency),
             supportingText = stringResource(R.string.settings_diagnostics_model_consistency_supporting),
             onClick = onOpenModelConsistency,
+        )
+        SettingRow(
+            title = stringResource(R.string.btn_open_ground_contact),
+            supportingText = stringResource(R.string.settings_diagnostics_ground_contact_supporting),
+            onClick = onOpenGroundContact,
         )
     }
 }

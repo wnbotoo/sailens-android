@@ -674,6 +674,29 @@ R3 回放：JVM 回放框架（`RegressionReplay`）及其报告。然后是真�
     - 发出提示时，障碍物的点估计距离各段中位数为 1.8–3.7 m。
   - 每段录制的具体数字见 M3a 第一段的 PR；它们会随所假定的机高而变。
 
+### M3a 实际实现：第二段，机高与开关
+
+- `Placement` 带有每种预设的高度和身高比例（提案值，未校准）：
+
+  | 携带方式 | 预设高度 | 身高比例 |
+  |---|---|---|
+  | 胸前挂绳 | 1.25 m | 0.73 |
+  | 胸前手持 | 1.20 m | 0.70 |
+  | 腰间 | 1.00 m | 0.58 |
+
+- `PhoneGeometrySettings.of(placement, bodyHeightCm)` 给出设置：
+  - 什么都没说 → 初始值；
+  - 只有携带方式 → `PRESET`；
+  - 携带方式加 100–220 cm 的身高 → `CALIBRATED`，取整到厘米；
+  - 只有身高 → 初始值。
+- `PhoneGeometryStore`（shell，main 源集）保存携带方式、身高和实验开关。Guidance 每帧读一次 `current()`。
+- **开关只在会话边界生效。** `PerceptionProfileManager.selectGroundContact` 在下一次 `activateSelected`
+  时和挡位一起生效，所以运行中的会话以及它的采集所记录的配置，都不会中途改变。
+- **release 始终关闭。** 只有 debug 构建里 app 才按存储的开关设置。唯一的界面是 debug 页面 设置 →
+  诊断 →"接地点距离（实验）"：开关、携带方式、可选身高，以及当前采用的机高和来源。
+  - 携带方式在任何 debug 构建里都能设置。release 里没有任何地方写这个存储，所以 trace 记录的是初始值。
+- 把界面挪进用户设置，是满足 M3a 启用门槛的一部分。
+
 ## 9. M3b — 基于深度的地面几何
 
 **模型契约**（`docs/models.md` 增加一节）：输入 RGB，ImageNet 归一化，固定形状；输出相对视差（越

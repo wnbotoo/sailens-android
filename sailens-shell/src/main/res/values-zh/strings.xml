@@ -379,4 +379,30 @@
     <string name="field_capture_scene_label">场景名称</string>
     <string name="field_capture_cap_label">采集存储上限</string>
     <string name="field_capture_cap_value">%1$d GB</string>
+
+    <!-- 接地点距离，M3a（调试诊断） -->
+    <string name="btn_open_ground_contact">接地点距离（实验）</string>
+    <string name="settings_diagnostics_ground_contact_supporting">手机携带方式，以及按障碍物接地点估算距离的开关</string>
+    <string name="title_ground_contact_page">接地点距离</string>
+    <string name="ground_contact_intro">利用手机的倾角和离地高度，从障碍物与地面的接触点估算距离。它只会把距离判得比现有估计更近，绝不会更远。修改在下次开始导航时生效。</string>
+    <string name="ground_contact_section_switch">实验</string>
+    <string name="ground_contact_enable">启用接地点距离</string>
+    <string name="ground_contact_enable_needs_placement">请先选择携带方式。在那之前，这个开关不起作用。</string>
+    <string name="ground_contact_enable_next_session">下次开始导航时生效。</string>
+    <string name="ground_contact_section_placement">手机携带方式</string>
+    <string name="ground_contact_placement_none">未设置</string>
+    <string name="ground_contact_placement_none_supporting">仅在记录中使用默认高度 %1$s 米</string>
+    <string name="ground_contact_placement_chest_lanyard">胸前挂绳</string>
+    <string name="ground_contact_placement_handheld_chest">胸前手持</string>
+    <string name="ground_contact_placement_waist">腰间</string>
+    <string name="ground_contact_placement_height">约 %1$s 米</string>
+    <string name="ground_contact_body_height_label">你的身高，厘米（可选）</string>
+    <string name="ground_contact_body_height_invalid">请输入 %1$d 到 %2$d 厘米之间的身高</string>
+    <string name="btn_ground_contact_body_height_save">保存身高</string>
+    <string name="btn_ground_contact_body_height_clear">清除身高</string>
+    <string name="ground_contact_result">采用的机高：%1$s 米，%2$s</string>
+    <string name="ground_contact_source_default_seed">默认值</string>
+    <string name="ground_contact_source_preset">按携带方式</string>
+    <string name="ground_contact_source_calibrated">按身高换算</string>
+    <string name="ground_contact_proposals_note">预设高度和身高比例是初步估计，还没有用录制数据核对。</string>
 </resources>

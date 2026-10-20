@@ -30,6 +30,11 @@ class PerceptionProfileManager(
     var activeConfig: PerceptionConfig = initialConfig
         private set
 
+    /** Whether the ground-contact distance (M3a) may decide, from the next session on. */
+    @Volatile
+    var selectedGroundContact: Boolean = initialConfig.groundContact.enabled
+        private set
+
     /**
      * 记录挡位选择，不立即生效。唯一的调用入口是设置页的
      * SettingsViewModel.setPerceptionProfile——它同时负责经 PerceptionSettingsStore
@@ -40,13 +45,25 @@ class PerceptionProfileManager(
     }
 
     /**
+     * Records whether the ground-contact distance (M3a) is switched on; like the profile, it takes
+     * effect at the next [activateSelected], so a session (and its capture's recorded config) never
+     * changes midway. Its only caller is the debug settings screen until M3a's enable gate is met.
+     */
+    fun selectGroundContact(enabled: Boolean) {
+        selectedGroundContact = enabled
+    }
+
+    /**
      * 把当前选中的挡位落成运行配置，返回本次会话使用的 config。
      * 必须在会话开始、obstacle provider 初始化之前调用。
      */
     fun activateSelected(): PerceptionConfig {
-        val profile = selectedProfile
-        if (profile != activeConfig.profile) {
-            activeConfig = template.copy(profile = profile)
+        val next = template.copy(
+            profile = selectedProfile,
+            groundContact = template.groundContact.copy(enabled = selectedGroundContact),
+        )
+        if (next != activeConfig) {
+            activeConfig = next
         }
         return activeConfig
     }
