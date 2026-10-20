@@ -123,11 +123,14 @@ class GroundContactCaptureEvaluationTest {
 
         /** Obstacle prompts: the offered (first) event of each frame, when it is about an obstacle. */
         fun obstaclePrompts() = frames.mapNotNull { (record, outcome) ->
-            outcome.events.firstOrNull()?.takeIf { it.messageKey.startsWith("event_obstacle_") }?.let { Prompt(record.seq, it, outcome.obstacles) }
+            outcome.events.firstOrNull()?.takeIf { it.messageKey.startsWith("event_obstacle_") }?.let {
+                Prompt(record.seq, it, outcome.obstacles, record.events.firstOrNull()?.id)
+            }
         }
     }
 
-    private class Prompt(val seq: Long, val event: SceneEvent, val obstacles: List<DetectedObstacle>) {
+    /** [recordedId]: the id the device gave this frame's offered event, to look its revoke up by. */
+    private class Prompt(val seq: Long, val event: SceneEvent, val obstacles: List<DetectedObstacle>, val recordedId: String?) {
         /** The obstacle behind the prompt: the nearest tracked one in the zones it speaks of. */
         val obstacle: DetectedObstacle? = obstacles
             .filter { it.zone in event.relatedZones }
@@ -165,28 +168,40 @@ class GroundContactCaptureEvaluationTest {
         }
         appendLine("  valid contacts nearer than today: $wouldRaise (${pct(wouldRaise, tracked.size)})")
 
+        // A prompt the device offered but could not deliver (speech busy) was revoked: nobody heard it.
+        val revoked = session.revokes.map { it.eventId }.toSet()
         val offPrompts = off.obstaclePrompts()
-        appendLine("  obstacle prompts offered (M3a off): ${offPrompts.size}")
+        fun heard(p: Prompt) = p.recordedId !in revoked
+        appendLine("  obstacle prompts offered (M3a off): ${offPrompts.size}, delivered ${offPrompts.count(::heard)}")
         for (p in offPrompts) {
             val e = p.obstacle?.distanceEstimate
             appendLine(
                 "    seq ${p.seq} ${p.event.messageKey} ${p.event.priority} distance=${p.event.distance ?: "-"}" +
+                    (if (heard(p)) "" else " [revoked]") +
                     " obstacle=${p.obstacle?.category ?: "?"} y=${p.obstacle?.boundingBox?.maxY?.let(::fmt) ?: "-"}" +
                     " contact=${e?.contact?.validity?.name?.lowercase() ?: "none"} point=${fmt(e?.contact?.pointM)} lower=${fmt(e?.contact?.lowerM)}",
             )
         }
-        val points = offPrompts.mapNotNull { p -> p.obstacle?.distanceEstimate?.contact?.takeIf { it.validity == ContactValidity.VALID }?.pointM }.sorted()
+        val points = offPrompts.filter(::heard).mapNotNull { p -> p.obstacle?.distanceEstimate?.contact?.takeIf { it.validity == ContactValidity.VALID }?.pointM }.sorted()
         if (points.isNotEmpty()) {
-            appendLine("  prompt distance (valid contacts, point estimate): n ${points.size}, min ${fmt(points.first())}, median ${fmt(points[points.size / 2])}, max ${fmt(points.last())}")
+            appendLine("  delivered prompt distance (valid contacts, point estimate): n ${points.size}, min ${fmt(points.first())}, median ${fmt(points[points.size / 2])}, max ${fmt(points.last())}")
         }
 
         val onPrompts = on.obstaclePrompts()
         val offKeys = offPrompts.map { it.seq to it.event.messageKey }.toSet()
         val onKeys = onPrompts.map { it.seq to it.event.messageKey }.toSet()
-        appendLine("  with M3a on: obstacle prompts ${onPrompts.size}; added ${(onKeys - offKeys).size}, removed ${(offKeys - onKeys).size}")
-        (onKeys - offKeys).sortedBy { it.first }.forEach { appendLine("    + seq ${it.first} ${it.second}") }
-        (offKeys - onKeys).sortedBy { it.first }.forEach { appendLine("    - seq ${it.first} ${it.second}") }
         val offBySeq = offPrompts.associateBy { it.seq to it.event.messageKey }
+        val removed = (offKeys - onKeys).sortedBy { it.first }
+        val removedHeard = removed.count { heard(offBySeq.getValue(it)) }
+        // Counterfactual offers: whether the device would have delivered them is unknown, and a
+        // revoke only reaches an event the device also decided, so offers re-made after a revoke
+        // on the device do not recur. Compare delivered prompts, not offers.
+        appendLine(
+            "  with M3a on: obstacle prompts offered ${onPrompts.size}; added ${(onKeys - offKeys).size}, " +
+                "removed ${removed.size} (of which delivered on the device: $removedHeard)",
+        )
+        (onKeys - offKeys).sortedBy { it.first }.forEach { appendLine("    + seq ${it.first} ${it.second}") }
+        removed.forEach { appendLine("    - seq ${it.first} ${it.second}" + if (heard(offBySeq.getValue(it))) "" else " [was revoked]") }
         val reworded = onPrompts.mapNotNull { p ->
             val before = offBySeq[p.seq to p.event.messageKey] ?: return@mapNotNull null
             if (before.event.distance != p.event.distance || before.event.priority != p.event.priority) {

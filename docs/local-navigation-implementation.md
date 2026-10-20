@@ -789,15 +789,19 @@ pitch −30°…+10°, the used level never becomes less near than today's); occ
   - First as recorded, which must stay exact with M3a off. Geometry is resolved from each capture's
     sensor log and camera record.
   - Then counterfactually with M3a on.
-  - Assuming a 1.3 m preset:
+  - It compares **delivered** prompts, not offers. A prompt the device offered but revoked (speech
+    busy) was never heard, and a counterfactual run cannot re-create those re-offers.
+  - With the real carry for these recordings (handheld at chest, about 1.15 m):
     - Valid contacts are 41–75% outdoors and 21–56% indoors.
     - Indoors the main loss is `GROUND_UNSEEN` (25–71%).
-    - A valid contact is nearer than today's level in 0.1–2.9% of obstacle-frames.
-    - Obstacle prompts change in two of the seven captures.
-    - Where a prompt was offered, the obstacle's point estimate had a median of 1.8–3.7 m per
+    - A valid contact is nearer than today's level in 0.1–6.1% of obstacle-frames.
+    - Delivered obstacle prompts change materially in one capture (overcast dusk: 14 of 46
+      delivered prompts drop out, 12 are added, 16 reworded) and by at most 2 in the others.
+    - Only 20–93% of offered obstacle prompts were delivered.
+    - Where a prompt was delivered, the obstacle's point estimate had a median of 1.8–3.4 m per
       capture.
   - The per-capture numbers are in the M3a part 1 pull request. They move with the phone height
-    assumed.
+    assumed; at 1.3 m and 1.2 m the effects are smaller.
 
 ### M3a as built: part 2, phone height and the switch
 
