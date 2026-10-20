@@ -1,5 +1,11 @@
 package com.sailens.shell.groundcontact
 
+import kotlinx.coroutines.launch
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.foundation.relocation.bringIntoViewRequester
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -62,6 +68,9 @@ internal fun GroundContactScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
+                // Edge-to-edge: without this the number keyboard covers the height block's buttons
+                // and its error.
+                .imePadding()
                 .verticalScroll(rememberScrollState())
                 .padding(SailensDimens.screenPadding),
             verticalArrangement = Arrangement.spacedBy(SailensDimens.spaceLg),
@@ -120,27 +129,35 @@ private fun BodyHeight(initial: Int?, onSave: (String) -> Boolean) {
     var text by rememberSaveable { mutableStateOf(initial?.toString().orEmpty()) }
     var invalid by remember { mutableStateOf(false) }
     val range = PhoneGeometrySettings.BODY_HEIGHT_CM_RANGE
+    // The field, its error and its buttons are kept in view together while the keyboard is up.
+    val inView = remember { BringIntoViewRequester() }
+    val scope = rememberCoroutineScope()
+    fun reveal() {
+        scope.launch { inView.bringIntoView() }
+    }
     fun save() {
         invalid = !onSave(text)
+        reveal()
     }
-    Column(verticalArrangement = Arrangement.spacedBy(SailensDimens.spaceSm)) {
+    Column(
+        verticalArrangement = Arrangement.spacedBy(SailensDimens.spaceSm),
+        modifier = Modifier.bringIntoViewRequester(inView),
+    ) {
         OutlinedTextField(
             value = text,
             onValueChange = { text = it.filter(Char::isDigit).take(3); invalid = false },
             label = { Text(stringResource(R.string.ground_contact_body_height_label)) },
             singleLine = true,
             isError = invalid,
-            supportingText = if (invalid) {
-                { Text(stringResource(R.string.ground_contact_body_height_invalid, range.first, range.last)) }
-            } else {
-                null
-            },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
             keyboardActions = KeyboardActions(onDone = { save() }),
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .onFocusChanged { if (it.isFocused) reveal() },
         )
         if (invalid) {
-            // Spoken: the field's own error text is not announced when it appears.
+            // The error lives here rather than in the field's supporting text: a live region is
+            // announced when it appears, and the field's own error text is not.
             Text(
                 text = stringResource(R.string.ground_contact_body_height_invalid, range.first, range.last),
                 color = MaterialTheme.colorScheme.error,
