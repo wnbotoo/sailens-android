@@ -2,19 +2,24 @@ package com.sailens.guidance.depth
 
 import com.sailens.core.geometry.NormalizedRect
 import com.sailens.guidance.geometry.CameraGeometry
+import com.sailens.guidance.geometry.CameraIntrinsics
 import com.sailens.guidance.geometry.GeometryIssue
 import com.sailens.guidance.geometry.GeometryQuality
 import com.sailens.guidance.geometry.HeightSource
+import com.sailens.guidance.geometry.Vec3
 import com.sailens.guidance.model.common.DistanceLevel
 import com.sailens.guidance.model.common.GroundType
 import com.sailens.guidance.model.common.ObstacleCategory
 import com.sailens.guidance.model.perception.SegmentationMask
 import com.sailens.guidance.semantics.NavigationSemantics
 import kotlinx.serialization.Serializable
+import kotlin.math.abs
 import kotlin.math.asin
+import kotlin.math.cos
 import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.sin
 import kotlin.math.sqrt
 import kotlin.math.tan
 
@@ -194,7 +199,7 @@ class GroundContactDistanceEstimator(semantics: NavigationSemantics) {
         if (isOccluded(box, frame.otherBoxes, config)) return result(ContactValidity.OCCLUDED)
         val segmentation = frame.segmentation
         if (segmentation != null && !groundBelow(box, segmentation, config)) return result(ContactValidity.GROUND_UNSEEN)
-        if (!plausible(box, category, depression, h, tolerance, geometry, config)) return result(ContactValidity.IMPLAUSIBLE_BOX)
+        if (!plausible(box, category, h, tolerance, geometry, config)) return result(ContactValidity.IMPLAUSIBLE_BOX)
         return result(ContactValidity.VALID)
     }
 
@@ -205,6 +210,10 @@ class GroundContactDistanceEstimator(semantics: NavigationSemantics) {
     fun depressionRad(x: Float, y: Float, geometry: CameraGeometry): Double? {
         val k = geometry.intrinsics ?: return null
         val g = geometry.gravityInCamera ?: return null
+        return depressionRad(x, y, k, g)
+    }
+
+    private fun depressionRad(x: Float, y: Float, k: CameraIntrinsics, g: Vec3): Double {
         val rx = (x * k.width - k.cx).toDouble() / k.fx
         val ry = (y * k.height - k.cy).toDouble() / k.fy
         val norm = sqrt(rx * rx + ry * ry + 1.0)
@@ -265,7 +274,6 @@ class GroundContactDistanceEstimator(semantics: NavigationSemantics) {
     private fun plausible(
         box: NormalizedRect,
         category: ObstacleCategory,
-        depression: Double,
         h: Double,
         tolerance: Double,
         geometry: CameraGeometry,
@@ -273,15 +281,47 @@ class GroundContactDistanceEstimator(semantics: NavigationSemantics) {
     ): Boolean {
         val range = PLAUSIBLE_HEIGHT_M[category] ?: return true
         if (box.y <= config.clippedBottomMargin) return true
-        val top = depressionRad(box.centerX, box.y, geometry) ?: return true
-        val implied = h * (1 - tan(top) / tan(depression))
-        val low = implied * (1 - tolerance)
-        val high = implied * (1 + tolerance)
+        val k = geometry.intrinsics ?: return true
+        val g = geometry.gravityInCamera ?: return true
+        // The box is implausible only if no height the tolerances allow fits: the same gravity
+        // error the distance interval allows (each candidate used for both rays) and the height
+        // tolerance.
+        var low = Double.POSITIVE_INFINITY
+        var high = Double.NEGATIVE_INFINITY
+        for (candidate in gravityCandidates(g, Math.toRadians(config.gravityToleranceDeg.toDouble()))) {
+            val bottom = depressionRad(box.centerX, box.maxY, k, candidate)
+            if (bottom <= 0.0) continue
+            val implied = h * (1 - tan(depressionRad(box.centerX, box.y, k, candidate)) / tan(bottom))
+            low = min(low, implied * (1 - tolerance))
+            high = max(high, implied * (1 + tolerance))
+        }
+        if (low > high) return true
         return high >= range.start && low <= range.endInclusive
+    }
+
+    /**
+     * [g] and [g] tilted by [delta] in [GRAVITY_DIRECTIONS] directions around it: the edge of the
+     * cone of gravity errors the tolerance allows, sampled.
+     */
+    private fun gravityCandidates(g: Vec3, delta: Double): List<Vec3> {
+        val n = g.normalized()
+        val seed = if (abs(n.x) < 0.9f) Vec3(1f, 0f, 0f) else Vec3(0f, 1f, 0f)
+        val along = seed.x * n.x + seed.y * n.y + seed.z * n.z
+        val u = Vec3(seed.x - along * n.x, seed.y - along * n.y, seed.z - along * n.z).normalized()
+        val v = Vec3(n.y * u.z - n.z * u.y, n.z * u.x - n.x * u.z, n.x * u.y - n.y * u.x)
+        val c = cos(delta).toFloat()
+        val s = sin(delta).toFloat()
+        return listOf(n) + (0 until GRAVITY_DIRECTIONS).map { i ->
+            val phi = 2 * Math.PI * i / GRAVITY_DIRECTIONS
+            val a = (s * cos(phi)).toFloat()
+            val b = (s * sin(phi)).toFloat()
+            Vec3(c * n.x + a * u.x + b * v.x, c * n.y + a * u.y + b * v.y, c * n.z + a * u.z + b * v.z)
+        }
     }
 
     private companion object {
         const val PROBE_STRIDE = 2
+        const val GRAVITY_DIRECTIONS = 16
         const val MAX_DEPRESSION = Math.PI / 2 - 1e-6
 
         /** Proposals, not calibrated: wide enough for children, seated people and buses. */

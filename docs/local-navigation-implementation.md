@@ -738,12 +738,15 @@ pitch −30°…+10°, the used level never becomes less near than today's); occ
     - `GROUND_UNSEEN`: under 30% of the strip below the contact is ground (passable or a ground type)
       in the sem class map. The strip is 2% of the frame high and spans the box's central half.
     - `IMPLAUSIBLE_BOX`: the box's implied height `H = h (1 − tan β_top / tan β)` falls outside its
-      class's range, after the height tolerance.
+      class's range under every allowed error. The errors are the height tolerance and the same ±2°
+      gravity error the interval allows: 17 candidate gravities, each used for both rays.
   - **Two departures from the sketch above:**
     - `GROUND_UNSEEN` is split out of `OCCLUDED`. It is common indoors, where the sem model reads
       reflective floors as building, and the evaluation needs to see it separately.
     - A box cut short at the bottom (legs behind a wall) reads farther and *taller*, not shorter.
-      The plausibility check catches both directions.
+      Near the horizon the allowed gravity error spans plausible heights, so such a box can pass;
+      reading farther, it can never make a level nearer. The check bites on gross cases, such as a
+      person box that ends at the knee.
   - **Height ranges** (proposals, not calibrated): person 0.7–2.4 m, bicycle 0.6–2.2 m, vehicle
     0.9–4.5 m.
     - Static classes have no range.
@@ -773,7 +776,13 @@ pitch −30°…+10°, the used level never becomes less near than today's); occ
   - It is recorded, not re-resolved from the sensor log: the live pipeline uses the nearest sample
     it *has*, which a replay cannot know.
   - Replay uses it by default. A caller can supply geometry for older records.
-  - A counterfactual replay (`compareDecisions = false`) runs a config the device did not run.
+  - A counterfactual replay (`counterfactual = …`) runs a config the device did not run. The
+    device's revokes say only which of *its* prompts went undelivered. A changed prompt may have
+    been delivered after all: an upgrade can interrupt the speech that blocked the original. So a
+    counterfactual run states its assumption:
+    - `UNCHANGED_AS_RECORDED`: a revoke reaches only an identical event. On the recorded config this
+      reproduces the device exactly, which a test checks.
+    - `ALL_DELIVERED`: no revoke applies.
 - **Simulator**:
   - Two new scenarios: a tilt sweep near a person, and walking toward a parked car at the field
     pitch.
@@ -784,24 +793,31 @@ pitch −30°…+10°, the used level never becomes less near than today's); occ
     - No scenario's decided events change, the distance wording included.
     - Levels do change. A person 3 m away at about 29° down stays MEDIUM where today's level says
       FAR, and the car becomes NEAR about 0.25 m sooner.
-- **Evaluation** (`GroundContactCaptureEvaluationTest`, local only): it replays the seven M0b-exit
-  captures twice.
-  - First as recorded, which must stay exact with M3a off. Geometry is resolved from each capture's
-    sensor log and camera record.
-  - Then counterfactually with M3a on.
-  - It compares **delivered** prompts, not offers. A prompt the device offered but revoked (speech
-    busy) was never heard, and a counterfactual run cannot re-create those re-offers.
-  - With the real carry for these recordings (handheld at chest, about 1.15 m):
+- **Evaluation** (`GroundContactCaptureEvaluationTest`, local only):
+  - **Geometry:** a capture's recorded geometry with only the phone height replaced. An older
+    capture is resolved from its sensor log, which needs the camera's realtime clock; a capture
+    with neither is reported as not evaluable.
+  - **Exact run:** the capture is replayed as recorded, which must stay exact with M3a off.
+  - **Counterfactual runs:** under each delivery assumption, with M3a off and on. M3a's effect is
+    on against off *under the same assumption*.
+  - **Coverage:** every run must cover every frame the record allows. A prefix before a lost frame
+    is labelled and excluded from the pass, and an empty evaluation fails.
+  - **What it counts:** prompts the user would have **heard**, not offers. A revoked offer (speech
+    busy) was never heard. A prompt the device never made has unknown delivery and is counted
+    apart.
+  - Results with the real carry for the seven M0b-exit captures (handheld at chest, about 1.15 m):
     - Valid contacts are 41–75% outdoors and 21–56% indoors.
     - Indoors the main loss is `GROUND_UNSEEN` (25–71%).
     - A valid contact is nearer than today's level in 0.1–6.1% of obstacle-frames.
-    - Delivered obstacle prompts change materially in one capture (overcast dusk: 14 of 46
-      delivered prompts drop out, 12 are added, 16 reworded) and by at most 2 in the others.
+    - Heard obstacle prompts change materially in one capture, overcast dusk: of 46–47 heard,
+      12–15 drop out, 4–5 are reworded and 11–13 come on frames that had none. In each of the
+      others, 0–5 heard prompts are reworded or drop out.
+    - The two assumptions agree to within 3 prompts per capture.
     - Only 20–93% of offered obstacle prompts were delivered.
-    - Where a prompt was delivered, the obstacle's point estimate had a median of 1.8–3.4 m per
+    - Where a prompt was heard, the obstacle's point estimate had a median of 1.8–3.4 m per
       capture.
   - The per-capture numbers are in the M3a part 1 pull request. They move with the phone height
-    assumed; at 1.3 m and 1.2 m the effects are smaller.
+    assumed.
 
 ## 9. M3b — Ground geometry from depth
 
