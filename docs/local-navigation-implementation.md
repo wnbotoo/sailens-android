@@ -842,6 +842,33 @@ pitch −30°…+10°, the used level never becomes less near than today's); occ
   - The per-capture numbers are in the M3a part 1 pull request. They move with the phone height
     assumed.
 
+### M3a as built: part 2, phone height and the switch
+
+- `Placement` carries each preset's height and body-height ratio (proposals, not calibrated):
+
+  | Placement | Preset height | Body-height ratio |
+  |---|---|---|
+  | chest lanyard | 1.25 m | 0.73 |
+  | handheld at chest | 1.20 m | 0.70 |
+  | waist | 1.00 m | 0.58 |
+
+- `PhoneGeometrySettings.of(placement, bodyHeightCm)` gives the settings:
+  - nothing → the seed;
+  - a placement → `PRESET`;
+  - a placement and a body height of 100–220 cm → `CALIBRATED`, rounded to the centimetre;
+  - a body height alone → the seed.
+- `PhoneGeometryStore` (shell, main source set) keeps the placement, the body height and the
+  experimental switch. Guidance reads `current()` once per frame.
+- **The switch reaches Guidance at a session boundary.** `PerceptionProfileManager.selectGroundContact`
+  takes effect at the next `activateSelected`, together with the profile. So a running session, and
+  the config its capture records, never changes midway.
+- **Release stays off.** The app sets the switch from the store only in a debug build. The only UI is
+  the debug screen Settings → Diagnostics → "Ground-contact distance (experimental)": the switch, the
+  placement, an optional body height, and the height in use with its source.
+  - The placement can still be set there in any debug build. In release nothing writes the store, so
+    traces record the seed.
+- Moving the UI into the user settings is part of meeting M3a's enable gate.
+
 ## 9. M3b — Ground geometry from depth
 
 **Model contract** (`docs/models.md` gets a section): input RGB, ImageNet normalisation, fixed

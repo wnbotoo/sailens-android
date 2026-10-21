@@ -1,5 +1,6 @@
 package com.sailens.shell.di
 
+import com.sailens.shell.guidance.settings.PhoneGeometryStore
 import com.sailens.core.log.LogService
 import com.sailens.guidance.geometry.CameraFactsSource
 import com.sailens.shell.FileLogService
@@ -60,6 +61,7 @@ val shellModule = module {
     single<CameraFactsSource> { CameraFactsAdapter(get()) }
     single { GuidanceSettingsStore(androidContext()) }
     single { PerceptionSettingsStore(androidContext()) }
+    single { PhoneGeometryStore(androidContext()) }
     single { GuidanceDiagnosticsStore(sceneOverlayConfig = get(), uiFeatureFlags = get()) }
 
     // Shared output ownership (architecture.md §6.6). Every screen that speaks goes through these

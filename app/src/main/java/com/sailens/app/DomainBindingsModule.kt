@@ -1,5 +1,7 @@
 package com.sailens.app
 
+import com.sailens.shell.guidance.settings.PhoneGeometryStore
+import com.sailens.BuildConfig
 import com.sailens.guidance.geometry.CameraFactsSource
 import com.sailens.guidance.repository.DeviceSensorRepository
 import com.sailens.guidance.processor.analysis.ConnectivityAnalysisProcessor
@@ -56,7 +58,13 @@ val domainBindingsModule = module {
     single { ObstacleExtractor(config = get(), navigationSemantics = get()) }
     single { ObstacleTracker(config = get()) }
     // 设置页选择的挡位经由 manager 在下一次导航会话开始时生效
-    single { PerceptionProfileManager(initialConfig = get()) }
+    single {
+        PerceptionProfileManager(initialConfig = get()).apply {
+            // M3a's ground-contact distance stays off in release until its enable gate is met; in a
+            // debug build the diagnostics screen's switch, remembered across restarts, applies.
+            if (BuildConfig.DEBUG) selectGroundContact(get<PhoneGeometryStore>().choice.value.groundContactEnabled)
+        }
+    }
     single { RoadSafetyAnalyzer(config = get(), navigationSemantics = get()) }
     single { ObstacleOcclusionAnalyzer(config = get()) }
     single { GroundTypeDetector(config = get()) }
@@ -138,6 +146,7 @@ val domainBindingsModule = module {
             orientationSource = get(),
             // A host without a camera-facts binding runs Guidance without geometry.
             cameraFactsSource = getOrNull() ?: CameraFactsSource { null },
+            phoneGeometry = get<PhoneGeometryStore>().let { store -> store::current },
             isStationary = get<DeviceSensorRepository>().let { sensors -> { sensors.isStationary.value } },
         )
     }

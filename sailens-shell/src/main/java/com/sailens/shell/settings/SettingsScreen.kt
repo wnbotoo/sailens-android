@@ -47,6 +47,7 @@ fun SettingsScreen(
     onOpenTraceReports: () -> Unit,
     onOpenFieldCapture: () -> Unit,
     onOpenModelConsistency: () -> Unit,
+    onOpenGroundContact: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: SettingsViewModel = koinViewModel(),
 ) {
@@ -130,6 +131,7 @@ fun SettingsScreen(
                     onOpenTraceReports = onOpenTraceReports,
                     onOpenFieldCapture = onOpenFieldCapture,
                     onOpenModelConsistency = onOpenModelConsistency,
+                    onOpenGroundContact = onOpenGroundContact,
                 )
             }
 

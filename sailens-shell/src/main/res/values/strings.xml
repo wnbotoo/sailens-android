@@ -391,4 +391,30 @@
     <string name="field_capture_scene_label">Scene name</string>
     <string name="field_capture_cap_label">Storage cap for captures</string>
     <string name="field_capture_cap_value">%1$d GB</string>
+
+    <!-- Ground-contact distance, M3a (debug diagnostics) -->
+    <string name="btn_open_ground_contact">Ground-contact distance (experimental)</string>
+    <string name="settings_diagnostics_ground_contact_supporting">How you carry the phone, and the switch for distance from where obstacles meet the ground</string>
+    <string name="title_ground_contact_page">Ground-contact distance</string>
+    <string name="ground_contact_intro">Estimates how far an obstacle is from where it meets the ground, using the tilt and height of the phone. It can only make a distance nearer than the current estimate, never farther. Changes apply the next time Guidance starts.</string>
+    <string name="ground_contact_section_switch">Experiment</string>
+    <string name="ground_contact_enable">Use ground-contact distance</string>
+    <string name="ground_contact_enable_needs_placement">Choose how you carry the phone first. Until then this changes nothing.</string>
+    <string name="ground_contact_enable_next_session">Applies the next time Guidance starts.</string>
+    <string name="ground_contact_section_placement">How you carry the phone</string>
+    <string name="ground_contact_placement_none">Not set</string>
+    <string name="ground_contact_placement_none_supporting">The default height of %1$s m is used for the record only</string>
+    <string name="ground_contact_placement_chest_lanyard">On a lanyard at the chest</string>
+    <string name="ground_contact_placement_handheld_chest">In the hand at chest height</string>
+    <string name="ground_contact_placement_waist">At the waist</string>
+    <string name="ground_contact_placement_height">About %1$s m</string>
+    <string name="ground_contact_body_height_label">Your height in centimetres (optional)</string>
+    <string name="ground_contact_body_height_invalid">Enter a height from %1$d to %2$d cm</string>
+    <string name="btn_ground_contact_body_height_save">Save height</string>
+    <string name="btn_ground_contact_body_height_clear">Clear height</string>
+    <string name="ground_contact_result">Phone height used: %1$s m, %2$s</string>
+    <string name="ground_contact_source_default_seed">default</string>
+    <string name="ground_contact_source_preset">from how you carry it</string>
+    <string name="ground_contact_source_calibrated">from your height</string>
+    <string name="ground_contact_proposals_note">The preset heights and the height ratios are first guesses, not yet checked against recordings.</string>
 </resources>

@@ -1,5 +1,6 @@
 package com.sailens.shell.di
 
+import com.sailens.shell.groundcontact.GroundContactViewModel
 import com.sailens.guidance.config.AnalysisConfig
 import com.sailens.guidance.config.PerceptionConfig
 import com.sailens.guidance.processor.perception.PerceptionProfileManager
@@ -114,6 +115,7 @@ val shellDebugModule: Module = module {
     single<HardwareKeyHandler> { VolumeDownMarkerKeyHandler(get(), get()) }
     single<GuidanceStartGate> { FieldCaptureStartGate(androidContext(), get()) }
     viewModel { FieldCaptureViewModel(get(), get()) }
+    viewModel { GroundContactViewModel(store = get(), profiles = get()) }
 
     single { GuidanceSessionMonitor() }
     viewModel {
