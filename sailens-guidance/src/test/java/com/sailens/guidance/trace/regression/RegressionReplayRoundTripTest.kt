@@ -439,42 +439,70 @@ class RegressionReplayRoundTripTest {
         assertTrue("geometry should change decisions", withoutGeometry.firstMismatch != null)
     }
 
-    @Test
-    fun `a record written to disk replays through the reader`() {
-        val session = runSession(record = true)
+    /**
+     * Writes [session]'s record as `RegressionCapture` would -- class maps in seq order, frames
+     * pointing at them -- with [frames] and the manifest's completeness facts open to tampering, and
+     * reads it back.
+     */
+    private fun writeCapture(
+        session: Session,
+        dir: java.io.File,
+        frames: List<RegressionFrameRecord> = session.recorder!!.frames,
+        complete: Boolean = true,
+        framesRecorded: Long = session.recorder!!.frames.size.toLong(),
+        firstLostSeq: Long? = null,
+    ): com.sailens.guidance.trace.capture.CaptureSession {
         val recorder = session.recorder!!
-        val dir = java.nio.file.Files.createTempDirectory("regression-capture").toFile()
-        try {
-            // As RegressionCapture writes it: class maps in seq order, frames pointing at them.
-            java.io.FileOutputStream(java.io.File(dir, CaptureSchema.CLASS_MAPS_FILE)).use { out ->
-                recorder.frames.forEach { frame ->
-                    recorder.classMaps[frame.seq]?.let { ids ->
-                        val ref = frame.semantic!!.classMap!!
-                        out.write(ClassMapStore.encode(frame.seq, ref.width, ref.height, ids).bytes)
-                    }
+        java.io.FileOutputStream(java.io.File(dir, CaptureSchema.CLASS_MAPS_FILE)).use { out ->
+            frames.forEach { frame ->
+                recorder.classMaps[frame.seq]?.let { ids ->
+                    val ref = frame.semantic!!.classMap!!
+                    out.write(ClassMapStore.encode(frame.seq, ref.width, ref.height, ids).bytes)
                 }
             }
-            java.io.File(dir, CaptureSchema.REGRESSION_FILE).writeText(
-                (recorder.frames.map(CaptureSchema::encodeRecord) + recorder.revokes.map(CaptureSchema::encodeRecord))
-                    .joinToString(separator = "\n", postfix = "\n"),
-            )
-            java.io.File(dir, CaptureSchema.MANIFEST_FILE).writeText(
-                CaptureSchema.encodeManifest(
-                    com.sailens.guidance.trace.capture.CaptureManifest(
-                        sessionId = "synthetic", captureMode = com.sailens.guidance.trace.capture.CaptureModes.MODEL_REGRESSION,
-                        startedWallMs = 1, startedElapsedRealtimeNanos = 1, deviceManufacturer = "Test", deviceModel = "JVM",
-                        sdkInt = 0, complete = true,
-                        regression = com.sailens.guidance.trace.capture.RegressionManifest(
-                            perceptionConfig = CaptureSchema.json.encodeToJsonElement(PerceptionConfig.serializer(), session.activeConfig),
-                            analysisConfig = CaptureSchema.json.encodeToJsonElement(AnalysisConfig.serializer(), analysisConfig),
-                            taxonomyId = semantics.taxonomyId.value,
+        }
+        java.io.File(dir, CaptureSchema.REGRESSION_FILE).writeText(
+            (frames.map(CaptureSchema::encodeRecord) + recorder.revokes.map(CaptureSchema::encodeRecord))
+                .joinToString(separator = "\n", postfix = "\n"),
+        )
+        java.io.File(dir, CaptureSchema.MANIFEST_FILE).writeText(
+            CaptureSchema.encodeManifest(
+                com.sailens.guidance.trace.capture.CaptureManifest(
+                    sessionId = "synthetic", captureMode = com.sailens.guidance.trace.capture.CaptureModes.MODEL_REGRESSION,
+                    startedWallMs = 1, startedElapsedRealtimeNanos = 1, deviceManufacturer = "Test", deviceModel = "JVM",
+                    sdkInt = 0, complete = complete,
+                    regression = com.sailens.guidance.trace.capture.RegressionManifest(
+                        perceptionConfig = CaptureSchema.json.encodeToJsonElement(PerceptionConfig.serializer(), session.activeConfig),
+                        analysisConfig = CaptureSchema.json.encodeToJsonElement(AnalysisConfig.serializer(), analysisConfig),
+                        taxonomyId = semantics.taxonomyId.value,
+                        stats = com.sailens.guidance.trace.capture.RegressionStats(
+                            framesRecorded = framesRecorded,
+                            framesLost = if (firstLostSeq != null) 1 else 0,
+                            firstLostSeq = firstLostSeq,
                         ),
                     ),
                 ),
-            )
-            val read = com.sailens.guidance.trace.capture.CaptureSessionReader.read(dir).let {
-                (it as com.sailens.guidance.trace.capture.CaptureReadResult.Read).session
-            }
+            ),
+        )
+        return com.sailens.guidance.trace.capture.CaptureSessionReader.read(dir).let {
+            (it as com.sailens.guidance.trace.capture.CaptureReadResult.Read).session
+        }
+    }
+
+    private fun <T> withTempDir(block: (java.io.File) -> T): T {
+        val dir = java.nio.file.Files.createTempDirectory("regression-capture").toFile()
+        try {
+            return block(dir)
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `a record written to disk replays through the reader`() {
+        val session = runSession(record = true)
+        withTempDir { dir ->
+            val read = writeCapture(session, dir)
             val block = read.manifest.regression!!
             val report = RegressionReplay(
                 CaptureSchema.json.decodeFromJsonElement(PerceptionConfig.serializer(), block.perceptionConfig!!),
@@ -483,9 +511,52 @@ class RegressionReplayRoundTripTest {
             ).replay(read.regressionFrames, read.revokes, classMap = { com.sailens.guidance.trace.capture.CaptureSessionReader.classMap(read, it) })
             assertNull(report.firstMismatch?.toString(), report.firstMismatch)
             assertEquals(frameCount.toInt(), report.framesReplayed)
-        } finally {
-            dir.deleteRecursively()
         }
+    }
+
+    /** The phone settings the M3a sessions here ran with, so the evaluation's exact run matches. */
+    private val evaluation = GroundContactEvaluation(PhoneGeometrySettings(1.3f, HeightSource.PRESET, Placement.HANDHELD_CHEST))
+
+    @Test
+    fun `the evaluation of a capture recorded with M3a on compares against M3a really off`() {
+        // Review round 2, P1: built from the recorded config alone, the "off" baseline stayed on.
+        val result = withTempDir { dir -> evaluation.evaluate(writeCapture(runSession(record = true, groundContact = true), dir))!! }
+        assertTrue(result.recordedOn)
+        assertEquals(emptyList<String>(), result.problems)
+        assertTrue(result.complete)
+        assertTrue(
+            "with M3a on recorded, off and on must still decide differently in this scene",
+            result.changes.getValue(RegressionReplay.CounterfactualDelivery.UNCHANGED_AS_RECORDED).decisionsDiffer,
+        )
+    }
+
+    @Test
+    fun `the evaluation of a capture recorded with M3a off has the device as its off baseline`() {
+        val result = withTempDir { dir -> evaluation.evaluate(writeCapture(runSession(record = true), dir))!! }
+        assertTrue(!result.recordedOn)
+        assertEquals(emptyList<String>(), result.problems)
+        assertTrue(result.complete)
+    }
+
+    @Test
+    fun `a truncated or unfinished capture is evaluated but never counted complete`() {
+        // Review round 2, P2: the records read must not vouch for themselves.
+        val session = runSession(record = true)
+        val truncated = withTempDir { dir -> evaluation.evaluate(writeCapture(session, dir, frames = session.recorder!!.frames.take(5)))!! }
+        assertEquals(emptyList<String>(), truncated.problems)
+        assertTrue("records missing against the manifest's count", !truncated.complete)
+        val unfinished = withTempDir { dir -> evaluation.evaluate(writeCapture(session, dir, complete = false))!! }
+        assertTrue("the manifest says it did not finish", !unfinished.complete)
+    }
+
+    @Test
+    fun `a capture that loses its first frame evaluates nothing and says so`() {
+        val session = runSession(record = true)
+        val result = withTempDir { dir ->
+            evaluation.evaluate(writeCapture(session, dir, firstLostSeq = session.recorder!!.frames.first().seq))!!
+        }
+        assertTrue(result.problems.toString(), result.problems.any { "no frame to evaluate" in it })
+        assertTrue(!result.complete)
     }
 
     @Test

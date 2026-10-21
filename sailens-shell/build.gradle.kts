@@ -30,6 +30,10 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+    testOptions {
+        // SceneEventStringsTest reads the string files themselves: an edited string must re-run it.
+        unitTests.all { test -> test.inputs.dir("src/main/res").withPathSensitivity(PathSensitivity.RELATIVE) }
+    }
 }
 
 dependencies {

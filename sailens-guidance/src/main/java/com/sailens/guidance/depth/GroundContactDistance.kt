@@ -13,13 +13,10 @@ import com.sailens.guidance.model.common.ObstacleCategory
 import com.sailens.guidance.model.perception.SegmentationMask
 import com.sailens.guidance.semantics.NavigationSemantics
 import kotlinx.serialization.Serializable
-import kotlin.math.abs
 import kotlin.math.asin
-import kotlin.math.cos
 import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
-import kotlin.math.sin
 import kotlin.math.sqrt
 import kotlin.math.tan
 
@@ -267,9 +264,17 @@ class GroundContactDistanceEstimator(semantics: NavigationSemantics) {
 
     /**
      * The height the box implies for an upright object standing at the contact:
-     * `H = h − d·tan β_top`, with the top ray's angle β_top. A box cut short at the bottom (legs
-     * behind a wall) reads farther and *taller*; one that runs past the contact reads nearer and
-     * shorter. A box whose top is clipped is not judged, and classes without a known size are not.
+     * `H = h (1 − tan β_top / tan β_bottom)`, with each ray's angle below the horizon. A box cut
+     * short at the bottom (legs behind a wall) reads farther and *taller*; one that runs past the
+     * contact reads nearer and shorter. A box whose top is clipped is not judged, and classes
+     * without a known size are not.
+     *
+     * The box is implausible only if *no* height the tolerances allow fits its class. The bound is
+     * proved, not sampled: a gravity within δ of the estimate moves the angle between gravity and
+     * any ray by at most δ (triangle inequality on the sphere), so each β lies within δ of its
+     * nominal value, clipped to ±90°. `H` is monotonic in `tan β_top` and in `1 / tan β_bottom`, and
+     * linear in the phone height, so the extremes over those intervals enclose every combination the
+     * tolerances allow -- including the two rays' shared gravity, which can only narrow it.
      */
     private fun plausible(
         box: NormalizedRect,
@@ -283,45 +288,21 @@ class GroundContactDistanceEstimator(semantics: NavigationSemantics) {
         if (box.y <= config.clippedBottomMargin) return true
         val k = geometry.intrinsics ?: return true
         val g = geometry.gravityInCamera ?: return true
-        // The box is implausible only if no height the tolerances allow fits: the same gravity
-        // error the distance interval allows (each candidate used for both rays) and the height
-        // tolerance.
-        var low = Double.POSITIVE_INFINITY
-        var high = Double.NEGATIVE_INFINITY
-        for (candidate in gravityCandidates(g, Math.toRadians(config.gravityToleranceDeg.toDouble()))) {
-            val bottom = depressionRad(box.centerX, box.maxY, k, candidate)
-            if (bottom <= 0.0) continue
-            val implied = h * (1 - tan(depressionRad(box.centerX, box.y, k, candidate)) / tan(bottom))
-            low = min(low, implied * (1 - tolerance))
-            high = max(high, implied * (1 + tolerance))
-        }
-        if (low > high) return true
-        return high >= range.start && low <= range.endInclusive
-    }
-
-    /**
-     * [g] and [g] tilted by [delta] in [GRAVITY_DIRECTIONS] directions around it: the edge of the
-     * cone of gravity errors the tolerance allows, sampled.
-     */
-    private fun gravityCandidates(g: Vec3, delta: Double): List<Vec3> {
-        val n = g.normalized()
-        val seed = if (abs(n.x) < 0.9f) Vec3(1f, 0f, 0f) else Vec3(0f, 1f, 0f)
-        val along = seed.x * n.x + seed.y * n.y + seed.z * n.z
-        val u = Vec3(seed.x - along * n.x, seed.y - along * n.y, seed.z - along * n.z).normalized()
-        val v = Vec3(n.y * u.z - n.z * u.y, n.z * u.x - n.x * u.z, n.x * u.y - n.y * u.x)
-        val c = cos(delta).toFloat()
-        val s = sin(delta).toFloat()
-        return listOf(n) + (0 until GRAVITY_DIRECTIONS).map { i ->
-            val phi = 2 * Math.PI * i / GRAVITY_DIRECTIONS
-            val a = (s * cos(phi)).toFloat()
-            val b = (s * sin(phi)).toFloat()
-            Vec3(c * n.x + a * u.x + b * v.x, c * n.y + a * u.y + b * v.y, c * n.z + a * u.z + b * v.z)
-        }
+        val delta = Math.toRadians(config.gravityToleranceDeg.toDouble())
+        val bottom = depressionRad(box.centerX, box.maxY, k, g)
+        val top = depressionRad(box.centerX, box.y, k, g)
+        // Below the horizon throughout, or the ratio is unbounded and nothing can be ruled out.
+        if (bottom - delta <= 0.0) return true
+        val inverseBottom = listOf(1 / tan(min(bottom + delta, MAX_DEPRESSION)), 1 / tan(bottom - delta))
+        val tanTop = listOf(tan(max(top - delta, -MAX_DEPRESSION)), tan(min(top + delta, MAX_DEPRESSION)))
+        val ratios = tanTop.flatMap { t -> inverseBottom.map { t * it } }
+        val heights = listOf(h * (1 - tolerance), h * (1 + tolerance))
+        val implied = heights.flatMap { hh -> listOf(hh * (1 - ratios.max()), hh * (1 - ratios.min())) }
+        return implied.max() >= range.start && implied.min() <= range.endInclusive
     }
 
     private companion object {
         const val PROBE_STRIDE = 2
-        const val GRAVITY_DIRECTIONS = 16
         const val MAX_DEPRESSION = Math.PI / 2 - 1e-6
 
         /** Proposals, not calibrated: wide enough for children, seated people and buses. */
