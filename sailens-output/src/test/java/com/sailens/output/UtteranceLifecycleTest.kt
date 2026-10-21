@@ -4,6 +4,8 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.Collections
+import java.util.concurrent.CountDownLatch
 
 /**
  * The attempt bookkeeping behind the speech lifecycle (det-first plan D1.3), in the orders the
@@ -135,7 +137,7 @@ class UtteranceLifecycleTest {
     }
 
     @Test
-    fun `a callback after its session ended still belongs to that session`() {
+    fun `a callback after its session ended is never reported, least of all into the next session`() {
         lifecycle.beginSession("s1")
         submit(entry("a", logical = "event-a"))
         lifecycle.endSession("s1")
@@ -145,8 +147,10 @@ class UtteranceLifecycleTest {
         val unknown = only(UtteranceEventKind.UNKNOWN_TERMINAL)
         assertEquals(UtteranceReasons.SESSION_ENDED, unknown.reason)
         assertEquals("s1", unknown.session)
-        val done = only(UtteranceEventKind.DONE)
-        assertEquals("never the session current when it arrives", "s1", done.session)
+        assertTrue("its session is closed: the record already said 'unknown'", events.none { it.kind == UtteranceEventKind.DONE })
+        // An attempt of the new session is reported as usual.
+        submit(entry("b"))
+        assertEquals("s2", events.last().session)
     }
 
     @Test
@@ -219,59 +223,113 @@ class UtteranceLifecycleTest {
         throwing.engineCallback(UtteranceEventKind.DONE, "a", 1, 0)
     }
 
-    @Test
-    fun `ending a session waits for an event already decided but still on its way`() {
-        // The engine thread settles the attempt, then is descheduled before it reaches the observer.
-        // The session must not end -- and the record close -- in between.
-        val entered = java.util.concurrent.CountDownLatch(1)
-        val release = java.util.concurrent.CountDownLatch(1)
-        val seen = java.util.Collections.synchronizedList(mutableListOf<String>())
-        val slow = UtteranceLifecycle { 0L }.apply {
-            observer = UtteranceLifecycleObserver { e ->
-                if (e.kind == UtteranceEventKind.STOPPED) {
-                    entered.countDown()
-                    release.await()
-                }
-                seen += e.kind.wireName
+    // ---- Ending a session: a reconciliation, each event counted once ------------------------------
+
+    /** An observer that blocks on [kind] until released, recording what reaches it. */
+    private class Gate(private val kind: UtteranceEventKind) : UtteranceLifecycleObserver {
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val seen: MutableList<String> = Collections.synchronizedList(mutableListOf())
+        override fun onUtteranceEvent(event: UtteranceEvent) {
+            if (event.kind == kind) {
+                entered.countDown()
+                release.await()
             }
+            seen += "${event.session}:${event.kind.wireName}"
         }
+    }
+
+    private fun thread(block: () -> Unit) = Thread(block).apply { start() }
+
+    @Test
+    fun `ending a session waits for an event already decided but still on its way, and counts it`() {
+        // The engine thread settles the attempt, then is descheduled before it reaches the observer.
+        val gate = Gate(UtteranceEventKind.STOPPED)
+        val slow = UtteranceLifecycle { 0L }.apply { observer = gate }
         slow.beginSession("s1")
         slow.submitting(entry("a"), 1)
         slow.submitted("a")
-        val callback = Thread { slow.engineCallback(UtteranceEventKind.STOPPED, "a", 1, atNanos = 5, interrupted = true) }.apply { start() }
-        entered.await()
+        val callback = thread { slow.engineCallback(UtteranceEventKind.STOPPED, "a", 1, atNanos = 5, interrupted = true) }
+        gate.entered.await()
 
-        val ending = Thread { slow.endSession("s1", drainTimeoutMs = 10_000).also { seen += "ended:$it" } }.apply { start() }
+        val ending = thread { slow.endSession("s1", drainTimeoutMs = 10_000).also { gate.seen += "produced:$it" } }
         Thread.sleep(200)
         assertTrue("still waiting for the stop", ending.isAlive)
-        release.countDown()
+        gate.release.countDown()
         ending.join(5_000)
         callback.join(5_000)
 
-        assertEquals("the stop settled the attempt: nothing is unknown, and it arrived first", listOf("submitted", "stopped", "ended:0"), seen)
+        assertEquals(listOf("s1:submitted", "s1:stopped", "produced:2"), gate.seen)
     }
 
     @Test
-    fun `ending a session gives up after a bounded wait and says how many it did not get`() {
-        val entered = java.util.concurrent.CountDownLatch(1)
-        val release = java.util.concurrent.CountDownLatch(1)
-        val stuck = UtteranceLifecycle { 0L }.apply {
-            observer = UtteranceLifecycleObserver { e ->
-                if (e.kind == UtteranceEventKind.DONE) {
-                    entered.countDown()
-                    release.await()
-                }
-            }
+    fun `a submission the engine has taken but not yet confirmed is waited for before the session closes`() {
+        // Registered, speak() returned SUCCESS, and the main thread is descheduled before submitted().
+        val gate = Gate(UtteranceEventKind.DONE)
+        val life = UtteranceLifecycle { 0L }.apply { observer = gate }
+        life.beginSession("s1")
+        life.submitting(entry("a"), 1)
+        val ended = CountDownLatch(1)
+        var produced = -1
+        val ending = thread {
+            produced = life.endSession("s1", drainTimeoutMs = 10_000)
+            ended.countDown()
         }
+        Thread.sleep(200)
+        assertTrue("the session does not close under an unconfirmed submission", ending.isAlive)
+        life.submitted("a")
+        ending.join(5_000)
+
+        assertEquals(0, ended.count)
+        assertEquals("the submission, then unknown: the session ended before any outcome", listOf("s1:submitted", "s1:unknown_terminal"), gate.seen)
+        assertEquals(2, produced)
+    }
+
+    @Test
+    fun `an unconfirmed submission past the wait is abandoned -- counted once, never reported`() {
+        val gate = Gate(UtteranceEventKind.ERROR) // never blocks here
+        val life = UtteranceLifecycle { 0L }.apply { observer = gate }
+        life.beginSession("s1")
+        life.submitting(entry("a"), 1)
+
+        assertEquals("one event lost: the submission's", 1, life.endSession("s1", drainTimeoutMs = 50))
+        life.submitted("a")
+        life.engineCallback(UtteranceEventKind.DONE, "a", 1, atNanos = 9)
+        assertTrue("nothing of the abandoned attempt is reported afterwards", gate.seen.isEmpty())
+    }
+
+    @Test
+    fun `an event still on its way past the wait is in the count, so a recorder that misses it loses it once`() {
+        val gate = Gate(UtteranceEventKind.DONE)
+        val stuck = UtteranceLifecycle { 0L }.apply { observer = gate }
+        stuck.beginSession("s1")
         stuck.submitting(entry("a"), 1)
         stuck.submitted("a")
-        val callback = Thread { stuck.engineCallback(UtteranceEventKind.DONE, "a", 1, atNanos = 5) }.apply { start() }
-        entered.await()
+        val callback = thread { stuck.engineCallback(UtteranceEventKind.DONE, "a", 1, atNanos = 5) }
+        gate.entered.await()
 
-        assertEquals(1, stuck.endSession("s1", drainTimeoutMs = 50))
-        release.countDown()
+        assertEquals("submitted and the stuck done", 2, stuck.endSession("s1", drainTimeoutMs = 50))
+        gate.release.countDown()
         callback.join(5_000)
-        assertEquals("nothing is waited for without an observer", 0, UtteranceLifecycle { 0L }.endSession("s1"))
+        assertEquals("nothing is counted or waited for without an observer", 0, UtteranceLifecycle { 0L }.endSession("s1"))
+    }
+
+    @Test
+    fun `ending one session neither waits for nor counts another session's events`() {
+        val gate = Gate(UtteranceEventKind.DONE)
+        val life = UtteranceLifecycle { 0L }.apply { observer = gate }
+        life.beginSession("s1")
+        life.submitting(entry("a"), 1)
+        life.submitted("a")
+        life.beginSession("s2")
+        val callback = thread { life.engineCallback(UtteranceEventKind.DONE, "a", 1, atNanos = 5) } // s1's, stuck
+        gate.entered.await()
+
+        val started = System.nanoTime()
+        assertEquals(0, life.endSession("s2", drainTimeoutMs = 10_000))
+        assertTrue("did not wait for s1", (System.nanoTime() - started) / 1_000_000 < 1_000)
+        gate.release.countDown()
+        callback.join(5_000)
     }
 
     @Test

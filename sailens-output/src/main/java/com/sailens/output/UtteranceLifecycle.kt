@@ -13,7 +13,7 @@ package com.sailens.output
  *   a callback reports the generation of the instance it came from. Null for an attempt no engine
  *   ever saw.
  * @param session the lifecycle session ([SpeechManager.beginLifecycleSession]) the attempt was
- *   submitted in. A callback that arrives later still reports that session, not the current one.
+ *   submitted in, never the current one; once that session has ended, nothing of it is reported.
  * @param elapsedRealtimeNanos `SystemClock.elapsedRealtimeNanos()`, read on the thread that observed
  *   the event: the engine's own thread for its callbacks.
  * @param logicalId null when the attempt is not known here (submitted before observation began, or
@@ -115,10 +115,14 @@ public fun interface UtteranceLifecycleObserver {
  * Observation only. Without an observer it does nothing at all; with one, it never throws and
  * calls the observer outside its lock.
  *
- * Because the observer is called outside the lock, an event can be decided (its attempt settled)
- * and still be on its way to the observer. [endSession] therefore waits, for a bounded time, until
- * every event decided before it has been delivered: whoever closes the record after it has then
- * either received each one or been told how many it did not.
+ * Ending a session is a reconciliation, not a guess. Each session counts the events it produced
+ * -- decided under the lock, whether or not the observer has had them yet -- and [endSession]
+ * returns that count once the session is closed: from then on nothing more of that session is
+ * reported, so a recorder that compares it with what it wrote knows exactly how many it lost, each
+ * at most once. Before closing, it waits a bounded time for two things that would otherwise turn
+ * into losses: submissions registered but not yet confirmed or refused by the engine, and events on
+ * their way to the observer. A submission still unconfirmed then is abandoned: counted as one lost
+ * event, and nothing of that attempt is reported afterwards.
  */
 internal class UtteranceLifecycle(private val nanoClock: () -> Long) {
 
@@ -143,36 +147,67 @@ internal class UtteranceLifecycle(private val nanoClock: () -> Long) {
     private val attempts = LinkedHashMap<String, Attempt>()
     private var session: String? = null
 
-    /** Events decided under the lock and not yet handed to the observer; guarded by [delivery]. */
+    // Per-session accounting, all guarded by [delivery]. Lock order: `this`, then [delivery].
     private val delivery = Object()
-    private var inFlight = 0
+
+    /** Events each session produced: decided, and handed (or about to be handed) to the observer. */
+    private val produced = HashMap<String, Int>()
+
+    /** Of those, the ones not yet handed over. */
+    private val inFlight = HashMap<String, Int>()
+
+    /** Submissions registered and not yet confirmed or refused, per session. */
+    private val pending = HashMap<String, MutableSet<String>>()
+
+    /** Ended sessions: nothing more of theirs is reported. */
+    private val closed = LinkedHashSet<String>()
+
+    /** Attempts given up on while unconfirmed: nothing of theirs is reported. */
+    private val abandoned = LinkedHashSet<String>()
 
     fun beginSession(token: String) = synchronized(this) { session = token }
 
     /**
-     * Ends [token]'s session: every attempt of it still without an outcome is reported as unknown,
-     * and every event decided before this call is delivered before it returns.
+     * Ends [token]'s session. Waits up to [drainTimeoutMs] for its unconfirmed submissions; reports
+     * every attempt of it still without an outcome as unknown; closes it; then waits for what is on
+     * its way to the observer, within the same time limit.
      *
-     * @return how many events were still on their way to the observer when it stopped waiting,
-     *   after [drainTimeoutMs]; 0 when all arrived (or nothing is observed).
+     * @return how many events the session produced, delivered or not (an abandoned submission counts
+     *   as one): a recorder that wrote fewer lost the difference. 0 when nothing was observed.
      */
     fun endSession(token: String, drainTimeoutMs: Long = END_DRAIN_TIMEOUT_MS): Int {
-        emit {
+        val deadline = System.nanoTime() + drainTimeoutMs * 1_000_000
+        awaitDrained(deadline) { pending[token].isNullOrEmpty() }
+        val target = observer
+        val events = synchronized(this) {
             if (session == token) session = null
-            settleOpen(UtteranceReasons.SESSION_ENDED) { it.session == token }
+            val unknown = if (target == null) emptyList() else settleOpen(UtteranceReasons.SESSION_ENDED) { it.session == token }
+            synchronized(delivery) {
+                val stuck = pending.remove(token).orEmpty()
+                abandoned += stuck
+                trimOldest(abandoned, MAX_ATTEMPTS)
+                if (stuck.isNotEmpty()) produced[token] = (produced[token] ?: 0) + stuck.size
+                val kept = registerLocked(unknown)
+                closed += token
+                trimOldest(closed, MAX_CLOSED_SESSIONS)
+                kept
+            }
         }
-        return awaitDelivered(drainTimeoutMs)
+        if (target != null) deliver(target, events)
+        awaitDrained(deadline) { (inFlight[token] ?: 0) == 0 }
+        return synchronized(delivery) {
+            inFlight.remove(token)
+            produced.remove(token) ?: 0
+        }
     }
 
-    /** Waits until nothing is on its way to the observer, at most [timeoutMs]; returns what still is. */
-    private fun awaitDelivered(timeoutMs: Long): Int = synchronized(delivery) {
-        val deadline = System.nanoTime() + timeoutMs * 1_000_000
-        while (inFlight > 0) {
+    /** Waits on [delivery] until [done], at most until [deadline] (System.nanoTime). */
+    private inline fun awaitDrained(deadline: Long, done: () -> Boolean) = synchronized(delivery) {
+        while (!done()) {
             val remainingMs = (deadline - System.nanoTime()) / 1_000_000
             if (remainingMs <= 0) break
             delivery.wait(remainingMs)
         }
-        inFlight
     }
 
     /** The engine of [generation] was shut down: its attempts without an outcome will not get one. */
@@ -195,14 +230,26 @@ internal class UtteranceLifecycle(private val nanoClock: () -> Long) {
             priority = entry.priority,
             textLength = entry.text.length,
             previousAttemptId = previousAttemptId,
-        )
+        ).also { attempt ->
+            attempt.session?.let { s -> synchronized(delivery) { if (s !in closed) pending.getOrPut(s) { LinkedHashSet() } += entry.id } }
+        }
         trim()
         emptyList()
+    }
+
+    /** The engine has answered for [attempt]: it is no longer awaited by [endSession]. */
+    private fun confirmed(attemptId: String, attempt: Attempt) {
+        val s = attempt.session ?: return
+        synchronized(delivery) {
+            pending[s]?.remove(attemptId)
+            delivery.notifyAll()
+        }
     }
 
     /** The engine took the attempt [submitting] registered. */
     fun submitted(attemptId: String) = emit {
         val attempt = attempts[attemptId] ?: return@emit emptyList()
+        confirmed(attemptId, attempt)
         attempt.submitted = true
         val previous = attempt.previousAttemptId
         if (previous == null) {
@@ -222,6 +269,7 @@ internal class UtteranceLifecycle(private val nanoClock: () -> Long) {
     /** The engine refused the attempt [submitting] registered. */
     fun submitFailed(attemptId: String) = emit {
         val attempt = attempts[attemptId] ?: return@emit emptyList()
+        confirmed(attemptId, attempt)
         attempt.settled = true
         val previous = attempt.previousAttemptId
         if (previous == null) {
@@ -329,36 +377,60 @@ internal class UtteranceLifecycle(private val nanoClock: () -> Long) {
 
     /**
      * Runs [block] under the lock when observed, then hands its events to the observer outside it.
-     * They count as in flight from the moment they are decided -- under the same lock that settles
-     * their attempts -- until the observer has had them, so [endSession] cannot slip between.
+     * Each event is counted for its session the moment it is decided -- under the same lock that
+     * settles its attempt -- so [endSession] cannot slip between deciding and delivering.
      */
     private inline fun emit(block: () -> List<UtteranceEvent>) {
         val target = observer ?: return
         val events = try {
             synchronized(this) {
-                block().also { if (it.isNotEmpty()) synchronized(delivery) { inFlight += it.size } }
+                val decided = block()
+                if (decided.isEmpty()) decided else synchronized(delivery) { registerLocked(decided) }
             }
         } catch (e: RuntimeException) {
             return
         }
+        deliver(target, events)
+    }
+
+    /**
+     * Holding [delivery]: drops what belongs to a closed session or an abandoned attempt, and counts
+     * the rest for their sessions as produced and in flight.
+     */
+    private fun registerLocked(events: List<UtteranceEvent>): List<UtteranceEvent> =
+        events.filter { e -> e.attemptId !in abandoned && (e.session == null || e.session !in closed) }.onEach { e ->
+            val s = e.session ?: return@onEach
+            produced[s] = (produced[s] ?: 0) + 1
+            inFlight[s] = (inFlight[s] ?: 0) + 1
+        }
+
+    private fun deliver(target: UtteranceLifecycleObserver, events: List<UtteranceEvent>) {
         for (event in events) {
             try {
                 target.onUtteranceEvent(event)
             } catch (e: RuntimeException) {
                 // Observation must never reach the speech path.
             } finally {
-                synchronized(delivery) {
-                    inFlight--
-                    delivery.notifyAll()
+                event.session?.let { s ->
+                    synchronized(delivery) {
+                        inFlight[s]?.let { inFlight[s] = it - 1 }
+                        delivery.notifyAll()
+                    }
                 }
             }
         }
     }
 
+    private fun trimOldest(set: LinkedHashSet<String>, max: Int) {
+        while (set.size > max) set.remove(set.first())
+    }
+
     companion object {
         const val MAX_ATTEMPTS: Int = 512
 
-        /** Long enough for a descheduled callback thread, short enough never to stall a session's end. */
+        /** Long enough for a descheduled thread, short enough never to stall a session's end. */
         const val END_DRAIN_TIMEOUT_MS: Long = 500
+
+        const val MAX_CLOSED_SESSIONS: Int = 32
     }
 }

@@ -67,10 +67,11 @@ internal interface SpeechLifecycleSessions {
     fun begin(sessionId: String)
 
     /**
-     * Synchronous: the session's attempts still without an outcome, and every event decided before
-     * the call, are reported before it returns.
+     * Synchronous: closes the session on the speech side. Its attempts still without an outcome are
+     * reported before it returns, and nothing of it is reported afterwards.
      *
-     * @return events it could not deliver in time; the record counts them as dropped.
+     * @return how many events the session produced, delivered or not. The record reconciles it with
+     *   what it wrote: the difference is what it lost, each event counted once.
      */
     fun end(sessionId: String): Int
 }
@@ -156,8 +157,7 @@ internal class RegressionCapture(
     }
 
     private fun endSpeechSession(s: Session) {
-        val undelivered = runCatching { speechSessions?.end(s.id) ?: 0 }.getOrDefault(0)
-        if (undelivered > 0) s.utteranceEventsDropped.addAndGet(undelivered.toLong())
+        s.lifecycleProduced = speechSessions?.let { sessions -> runCatching { sessions.end(s.id) }.getOrNull() }
     }
 
     private fun abandon(s: Session, reason: String) {
@@ -180,7 +180,8 @@ internal class RegressionCapture(
         if (outcome.deliveredAt == null) return
         session?.windows?.onPrompt(outcome.sourceSequenceNumber, outcome.eventId)
         if (PromptDeliveryChannels.SCREEN_READER in outcome.deliveredVia) {
-            val s = session ?: return
+            val s = session?.takeIf { it.recording } ?: return
+            s.ownUtteranceRecords.incrementAndGet()
             onUtterance(
                 s.id,
                 RegressionUtteranceRecord(
@@ -228,13 +229,10 @@ internal class RegressionCapture(
     override fun onRevoke(eventId: UUID, decisionsBefore: Long) = guarded("onRevoke") { it.onRevoke(eventId, decisionsBefore) }
 
     // Not guarded(): a lost lifecycle event is counted against the lifecycle, never against a frame.
+    // An event that is not taken here is not counted here either: the session's drops are reconciled
+    // at the end from what the speech side says it produced (see Session.stats), once per event.
     override fun onUtterance(sessionId: String?, record: RegressionUtteranceRecord) {
-        val s = session?.takeIf { it.id == sessionId } ?: return
-        if (!s.recording) {
-            // The session is closing: an event of it arriving now is lost, and counted.
-            s.utteranceEventsDropped.incrementAndGet()
-            return
-        }
+        val s = session?.takeIf { it.recording && it.id == sessionId } ?: return
         try {
             if (s.utterances.trySend(record).isFailure) s.utteranceEventsDropped.incrementAndGet()
         } catch (e: Exception) {
@@ -283,6 +281,12 @@ internal class RegressionCapture(
         val windowFramesDropped = AtomicLong()
         val utteranceEventsRecorded = AtomicLong()
         val utteranceEventsDropped = AtomicLong()
+
+        /** Lifecycle records this capture made itself (screen-reader deliveries). */
+        val ownUtteranceRecords = AtomicLong()
+
+        /** What the speech side said the session produced when it ended; null without speech hooks. */
+        @Volatile var lifecycleProduced: Int? = null
         val bytes = AtomicLong()
         private var strayClockReads = 0L
 
@@ -295,8 +299,17 @@ internal class RegressionCapture(
             windowFramesStored = windowFramesStored.get(),
             windowFramesDropped = windowFramesDropped.get(),
             utteranceEventsRecorded = utteranceEventsRecorded.get(),
-            utteranceEventsDropped = utteranceEventsDropped.get(),
+            utteranceEventsDropped = utteranceDrops(),
         )
+
+        /**
+         * With the speech hooks, everything produced and not written -- whether it overflowed, failed
+         * to write, or arrived too late -- each event once. Without them, what this side counted.
+         */
+        private fun utteranceDrops(): Long {
+            val produced = lifecycleProduced ?: return utteranceEventsDropped.get()
+            return maxOf(0L, produced + ownUtteranceRecords.get() - utteranceEventsRecorded.get())
+        }
 
         private var hookFailures = 0L
 

@@ -70,7 +70,9 @@ class RegressionCaptureTest {
     private class FakeSpeechSessions : SpeechLifecycleSessions {
         val calls = mutableListOf<String>()
         var onEnd: (String) -> Unit = {}
-        var undelivered = 0
+
+        /** What the speech side says the session produced. */
+        var produced = 0
         override fun begin(sessionId: String) {
             calls += "begin $sessionId"
         }
@@ -78,7 +80,7 @@ class RegressionCaptureTest {
         override fun end(sessionId: String): Int {
             calls += "end $sessionId"
             onEnd(sessionId)
-            return undelivered
+            return produced
         }
     }
 
@@ -329,7 +331,7 @@ class RegressionCaptureTest {
 
     @Test
     fun `the session's lifecycle events are recorded beside its frames and read back without warnings`() = runBlocking {
-        val speech = FakeSpeechSessions()
+        val speech = FakeSpeechSessions().apply { produced = 3 }
         val capture = capture(speechSessions = speech)
         speech.onEnd = { id -> capture.onUtterance(id, utterance(UtteranceRecordEvents.UNKNOWN_TERMINAL, "open", at = 99)) }
         assertTrue("the manifest says the record keeps the lifecycle", capture.manifestBlock().utteranceLifecycle)
@@ -355,16 +357,33 @@ class RegressionCaptureTest {
     }
 
     @Test
-    fun `events the speech side could not hand over before the end are counted dropped`() = runBlocking {
-        val speech = FakeSpeechSessions().apply { undelivered = 2 }
+    fun `drops are what the speech side produced and the record did not write, each counted once`() = runBlocking {
+        // The session produced a submission and a done; only the submission arrived before the end.
+        val speech = FakeSpeechSessions().apply { produced = 2 }
         val capture = capture(speechSessions = speech)
         capture.startSession("s1")
         capture.attach("s1", sessionDir("s1"))
         capture.onUtterance("s1", utterance(UtteranceRecordEvents.SUBMITTED, "a"))
         val stats = capture.finish("s1")!!
+        // The done arrives late, after the record closed: still one loss, not two.
+        capture.onUtterance("s1", utterance(UtteranceRecordEvents.DONE, "a"))
 
         assertEquals(1, stats.utteranceEventsRecorded)
-        assertEquals("the session's lifecycle is then incomplete", 2, stats.utteranceEventsDropped)
+        assertEquals(1, stats.utteranceEventsDropped)
+    }
+
+    @Test
+    fun `another session's late event never marks this one incomplete`() = runBlocking {
+        val speech = FakeSpeechSessions().apply { produced = 1 }
+        val capture = capture(speechSessions = speech)
+        capture.startSession("s2")
+        capture.attach("s2", sessionDir("s2"))
+        capture.onUtterance("s1", utterance(UtteranceRecordEvents.DONE, "old"))
+        capture.onUtterance("s2", utterance(UtteranceRecordEvents.SUBMITTED, "b"))
+        val stats = capture.finish("s2")!!
+
+        assertEquals(1, stats.utteranceEventsRecorded)
+        assertEquals(0, stats.utteranceEventsDropped)
     }
 
     @Test
@@ -391,7 +410,7 @@ class RegressionCaptureTest {
 
     @Test
     fun `lifecycle events that do not fit are counted dropped and never cost a frame`() = runBlocking {
-        val capture = capture(RegressionCaptureConfig(utteranceQueueCapacity = 2), FakeSpeechSessions())
+        val capture = capture(RegressionCaptureConfig(utteranceQueueCapacity = 2), FakeSpeechSessions().apply { produced = 5 })
         capture.startSession("s1")
         capture.process(1)
         repeat(5) { capture.onUtterance("s1", utterance(UtteranceRecordEvents.STARTED, "a$it")) }
@@ -407,7 +426,7 @@ class RegressionCaptureTest {
 
     @Test
     fun `a capture that never starts writing counts its queued lifecycle events dropped`() = runBlocking {
-        val capture = capture(speechSessions = FakeSpeechSessions())
+        val capture = capture(speechSessions = FakeSpeechSessions().apply { produced = 1 })
         capture.startSession("s1")
         capture.onUtterance("s1", utterance(UtteranceRecordEvents.SUBMITTED, "a"))
         val stats = capture.finish("s1")!!

@@ -104,8 +104,8 @@ public class SpeechManager(
     }
 
     /**
-     * Attempts submitted from now on belong to the session [token], for good: a callback that
-     * arrives after the session ended still reports it. Safe from any thread.
+     * Attempts submitted from now on belong to the session [token], for good: their events carry it,
+     * never a later session's, and once it has ended nothing of it is reported. Safe from any thread.
      */
     public fun beginLifecycleSession(token: String) {
         lifecycle.beginSession(token)
@@ -113,10 +113,11 @@ public class SpeechManager(
 
     /**
      * Ends [token]'s session: its submissions still without any outcome are reported as unknown, and
-     * whatever was reported before is delivered to the observer before this returns (waiting at most
-     * half a second, on the caller's thread).
+     * nothing more of the session is reported afterwards. Waits at most half a second, on the
+     * caller's thread, for unconfirmed submissions and for events still on their way to the observer.
      *
-     * @return how many events had still not reached the observer when it stopped waiting.
+     * @return how many events the session produced, delivered or not: an observer that received
+     *   fewer lost the difference.
      */
     public fun endLifecycleSession(token: String): Int = lifecycle.endSession(token)
 
