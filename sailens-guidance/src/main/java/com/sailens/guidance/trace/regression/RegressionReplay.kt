@@ -195,10 +195,12 @@ class RegressionReplay(
             null -> recorded.zip(replayed).associate { (expected, actual) -> expected.id to actual.id }
             CounterfactualDelivery.ALL_DELIVERED -> emptyMap()
             CounterfactualDelivery.UNCHANGED_AS_RECORDED -> {
-                val replayedRecords = replayed.map { it to it.toRecord().withoutId() }
+                // One to one: each replayed event takes at most one recorded event's revoke.
+                val unmatched = replayed.map { it to it.toRecord().withoutId() }.toMutableList()
                 recorded.mapNotNull { expected ->
                     val same = expected.withoutId()
-                    replayedRecords.firstOrNull { it.second == same }?.let { expected.id to it.first.id }
+                    val index = unmatched.indexOfFirst { it.second == same }
+                    if (index < 0) null else expected.id to unmatched.removeAt(index).first.id
                 }.toMap()
             }
         }
