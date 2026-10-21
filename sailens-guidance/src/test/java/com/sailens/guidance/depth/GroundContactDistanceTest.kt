@@ -166,8 +166,10 @@ class GroundContactDistanceTest {
         val g = geometry(17.0)
         // Legs behind a 1 m wall: the box ends at the wall top, so it reads farther and taller. Its
         // contact is barely below the horizon, where the allowed gravity error spans heights from
-        // plausible to not, so the check cannot reject it. Reading farther than the truth, it never
-        // claims the obstacle is nearer than it is (here: FAR, raising nothing).
+        // plausible to not, so the check cannot reject it. Its point estimate reads farther than the
+        // truth; here even the lower bound is FAR, so it raises nothing. (Elsewhere a cut box's lower
+        // bound, which carries the tolerances, can be nearer than the truth -- the guarantee is only
+        // that the level used is never farther than today's.)
         val cut = estimate(box(5.0, 17.0, visibleFromM = 1.0), g)
         assertTrue("reads farther than the truth: ${cut.lowerM}", cut.lowerM!! > 5.0)
         // A box that stops at knee height: too short for a person standing there.
@@ -181,6 +183,18 @@ class GroundContactDistanceTest {
         val tall = box(1.6, 40.0)
         assertEquals(0f, tall.y)
         assertEquals(ContactValidity.VALID, estimate(tall, geometry(40.0)).validity)
+    }
+
+    @Test
+    fun `a cut box reads farther at its point, yet its lower bound can be nearer than the truth`() {
+        // Review round 3: what holds is the fusion's guarantee (never farther than today's level),
+        // not "never nearer than the truth".
+        val e = estimate(box(1.6, 25.0, heightM = 1.2, objectHeightM = 0.9, visibleFromM = 0.05), geometry(25.0, heightM = 1.2f))
+        assertEquals(ContactValidity.VALID, e.validity)
+        assertTrue("point ${e.pointM}", e.pointM!! > 1.6f)
+        assertTrue("lower ${e.lowerM}", e.lowerM!! < 1.5f)
+        assertEquals(1.67, e.pointM!!.toDouble(), 0.01)
+        assertEquals(1.32, e.lowerM!!.toDouble(), 0.01)
     }
 
     @Test
@@ -261,6 +275,17 @@ class GroundContactDistanceTest {
                 }
             }
         }
+        // Review round 3: a bottom ray within the tolerance of straight down (H reaches h there).
+        val pole = Case(81.09889, 0.0, 0.78262f, NormalizedRect(0.45f, 0.594f, 0.1f, 0.006f), ObstacleCategory.VEHICLE)
+        val poleEstimate = estimate(pole.box, geometry(pole.pitch, heightM = pole.h), pole.category, config = config)
+        assertTrue("$pole: ${poleEstimate.validity}", poleEstimate.validity != ContactValidity.IMPLAUSIBLE_BOX)
+        // The bottom ray alone within the tolerance of straight down, the top ray well clear: the
+        // enclosure's 1 / tan(bottom) reaches 0, so the tallest allowed height is h (1 + tolerance).
+        // With h set just above 0.9 m / 1.15, that clears the vehicle floor by about 4e-7 m; a
+        // clipped near-zero in place of the limit would push it under.
+        val edge = Case(81.09889, 0.0, (0.9 / 1.15 * (1 + 5e-7)).toFloat(), NormalizedRect(0.45f, 0.23f, 0.1f, 0.37f), ObstacleCategory.VEHICLE)
+        val edgeEstimate = estimate(edge.box, geometry(edge.pitch, heightM = edge.h), edge.category, config = config)
+        assertTrue("$edge: ${edgeEstimate.validity}", edgeEstimate.validity != ContactValidity.IMPLAUSIBLE_BOX)
         // The two review cases fit within the tolerances, so they must not be rejected.
         for (case in reviewCases) {
             val e = estimate(case.box, geometry(case.pitch, heightM = case.h, rollDeg = case.roll), case.category, config = config)

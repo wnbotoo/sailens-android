@@ -291,10 +291,13 @@ class GroundContactDistanceEstimator(semantics: NavigationSemantics) {
         val delta = Math.toRadians(config.gravityToleranceDeg.toDouble())
         val bottom = depressionRad(box.centerX, box.maxY, k, g)
         val top = depressionRad(box.centerX, box.y, k, g)
-        // Below the horizon throughout, or the ratio is unbounded and nothing can be ruled out.
-        if (bottom - delta <= 0.0) return true
-        val inverseBottom = listOf(1 / tan(min(bottom + delta, MAX_DEPRESSION)), 1 / tan(bottom - delta))
-        val tanTop = listOf(tan(max(top - delta, -MAX_DEPRESSION)), tan(min(top + delta, MAX_DEPRESSION)))
+        // The ratio is unbounded -- nothing can be ruled out -- when the bottom ray may reach the
+        // horizon or the top ray may point straight up or down.
+        if (bottom - delta <= 0.0 || top + delta >= HALF_PI || top - delta <= -HALF_PI) return true
+        // A bottom ray that may point straight down makes 1 / tan reach its limit, 0 -- exactly,
+        // not a clipped near-zero, or the enclosure shrinks (review round 3).
+        val inverseBottom = listOf(if (bottom + delta >= HALF_PI) 0.0 else 1 / tan(bottom + delta), 1 / tan(bottom - delta))
+        val tanTop = listOf(tan(top - delta), tan(top + delta))
         val ratios = tanTop.flatMap { t -> inverseBottom.map { t * it } }
         val heights = listOf(h * (1 - tolerance), h * (1 + tolerance))
         val implied = heights.flatMap { hh -> listOf(hh * (1 - ratios.max()), hh * (1 - ratios.min())) }
@@ -304,6 +307,7 @@ class GroundContactDistanceEstimator(semantics: NavigationSemantics) {
     private companion object {
         const val PROBE_STRIDE = 2
         const val MAX_DEPRESSION = Math.PI / 2 - 1e-6
+        const val HALF_PI = Math.PI / 2
 
         /** Proposals, not calibrated: wide enough for children, seated people and buses. */
         val PLAUSIBLE_HEIGHT_M: Map<ObstacleCategory, ClosedFloatingPointRange<Double>> = mapOf(
