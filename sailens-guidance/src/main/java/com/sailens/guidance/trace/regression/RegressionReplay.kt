@@ -6,8 +6,11 @@ import com.sailens.core.mask.BinaryMask
 import com.sailens.guidance.config.AnalysisConfig
 import com.sailens.guidance.config.PerceptionConfig
 import com.sailens.guidance.depth.DefaultDepthRepository
+import com.sailens.guidance.depth.GroundContactDistanceEstimator
 import com.sailens.guidance.depth.ImagePositionDepthEstimator
+import com.sailens.guidance.geometry.CameraGeometry
 import com.sailens.guidance.model.analysis.ConnectivityStats
+import com.sailens.guidance.model.perception.DetectedObstacle
 import com.sailens.guidance.model.perception.ObstacleModelOutput
 import com.sailens.guidance.model.perception.SegmentationMask
 import com.sailens.guidance.model.perception.SegmentationOutput
@@ -89,18 +92,49 @@ class RegressionReplay(
         val exact: Boolean get() = firstMismatch == null && approximateFrames.isEmpty()
     }
 
+    /**
+     * How a counterfactual run (a config the device did not run with) treats delivery. The device's
+     * revokes say which of *its* prompts were not delivered; whether a prompt the device never made
+     * would have been delivered is unknown -- the speech side lets a strictly higher priority
+     * interrupt, and the speech that was busy may itself have changed. Running both assumptions
+     * gives a range, not the device's answer.
+     */
+    enum class CounterfactualDelivery {
+        /** Every prompt is delivered: no recorded revoke is applied. The fewest re-offers. */
+        ALL_DELIVERED,
+
+        /**
+         * A recorded revoke applies only to a replayed event identical to the recorded one (every
+         * field but the id); a changed or new event is taken as delivered.
+         */
+        UNCHANGED_AS_RECORDED,
+    }
+
+    /** What the replayed path made of one frame, for evaluations that look past the decided events. */
+    data class FrameOutcome(val obstacles: List<DetectedObstacle>, val events: List<SceneEvent>)
+
     /** Stops the replay of one frame with a precise reason. */
     private class Divergence(val what: String, val expected: String, val actual: String) : RuntimeException(what)
 
     /**
      * @param classMap the class map a frame recorded (`CaptureSessionReader.classMap`).
      * @param firstLostSeq the record's `firstLostSeq`: replay stops before it.
+     * @param geometryOf the camera geometry to process a frame with: by default the one it recorded
+     *   (schema 1.4), none for older records. An evaluation can supply one resolved from the
+     *   capture's sensor log instead.
+     * @param counterfactual null for exact replay: decisions are compared and the recorded revokes
+     *   apply. Set for a counterfactual run: decisions are not compared, and revokes follow
+     *   [CounterfactualDelivery]. Every other check stays.
+     * @param onFrame each successfully processed frame's tracked obstacles and decided events.
      */
     fun replay(
         frames: List<RegressionFrameRecord>,
         revokes: List<RegressionRevokeRecord>,
         classMap: (RegressionFrameRecord) -> IntArray?,
         firstLostSeq: Long? = null,
+        geometryOf: (RegressionFrameRecord) -> CameraGeometry? = { it.geometry?.toGeometry() },
+        onFrame: (RegressionFrameRecord, FrameOutcome) -> Unit = { _, _ -> },
+        counterfactual: CounterfactualDelivery? = null,
     ): Report {
         val world = World(classMap)
         val revokesByDecision = revokes.groupBy { it.decisionsBefore }
@@ -116,7 +150,7 @@ class RegressionReplay(
             val outcome = try {
                 world.load(record)
                 val frame = record.frame()
-                val result = runBlocking { world.processFrame(frame) }
+                val result = runBlocking { world.processFrame(frame, geometryOf(record)) }
                 val expectedFailure = record.failure != null
                 if (result.isFailure != expectedFailure) {
                     throw Divergence("frame failure", record.failure ?: "success", result.exceptionOrNull()?.toString() ?: "success")
@@ -124,14 +158,17 @@ class RegressionReplay(
                 if (result.isSuccess) {
                     val quality = world.frameQuality.analyzeMeasured(record.quality?.measurement()).stabilized
                     val snapshot = world.analyzeScene(result.getOrThrow()).copy(frameQuality = quality)
+                    // A revoke whose event the replay did not make (or, counterfactually, made
+                    // differently) has nothing to revoke.
                     revokesByDecision[decisions.toLong()]?.forEach { revoke ->
-                        world.cooldown.revoke(replayedIdOf[revoke.eventId] ?: UUID.randomUUID())
+                        replayedIdOf[revoke.eventId]?.let(world.cooldown::revoke)
                     }
                     world.stationary.value = record.stationary ?: false
                     val events = world.decide(snapshot)
                     decisions++
-                    compareEvents(record, events)
-                    record.events.zip(events).forEach { (expected, actual) -> replayedIdOf[expected.id] = actual.id }
+                    onFrame(record, FrameOutcome(result.getOrThrow().obstacles, events))
+                    if (counterfactual == null) compareEvents(record, events)
+                    replayedIdOf.putAll(revokeTargets(record.events, events, counterfactual))
                 }
                 world.finishFrame()
             } catch (d: Divergence) {
@@ -142,6 +179,31 @@ class RegressionReplay(
             replayed++
         }
         return Report(replayed, decisions, null, approximate, null)
+    }
+
+    companion object {
+        /**
+         * Which replayed event each recorded event's revoke reaches, by recorded id: in exact replay
+         * the event in the same position (the events were just compared equal); counterfactually,
+         * per [CounterfactualDelivery]. A recorded event missing from the result is not revoked.
+         */
+        internal fun revokeTargets(
+            recorded: List<EventRecord>,
+            replayed: List<SceneEvent>,
+            counterfactual: CounterfactualDelivery?,
+        ): Map<String, UUID> = when (counterfactual) {
+            null -> recorded.zip(replayed).associate { (expected, actual) -> expected.id to actual.id }
+            CounterfactualDelivery.ALL_DELIVERED -> emptyMap()
+            CounterfactualDelivery.UNCHANGED_AS_RECORDED -> {
+                // One to one: each replayed event takes at most one recorded event's revoke.
+                val unmatched = replayed.map { it to it.toRecord().withoutId() }.toMutableList()
+                recorded.mapNotNull { expected ->
+                    val same = expected.withoutId()
+                    val index = unmatched.indexOfFirst { it.second == same }
+                    if (index < 0) null else expected.id to unmatched.removeAt(index).first.id
+                }.toMap()
+            }
+        }
     }
 
     private fun compareEvents(record: RegressionFrameRecord, events: List<SceneEvent>) {
@@ -229,7 +291,7 @@ class RegressionReplay(
             profileManager = profiles,
             perceptionRepository = repository,
             realtimeObstacleProvider = obstacles,
-            depthRepository = DefaultDepthRepository(ImagePositionDepthEstimator(), null),
+            depthRepository = DefaultDepthRepository(ImagePositionDepthEstimator(), GroundContactDistanceEstimator(navigationSemantics)),
             segmentationAnalyzer = SegmentationAnalyzer(config = analysisConfig, navigationSemantics = navigationSemantics),
             obstacleExtractor = ObstacleExtractor(config = perceptionConfig, navigationSemantics = navigationSemantics),
             obstacleTracker = ObstacleTracker(config = perceptionConfig),

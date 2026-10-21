@@ -1,5 +1,13 @@
 package com.sailens.guidance.usecase.perception
 
+import com.sailens.guidance.geometry.TimeBasis
+import com.sailens.guidance.geometry.PhoneGeometrySettings
+import com.sailens.guidance.geometry.GeometryQuality
+import com.sailens.guidance.geometry.GeometryIssue
+import com.sailens.guidance.geometry.CameraGeometry
+import com.sailens.guidance.depth.GroundContactDistanceConfig
+import com.sailens.guidance.depth.DistanceFrame
+import com.sailens.guidance.depth.DistanceEstimate
 import com.sailens.vision.taxonomy.TaxonomyId
 import com.sailens.guidance.config.AnalysisConfig
 import com.sailens.guidance.config.PerceptionConfig
@@ -315,6 +323,43 @@ class ProcessFrameUseCaseTest {
         }
     }
 
+    @Test
+    fun `the distance estimate gets the frame's geometry, its other detections, its class map and the config`() {
+        val seen = mutableListOf<Triple<NormalizedRect, ObstacleCategory, DistanceFrame>>()
+        val recording = object : DepthRepository {
+            override fun estimateDistance(boundingBox: NormalizedRect, category: ObstacleCategory, frame: DistanceFrame): DistanceEstimate {
+                seen += Triple(boundingBox, category, frame)
+                return DistanceEstimate.today(DistanceLevel.MEDIUM)
+            }
+        }
+        val person = ObstacleDetection(0, "person", 0.9f, NormalizedRect(0.4f, 0.3f, 0.2f, 0.3f), ObstacleCategory.PERSON)
+        val bench = ObstacleDetection(56, "bench", 0.8f, NormalizedRect(0.3f, 0.5f, 0.4f, 0.2f), ObstacleCategory.STATIC_OBSTACLE)
+        val faint = ObstacleDetection(56, "bench", 0.05f, NormalizedRect(0.0f, 0.8f, 0.2f, 0.2f), ObstacleCategory.STATIC_OBSTACLE)
+        val config = GroundContactDistanceConfig(enabled = true, nearMeters = 2f)
+        val geometry = CameraGeometry(
+            1, TimeBasis.CAMERA_REALTIME, null, null, null, PhoneGeometrySettings.DEFAULT,
+            GeometryQuality.Unavailable(setOf(GeometryIssue.NO_GRAVITY)),
+        )
+        val useCase = createUseCase(
+            PerceptionProfile.DEFAULT, FakeClock(),
+            realtimeObstacleProvider = FakeObstacleProvider(detections = listOf(person, bench, faint)),
+            depthRepository = recording,
+            groundContact = config,
+        )
+
+        val result = runBlocking { useCase(createFrame(sequenceNumber = 1), geometry).getOrThrow() }
+
+        assertEquals(setOf(person.boundingBox, bench.boundingBox), seen.map { it.first }.toSet())
+        assertEquals(ObstacleCategory.PERSON, seen.single { it.first == person.boundingBox }.second)
+        for ((_, _, frame) in seen) {
+            assertSame(geometry, frame.geometry)
+            // Every detection the extractor would consider, including the box itself; not the faint one.
+            assertEquals(listOf(person.boundingBox, bench.boundingBox), frame.otherBoxes)
+            assertSame(result.analysis.segmentation, frame.segmentation)
+            assertEquals(config, frame.config)
+        }
+    }
+
     private fun createUseCase(
         profile: PerceptionProfile,
         clock: FakeClock,
@@ -325,6 +370,11 @@ class ProcessFrameUseCaseTest {
         detectionTargetFps: Int = 10,
         detectionResultTtlMs: Long = 500,
         distanceLevel: DistanceLevel = DistanceLevel.MEDIUM,
+        depthRepository: DepthRepository = object : DepthRepository {
+            override fun estimateDistance(boundingBox: NormalizedRect, category: ObstacleCategory, frame: DistanceFrame) =
+                DistanceEstimate.today(distanceLevel)
+        },
+        groundContact: GroundContactDistanceConfig = GroundContactDistanceConfig(),
     ): ProcessFrameUseCase {
         val config = PerceptionConfig(
             profile = profile,
@@ -335,6 +385,7 @@ class ProcessFrameUseCaseTest {
             detectionResultTtlMs = detectionResultTtlMs,
             minObstacleConfidence = 0.1f,
             trackerMinStableFrames = 1,
+            groundContact = groundContact,
         )
         val navigationSemantics = FakeSemanticClassMapper()
 
@@ -342,9 +393,7 @@ class ProcessFrameUseCaseTest {
             profileManager = PerceptionProfileManager(config),
             perceptionRepository = perceptionRepository,
             realtimeObstacleProvider = realtimeObstacleProvider,
-            depthRepository = object : DepthRepository {
-                override fun estimateDistance(boundingBox: NormalizedRect): DistanceLevel = distanceLevel
-            },
+            depthRepository = depthRepository,
             segmentationAnalyzer = segmentationAnalyzer ?: SegmentationAnalyzer(AnalysisConfig(), navigationSemantics),
             obstacleExtractor = ObstacleExtractor(config, navigationSemantics),
             obstacleTracker = ObstacleTracker(config),

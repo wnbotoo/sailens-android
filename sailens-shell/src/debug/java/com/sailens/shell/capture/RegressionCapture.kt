@@ -1,5 +1,6 @@
 package com.sailens.shell.capture
 
+import com.sailens.guidance.geometry.CameraGeometry
 import com.sailens.core.frame.ImageFrame
 import com.sailens.core.frame.Yuv420FrameData
 import com.sailens.core.frame.YuvPlaneData
@@ -163,6 +164,8 @@ internal class RegressionCapture(
 
     override fun onFrameQuality(result: FrameQualityResult) = guarded("onFrameQuality") { it.onFrameQuality(result) }
 
+    override fun onGeometry(geometry: CameraGeometry) = guarded("onGeometry") { it.onGeometry(geometry) }
+
     override fun onStationary(stationary: Boolean) = guarded("onStationary") { it.onStationary(stationary) }
 
     override fun endFrame(frame: ImageFrame, events: List<SceneEvent>, failure: Throwable?) =
@@ -258,6 +261,8 @@ internal class RegressionCapture(
         fun onConnectivity(passableMask: BinaryMask, stats: ConnectivityStats?) = assembler.onConnectivity(passableMask, stats)
 
         fun onFrameQuality(result: FrameQualityResult) = assembler.onFrameQuality(result)
+
+        fun onGeometry(geometry: CameraGeometry) = assembler.onGeometry(geometry)
 
         fun onStationary(stationary: Boolean) = assembler.onStationary(stationary)
 

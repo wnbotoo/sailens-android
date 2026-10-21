@@ -1,5 +1,8 @@
 package com.sailens.guidance.usecase.scene
 
+import com.sailens.guidance.model.common.ObstacleCategory
+import com.sailens.guidance.depth.DistanceFrame
+import com.sailens.guidance.depth.DistanceEstimate
 import com.sailens.core.frame.ImageFrame
 import com.sailens.core.frame.ImagePixelFormat
 import com.sailens.core.geometry.NormalizedRect
@@ -189,7 +192,8 @@ class StartSceneAnalysisFailureTest {
                 perceptionRepository = repository,
                 realtimeObstacleProvider = NoObstacles,
                 depthRepository = object : DepthRepository {
-                    override fun estimateDistance(boundingBox: NormalizedRect) = DistanceLevel.FAR
+                    override fun estimateDistance(boundingBox: NormalizedRect, category: ObstacleCategory, frame: DistanceFrame) =
+                        DistanceEstimate.today(DistanceLevel.FAR)
                 },
                 segmentationAnalyzer = SegmentationAnalyzer(analysisConfig, semantics),
                 obstacleExtractor = ObstacleExtractor(perceptionConfig, semantics),

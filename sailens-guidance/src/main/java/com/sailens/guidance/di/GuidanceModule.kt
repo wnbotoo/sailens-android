@@ -7,6 +7,7 @@ import com.sailens.core.log.LogService
 import com.sailens.guidance.config.PerceptionConfig
 import com.sailens.guidance.config.TraceRuntimeConfig
 import com.sailens.guidance.depth.DefaultDepthRepository
+import com.sailens.guidance.depth.GroundContactDistanceEstimator
 import com.sailens.guidance.depth.ImagePositionDepthEstimator
 import com.sailens.guidance.kernel.NativeConnectivityStatsExtractor
 import com.sailens.guidance.kernel.NavigationScorePostprocessor
@@ -112,7 +113,7 @@ val guidanceModule = module {
     single { DeviceRotationDataSource(context = androidContext()) }
     single { DeviceMotionDataSource(context = androidContext()) }
 
-    single<DepthRepository> { DefaultDepthRepository(get(), null) }
+    single<DepthRepository> { DefaultDepthRepository(get(), GroundContactDistanceEstimator(get())) }
     single<OrientationSource> { AndroidOrientationSource(androidContext()) }
     single<DeviceSensorRepository> { DefaultDeviceSensorRepository(get(), get()) }
 

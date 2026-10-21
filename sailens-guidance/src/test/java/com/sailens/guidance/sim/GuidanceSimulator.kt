@@ -11,8 +11,10 @@ import com.sailens.guidance.config.PerceptionConfig
 import com.sailens.guidance.config.PipelinePerformanceBudget
 import com.sailens.guidance.config.TraceRuntimeConfig
 import com.sailens.guidance.depth.DefaultDepthRepository
+import com.sailens.guidance.depth.GroundContactDistanceEstimator
 import com.sailens.guidance.depth.ImagePositionDepthEstimator
 import com.sailens.guidance.geometry.CameraFactsSource
+import com.sailens.guidance.geometry.PhoneGeometrySettings
 import com.sailens.guidance.geometry.SensorSample
 import com.sailens.guidance.geometry.Vec3
 import com.sailens.guidance.geometry.toCameraFacts
@@ -20,6 +22,7 @@ import com.sailens.guidance.motion.MotionTracker
 import com.sailens.guidance.motion.OrientationSource
 import com.sailens.guidance.model.common.ObstacleProviderType
 import com.sailens.guidance.model.common.PerceptionProfile
+import com.sailens.guidance.model.perception.DetectedObstacle
 import com.sailens.guidance.model.perception.ObstacleModelOutput
 import com.sailens.guidance.model.perception.SegmentationMask
 import com.sailens.guidance.model.perception.SegmentationOutput
@@ -84,6 +87,8 @@ class GuidanceSimulator(
         profile = PerceptionProfile.DEFAULT,
         realtimeObstacleProviderType = ObstacleProviderType.DETECTION_MODEL,
     ),
+    /** The phone settings the user would have set (M3a); the scenario's pose is the truth they approximate. */
+    private val phoneGeometry: () -> PhoneGeometrySettings = { PhoneGeometrySettings.DEFAULT },
 ) {
     private val semantics = CityscapesNavigationSemantics
 
@@ -136,7 +141,7 @@ class GuidanceSimulator(
             profileManager = profiles,
             perceptionRepository = repository,
             realtimeObstacleProvider = provider,
-            depthRepository = DefaultDepthRepository(ImagePositionDepthEstimator(), null),
+            depthRepository = DefaultDepthRepository(ImagePositionDepthEstimator(), GroundContactDistanceEstimator(semantics)),
             segmentationAnalyzer = SegmentationAnalyzer(analysisConfig, semantics),
             obstacleExtractor = ObstacleExtractor(perceptionConfig, semantics),
             obstacleTracker = ObstacleTracker(perceptionConfig),
@@ -168,6 +173,7 @@ class GuidanceSimulator(
             pipelineBudget = PipelinePerformanceBudget(),
             orientationSource = orientation,
             cameraFactsSource = CameraFactsSource { cameraFacts },
+            phoneGeometry = phoneGeometry,
             isStationary = { stationary.value },
         )
         val frames = flow {
@@ -214,15 +220,21 @@ class GuidanceSimulator(
         /**
          * One golden line per frame: what Guidance decided and the analysis behind it. Floats are
          * rounded to 4 decimals, so a last-bit difference between JVMs does not look like a change
-         * of behaviour.
+         * of behaviour. [distances] adds each event's distance (what decides the "near" wording) and
+         * each obstacle's distance evidence (M3a): today's level, the contact's validity and interval
+         * (metres, 2 decimals).
          */
-        fun goldenLine(result: SceneResult): String {
+        fun goldenLine(result: SceneResult, distances: Boolean = false): String {
             val d = result.debugInfo
             val events = result.events.joinToString(",") { event ->
                 val params = event.messageParams.toSortedMap().entries.joinToString(";") { "${it.key}=${it.value}" }
-                "${event.messageKey}:${event.priority.name}" + if (params.isEmpty()) "" else "{$params}"
+                "${event.messageKey}:${event.priority.name}" + (if (params.isEmpty()) "" else "{$params}") +
+                    if (distances) "@${event.distance?.name ?: "-"}" else ""
             }
-            val obstacles = result.obstacles.joinToString(",") { "${it.category.name}/${it.zone.name}/${it.distance.name}" }
+            val obstacles = result.obstacles.joinToString(",") { obstacle ->
+                "${obstacle.category.name}/${obstacle.zone.name}/${obstacle.distance.name}" +
+                    if (distances) distanceEvidence(obstacle) else ""
+            }
             return buildString {
                 append("seq=").append(result.sequenceNumber)
                 append(" events=[").append(events).append(']')
@@ -244,5 +256,12 @@ class GuidanceSimulator(
         }
 
         private fun r(v: Float) = String.format(Locale.ROOT, "%.4f", v)
+
+        private fun distanceEvidence(obstacle: DetectedObstacle): String {
+            val e = obstacle.distanceEstimate ?: return "[none]"
+            val c = e.contact
+            fun m(v: Float?) = v?.let { String.format(Locale.ROOT, "%.2f", it) } ?: "-"
+            return "[today=${e.today.name} ${c.validity.name.lowercase()} ${m(c.lowerM)}..${m(c.upperM)}]"
+        }
     }
 }

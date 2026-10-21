@@ -2,6 +2,7 @@ package com.sailens.guidance.trace.regression
 
 import com.sailens.core.frame.ImageFrame
 import com.sailens.core.mask.BinaryMask
+import com.sailens.guidance.geometry.CameraGeometry
 import com.sailens.guidance.model.analysis.ConnectivityStats
 import com.sailens.guidance.model.perception.ObstacleDetection
 import com.sailens.guidance.model.perception.SegmentationOutput
@@ -10,6 +11,7 @@ import com.sailens.guidance.processor.analysis.FrameQualityResult
 import com.sailens.guidance.trace.capture.ConnectivityRecord
 import com.sailens.guidance.trace.capture.DetectionRunRecord
 import com.sailens.guidance.trace.capture.FrameQualityRecord
+import com.sailens.guidance.trace.capture.GeometryRecord
 import com.sailens.guidance.trace.capture.RegressionFrameRecord
 import com.sailens.guidance.trace.capture.SemanticRunRecord
 import com.sailens.guidance.trace.capture.SemanticRuns
@@ -48,6 +50,7 @@ class RegressionFrameAssembler(
         val connectivity = mutableListOf<ConnectivityRecord>()
         var quality: FrameQualityRecord? = null
         var stationary: Boolean? = null
+        var geometry: GeometryRecord? = null
         var incomplete: String? = null
     }
 
@@ -119,6 +122,10 @@ class RegressionFrameAssembler(
         )
     }
 
+    fun onGeometry(geometry: CameraGeometry) = synchronized(lock) {
+        current?.geometry = geometry.toRecord()
+    }
+
     fun onStationary(stationary: Boolean) = synchronized(lock) {
         current?.stationary = stationary
     }
@@ -146,6 +153,7 @@ class RegressionFrameAssembler(
             connectivity = builder.connectivity,
             quality = builder.quality,
             stationary = builder.stationary,
+            geometry = builder.geometry,
             events = events.map { it.toRecord() },
             failure = failure?.toString(),
         )

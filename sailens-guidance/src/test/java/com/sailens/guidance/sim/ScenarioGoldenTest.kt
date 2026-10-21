@@ -16,14 +16,14 @@ import java.io.File
  */
 class ScenarioGoldenTest {
 
-    private val update = System.getProperty("sailens.updateGoldens") == "true"
-
     @Test fun `straight clear path`() = check(Scenarios.straightClearPath)
     @Test fun `pitch change with a fixed obstacle`() = check(Scenarios.pitchChangeFixedObstacle)
     @Test fun `phone height change`() = check(Scenarios.phoneHeightChange)
     @Test fun `ground and no ground`() = check(Scenarios.groundNoGround)
     @Test fun `curb and drop`() = check(Scenarios.curbAndDrop)
     @Test fun `partially occluded person`() = check(Scenarios.partiallyOccludedPerson)
+    @Test fun `tilt sweep near a person`() = check(Scenarios.tiltSweepNearPerson)
+    @Test fun `approach a parked car`() = check(Scenarios.approachParkedCar)
 
     @Test
     fun `every scenario has a golden test`() {
@@ -42,9 +42,16 @@ class ScenarioGoldenTest {
     private fun check(scenario: Scenario) {
         val results = GuidanceSimulator().run(scenario)
         assertEquals("every frame produces a result", scenario.frames.size, results.size)
-        val actual = listOf("# ${scenario.name}: ${scenario.description}") + results.map(GuidanceSimulator::goldenLine)
-        val fileName = "${scenario.name}.golden.txt"
+        Goldens.check(scenario, "${scenario.name}.golden.txt", results.map(GuidanceSimulator::goldenLine))
+    }
+}
 
+/** Compares a scenario's lines with its checked-in golden file, or rewrites it under -PupdateGoldens. */
+object Goldens {
+    private val update = System.getProperty("sailens.updateGoldens") == "true"
+
+    fun check(scenario: Scenario, fileName: String, lines: List<String>) {
+        val actual = listOf("# ${scenario.name}: ${scenario.description}") + lines
         if (update) {
             val dir = File(checkNotNull(System.getProperty("sailens.goldens.dir")) { "goldens dir not set" })
             dir.mkdirs()
@@ -52,12 +59,12 @@ class ScenarioGoldenTest {
             return
         }
         val resource = javaClass.getResource("/scenarios/$fileName")
-            ?: return fail("no golden for ${scenario.name}; generate it with -PupdateGoldens")
+            ?: return fail("no golden $fileName; generate it with -PupdateGoldens")
         val expected = resource.readText().trimEnd('\n').split('\n')
         val firstDiff = (0 until maxOf(expected.size, actual.size)).firstOrNull { expected.getOrNull(it) != actual.getOrNull(it) }
             ?: return
         fail(
-            "${scenario.name} differs from its golden at line ${firstDiff + 1}\n" +
+            "$fileName differs from its golden at line ${firstDiff + 1}\n" +
                 "  golden: ${expected.getOrNull(firstDiff) ?: "<end>"}\n" +
                 "  actual: ${actual.getOrNull(firstDiff) ?: "<end>"}\n" +
                 "If the change is intended, regenerate with -PupdateGoldens and commit the diff.",

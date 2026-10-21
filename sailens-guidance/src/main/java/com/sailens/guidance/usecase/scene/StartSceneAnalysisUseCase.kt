@@ -10,6 +10,7 @@ import com.sailens.guidance.geometry.CameraGeometryResolver
 import com.sailens.guidance.geometry.FrameFacts
 import com.sailens.guidance.geometry.PhoneGeometrySettings
 import com.sailens.guidance.geometry.withGeometry
+import com.sailens.guidance.geometry.withObstacleDistances
 import com.sailens.guidance.motion.NoOrientationSource
 import com.sailens.guidance.motion.OrientationSource
 import com.sailens.guidance.model.trace.FrameTrace
@@ -63,7 +64,8 @@ class StartSceneAnalysisUseCase(
     private val traceRuntimeConfig: TraceRuntimeConfig,
     private val pipelineBudget: PipelinePerformanceBudget,
     private val regressionRecorder: RegressionRecorder = RegressionRecorder.None,
-    // M3o geometry. The defaults leave it unavailable, which is legal: nothing decides on it yet.
+    // M3o geometry. The defaults leave it unavailable, which is legal: every distance then stays at
+    // today's image-position estimate (M3a).
     private val orientationSource: OrientationSource = NoOrientationSource,
     private val cameraFactsSource: CameraFactsSource = CameraFactsSource { null },
     private val phoneGeometry: () -> PhoneGeometrySettings = { PhoneGeometrySettings.DEFAULT },
@@ -169,8 +171,18 @@ class StartSceneAnalysisUseCase(
                 val recording = regressionRecorder.isRecording
                 if (recording) regressionRecorder.beginFrame(frame)
 
+                // M3o: where the camera points. Resolved before the frame is processed because the
+                // ground-contact distance (M3a) reads it; it is a sample lookup and a little maths.
+                val geometry = cameraGeometryResolver.resolve(
+                    cameraFactsSource.current(),
+                    FrameFacts.of(frame),
+                    orientationSource::gravityNear,
+                    phoneGeometry(),
+                )
+                if (recording) regressionRecorder.onGeometry(geometry)
+
                 // 处理帧
-                val perceptionResult = processFrameUseCase(frame).getOrElse {
+                val perceptionResult = processFrameUseCase(frame, geometry).getOrElse {
                     if (recording) regressionRecorder.endFrame(frame, emptyList(), it)
                     traceService.recordError(sessionId, "process_frame", it)
                     logService.error(
@@ -210,14 +222,8 @@ class StartSceneAnalysisUseCase(
                 if (recording) regressionRecorder.endFrame(frame, events, null)
                 val decideCompletedAt = Timestamp.now()
 
-                // M3o: where the camera points, for the record. Read after the decision so it
-                // cannot slow the prompt; nothing above depends on it.
-                val geometry = cameraGeometryResolver.resolve(
-                    cameraFactsSource.current(),
-                    FrameFacts.of(frame),
-                    orientationSource::gravityNear,
-                    phoneGeometry(),
-                )
+                // M3o motion, for the record. Read after the decision so it cannot slow the prompt;
+                // nothing above depends on it.
                 val motion = orientationSource.motionState(
                     geometry.frameTimeNanos ?: frame.receivedElapsedRealtimeNanos,
                     isStationary(),
@@ -354,7 +360,7 @@ class StartSceneAnalysisUseCase(
                     obstacleAcceleratorSelection = perceptionResult.obstacleRuntimeInfo.acceleratorSelection,
                     obstaclePreprocessBackend = perceptionResult.obstacleRuntimeInfo.preprocessBackend,
                     obstaclePostprocessBackend = perceptionResult.obstacleRuntimeInfo.postprocessBackend,
-                ).withGeometry(geometry, motion)
+                ).withGeometry(geometry, motion).withObstacleDistances(perceptionResult.obstacles, perceptionConfig.groundContact.enabled)
                 val runtimeStats = runtimeWindow.record(frameTrace, pipelineBudget)
 
                 return@mapNotNullReleasing PipelineFrameResult(

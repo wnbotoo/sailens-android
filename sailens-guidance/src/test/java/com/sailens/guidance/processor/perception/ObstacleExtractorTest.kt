@@ -1,5 +1,6 @@
 package com.sailens.guidance.processor.perception
 
+import com.sailens.guidance.depth.DistanceEstimate
 import com.sailens.vision.taxonomy.TaxonomyId
 import com.sailens.guidance.config.AnalysisConfig
 import com.sailens.guidance.config.PerceptionConfig
@@ -26,7 +27,7 @@ class ObstacleExtractorTest {
         }
         val analysis = analyzer.analyze(SegmentationMask(width = 10, height = 10, classMap = classMap))
 
-        val obstacles = extractor.extractFromSemantic(analysis) { DistanceLevel.NEAR }
+        val obstacles = extractor.extractFromSemantic(analysis) { _, _ -> DistanceEstimate.today(DistanceLevel.NEAR) }
 
         assertTrue(obstacles.isEmpty())
     }
@@ -41,7 +42,7 @@ class ObstacleExtractorTest {
         }
         val analysis = analyzer.analyze(SegmentationMask(width = 10, height = 10, classMap = classMap))
 
-        val obstacles = extractor.extractFromSemantic(analysis) { DistanceLevel.NEAR }
+        val obstacles = extractor.extractFromSemantic(analysis) { _, _ -> DistanceEstimate.today(DistanceLevel.NEAR) }
 
         assertEquals(1, obstacles.size)
         assertEquals(ObstacleCategory.PERSON, obstacles.single().category)
@@ -62,7 +63,7 @@ class ObstacleExtractorTest {
         )
         val detection = detection(NormalizedRect(x = 0.62f, y = 0.20f, width = 0.08f, height = 0.10f))
 
-        val obstacles = perspectiveExtractor.extractFromDetections(listOf(detection)) { DistanceLevel.FAR }
+        val obstacles = perspectiveExtractor.extractFromDetections(listOf(detection)) { _, _ -> DistanceEstimate.today(DistanceLevel.FAR) }
 
         assertTrue(obstacles.isEmpty())
     }
@@ -82,7 +83,7 @@ class ObstacleExtractorTest {
         )
         val detection = detection(NormalizedRect(x = 0.46f, y = 0.20f, width = 0.08f, height = 0.10f))
 
-        val obstacles = perspectiveExtractor.extractFromDetections(listOf(detection)) { DistanceLevel.FAR }
+        val obstacles = perspectiveExtractor.extractFromDetections(listOf(detection)) { _, _ -> DistanceEstimate.today(DistanceLevel.FAR) }
 
         assertEquals(1, obstacles.size)
         assertEquals(ObstacleCategory.PERSON, obstacles.single().category)

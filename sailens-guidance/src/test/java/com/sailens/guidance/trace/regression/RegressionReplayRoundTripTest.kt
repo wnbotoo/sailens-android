@@ -1,5 +1,20 @@
 package com.sailens.guidance.trace.regression
 
+import kotlin.math.sin
+import com.sailens.guidance.sim.SyntheticCamera
+import com.sailens.guidance.sim.Pose
+import com.sailens.guidance.motion.OrientationSource
+import com.sailens.guidance.motion.NoOrientationSource
+import com.sailens.guidance.motion.MotionTracker
+import com.sailens.guidance.geometry.toCameraFacts
+import com.sailens.guidance.geometry.Vec3
+import com.sailens.guidance.geometry.SensorSample
+import com.sailens.guidance.geometry.Placement
+import com.sailens.guidance.geometry.PhoneGeometrySettings
+import com.sailens.guidance.geometry.HeightSource
+import com.sailens.guidance.geometry.CameraFactsSource
+import com.sailens.guidance.depth.GroundContactDistanceConfig
+import com.sailens.guidance.geometry.CameraGeometry
 import com.sailens.core.frame.ImageFrame
 import com.sailens.core.frame.ImagePixelFormat
 import com.sailens.core.frame.Yuv420FrameData
@@ -12,6 +27,7 @@ import com.sailens.guidance.config.PerceptionConfig
 import com.sailens.guidance.config.PipelinePerformanceBudget
 import com.sailens.guidance.config.TraceRuntimeConfig
 import com.sailens.guidance.depth.DefaultDepthRepository
+import com.sailens.guidance.depth.GroundContactDistanceEstimator
 import com.sailens.guidance.depth.ImagePositionDepthEstimator
 import com.sailens.guidance.model.analysis.ConnectivityStats
 import com.sailens.guidance.model.common.GroundType
@@ -53,6 +69,7 @@ import com.sailens.guidance.semantics.CityscapesNavigationSemantics
 import com.sailens.guidance.service.TraceService
 import com.sailens.guidance.trace.capture.CaptureSchema
 import com.sailens.guidance.trace.capture.ClassMapStore
+import com.sailens.guidance.trace.capture.EventRecord
 import com.sailens.guidance.trace.capture.RegressionClocks
 import com.sailens.guidance.trace.capture.RegressionFrameRecord
 import com.sailens.guidance.trace.capture.RegressionRevokeRecord
@@ -116,6 +133,7 @@ class RegressionReplayRoundTripTest {
             assembler.onDetection(frame, detections, failure)
         override fun onConnectivity(passableMask: BinaryMask, stats: ConnectivityStats?) = assembler.onConnectivity(passableMask, stats)
         override fun onFrameQuality(result: FrameQualityResult) = assembler.onFrameQuality(result)
+        override fun onGeometry(geometry: CameraGeometry) = assembler.onGeometry(geometry)
         override fun onStationary(stationary: Boolean) = assembler.onStationary(stationary)
         override fun endFrame(frame: ImageFrame, events: List<SceneEvent>, failure: Throwable?) {
             when (val outcome = assembler.endFrame(frame, events, failure)) {
@@ -178,8 +196,11 @@ class RegressionReplayRoundTripTest {
         )
     }
 
-    /** An obstacle approaching in a zone and of a kind that change every 12 frames. */
-    private fun detections(seq: Long): List<ObstacleDetection> {
+    /**
+     * An obstacle approaching in a zone and of a kind that change every 12 frames. [farther] starts
+     * it higher in the image, where today's level is MEDIUM and the ground contact can disagree.
+     */
+    private fun detections(seq: Long, farther: Boolean = false): List<ObstacleDetection> {
         if (seq % 7 == 3L) return emptyList()
         val phase = (seq / 12).toInt()
         val left = listOf(0.12f, 0.42f, 0.70f)[phase % 3]
@@ -188,7 +209,7 @@ class RegressionReplayRoundTripTest {
             Triple(1, "bicycle", ObstacleCategory.BICYCLE),
             Triple(2, "car", ObstacleCategory.VEHICLE),
         )[(phase / 3) % 3]
-        val bottom = (0.55f + (seq % 12) * 0.035f).coerceAtMost(0.98f)
+        val bottom = ((if (farther) 0.45f else 0.55f) + (seq % 12) * 0.035f).coerceAtMost(0.98f)
         return listOf(ObstacleDetection(classId, label, 0.85f, NormalizedRect(left, bottom - 0.35f, 0.18f, 0.35f), category))
     }
 
@@ -209,7 +230,29 @@ class RegressionReplayRoundTripTest {
     /** Frames whose semantic run fails when it runs: such a frame produces no result. */
     private val failingFrames = setOf(30L, 31L)
 
-    private fun runSession(record: Boolean): Session = runBlocking {
+    /**
+     * The phone tilting between 26 and 38 degrees down over a few seconds, as gravity samples at
+     * any time asked; the camera is the M2a scenarios' (its buffer mapping is assumed for these
+     * small frames). With it, the ground-contact distance (M3a) has something to work on.
+     */
+    private val tiltingPhone = object : OrientationSource {
+        private val noRotation = MotionTracker()
+        override fun start() = Unit
+        override fun stop() = Unit
+        override fun gravityNear(timeNanos: Long): SensorSample {
+            val pitch = 32f + 6f * sin(timeNanos / 1e9 * 1.3).toFloat()
+            val g = Pose(1.3f, pitch).gravity()
+            return SensorSample(timeNanos - 4_000_000, Vec3(g[0], g[1], g[2]))
+        }
+        override fun motionState(atNanos: Long, isStationary: Boolean) = noRotation.state(atNanos, isStationary)
+    }
+
+    private fun runSession(record: Boolean, groundContact: Boolean = false): Session = runBlocking {
+        val perceptionConfig = if (groundContact) {
+            perceptionConfig.copy(groundContact = GroundContactDistanceConfig(enabled = true))
+        } else {
+            perceptionConfig
+        }
         val recorder = if (record) MemoryRecorder() else null
         val regression: RegressionRecorder = recorder ?: RegressionRecorder.None
         val now = AtomicLong(1_000_000)
@@ -233,7 +276,7 @@ class RegressionReplayRoundTripTest {
             override val isInitialized = true
             override suspend fun initialize() = Unit
             override fun release() = Unit
-            override suspend fun detect(frame: ImageFrame) = ObstacleModelOutput(detections(frame.sequenceNumber))
+            override suspend fun detect(frame: ImageFrame) = ObstacleModelOutput(detections(frame.sequenceNumber, farther = groundContact))
         }
         val sensors = object : DeviceSensorRepository {
             override val deviceRotation: StateFlow<Int> = MutableStateFlow(0)
@@ -249,7 +292,7 @@ class RegressionReplayRoundTripTest {
             profileManager = profiles,
             perceptionRepository = repository,
             realtimeObstacleProvider = provider,
-            depthRepository = DefaultDepthRepository(ImagePositionDepthEstimator(), null),
+            depthRepository = DefaultDepthRepository(ImagePositionDepthEstimator(), GroundContactDistanceEstimator(semantics)),
             segmentationAnalyzer = SegmentationAnalyzer(analysisConfig, semantics),
             obstacleExtractor = ObstacleExtractor(perceptionConfig, semantics),
             obstacleTracker = ObstacleTracker(perceptionConfig),
@@ -285,6 +328,9 @@ class RegressionReplayRoundTripTest {
             traceRuntimeConfig = TraceRuntimeConfig(enabled = false),
             pipelineBudget = PipelinePerformanceBudget(),
             regressionRecorder = regression,
+            orientationSource = if (groundContact) tiltingPhone else NoOrientationSource,
+            cameraFactsSource = CameraFactsSource { if (groundContact) SyntheticCamera().cameraRecord().toCameraFacts() else null },
+            phoneGeometry = { PhoneGeometrySettings(1.3f, HeightSource.PRESET, Placement.HANDHELD_CHEST) },
         )
         // The pipeline runs on its own dispatcher with a buffer before the collector, so on its own
         // it may decide several frames ahead of a revoke. The live recording copes (each revoke
@@ -348,44 +394,115 @@ class RegressionReplayRoundTripTest {
         val withoutRevokes = RegressionReplay(recorded.activeConfig, analysisConfig, semantics)
             .replay(recorder.frames, emptyList(), classMap = { recorder.classMaps[it.seq] })
         assertTrue("revokes should change later decisions", withoutRevokes.firstMismatch != null)
+
+        // Counterfactual delivery, run on the recorded config: taking each revoke where the event is
+        // unchanged must reproduce the record exactly; taking none must not.
+        fun counterfactual(delivery: RegressionReplay.CounterfactualDelivery): List<List<EventRecord>> {
+            val decided = mutableListOf<List<EventRecord>>()
+            val report = RegressionReplay(recorded.activeConfig, analysisConfig, semantics).replay(
+                recorder.frames, recorder.revokes, classMap = { recorder.classMaps[it.seq] },
+                onFrame = { _, outcome -> decided += outcome.events.map { it.toRecord().withoutId() } },
+                counterfactual = delivery,
+            )
+            assertNull(report.firstMismatch)
+            return decided
+        }
+        val asRecorded = recorder.frames.filter { it.failure == null }.map { frame -> frame.events.map(EventRecord::withoutId) }
+        assertEquals(asRecorded, counterfactual(RegressionReplay.CounterfactualDelivery.UNCHANGED_AS_RECORDED))
+        assertTrue(asRecorded != counterfactual(RegressionReplay.CounterfactualDelivery.ALL_DELIVERED))
+    }
+
+    @Test
+    fun `with the ground contact on, the recorded geometry replays exactly and is what makes it exact`() {
+        val plain = runSession(record = false, groundContact = true)
+        val recorded = runSession(record = true, groundContact = true)
+        val recorder = recorded.recorder!!
+        assertEquals(plain.events.map { e -> e.map { it.toRecord().withoutId() } }, recorded.events.map { e -> e.map { it.toRecord().withoutId() } })
+        assertTrue("every frame records its geometry", recorder.frames.all { it.geometry?.quality == "Degraded" })
+
+        val raised = mutableListOf<Long>()
+        val report = RegressionReplay(recorded.activeConfig, analysisConfig, semantics).replay(
+            frames = recorder.frames,
+            revokes = recorder.revokes,
+            classMap = { recorder.classMaps[it.seq] },
+            onFrame = { record, outcome ->
+                if (outcome.obstacles.any { it.distanceEstimate?.let { e -> e.used != e.today } == true }) raised += record.seq
+            },
+        )
+        assertNull(report.firstMismatch?.toString(), report.firstMismatch)
+        assertEquals(frameCount.toInt(), report.framesReplayed)
+        assertTrue("the ground contact must raise some level for this to test anything", raised.isNotEmpty())
+
+        // Without the recorded geometry every distance falls back to today's, and the replay diverges.
+        val withoutGeometry = RegressionReplay(recorded.activeConfig, analysisConfig, semantics)
+            .replay(recorder.frames, recorder.revokes, classMap = { recorder.classMaps[it.seq] }, geometryOf = { null })
+        assertTrue("geometry should change decisions", withoutGeometry.firstMismatch != null)
+    }
+
+    /**
+     * Writes [session]'s record as `RegressionCapture` would -- class maps in seq order, frames
+     * pointing at them -- with [frames] and the manifest's completeness facts open to tampering, and
+     * reads it back.
+     */
+    private fun writeCapture(
+        session: Session,
+        dir: java.io.File,
+        frames: List<RegressionFrameRecord> = session.recorder!!.frames,
+        complete: Boolean = true,
+        framesRecorded: Long = session.recorder!!.frames.size.toLong(),
+        firstLostSeq: Long? = null,
+    ): com.sailens.guidance.trace.capture.CaptureSession {
+        val recorder = session.recorder!!
+        java.io.FileOutputStream(java.io.File(dir, CaptureSchema.CLASS_MAPS_FILE)).use { out ->
+            frames.forEach { frame ->
+                recorder.classMaps[frame.seq]?.let { ids ->
+                    val ref = frame.semantic!!.classMap!!
+                    out.write(ClassMapStore.encode(frame.seq, ref.width, ref.height, ids).bytes)
+                }
+            }
+        }
+        java.io.File(dir, CaptureSchema.REGRESSION_FILE).writeText(
+            (frames.map(CaptureSchema::encodeRecord) + recorder.revokes.map(CaptureSchema::encodeRecord))
+                .joinToString(separator = "\n", postfix = "\n"),
+        )
+        java.io.File(dir, CaptureSchema.MANIFEST_FILE).writeText(
+            CaptureSchema.encodeManifest(
+                com.sailens.guidance.trace.capture.CaptureManifest(
+                    sessionId = "synthetic", captureMode = com.sailens.guidance.trace.capture.CaptureModes.MODEL_REGRESSION,
+                    startedWallMs = 1, startedElapsedRealtimeNanos = 1, deviceManufacturer = "Test", deviceModel = "JVM",
+                    sdkInt = 0, complete = complete,
+                    regression = com.sailens.guidance.trace.capture.RegressionManifest(
+                        perceptionConfig = CaptureSchema.json.encodeToJsonElement(PerceptionConfig.serializer(), session.activeConfig),
+                        analysisConfig = CaptureSchema.json.encodeToJsonElement(AnalysisConfig.serializer(), analysisConfig),
+                        taxonomyId = semantics.taxonomyId.value,
+                        stats = com.sailens.guidance.trace.capture.RegressionStats(
+                            framesRecorded = framesRecorded,
+                            framesLost = if (firstLostSeq != null) 1 else 0,
+                            firstLostSeq = firstLostSeq,
+                        ),
+                    ),
+                ),
+            ),
+        )
+        return com.sailens.guidance.trace.capture.CaptureSessionReader.read(dir).let {
+            (it as com.sailens.guidance.trace.capture.CaptureReadResult.Read).session
+        }
+    }
+
+    private fun <T> withTempDir(block: (java.io.File) -> T): T {
+        val dir = java.nio.file.Files.createTempDirectory("regression-capture").toFile()
+        try {
+            return block(dir)
+        } finally {
+            dir.deleteRecursively()
+        }
     }
 
     @Test
     fun `a record written to disk replays through the reader`() {
         val session = runSession(record = true)
-        val recorder = session.recorder!!
-        val dir = java.nio.file.Files.createTempDirectory("regression-capture").toFile()
-        try {
-            // As RegressionCapture writes it: class maps in seq order, frames pointing at them.
-            java.io.FileOutputStream(java.io.File(dir, CaptureSchema.CLASS_MAPS_FILE)).use { out ->
-                recorder.frames.forEach { frame ->
-                    recorder.classMaps[frame.seq]?.let { ids ->
-                        val ref = frame.semantic!!.classMap!!
-                        out.write(ClassMapStore.encode(frame.seq, ref.width, ref.height, ids).bytes)
-                    }
-                }
-            }
-            java.io.File(dir, CaptureSchema.REGRESSION_FILE).writeText(
-                (recorder.frames.map(CaptureSchema::encodeRecord) + recorder.revokes.map(CaptureSchema::encodeRecord))
-                    .joinToString(separator = "\n", postfix = "\n"),
-            )
-            java.io.File(dir, CaptureSchema.MANIFEST_FILE).writeText(
-                CaptureSchema.encodeManifest(
-                    com.sailens.guidance.trace.capture.CaptureManifest(
-                        sessionId = "synthetic", captureMode = com.sailens.guidance.trace.capture.CaptureModes.MODEL_REGRESSION,
-                        startedWallMs = 1, startedElapsedRealtimeNanos = 1, deviceManufacturer = "Test", deviceModel = "JVM",
-                        sdkInt = 0, complete = true,
-                        regression = com.sailens.guidance.trace.capture.RegressionManifest(
-                            perceptionConfig = CaptureSchema.json.encodeToJsonElement(PerceptionConfig.serializer(), session.activeConfig),
-                            analysisConfig = CaptureSchema.json.encodeToJsonElement(AnalysisConfig.serializer(), analysisConfig),
-                            taxonomyId = semantics.taxonomyId.value,
-                        ),
-                    ),
-                ),
-            )
-            val read = com.sailens.guidance.trace.capture.CaptureSessionReader.read(dir).let {
-                (it as com.sailens.guidance.trace.capture.CaptureReadResult.Read).session
-            }
+        withTempDir { dir ->
+            val read = writeCapture(session, dir)
             val block = read.manifest.regression!!
             val report = RegressionReplay(
                 CaptureSchema.json.decodeFromJsonElement(PerceptionConfig.serializer(), block.perceptionConfig!!),
@@ -394,9 +511,52 @@ class RegressionReplayRoundTripTest {
             ).replay(read.regressionFrames, read.revokes, classMap = { com.sailens.guidance.trace.capture.CaptureSessionReader.classMap(read, it) })
             assertNull(report.firstMismatch?.toString(), report.firstMismatch)
             assertEquals(frameCount.toInt(), report.framesReplayed)
-        } finally {
-            dir.deleteRecursively()
         }
+    }
+
+    /** The phone settings the M3a sessions here ran with, so the evaluation's exact run matches. */
+    private val evaluation = GroundContactEvaluation(PhoneGeometrySettings(1.3f, HeightSource.PRESET, Placement.HANDHELD_CHEST))
+
+    @Test
+    fun `the evaluation of a capture recorded with M3a on compares against M3a really off`() {
+        // Review round 2, P1: built from the recorded config alone, the "off" baseline stayed on.
+        val result = withTempDir { dir -> evaluation.evaluate(writeCapture(runSession(record = true, groundContact = true), dir))!! }
+        assertTrue(result.recordedOn)
+        assertEquals(emptyList<String>(), result.problems)
+        assertTrue(result.complete)
+        assertTrue(
+            "with M3a on recorded, off and on must still decide differently in this scene",
+            result.changes.getValue(RegressionReplay.CounterfactualDelivery.UNCHANGED_AS_RECORDED).decisionsDiffer,
+        )
+    }
+
+    @Test
+    fun `the evaluation of a capture recorded with M3a off has the device as its off baseline`() {
+        val result = withTempDir { dir -> evaluation.evaluate(writeCapture(runSession(record = true), dir))!! }
+        assertTrue(!result.recordedOn)
+        assertEquals(emptyList<String>(), result.problems)
+        assertTrue(result.complete)
+    }
+
+    @Test
+    fun `a truncated or unfinished capture is evaluated but never counted complete`() {
+        // Review round 2, P2: the records read must not vouch for themselves.
+        val session = runSession(record = true)
+        val truncated = withTempDir { dir -> evaluation.evaluate(writeCapture(session, dir, frames = session.recorder!!.frames.take(5)))!! }
+        assertEquals(emptyList<String>(), truncated.problems)
+        assertTrue("records missing against the manifest's count", !truncated.complete)
+        val unfinished = withTempDir { dir -> evaluation.evaluate(writeCapture(session, dir, complete = false))!! }
+        assertTrue("the manifest says it did not finish", !unfinished.complete)
+    }
+
+    @Test
+    fun `a capture that loses its first frame evaluates nothing and says so`() {
+        val session = runSession(record = true)
+        val result = withTempDir { dir ->
+            evaluation.evaluate(writeCapture(session, dir, firstLostSeq = session.recorder!!.frames.first().seq))!!
+        }
+        assertTrue(result.problems.toString(), result.problems.any { "no frame to evaluate" in it })
+        assertTrue(!result.complete)
     }
 
     @Test

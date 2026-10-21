@@ -42,9 +42,9 @@ object CaptureSchema {
     /**
      * 1: `CaptureStats.framesMissedBySubscriber`. 2: `CaptureManifest.modelArtifacts`.
      * 3: the `model_regression` mode -- `regression.jsonl`, `classmaps.bin`, `windows.jsonl`,
-     * `CaptureManifest.regression`, `group`, `sceneLabel`.
+     * `CaptureManifest.regression`, `group`, `sceneLabel`. 4: `RegressionFrameRecord.geometry`.
      */
-    const val MINOR: Int = 3
+    const val MINOR: Int = 4
 
     const val MANIFEST_FILE: String = "manifest.json"
     const val FRAMES_FILE: String = "frames.jsonl"

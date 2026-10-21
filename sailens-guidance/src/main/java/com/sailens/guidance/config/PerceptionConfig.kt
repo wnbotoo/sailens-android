@@ -1,5 +1,6 @@
 package com.sailens.guidance.config
 
+import com.sailens.guidance.depth.GroundContactDistanceConfig
 import com.sailens.guidance.model.common.ObstacleProviderType
 import com.sailens.guidance.model.common.PerceptionProfile
 import com.sailens.guidance.model.common.SemanticProviderType
@@ -71,6 +72,9 @@ data class PerceptionConfig(
     val trackerIoUThreshold: Float = 0.3f,
     val trackerMaxMissedFrames: Int = 5,
     val trackerMinStableFrames: Int = 3,
+
+    /** M3a ground-contact distance; off by default (see [GroundContactDistanceConfig]). */
+    val groundContact: GroundContactDistanceConfig = GroundContactDistanceConfig(),
 ) {
     /** det 是否参与运行（BASIC 挡位或未配置 provider 时关闭） */
     val detectionEnabled: Boolean

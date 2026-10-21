@@ -662,6 +662,8 @@ M1b and M8 depend on.
     `orientationQuality`.
   - Older traces parse as `none`.
   - **Nothing decides on these yet.**
+  - M3a later moved the geometry ahead of the frame's processing, because its distance reads the
+    geometry; the motion state stays after the decision (§8, "M3a as built").
 - `PhoneGeometrySettings` stays at the 1.3 m seed. The shell store and the setting UI come with M3a,
   the first consumer of the height.
 - The simulator feeds geometry each scenario's own raw facts. The goldens gained a
@@ -718,6 +720,127 @@ margins, per-class plausibility) are profile values.
 **Tests**: pure maths on synthetic cameras (known pitch/height → known distance); fusion table
 (new estimate may raise, may not lower); validity cases; simulator tilt scenarios (same obstacle,
 pitch −30°…+10°, the used level never becomes less near than today's); occluded-person scenario.
+
+### M3a as built: part 1, estimate, fusion and evaluation (default off)
+
+- `…guidance.depth`:
+  - `GroundContactDistanceEstimator`. The contact pixel is the bottom centre of the box. β is the
+    ray's angle below the horizon, from gravity, and `d = h / tan β`.
+    - The interval is `h(1 − Δh) / tan(β + δ)` … `h(1 + Δh) / tan(β − δ)`.
+    - Δh is 15% for the seed or a preset and 10% when calibrated; δ is 2°.
+  - **Validity**, checked in this order:
+    - `NO_GEOMETRY`: no geometry, or geometry that is unavailable or whose gravity is stale.
+      Estimated intrinsics and receipt-time alignment are accepted.
+    - `NEAR_HORIZON`: β < 3°.
+    - `CLIPPED`: the box bottom is within 1% of the bottom edge.
+    - `OCCLUDED`: another detection covers the contact row across the box's central half. It must
+      pass the extractor's confidence floor and its bottom must be more than 2% of the frame lower.
+    - `GROUND_UNSEEN`: under 30% of the strip below the contact is ground (passable or a ground type)
+      in the sem class map. The strip is 2% of the frame high and spans the box's central half.
+    - `IMPLAUSIBLE_BOX`: the box's implied height `H = h (1 − tan β_top / tan β)` falls outside its
+      class's range under every allowed error. The errors are the height tolerance and the same ±2°
+      gravity error the interval allows.
+      - The bound is proved, not sampled. A gravity within δ of the estimate moves the angle between
+        gravity and any ray by at most δ (the triangle inequality on the sphere), so each β lies
+        within δ of its nominal value, clipped to ±90°.
+      - `H` is monotonic in `tan β_top` and `1 / tan β_bottom`, and linear in the phone height. So
+        the extremes over those intervals enclose every allowed combination, the interior of the
+        error cone included.
+      - Treating the two rays' errors independently only widens the enclosure, so it rejects less.
+  - **Two departures from the sketch above:**
+    - `GROUND_UNSEEN` is split out of `OCCLUDED`. It is common indoors, where the sem model reads
+      reflective floors as building, and the evaluation needs to see it separately.
+    - A box cut short at the bottom (legs behind a wall) reads farther and *taller*, not shorter.
+      Within the tolerances such a box often passes the check.
+      - Its *point estimate* reads farther than the truth.
+      - Its *lower bound*, which carries the height and gravity tolerances and is what the fusion
+        uses, can still be nearer than the truth. For example: camera at 1.2 m, 25° down, a 0.9 m
+        person truly 1.6 m away with the bottom 5 cm hidden reads 1.67 m with a lower bound of
+        1.32 m, and goes from MEDIUM to NEAR.
+      - What is guaranteed is only the fusion's: the level used is never farther than today's.
+      - The check bites on gross cases, such as a person box that ends at the knee.
+  - **Height ranges** (proposals, not calibrated): person 0.7–2.4 m, bicycle 0.6–2.2 m, vehicle
+    0.9–4.5 m.
+    - Static classes have no range.
+    - A box whose top touches the frame is not judged.
+  - `DistanceFusion` follows the table above. `DistanceEstimate` refuses to hold a used level that
+    is farther than today's.
+  - `DefaultDepthRepository` computes today's level and the contact on every call.
+    - When M3a is off, the contact is a shadow: traced, but it decides nothing.
+    - The unused hardware depth path is removed. Its `getDepthAt` returned 0 m, which would have
+      read as NEAR. `SimpleDepthRepository` is removed too.
+- **Config**: `PerceptionConfig.groundContact = GroundContactDistanceConfig(enabled = false, …)`.
+  Because it is part of `PerceptionConfig`, the M0b manifest records it.
+- **Pipeline**: `StartSceneAnalysisUseCase` resolves the geometry before processing the frame and
+  passes it as `ProcessFrameUseCase(frame, geometry)`. Each frame's distance context holds:
+  - the geometry;
+  - the boxes of that frame's detections;
+  - its class map;
+  - the config.
+  - Tracker-predicted frames keep the last estimate.
+- **Trace**:
+  - Per frame: `phoneHeightM`, `heightSource`, `groundContactEnabled`.
+  - `obstacleDistances[]`, one entry per tracked obstacle: `category`, `zone`, `contactValidity`,
+    `lowerBoundM`, `pointM`, `upperBoundM`, `levelToday`, `levelNew`, `levelUsed`.
+  - Pitch, geometry quality, time basis, gravity age and intrinsics source came with M3o.
+- **M0b**: schema 1.4 adds `RegressionFrameRecord.geometry`, the geometry the frame was processed
+  with.
+  - It is recorded, not re-resolved from the sensor log: the live pipeline uses the nearest sample
+    it *has*, which a replay cannot know.
+  - Replay uses it by default. A caller can supply geometry for older records.
+  - A counterfactual replay (`counterfactual = …`) runs a config the device did not run. The
+    device's revokes say only which of *its* prompts went undelivered. A changed prompt may have
+    been delivered after all: an upgrade can interrupt the speech that blocked the original. So a
+    counterfactual run states its assumption:
+    - `UNCHANGED_AS_RECORDED`: a revoke reaches only an identical event. On the recorded config this
+      reproduces the device exactly, which a test checks.
+    - `ALL_DELIVERED`: no revoke applies.
+- **Simulator**:
+  - Two new scenarios: a tilt sweep near a person, and walking toward a parked car at the field
+    pitch.
+  - An M3a-on golden per scenario (`<name>.m3a.golden.txt`). It shows each obstacle's evidence and
+    each event's distance, with a 1.3 m chest preset.
+  - The plain goldens are byte-for-byte unchanged.
+  - With M3a on:
+    - No scenario's decided events change, the distance wording included.
+    - Levels do change. A person 3 m away at about 29° down stays MEDIUM where today's level says
+      FAR, and the car becomes NEAR about 0.25 m sooner.
+- **Evaluation** (`GroundContactEvaluation`; on local captures through
+  `GroundContactCaptureEvaluationTest`, on synthetic captures in CI):
+  - **Three kinds of run:**
+    - **Exact:** the recorded config and geometry, untouched. It must reproduce the device.
+    - **Baseline:** M3a explicitly off.
+    - **Treatment:** M3a explicitly on.
+    - The baseline and treatment keep the recorded thresholds, use the evaluation's phone height,
+      and run once under each delivery assumption. M3a's effect is treatment against baseline
+      *under the same assumption*.
+    - Only a recording made with M3a off must have its `UNCHANGED_AS_RECORDED` baseline equal the
+      device.
+  - **Geometry:** the recorded geometry. An older capture is resolved from its sensor log, which
+    needs the camera's realtime clock; a capture with neither is reported as not evaluable.
+  - **Completeness:** a capture is complete only if its manifest says so, it lost no frames, the
+    reader warned of nothing, and the records read match the manifest's count. Anything else is
+    evaluated as far as it goes, labelled, and kept out of the pass. Every run must cover every
+    frame the record allows, and an empty evaluation fails.
+  - **What it counts:** prompts the user would have **heard**: the device made the identical offer
+    and did not revoke it. Other prompts have unknown delivery and are counted apart.
+  - **What a change is:** a prompt changes only if what is spoken changes: the key, the priority,
+    the NEAR prefix or the direction suffix. Event metadata such as `messageParams` is not spoken;
+    `SceneEventStringsTest` checks that no event string has a placeholder.
+  - Results with the real carry for the seven M0b-exit captures (handheld at chest, about 1.15 m):
+    - Valid contacts are 41–75% outdoors and 21–56% indoors.
+    - Indoors the main loss is `GROUND_UNSEEN` (25–71%).
+    - A valid contact is nearer than today's level in 0.1–6.1% of obstacle-frames.
+    - At most 0.3% of obstacle-frames are `IMPLAUSIBLE_BOX`.
+    - Heard obstacle prompts change materially in one capture, overcast dusk: of 46–47 heard,
+      12–15 drop out, 4–5 are reworded and 11–13 come on frames that had none. In each of the
+      others, 0–5 heard prompts are reworded or drop out.
+    - The two assumptions agree to within 3 prompts per capture.
+    - Only 20–93% of offered obstacle prompts were delivered.
+    - Where a prompt was heard, the obstacle's point estimate had a median of 1.8–3.4 m per
+      capture.
+  - The per-capture numbers are in the M3a part 1 pull request. They move with the phone height
+    assumed.
 
 ## 9. M3b — Ground geometry from depth
 
