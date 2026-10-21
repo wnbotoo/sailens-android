@@ -10,6 +10,7 @@ import com.sailens.guidance.model.analysis.ConnectivityStats
 import com.sailens.guidance.model.perception.ObstacleDetection
 import com.sailens.guidance.model.perception.SegmentationOutput
 import com.sailens.guidance.model.scene.SceneEvent
+import com.sailens.guidance.model.trace.PromptDeliveryChannels
 import com.sailens.guidance.model.trace.PromptOutcomeTrace
 import com.sailens.guidance.processor.analysis.FrameQualityResult
 import com.sailens.guidance.trace.capture.CaptureSchema
@@ -19,6 +20,8 @@ import com.sailens.guidance.trace.capture.RegressionFrameRecord
 import com.sailens.guidance.trace.capture.RegressionManifest
 import com.sailens.guidance.trace.capture.RegressionRevokeRecord
 import com.sailens.guidance.trace.capture.RegressionStats
+import com.sailens.guidance.trace.capture.RegressionUtteranceRecord
+import com.sailens.guidance.trace.capture.UtteranceRecordEvents
 import com.sailens.guidance.trace.capture.WindowFrameRecord
 import com.sailens.guidance.trace.capture.WindowTriggers
 import com.sailens.guidance.trace.regression.RegressionFrameAssembler
@@ -40,6 +43,11 @@ import java.util.concurrent.atomic.AtomicLong
 internal data class RegressionCaptureConfig(
     /** Frames waiting for the writer before the record starts losing them. */
     val queueCapacity: Int = 240,
+    /**
+     * Speech-lifecycle events waiting for the writer. A queue of their own, so that they can never
+     * cost the record a frame (and with it exact replay); one that does not fit is counted dropped.
+     */
+    val utteranceQueueCapacity: Int = 1024,
     /** Class-map copies in flight between the pipeline and the writer. */
     val classMapPoolSize: Int = 16,
     /** Full-resolution frames kept for event windows: 10 Hz, 2.5 s. */
@@ -52,9 +60,21 @@ internal data class RegressionCaptureConfig(
 )
 
 /**
+ * Begins and ends the speech side's lifecycle sessions (det-first plan D1.3) with the record's own:
+ * what the speech engine reports is attributed to the session its utterance was submitted in.
+ */
+internal interface SpeechLifecycleSessions {
+    fun begin(sessionId: String)
+
+    /** Synchronous: the session's attempts still without an outcome are reported before it returns. */
+    fun end(sessionId: String)
+}
+
+/**
  * Records the model-regression part of a `model_regression` capture (M0b): one
  * [RegressionFrameRecord] per processed frame into `regression.jsonl`, class maps into
- * `classmaps.bin`, revocations, and full-resolution frames around delivered prompts and markers.
+ * `classmaps.bin`, revocations, the speech lifecycle ([RegressionUtteranceRecord]) when
+ * [speechSessions] is wired, and full-resolution frames around delivered prompts and markers.
  *
  * Lifecycle. [startSession] runs synchronously when the trace session starts, before Guidance
  * processes its first frame -- replay starts from the session's initial state, so the first frame
@@ -73,6 +93,8 @@ internal class RegressionCapture(
     private val log: LogService,
     private val writerDispatcher: CoroutineDispatcher,
     private val config: RegressionCaptureConfig = RegressionCaptureConfig(),
+    /** Null records no speech lifecycle, and the manifest says so. */
+    private val speechSessions: SpeechLifecycleSessions? = null,
 ) : RegressionRecorder {
 
     @Volatile
@@ -87,10 +109,11 @@ internal class RegressionCapture(
     fun startSession(sessionId: String) {
         session?.let { abandon(it, "superseded by $sessionId") }
         session = Session(sessionId)
+        runCatching { speechSessions?.begin(sessionId) }
     }
 
     /** The manifest block written when the capture starts; counters are filled in by [finish]. */
-    fun manifestBlock(): RegressionManifest = manifestBase()
+    fun manifestBlock(): RegressionManifest = manifestBase().copy(utteranceLifecycle = speechSessions != null)
 
     /** The session directory exists now: the writer may start. Writer-thread caller. */
     fun attach(sessionId: String, directory: File) {
@@ -101,8 +124,11 @@ internal class RegressionCapture(
     /** Stops recording, writes everything queued and returns the counters. */
     suspend fun finish(sessionId: String): RegressionStats? {
         val s = session?.takeIf { it.id == sessionId } ?: return null
+        // Before recording stops: what the speech side still owes the session is reported now.
+        runCatching { speechSessions?.end(sessionId) }
         s.recording = false
         s.queue.close()
+        s.utterances.close()
         val writer = s.writerJob
         if (writer == null) {
             s.discardQueued("the capture never started writing")
@@ -124,19 +150,36 @@ internal class RegressionCapture(
     }
 
     private fun abandon(s: Session, reason: String) {
+        runCatching { speechSessions?.end(s.id) }
         s.recording = false
         s.writerJob?.cancel()
         s.queue.close()
+        s.utterances.close()
         s.discardQueued(reason)
         log.warning(TAG, "Regression record stopped: $reason")
     }
 
     // ---- triggers for event windows -----------------------------------------------------------
 
-    /** A prompt outcome from the trace; a delivered one opens a window around its offering frame. */
+    /**
+     * A prompt outcome from the trace; a delivered one opens a window around its offering frame.
+     * One handed to the screen reader is noted with the lifecycle: that path reports none.
+     */
     fun onPromptOutcome(outcome: PromptOutcomeTrace) {
         if (outcome.deliveredAt == null) return
         session?.windows?.onPrompt(outcome.sourceSequenceNumber, outcome.eventId)
+        if (PromptDeliveryChannels.SCREEN_READER in outcome.deliveredVia) {
+            val s = session ?: return
+            onUtterance(
+                s.id,
+                RegressionUtteranceRecord(
+                    event = UtteranceRecordEvents.SCREEN_READER_PUBLISHED,
+                    attemptId = outcome.eventId,
+                    logicalId = outcome.eventId,
+                    elapsedRealtimeNanos = clock.elapsedRealtimeNanos(),
+                ),
+            )
+        }
     }
 
     /** A missed-alert marker, at its observed elapsed-realtime time. */
@@ -173,6 +216,16 @@ internal class RegressionCapture(
 
     override fun onRevoke(eventId: UUID, decisionsBefore: Long) = guarded("onRevoke") { it.onRevoke(eventId, decisionsBefore) }
 
+    // Not guarded(): a lost lifecycle event is counted against the lifecycle, never against a frame.
+    override fun onUtterance(sessionId: String?, record: RegressionUtteranceRecord) {
+        val s = session?.takeIf { it.recording && it.id == sessionId } ?: return
+        try {
+            if (s.utterances.trySend(record).isFailure) s.utteranceEventsDropped.incrementAndGet()
+        } catch (e: Exception) {
+            s.utteranceEventsDropped.incrementAndGet()
+        }
+    }
+
     private inline fun guarded(hook: String, block: (Session) -> Unit) {
         val s = session?.takeIf { it.recording } ?: return
         try {
@@ -195,6 +248,7 @@ internal class RegressionCapture(
         val scope = CoroutineScope(SupervisorJob() + writerDispatcher)
         var writerJob: Job? = null
         val queue = Channel<Item>(config.queueCapacity)
+        val utterances = Channel<RegressionUtteranceRecord>(config.utteranceQueueCapacity)
         val windows = WindowKeeper()
 
         private val classMapPool = ArrayDeque<IntArray>()
@@ -211,6 +265,8 @@ internal class RegressionCapture(
         val windowsRecorded = AtomicLong()
         val windowFramesStored = AtomicLong()
         val windowFramesDropped = AtomicLong()
+        val utteranceEventsRecorded = AtomicLong()
+        val utteranceEventsDropped = AtomicLong()
         val bytes = AtomicLong()
         private var strayClockReads = 0L
 
@@ -222,6 +278,8 @@ internal class RegressionCapture(
             windowsRecorded = windowsRecorded.get(),
             windowFramesStored = windowFramesStored.get(),
             windowFramesDropped = windowFramesDropped.get(),
+            utteranceEventsRecorded = utteranceEventsRecorded.get(),
+            utteranceEventsDropped = utteranceEventsDropped.get(),
         )
 
         private var hookFailures = 0L
@@ -320,6 +378,23 @@ internal class RegressionCapture(
                     }
                 }
             }
+            while (utterances.tryReceive().getOrNull() != null) utteranceEventsDropped.incrementAndGet()
+        }
+
+        /** Writer: every lifecycle event waiting now, appended to `regression.jsonl`. */
+        private fun writeUtterances(regression: BufferedWriter) {
+            while (true) {
+                val record = utterances.tryReceive().getOrNull() ?: return
+                try {
+                    val line = CaptureSchema.encodeRecord(record)
+                    regression.write(line)
+                    regression.write("\n")
+                    bytes.addAndGet(line.length + 1L)
+                    utteranceEventsRecorded.incrementAndGet()
+                } catch (e: Exception) {
+                    utteranceEventsDropped.incrementAndGet()
+                }
+            }
         }
 
         /** Writer thread: drains [queue] into the session directory until it is closed. */
@@ -403,11 +478,15 @@ internal class RegressionCapture(
                             }
                         }
                     }
+                    writeUtterances(regression)
                     if (queue.isEmpty) {
                         regression.flush()
                         windowLines.flush()
                     }
                 }
+                // The queue is closed: what the speech side reported last is written too.
+                writeUtterances(regression)
+                regression.flush()
             } finally {
                 runCatching { regression.close() }
                 runCatching { windowLines.close() }

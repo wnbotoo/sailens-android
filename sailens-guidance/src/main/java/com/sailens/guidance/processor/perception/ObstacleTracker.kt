@@ -8,15 +8,34 @@ import com.sailens.core.geometry.NormalizedRect
 import com.sailens.guidance.model.common.ObstacleCategory
 import com.sailens.guidance.model.common.UrgencyLevel
 import com.sailens.guidance.model.perception.DetectedObstacle
+import com.sailens.guidance.model.perception.ObstacleMeasurement
+import com.sailens.guidance.model.perception.ObstacleSourceFrame
 import com.sailens.guidance.model.perception.RawObstacle
 import java.util.UUID
 
 /**
  * 障碍物跟踪器
+ *
+ * @param trackIds where a new track's id comes from: random in production; numbered by birth in a
+ *   replay, so that two replays of one capture can pair their tracks (det-first plan D1.1).
  */
 class ObstacleTracker(
     private val config: PerceptionConfig,
+    private val trackIds: TrackIdSource = TrackIdSource.RANDOM,
 ) {
+    /**
+     * Gives each new track its id. Ids only name tracks; nothing compares or orders them, so the
+     * source changes no decision.
+     */
+    fun interface TrackIdSource {
+        /** The id of the track born from [birth] in [frame] (null when the caller did not say). */
+        fun newTrackId(birth: RawObstacle, frame: ObstacleSourceFrame?): UUID
+
+        companion object {
+            val RANDOM: TrackIdSource = TrackIdSource { _, _ -> UUID.randomUUID() }
+        }
+    }
+
     private val tracks = mutableMapOf<UUID, TrackState>()
 
     data class TrackState(
@@ -32,12 +51,18 @@ class ObstacleTracker(
         var missedFrames: Int,
         var areaRatio: Float,
         var lastSeen: Long,
+        /** The detection that last updated this track; observation only (see [ObstacleMeasurement]). */
+        var measurement: ObstacleMeasurement? = null,
     )
 
     /**
      * 更新跟踪（接收新检测）
+     *
+     * @param frame the frame [detections] came from. Only recorded on the tracks it updates
+     *   ([DetectedObstacle.measurement]); tracking does not read it.
      */
-    fun update(detections: List<RawObstacle>, timestamp: Long): List<DetectedObstacle> {
+    fun update(detections: List<RawObstacle>, timestamp: Long, frame: ObstacleSourceFrame? = null): List<DetectedObstacle> {
+        val measurement = frame?.let { ObstacleMeasurement(it.sequenceNumber, it.timestampNanos, timestamp) }
         // 1. 计算 IoU 匹配
         val matches = matchDetections(detections)
 
@@ -60,6 +85,7 @@ class ObstacleTracker(
             track.stableFrames++
             track.missedFrames = 0
             track.lastSeen = timestamp
+            track.measurement = measurement
 
             matchedTrackIds.add(trackId)
             matchedDetectionIndices.add(detectionIndex)
@@ -69,7 +95,7 @@ class ObstacleTracker(
         for ((index, detection) in detections.withIndex()) {
             if (index !in matchedDetectionIndices) {
                 val newTrack = TrackState(
-                    id = UUID.randomUUID(),
+                    id = trackIds.newTrackId(detection, frame),
                     boundingBox = detection.boundingBox,
                     category = detection.category,
                     className = detection.className,
@@ -80,7 +106,8 @@ class ObstacleTracker(
                     stableFrames = 1,
                     missedFrames = 0,
                     areaRatio = detection.areaRatio,
-                    lastSeen = timestamp
+                    lastSeen = timestamp,
+                    measurement = measurement,
                 )
                 tracks[newTrack.id] = newTrack
             }
@@ -122,7 +149,8 @@ class ObstacleTracker(
                     confidence = track.confidence * 0.9f,  // 预测时降低置信度
                     stableFrames = track.stableFrames,
                     areaRatio = track.areaRatio,
-                    timestamp = timestamp
+                    timestamp = timestamp,
+                    measurement = track.measurement,
                 )
             }
     }
@@ -164,7 +192,8 @@ class ObstacleTracker(
                     confidence = track.confidence,
                     stableFrames = track.stableFrames,
                     areaRatio = track.areaRatio,
-                    timestamp = timestamp
+                    timestamp = timestamp,
+                    measurement = track.measurement,
                 )
             }
     }

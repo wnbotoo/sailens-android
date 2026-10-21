@@ -8,6 +8,7 @@ import com.sailens.shell.capture.FieldCaptureScreen
 import com.sailens.shell.consistency.ModelConsistencyScreen
 import com.sailens.shell.trace.TraceReportScreen
 import com.sailens.shell.trace.TraceSessionsScreen
+import com.sailens.shell.ttsduration.TtsDurationScreen
 
 /**
  * Debug-variant trace/diagnostics destinations. This file exists only in `src/debug`, so the trace
@@ -34,5 +35,8 @@ fun EntryProviderScope<NavKey>.sailensDebugEntries(backStack: NavBackStack<NavKe
     }
     entry<GroundContactKey> {
         GroundContactScreen(onNavigateBack = { backStack.removeLastOrNull() })
+    }
+    entry<TtsDurationKey> {
+        TtsDurationScreen(onNavigateBack = { backStack.removeLastOrNull() })
     }
 }

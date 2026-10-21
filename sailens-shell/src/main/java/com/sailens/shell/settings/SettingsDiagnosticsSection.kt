@@ -13,6 +13,7 @@ internal fun SettingsDiagnosticsSection(
     onOpenFieldCapture: () -> Unit,
     onOpenModelConsistency: () -> Unit,
     onOpenGroundContact: () -> Unit,
+    onOpenTtsDuration: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     SettingsSection(
@@ -38,6 +39,11 @@ internal fun SettingsDiagnosticsSection(
             title = stringResource(R.string.btn_open_ground_contact),
             supportingText = stringResource(R.string.settings_diagnostics_ground_contact_supporting),
             onClick = onOpenGroundContact,
+        )
+        SettingRow(
+            title = stringResource(R.string.btn_open_tts_duration),
+            supportingText = stringResource(R.string.settings_diagnostics_tts_duration_supporting),
+            onClick = onOpenTtsDuration,
         )
     }
 }

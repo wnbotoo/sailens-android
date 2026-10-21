@@ -34,6 +34,13 @@ data class RegressionManifest(
     /** What the distance estimate came from ("position" without hardware depth). */
     val depthSource: String? = null,
     val stats: RegressionStats = RegressionStats(),
+    /**
+     * True when the record carries the speech lifecycle ([RegressionUtteranceRecord], schema 1.5):
+     * an event missing from it did not happen, or was counted in
+     * [RegressionStats.utteranceEventsDropped]. False -- every older record -- means there is no
+     * lifecycle evidence at all, which is not the same as "nothing failed".
+     */
+    val utteranceLifecycle: Boolean = false,
 ) {
     companion object {
         const val RECORDER_VERSION: Int = 1
@@ -56,6 +63,13 @@ data class RegressionStats(
     val windowsRecorded: Long = 0,
     val windowFramesStored: Long = 0,
     val windowFramesDropped: Long = 0,
+    /** [RegressionUtteranceRecord]s written (schema 1.5). */
+    val utteranceEventsRecorded: Long = 0,
+    /**
+     * Lifecycle events the record could not keep (queue full, write failure). Any drop makes the
+     * session's lifecycle incomplete; exact replay does not depend on them.
+     */
+    val utteranceEventsDropped: Long = 0,
 )
 
 /**
@@ -293,6 +307,65 @@ data class RegressionRevokeRecord(
     val decisionsBefore: Long,
     val elapsedRealtimeNanos: Long,
 ) : CaptureRecord
+
+/**
+ * One event in the life of one utterance handed to the speech engine (det-first plan D1.3; schema
+ * 1.5). Measurement only: replay never reads it.
+ *
+ * Two ids, because the same words can be handed to the engine more than once: [attemptId] is one
+ * submission's utterance id, [logicalId] what is being said -- for a Guidance prompt, the decided
+ * event's id, the one [EventRecord.id] and [RegressionRevokeRecord.eventId] carry.
+ *
+ * Only the session's own attempts are recorded: an engine callback that arrives after its session
+ * ended is not written into a later one.
+ *
+ * @param event one of [UtteranceRecordEvents]; an open string, so a later minor version can add one.
+ * @param engineGeneration the engine instance the attempt was given to; for an engine callback, the
+ *   instance the callback came from.
+ * @param elapsedRealtimeNanos when it was observed, on the thread that observed it (the engine's own
+ *   thread for its callbacks), on the clock of [RegressionRevokeRecord.elapsedRealtimeNanos].
+ * @param logicalId null when the speech side did not know the attempt.
+ */
+@Serializable
+@SerialName("regression_utterance")
+data class RegressionUtteranceRecord(
+    val event: String,
+    val attemptId: String,
+    val logicalId: String? = null,
+    val engineGeneration: Long? = null,
+    val elapsedRealtimeNanos: Long,
+    /** Why it was refused, cancelled or left without an outcome. */
+    val reason: String? = null,
+    val interrupted: Boolean? = null,
+    val errorCode: Int? = null,
+    /** For a hand-back: the attempt this one replaces. */
+    val previousAttemptId: String? = null,
+    /** For a submission: the owner's diagnostic name ("describe"), the caller's priority, the text length. */
+    val owner: String? = null,
+    val priority: Int? = null,
+    val textLength: Int? = null,
+) : CaptureRecord
+
+/** Values of [RegressionUtteranceRecord.event]: sailens-output's lifecycle events, plus the screen reader's. */
+object UtteranceRecordEvents {
+    const val SUBMITTED: String = "submitted"
+    const val REFUSED: String = "refused"
+    const val STARTED: String = "started"
+    const val DONE: String = "done"
+    const val STOPPED: String = "stopped"
+    const val ERROR: String = "error"
+    const val REQUEUED: String = "requeued"
+    const val REQUEUE_FAILED: String = "requeue_failed"
+    const val SUPERSEDED: String = "superseded"
+    const val CANCELLED: String = "cancelled"
+    const val UNKNOWN_TERMINAL: String = "unknown_terminal"
+
+    /**
+     * A Guidance prompt was handed to the screen reader. That path reports no lifecycle, so a
+     * session with one cannot say whether its prompts were spoken to the end.
+     */
+    const val SCREEN_READER_PUBLISHED: String = "screen_reader_published"
+}
 
 /**
  * A full-resolution frame kept around a flagged moment, for re-running models offline. Encoded as

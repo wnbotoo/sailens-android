@@ -481,6 +481,16 @@ in the capture UI. R3 replay: the JVM harness (`RegressionReplay`) and its repor
 One report per capture goes to `sailens-guidance/build/replay/<sessionId>.txt`: frames replayed, the
 first mismatch (frame, what, expected, actual), approximate frames, where a lost frame stopped it.
 
+**Speech lifecycle (schema 1.5, det-first PR-0).** A debug capture also records what became of every
+utterance handed to the speech engine: `RegressionUtteranceRecord` lines in `regression.jsonl`
+(submitted / refused / started / done / stopped / error / requeued / requeue_failed / superseded /
+cancelled / unknown_terminal, and screen_reader_published), timed on the thread that observed them,
+with the attempt id, the logical id (a Guidance prompt's event id) and the engine generation. They
+have their own queue and drop counter (`RegressionStats.utteranceEventsDropped`), so they never cost
+the record a frame; replay ignores them. `RegressionManifest.utteranceLifecycle` is false in every
+older record, which therefore has no lifecycle evidence -- not zero failures. The measurement that
+reads them is `PromptPolicyBaselineTest` ([experiment note](experiments/detfirst-pr0-baseline-2026-10.md)).
+
 ## 5. M1 — Qualification and safety state (exact reproduction); M1b — stop pre-emption
 
 **Guidance side (`GuidanceQualification`)** is capability-scoped. Computed once per pipeline result:

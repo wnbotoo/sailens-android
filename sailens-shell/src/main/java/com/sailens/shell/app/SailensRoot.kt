@@ -1,6 +1,7 @@
 package com.sailens.shell.app
 
 import com.sailens.shell.navigation.GroundContactKey
+import com.sailens.shell.navigation.TtsDurationKey
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.material3.windowsizeclass.WindowSizeClass
@@ -157,6 +158,7 @@ fun SailensRoot(
                             onOpenFieldCapture = { backStack.add(FieldCaptureKey) },
                             onOpenModelConsistency = { backStack.add(ModelConsistencyKey) },
                             onOpenGroundContact = { backStack.add(GroundContactKey) },
+                            onOpenTtsDuration = { backStack.add(TtsDurationKey) },
                         )
                     }
                     entry<OssLicensesKey> {

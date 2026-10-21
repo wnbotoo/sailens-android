@@ -23,6 +23,11 @@ data class CaptureSession(
     val revokes: List<RegressionRevokeRecord> = emptyList(),
     /** `model_regression` only: full-resolution event-window frames. */
     val windowFrames: List<WindowFrameRecord> = emptyList(),
+    /**
+     * `model_regression` only: speech-lifecycle events, in file order. Empty both when nothing was
+     * said and when the record keeps no lifecycle -- [RegressionManifest.utteranceLifecycle] tells which.
+     */
+    val utterances: List<RegressionUtteranceRecord> = emptyList(),
 )
 
 sealed interface CaptureReadResult {
@@ -107,6 +112,7 @@ object CaptureSessionReader {
                 regressionFrames = records.filterIsInstance<RegressionFrameRecord>(),
                 revokes = records.filterIsInstance<RegressionRevokeRecord>(),
                 windowFrames = records.filterIsInstance<WindowFrameRecord>(),
+                utterances = records.filterIsInstance<RegressionUtteranceRecord>(),
             ),
         )
     }
@@ -165,6 +171,7 @@ object CaptureSessionReader {
 
     private val KNOWN_TYPES = setOf(
         "frame", "sensor", "clock_anchor", "marker", "regression_frame", "regression_revoke", "window_frame",
+        "regression_utterance",
     )
     private const val SCHEMA_MAJOR = "schemaMajor"
     private const val SCHEMA_MINOR = "schemaMinor"

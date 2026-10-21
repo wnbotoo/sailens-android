@@ -41,17 +41,39 @@ internal class UtteranceLedger {
          * ([Announcement.priority]); null for speech that does not take part in that contest.
          */
         val priority: Int? = null,
+        /**
+         * The caller's id for these words, kept when they are handed back under a fresh [id]
+         * (measurement only: see [UtteranceEvent.logicalId]).
+         */
+        val logicalId: String = id,
+        /** The attempt this one was handed back in place of; null for a first submission. */
+        val requeuedFrom: String? = null,
     ) {
         fun isAliveAt(nowMs: Long): Boolean = expiresAtMs == null || nowMs <= expiresAtMs
     }
 
+    /** What [withdrawDetailed] took out: what must go back, and what was dropped and why. */
+    data class Withdrawal(
+        val survivors: List<Entry>,
+        /** The owner's own utterances. */
+        val withdrawn: List<Entry>,
+        /** Everyone else's that had expired by then. */
+        val expired: List<Entry>,
+    )
+
     private val entries = LinkedHashMap<String, Entry>()
 
-    /** The engine was told to drop everything before this utterance (QUEUE_FLUSH). */
+    /**
+     * The engine was told to drop everything before this utterance (QUEUE_FLUSH).
+     *
+     * @return what was dropped, in order.
+     */
     @Synchronized
-    fun flushAndAdd(entry: Entry) {
+    fun flushAndAdd(entry: Entry): List<Entry> {
+        val dropped = entries.values.toList()
         entries.clear()
         entries[entry.id] = entry
+        return dropped
     }
 
     /** Appended after whatever is already queued (QUEUE_ADD). */
@@ -69,10 +91,16 @@ internal class UtteranceLedger {
         if (id != null) entries.remove(id)
     }
 
-    /** The engine's queue was emptied without anything being handed back. */
+    /**
+     * The engine's queue was emptied without anything being handed back.
+     *
+     * @return what was dropped, in order.
+     */
     @Synchronized
-    fun clear() {
+    fun clear(): List<Entry> {
+        val dropped = entries.values.toList()
         entries.clear()
+        return dropped
     }
 
     @Synchronized
@@ -97,11 +125,15 @@ internal class UtteranceLedger {
      * back to the engine after it is flushed: everyone else's speech that is still valid at [nowMs].
      * [owner]'s own utterances are the ones left out.
      */
+    fun withdraw(owner: SpeechOwner, nowMs: Long): List<Entry> = withdrawDetailed(owner, nowMs).survivors
+
+    /** [withdraw], also saying what was left out. */
     @Synchronized
-    fun withdraw(owner: SpeechOwner, nowMs: Long): List<Entry> {
-        val survivors = entries.values.filter { it.owner !== owner && it.isAliveAt(nowMs) }
+    fun withdrawDetailed(owner: SpeechOwner, nowMs: Long): Withdrawal {
+        val (withdrawn, others) = entries.values.partition { it.owner === owner }
+        val (survivors, expired) = others.partition { it.isAliveAt(nowMs) }
         entries.clear()
-        return survivors
+        return Withdrawal(survivors, withdrawn, expired)
     }
 
     /**

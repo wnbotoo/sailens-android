@@ -393,6 +393,16 @@
     <string name="field_capture_cap_value">%1$d GB</string>
 
     <!-- Ground-contact distance, M3a (debug diagnostics) -->
+    <string name="btn_open_tts_duration">Speech durations</string>
+    <string name="settings_diagnostics_tts_duration_supporting">Times every Guidance sentence at your speech rate, for the speaker model</string>
+    <string name="title_tts_duration_page">Speech durations</string>
+    <string name="tts_duration_intro">Speaks every Guidance sentence three times through a separate voice at your speech rate and records how long each takes. Stop Guidance first and keep the phone quiet. The table is saved on the device.</string>
+    <string name="tts_duration_measure_zh">Measure Chinese</string>
+    <string name="tts_duration_measure_en">Measure English</string>
+    <string name="tts_duration_cancel">Stop measuring</string>
+    <string name="tts_duration_progress">Measuring: %1$d of %2$d</string>
+    <string name="tts_duration_problem">Not measured: %1$s</string>
+    <string name="tts_duration_saved">Saved to %1$s</string>
     <string name="btn_open_ground_contact">Ground-contact distance (experimental)</string>
     <string name="settings_diagnostics_ground_contact_supporting">How you carry the phone, and the switch for distance from where obstacles meet the ground</string>
     <string name="title_ground_contact_page">Ground-contact distance</string>

@@ -37,5 +37,9 @@ data object ModelConsistencyKey : NavKey
 @Serializable
 data object GroundContactKey : NavKey
 
+/** Debug-only destination (det-first D1.7 speech durations); release registers no entry. */
+@Serializable
+data object TtsDurationKey : NavKey
+
 @Serializable
 data class TraceReportKey(val sessionId: String? = null) : NavKey

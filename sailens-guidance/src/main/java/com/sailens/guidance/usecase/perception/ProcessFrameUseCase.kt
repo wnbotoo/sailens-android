@@ -9,6 +9,7 @@ import com.sailens.core.geometry.NormalizedRect
 import com.sailens.guidance.model.common.ObstacleRunKind
 import com.sailens.guidance.model.perception.ObstacleDetection
 import com.sailens.guidance.model.perception.DetectedObstacle
+import com.sailens.guidance.model.perception.ObstacleSourceFrame
 import com.sailens.core.frame.ImageFrame
 import com.sailens.core.runtime.MlRuntimeInfo
 import com.sailens.guidance.model.perception.PerceptionResult
@@ -154,7 +155,7 @@ class ProcessFrameUseCase(
             )
             val rawObstacles = obstacleExtractor.extractFromDetections(obstacleOutput.detections, depthEstimator(distanceFrame))
             ObstacleTrackingOutput(
-                trackedObstacles = obstacleTracker.update(rawObstacles, completedAt),
+                trackedObstacles = obstacleTracker.update(rawObstacles, completedAt, ObstacleSourceFrame(frame.sequenceNumber, frame.timestamp)),
                 runKind = obstacleRun.kind,
                 obstacleDetections = obstacleOutput.detections,
                 obstaclePreprocessTimeMs = obstacleOutput.preprocessTimeMs,
@@ -178,7 +179,7 @@ class ProcessFrameUseCase(
             )
             val rawObstacles = obstacleExtractor.extractFromSemantic(semanticOutput.analysis, depthEstimator(distanceFrame))
             ObstacleTrackingOutput(
-                trackedObstacles = obstacleTracker.update(rawObstacles, clock()),
+                trackedObstacles = obstacleTracker.update(rawObstacles, clock(), ObstacleSourceFrame(frame.sequenceNumber, frame.timestamp)),
                 runtimeInfo = MlRuntimeInfo.unavailable("semantic_only"),
             )
         }
