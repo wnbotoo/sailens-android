@@ -111,10 +111,14 @@ public class SpeechManager(
         lifecycle.beginSession(token)
     }
 
-    /** Ends [token]'s session: its submissions still without any outcome are reported as unknown. */
-    public fun endLifecycleSession(token: String) {
-        lifecycle.endSession(token)
-    }
+    /**
+     * Ends [token]'s session: its submissions still without any outcome are reported as unknown, and
+     * whatever was reported before is delivered to the observer before this returns (waiting at most
+     * half a second, on the caller's thread).
+     *
+     * @return how many events had still not reached the observer when it stopped waiting.
+     */
+    public fun endLifecycleSession(token: String): Int = lifecycle.endSession(token)
 
     /**
      * 设置语速（相对正常语速的倍率）。
@@ -355,16 +359,12 @@ public class SpeechManager(
                 lifecycle.refused(utteranceId, utteranceId, UtteranceReasons.ENGINE_NOT_READY, priority)
                 return@runOnMain
             }
-            val entry = UtteranceLedger.Entry(
-                id = utteranceId,
-                text = text,
-                owner = owner,
-                expiresAtMs = priority?.let { SystemClock.elapsedRealtime() + PROTECTED_NOTICE_MAX_MS },
-                priority = priority,
-            )
+            // The deadline is set below, once the engine has taken it, as it always was: the
+            // protected time starts when the notice is queued, not before.
+            val submission = UtteranceLedger.Entry(id = utteranceId, text = text, owner = owner, expiresAtMs = null, priority = priority)
             requestAudioFocus()
             latestUtteranceId = utteranceId
-            lifecycle.submitting(entry, ttsGeneration)
+            lifecycle.submitting(submission, ttsGeneration)
             val result = tts?.speak(text, TextToSpeech.QUEUE_ADD, null, utteranceId)
                 ?: TextToSpeech.ERROR
             if (result == TextToSpeech.ERROR) {
@@ -373,7 +373,9 @@ public class SpeechManager(
                 logger.warning(TAG, "TTS system notice failed")
             } else {
                 lifecycle.submitted(utteranceId)
-                ledger.add(entry)
+                ledger.add(
+                    submission.copy(expiresAtMs = priority?.let { SystemClock.elapsedRealtime() + PROTECTED_NOTICE_MAX_MS }),
+                )
             }
         }
     }

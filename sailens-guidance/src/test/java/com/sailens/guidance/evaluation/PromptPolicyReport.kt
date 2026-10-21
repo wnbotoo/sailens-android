@@ -9,16 +9,40 @@ import java.util.Locale
  * Every rate is given with its full denominator, failures included in the latency statistics
  * (a stage never reached counts as infinitely late: a quantile that falls on it reads "not
  * reached"), and distance metrics are withheld where too few hazards could be bracketed.
+ *
+ * Results with different lifecycle evidence are never pooled: completion and its receipt proxy
+ * measure different things, and an incomplete lifecycle is reported but kept out of the rest.
  */
 internal object PromptPolicyReport {
 
     /** D1.5-5: below this share of bracketed crossings, distance metrics are not given. */
     const val MIN_COVERAGE: Double = 0.30
 
-    fun render(results: List<PromptPolicyEvaluation.Result>): String = buildString {
+    fun render(results: List<PromptPolicyEvaluation.Result>): String {
+        val byEvidence = results.groupBy { it.evidence }
+        if (byEvidence.size <= 1) return renderSame(results)
+        return buildString {
+            for (evidence in PromptPolicyEvaluation.LifecycleEvidence.entries) {
+                val group = byEvidence[evidence] ?: continue
+                appendLine("  == ${group.size} capture(s) with lifecycle evidence: ${evidence.label} ==")
+                append(renderSame(group))
+            }
+        }
+    }
+
+    /** [results] all share one kind of lifecycle evidence. */
+    private fun renderSame(results: List<PromptPolicyEvaluation.Result>): String = buildString {
         val evidence = results.map { it.evidence }.distinct()
+        check(evidence.size <= 1) { "lifecycle evidence must not be pooled: $evidence" }
         val completionKnown = results.isNotEmpty() && results.all { it.evidence.completionKnown }
-        appendLine("  lifecycle: ${evidence.joinToString { it.label }}" + if (completionKnown) "" else " -- completion is UNDETERMINABLE, not \"no failure\"")
+        val incomplete = evidence.singleOrNull() == PromptPolicyEvaluation.LifecycleEvidence.INCOMPLETE
+        appendLine(
+            "  lifecycle: ${evidence.joinToString { it.label }}" + when {
+                !completionKnown -> " -- completion is UNDETERMINABLE, not \"no failure\""
+                incomplete -> " -- REPORTED ONLY, never for acceptance"
+                else -> ""
+            },
+        )
         appendLine(
             "  tracks seen ${results.sumOf { it.tracksSeen }}, never announced ${results.sumOf { it.tracksNeverAnnounced }}; " +
                 "births ${results.sumOf { it.births }}, rebuilt after missed detections ${results.sumOf { it.rebuilds }} (each a new hazard)",
@@ -51,7 +75,11 @@ internal object PromptPolicyReport {
         }
 
         val leads = results.flatMap { it.leads }
-        val basis = if (completionKnown) "completion" else "RECEIPT PROXY (no lifecycle: when the prompt was accepted, not when it was heard)"
+        val basis = when {
+            !completionKnown -> "RECEIPT PROXY (no lifecycle: when the prompt was accepted, not when it was heard)"
+            incomplete -> "completion, from an INCOMPLETE lifecycle (not for acceptance)"
+            else -> "completion"
+        }
         if (leads.isEmpty()) {
             appendLine("  lead time: none (camera clock not realtime, or a screen-reader session)")
         } else {
@@ -84,13 +112,16 @@ internal object PromptPolicyReport {
         val by = near.groupBy { it.entry }
         fun n(e: NearEntry) = by[e].orEmpty().size
         val same = by[NearEntry.HELD_SAME_PRIORITY].orEmpty()
-        val sameNever = same.count { if (completionKnown) it.completedLater == false else !it.receivedLater }
+        val sameNeverReceived = same.count { !it.receivedLater }
+        val sameKnown = same.filter { it.completedLater != null }
         appendLine(
             "  NEAR entries (D1.6, first per hazard) ${near.size}: offered ${n(NearEntry.OFFERED)}, passed but outranked ${n(NearEntry.PASSED_NOT_OFFERED)}, " +
                 "suppressed by conflict resolution ${n(NearEntry.SUPPRESSED)}, held by a same-priority cooldown ${same.size} " +
-                "(NEAR never ${if (completionKnown) "spoken to the end" else "received"} afterwards: $sameNever), held otherwise ${n(NearEntry.HELD_OTHER)}",
+                "(NEAR never received afterwards: $sameNeverReceived" +
+                (if (sameKnown.isEmpty()) "" else "; never spoken to the end, of ${sameKnown.size} with a recorded lifecycle: ${sameKnown.count { it.completedLater == false }}") +
+                "), held by a higher recorded priority ${n(NearEntry.HELD_HIGHER_PRIORITY)}, unexplained ${n(NearEntry.UNEXPLAINED)}",
         )
-        appendLine("    (held-by-cooldown attribution approximates the cooldown record by the latest received prompt on the same keys)")
+        appendLine("    (holds read from a copy of the cooldown taken just before each decision)")
     }
 
     /** Quantiles with failures (null) as +infinity. */

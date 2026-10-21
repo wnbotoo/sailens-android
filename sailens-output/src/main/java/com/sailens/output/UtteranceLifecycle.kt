@@ -114,6 +114,11 @@ public fun interface UtteranceLifecycleObserver {
  *
  * Observation only. Without an observer it does nothing at all; with one, it never throws and
  * calls the observer outside its lock.
+ *
+ * Because the observer is called outside the lock, an event can be decided (its attempt settled)
+ * and still be on its way to the observer. [endSession] therefore waits, for a bounded time, until
+ * every event decided before it has been delivered: whoever closes the record after it has then
+ * either received each one or been told how many it did not.
  */
 internal class UtteranceLifecycle(private val nanoClock: () -> Long) {
 
@@ -138,12 +143,36 @@ internal class UtteranceLifecycle(private val nanoClock: () -> Long) {
     private val attempts = LinkedHashMap<String, Attempt>()
     private var session: String? = null
 
+    /** Events decided under the lock and not yet handed to the observer; guarded by [delivery]. */
+    private val delivery = Object()
+    private var inFlight = 0
+
     fun beginSession(token: String) = synchronized(this) { session = token }
 
-    /** Ends [token]'s session: every attempt of it still without an outcome is reported as unknown. */
-    fun endSession(token: String) = emit {
-        if (session == token) session = null
-        settleOpen(UtteranceReasons.SESSION_ENDED) { it.session == token }
+    /**
+     * Ends [token]'s session: every attempt of it still without an outcome is reported as unknown,
+     * and every event decided before this call is delivered before it returns.
+     *
+     * @return how many events were still on their way to the observer when it stopped waiting,
+     *   after [drainTimeoutMs]; 0 when all arrived (or nothing is observed).
+     */
+    fun endSession(token: String, drainTimeoutMs: Long = END_DRAIN_TIMEOUT_MS): Int {
+        emit {
+            if (session == token) session = null
+            settleOpen(UtteranceReasons.SESSION_ENDED) { it.session == token }
+        }
+        return awaitDelivered(drainTimeoutMs)
+    }
+
+    /** Waits until nothing is on its way to the observer, at most [timeoutMs]; returns what still is. */
+    private fun awaitDelivered(timeoutMs: Long): Int = synchronized(delivery) {
+        val deadline = System.nanoTime() + timeoutMs * 1_000_000
+        while (inFlight > 0) {
+            val remainingMs = (deadline - System.nanoTime()) / 1_000_000
+            if (remainingMs <= 0) break
+            delivery.wait(remainingMs)
+        }
+        inFlight
     }
 
     /** The engine of [generation] was shut down: its attempts without an outcome will not get one. */
@@ -298,11 +327,17 @@ internal class UtteranceLifecycle(private val nanoClock: () -> Long) {
         }
     }
 
-    /** Runs [block] under the lock when observed, then hands its events to the observer outside it. */
+    /**
+     * Runs [block] under the lock when observed, then hands its events to the observer outside it.
+     * They count as in flight from the moment they are decided -- under the same lock that settles
+     * their attempts -- until the observer has had them, so [endSession] cannot slip between.
+     */
     private inline fun emit(block: () -> List<UtteranceEvent>) {
         val target = observer ?: return
         val events = try {
-            synchronized(this) { block() }
+            synchronized(this) {
+                block().also { if (it.isNotEmpty()) synchronized(delivery) { inFlight += it.size } }
+            }
         } catch (e: RuntimeException) {
             return
         }
@@ -311,11 +346,19 @@ internal class UtteranceLifecycle(private val nanoClock: () -> Long) {
                 target.onUtteranceEvent(event)
             } catch (e: RuntimeException) {
                 // Observation must never reach the speech path.
+            } finally {
+                synchronized(delivery) {
+                    inFlight--
+                    delivery.notifyAll()
+                }
             }
         }
     }
 
     companion object {
         const val MAX_ATTEMPTS: Int = 512
+
+        /** Long enough for a descheduled callback thread, short enough never to stall a session's end. */
+        const val END_DRAIN_TIMEOUT_MS: Long = 500
     }
 }

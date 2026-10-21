@@ -70,13 +70,15 @@ class RegressionCaptureTest {
     private class FakeSpeechSessions : SpeechLifecycleSessions {
         val calls = mutableListOf<String>()
         var onEnd: (String) -> Unit = {}
+        var undelivered = 0
         override fun begin(sessionId: String) {
             calls += "begin $sessionId"
         }
 
-        override fun end(sessionId: String) {
+        override fun end(sessionId: String): Int {
             calls += "end $sessionId"
             onEnd(sessionId)
+            return undelivered
         }
     }
 
@@ -350,6 +352,19 @@ class RegressionCaptureTest {
             listOf("submitted", "done", "unknown_terminal"),
             session.utterances.map { it.event },
         )
+    }
+
+    @Test
+    fun `events the speech side could not hand over before the end are counted dropped`() = runBlocking {
+        val speech = FakeSpeechSessions().apply { undelivered = 2 }
+        val capture = capture(speechSessions = speech)
+        capture.startSession("s1")
+        capture.attach("s1", sessionDir("s1"))
+        capture.onUtterance("s1", utterance(UtteranceRecordEvents.SUBMITTED, "a"))
+        val stats = capture.finish("s1")!!
+
+        assertEquals(1, stats.utteranceEventsRecorded)
+        assertEquals("the session's lifecycle is then incomplete", 2, stats.utteranceEventsDropped)
     }
 
     @Test

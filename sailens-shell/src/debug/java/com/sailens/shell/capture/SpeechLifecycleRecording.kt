@@ -13,7 +13,7 @@ import com.sailens.output.UtteranceLifecycleObserver
 internal class SpeechManagerLifecycleSessions(private val speech: SpeechManager) : SpeechLifecycleSessions {
     override fun begin(sessionId: String) = speech.beginLifecycleSession(sessionId)
 
-    override fun end(sessionId: String) = speech.endLifecycleSession(sessionId)
+    override fun end(sessionId: String): Int = speech.endLifecycleSession(sessionId)
 }
 
 /** Hands each lifecycle event to [recorder], tagged with the session its attempt belongs to. */

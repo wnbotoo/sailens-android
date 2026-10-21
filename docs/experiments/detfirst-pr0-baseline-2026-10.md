@@ -76,10 +76,10 @@ Most unknowable cases are "the first valid contact was already within the thresh
 was first measured close) or "never within it".
 
 **NEAR entries held by a same-priority cooldown (D1.6).** Of 78 hazards that turned NEAR: the
-offered prompt said it for 33; 34 were held by a cooldown under a received prompt of the same
-priority on the same keys, and for 30 of those the NEAR wording was **never received** afterwards;
-2 were suppressed by BLOCKED; 9 were held otherwise. (The cooldown record is approximated by the
-latest received prompt on the same keys.)
+offered prompt said it for 33; 37 were held because their own zone's cooldown key recorded the
+same priority, and for 33 of those the NEAR wording was **never received** afterwards; 6 were held
+by a higher recorded priority; 2 were suppressed by BLOCKED; none was left unexplained. (Holds are
+read from a copy of the cooldown taken just before each decision, not approximated.)
 
 **Speaker model** (descriptive; default 1.4 s sentences; compared with revokes, which also cover
 waiting for a description): of 957 offers, both accept 245, both refuse 657, model accepts while

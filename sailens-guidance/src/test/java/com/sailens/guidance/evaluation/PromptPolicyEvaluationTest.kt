@@ -7,6 +7,7 @@ import com.sailens.guidance.model.common.DistanceLevel
 import com.sailens.guidance.model.common.ObstacleCategory
 import com.sailens.guidance.model.common.UrgencyLevel
 import com.sailens.guidance.model.perception.DetectedObstacle
+import com.sailens.guidance.processor.decision.CooldownManager
 import com.sailens.guidance.processor.decision.EventConflictResolver
 import com.sailens.guidance.processor.decision.EventGenerator
 import com.sailens.guidance.processor.decision.EventMerger
@@ -31,8 +32,9 @@ class PromptPolicyEvaluationTest {
     private val o = EvaluationFixtures
 
     /**
-     * One frame at [at] ms: the decision passes the cooldown when [passes], and the offered event is
-     * received unless [revoked].
+     * One frame at [at] ms, decided as DecideEventsUseCase decides: by [cooldown] when given (a copy
+     * of it taken first, as the replay does), else everything passes when [passes]. The offered event
+     * is received unless [revoked], and a revoked one is taken back from the cooldown.
      */
     private fun frame(
         seq: Long,
@@ -41,11 +43,22 @@ class PromptPolicyEvaluationTest {
         passes: Boolean = true,
         revoked: Boolean = false,
         blocked: Boolean = false,
+        cooldown: CooldownManager? = null,
     ): PromptPolicyEvaluation.Frame {
         val snapshot = o.snapshot(obstacles, blocked = blocked)
         val generated = generator.generate(snapshot, at)
         val resolved = EventConflictResolver().resolve(generated)
-        val decided = if (passes) EventMerger().merge(resolved).sortedByDescending { it.priority.value } else emptyList()
+        val merged = EventMerger().merge(resolved)
+        val before = cooldown?.snapshot(at, stationary = false)
+        val decided = when {
+            cooldown != null -> cooldown.decide {
+                setStationary(false)
+                filter(merged, at).sortedByDescending { it.priority.value }.also { d -> d.firstOrNull()?.let { recordEvent(it, at) } }
+            }
+            passes -> merged.sortedByDescending { it.priority.value }
+            else -> emptyList()
+        }
+        if (revoked) decided.firstOrNull()?.let { cooldown?.revoke(it.id) }
         val offeredId = decided.firstOrNull()?.id?.toString()
         return PromptPolicyEvaluation.Frame(
             seq = seq,
@@ -54,7 +67,9 @@ class PromptPolicyEvaluationTest {
             groups = generator.announcedObstacleGroups(obstacles),
             generated = generated,
             resolved = resolved,
+            merged = merged,
             decided = decided,
+            cooldown = before,
             offeredId = offeredId,
             offeredReceived = offeredId != null && !revoked,
             pitchDownDegrees = 15f,
@@ -150,13 +165,15 @@ class PromptPolicyEvaluationTest {
 
     @Test
     fun `a NEAR entry held by a same-priority cooldown is counted, with what came of it`() {
+        val cooldown = CooldownManager()
         val medium = o.obstacle(1, ObstacleCategory.PERSON, distance = DistanceLevel.MEDIUM, urgency = UrgencyLevel.HIGH)
         val near = medium.copy(distance = DistanceLevel.NEAR)
         val frames = listOf(
-            frame(1, 0, listOf(medium)), // "a person ahead", received
-            frame(2, 1_000, listOf(near), passes = false), // NEAR, same HIGH priority, still in the cooldown
-            frame(3, 2_000, listOf(near), passes = false),
+            frame(1, 0, listOf(medium), cooldown = cooldown), // "a person ahead", received
+            frame(2, 1_000, listOf(near), cooldown = cooldown), // NEAR, same HIGH priority, still in the cooldown
+            frame(3, 2_000, listOf(near), cooldown = cooldown),
         )
+        assertTrue("the cooldown really held it", frames[1].decided.isEmpty())
 
         val result = evaluation.evaluate(frames, LifecycleEvidence.NONE, null, true)
 
@@ -165,6 +182,77 @@ class PromptPolicyEvaluationTest {
         assertFalse(entry.receivedLater)
         assertNull("no lifecycle: completion unknown, not false", entry.completedLater)
         assertTrue(PromptPolicyReport.render(listOf(result)).contains("held by a same-priority cooldown 1 (NEAR never received afterwards: 1)"))
+    }
+
+    @Test
+    fun `a hold under a higher recorded priority is not counted as same-priority`() {
+        // A CRITICAL car ahead is received; a person appears on the left, so a merged HIGH prompt passes
+        // through the new zone; the person ahead turns NEAR while the centre key still records CRITICAL.
+        val cooldown = CooldownManager()
+        val car = o.obstacle(1, ObstacleCategory.VEHICLE, distance = DistanceLevel.MEDIUM, urgency = UrgencyLevel.HIGH)
+        val person = o.obstacle(2, ObstacleCategory.PERSON, distance = DistanceLevel.MEDIUM, urgency = UrgencyLevel.HIGH)
+        val left = o.obstacle(
+            3, ObstacleCategory.PERSON, zone = com.sailens.guidance.model.common.DirectionZone.LEFT, urgency = UrgencyLevel.HIGH,
+            box = com.sailens.core.geometry.NormalizedRect(0.02f, 0.5f, 0.2f, 0.4f),
+        )
+        val frames = listOf(
+            frame(1, 0, listOf(car), cooldown = cooldown),
+            frame(2, 500, listOf(person, left), cooldown = cooldown),
+            frame(3, 1_000, listOf(person.copy(distance = DistanceLevel.NEAR), left), cooldown = cooldown),
+        )
+        assertEquals("the merged HIGH prompt passed through the new zone", 1, frames[1].decided.size)
+        assertTrue("and the NEAR frame was held", frames[2].decided.isEmpty())
+
+        val entry = evaluation.evaluate(frames, LifecycleEvidence.NONE, null, true).nearEntries.single { it.hazard == o.id(2).toString() }
+        assertEquals(NearEntry.HELD_HIGHER_PRIORITY, entry.entry)
+    }
+
+    @Test
+    fun `when a stage appears does not depend on what was offered or received`() {
+        // The person is the primary ahead; a chair ahead is NEAR; a chair on the left makes the merged
+        // prompt generic, so only the merged candidate speaks for the near chair.
+        val person = o.obstacle(1, ObstacleCategory.PERSON, urgency = UrgencyLevel.CRITICAL)
+        val chair = o.obstacle(
+            2, ObstacleCategory.STATIC_OBSTACLE, distance = DistanceLevel.NEAR, urgency = UrgencyLevel.HIGH,
+            box = com.sailens.core.geometry.NormalizedRect(0.4f, 0.6f, 0.3f, 0.35f),
+        )
+        val leftChair = o.obstacle(
+            3, ObstacleCategory.STATIC_OBSTACLE, zone = com.sailens.guidance.model.common.DirectionZone.LEFT, urgency = UrgencyLevel.HIGH,
+            box = com.sailens.core.geometry.NormalizedRect(0.02f, 0.5f, 0.25f, 0.45f),
+        )
+        val scene = listOf(person, chair, leftChair)
+        fun run(vararg offeredAt: Boolean) = evaluation.evaluate(
+            offeredAt.mapIndexed { i, offered -> frame(i + 1L, i * 1_000L, scene, passes = offered) },
+            LifecycleEvidence.NONE, null, true,
+        )
+        fun appearances(result: PromptPolicyEvaluation.Result) =
+            result.stages.map { Triple(it.hazard, it.stage, it.appearedAt) to it.ambiguousOnly }.toSet()
+
+        val offeredFirst = run(true, true)
+        val heldThenOffered = run(false, true)
+        val neverOffered = run(false, false)
+
+        assertEquals(appearances(offeredFirst), appearances(heldThenOffered))
+        assertEquals(appearances(offeredFirst), appearances(neverOffered))
+        assertEquals(0L, row(neverOffered, 2, Stage.NEAR).appearedAt)
+        assertEquals("the same NEAR entries, whatever was offered", offeredFirst.nearEntries.map { it.hazard }, neverOffered.nearEntries.map { it.hazard })
+    }
+
+    @Test
+    fun `results with different lifecycle evidence are reported apart, never pooled`() {
+        fun approaching(seq: Long, at: Long, m: Float) = o.obstacle(1, ObstacleCategory.PERSON, measuredOn = seq, cameraNanos = at * 1_000_000, contactPointM = m)
+        val frames = listOf(frame(1, 0, listOf(approaching(1, 0, 3.6f))), frame(2, 100, listOf(approaching(2, 100, 2.8f))))
+        val proxy = evaluation.evaluate(frames, LifecycleEvidence.NONE, null, true)
+        val recorded = evaluation.evaluate(frames, LifecycleEvidence.RECORDED, CompletionCredit.of(emptyList()), true)
+        val incomplete = evaluation.evaluate(frames, LifecycleEvidence.INCOMPLETE, CompletionCredit.of(emptyList()), true)
+
+        val text = PromptPolicyReport.render(listOf(proxy, recorded, incomplete))
+
+        assertEquals(1, Regex("basis: completion\n").findAll(text).count())
+        assertEquals(1, Regex("basis: RECEIPT PROXY").findAll(text).count())
+        assertEquals(1, Regex("basis: completion, from an INCOMPLETE lifecycle").findAll(text).count())
+        assertTrue(text, text.contains("REPORTED ONLY, never for acceptance"))
+        assertTrue("each section counts its own hazards", Regex("person/front FIRST <=3.0m: n 1,").findAll(text).count() == 3)
     }
 
     @Test

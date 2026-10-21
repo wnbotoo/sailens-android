@@ -116,12 +116,15 @@ class RegressionReplay(
      *
      * @param snapshot the scene the decision step was given, and [decidedAt] the time it read: with
      *   them an evaluation can ask the (stateless) event generator what it made before the cooldown.
+     * @param cooldown a read-only copy of the cooldown as the decision found it, which says what held
+     *   an event back.
      */
     data class FrameOutcome(
         val obstacles: List<DetectedObstacle>,
         val events: List<SceneEvent>,
         val snapshot: SceneSnapshot? = null,
         val decidedAt: Long? = null,
+        val cooldown: CooldownManager.Snapshot? = null,
     )
 
     /** Stops the replay of one frame with a precise reason. */
@@ -177,9 +180,11 @@ class RegressionReplay(
                         replayedIdOf[revoke.eventId]?.let(world.cooldown::revoke)
                     }
                     world.stationary.value = record.stationary ?: false
+                    // Read-only, before the decision changes it; the clock is peeked, not consumed.
+                    val cooldownBefore = world.nextDecisionTime()?.let { world.cooldown.snapshot(it, world.stationary.value) }
                     val events = world.decide(snapshot)
                     decisions++
-                    onFrame(record, FrameOutcome(result.getOrThrow().obstacles, events, snapshot, world.decidedAt))
+                    onFrame(record, FrameOutcome(result.getOrThrow().obstacles, events, snapshot, world.decidedAt, cooldownBefore))
                     if (counterfactual == null) compareEvents(record, events)
                     replayedIdOf.putAll(revokeTargets(record.events, events, counterfactual))
                 }
@@ -326,6 +331,9 @@ class RegressionReplay(
                 clock = tapes.getValue(RegressionClocks.GROUND)::next,
             ),
         )
+        /** What the decision clock will return next, without consuming it. */
+        fun nextDecisionTime(): Long? = tapes.getValue(RegressionClocks.DECIDE).peek()
+
         /** The decision clock's last reading: the `now` of the latest decision. */
         var decidedAt: Long? = null
             private set
@@ -394,6 +402,8 @@ class RegressionReplay(
             if (next >= values.size) throw Divergence("$component clock reads", "${values.size}", "more")
             return values[next++]
         }
+
+        fun peek(): Long? = values.getOrNull(next)
 
         fun checkUsedUp() {
             if (next != values.size) throw Divergence("$component clock reads", "${values.size}", "$next")

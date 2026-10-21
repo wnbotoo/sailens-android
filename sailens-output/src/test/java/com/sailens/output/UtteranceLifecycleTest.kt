@@ -220,6 +220,61 @@ class UtteranceLifecycleTest {
     }
 
     @Test
+    fun `ending a session waits for an event already decided but still on its way`() {
+        // The engine thread settles the attempt, then is descheduled before it reaches the observer.
+        // The session must not end -- and the record close -- in between.
+        val entered = java.util.concurrent.CountDownLatch(1)
+        val release = java.util.concurrent.CountDownLatch(1)
+        val seen = java.util.Collections.synchronizedList(mutableListOf<String>())
+        val slow = UtteranceLifecycle { 0L }.apply {
+            observer = UtteranceLifecycleObserver { e ->
+                if (e.kind == UtteranceEventKind.STOPPED) {
+                    entered.countDown()
+                    release.await()
+                }
+                seen += e.kind.wireName
+            }
+        }
+        slow.beginSession("s1")
+        slow.submitting(entry("a"), 1)
+        slow.submitted("a")
+        val callback = Thread { slow.engineCallback(UtteranceEventKind.STOPPED, "a", 1, atNanos = 5, interrupted = true) }.apply { start() }
+        entered.await()
+
+        val ending = Thread { slow.endSession("s1", drainTimeoutMs = 10_000).also { seen += "ended:$it" } }.apply { start() }
+        Thread.sleep(200)
+        assertTrue("still waiting for the stop", ending.isAlive)
+        release.countDown()
+        ending.join(5_000)
+        callback.join(5_000)
+
+        assertEquals("the stop settled the attempt: nothing is unknown, and it arrived first", listOf("submitted", "stopped", "ended:0"), seen)
+    }
+
+    @Test
+    fun `ending a session gives up after a bounded wait and says how many it did not get`() {
+        val entered = java.util.concurrent.CountDownLatch(1)
+        val release = java.util.concurrent.CountDownLatch(1)
+        val stuck = UtteranceLifecycle { 0L }.apply {
+            observer = UtteranceLifecycleObserver { e ->
+                if (e.kind == UtteranceEventKind.DONE) {
+                    entered.countDown()
+                    release.await()
+                }
+            }
+        }
+        stuck.submitting(entry("a"), 1)
+        stuck.submitted("a")
+        val callback = Thread { stuck.engineCallback(UtteranceEventKind.DONE, "a", 1, atNanos = 5) }.apply { start() }
+        entered.await()
+
+        assertEquals(1, stuck.endSession("s1", drainTimeoutMs = 50))
+        release.countDown()
+        callback.join(5_000)
+        assertEquals("nothing is waited for without an observer", 0, UtteranceLifecycle { 0L }.endSession("s1"))
+    }
+
+    @Test
     fun `old attempts are forgotten beyond the cap, settled ones first`() {
         submit(entry("open"))
         for (i in 0 until UtteranceLifecycle.MAX_ATTEMPTS + 10) {

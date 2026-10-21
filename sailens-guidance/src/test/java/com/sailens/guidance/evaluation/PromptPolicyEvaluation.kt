@@ -6,8 +6,10 @@ import com.sailens.guidance.model.common.EventCategory
 import com.sailens.guidance.model.common.ObstacleCategory
 import com.sailens.guidance.model.perception.DetectedObstacle
 import com.sailens.guidance.model.scene.SceneEvent
+import com.sailens.guidance.processor.decision.CooldownManager
 import com.sailens.guidance.processor.decision.EventConflictResolver
 import com.sailens.guidance.processor.decision.EventGenerator
+import com.sailens.guidance.processor.decision.EventMerger
 import com.sailens.guidance.processor.decision.ObstacleZoneGroup
 import com.sailens.guidance.trace.capture.RegressionFrameRecord
 import com.sailens.guidance.trace.regression.RegressionReplay
@@ -35,6 +37,7 @@ internal class PromptPolicyEvaluation(
 ) {
     private val generator = EventGenerator(analysis)
     private val resolver = EventConflictResolver()
+    private val merger = EventMerger()
 
     /** What the session can say about completion. */
     enum class LifecycleEvidence(val label: String) {
@@ -62,7 +65,11 @@ internal class PromptPolicyEvaluation(
         val groups: List<ObstacleZoneGroup>,
         val generated: List<SceneEvent>,
         val resolved: List<SceneEvent>,
+        /** What the cooldown chooses among: [resolved] after merging. Before the cooldown, like [generated]. */
+        val merged: List<SceneEvent>,
         val decided: List<SceneEvent>,
+        /** The cooldown as the decision found it (read-only); null when unknown. */
+        val cooldown: CooldownManager.Snapshot?,
         /** The device's id of the offered (first decided) event; null when nothing was offered. */
         val offeredId: String?,
         val offeredReceived: Boolean,
@@ -74,6 +81,7 @@ internal class PromptPolicyEvaluation(
         val snapshot = checkNotNull(outcome.snapshot) { "seq ${record.seq}: no snapshot" }
         val now = checkNotNull(outcome.decidedAt) { "seq ${record.seq}: no decision time" }
         val generated = generator.generate(snapshot, now)
+        val resolved = resolver.resolve(generated)
         check(outcome.events.size == record.events.size) { "seq ${record.seq}: not an exact run" }
         val offeredId = record.events.firstOrNull()?.id
         return Frame(
@@ -82,8 +90,10 @@ internal class PromptPolicyEvaluation(
             obstacles = outcome.obstacles,
             groups = generator.announcedObstacleGroups(snapshot.obstacles),
             generated = generated,
-            resolved = resolver.resolve(generated),
+            resolved = resolved,
+            merged = merger.merge(resolved),
             decided = outcome.events,
+            cooldown = outcome.cooldown,
             offeredId = offeredId,
             offeredReceived = offeredId != null && offeredId !in revoked,
             pitchDownDegrees = pitchDownDegrees,
@@ -123,11 +133,14 @@ internal class PromptPolicyEvaluation(
         /** Removed by conflict resolution (BLOCKED suppressing a central obstacle). */
         SUPPRESSED,
 
-        /** Held by the cooldown under a received prompt of the same priority on the same keys. */
+        /** Held by the cooldown: a key that holds it records the same priority (no escalation through it). */
         HELD_SAME_PRIORITY,
 
-        /** Held by the cooldown otherwise (a higher recorded priority, or nothing received to blame). */
-        HELD_OTHER,
+        /** Held by the cooldown, every holding key recording a higher priority. */
+        HELD_HIGHER_PRIORITY,
+
+        /** Not offered, and the cooldown copy does not explain why (none recorded, or it passes there). */
+        UNEXPLAINED,
     }
 
     /** D1.6: the first frame a track hazard's NEAR stage appeared, and what came of it afterwards. */
@@ -157,7 +170,7 @@ internal class PromptPolicyEvaluation(
         var offers = 0
     }
 
-    /** Offers that spoke for a stage only ambiguously. Kept apart: they never make a stage appear. */
+    /** A stage spoken for only ambiguously before the cooldown. Kept apart: it never makes the stage appear. */
     private class Ambiguous(val firstAt: Long) {
         var offers = 0
         var received = false
@@ -188,7 +201,6 @@ internal class PromptPolicyEvaluation(
         val tracks = LinkedHashMap<UUID, TrackState>()
         val episodes = StateEpisodes()
         val episodeStages = LinkedHashMap<StateEpisodes.Episode, StageState>()
-        val received = mutableListOf<SceneEvent>()
         val nearEntries = mutableListOf<Pair<UUID, Pair<Long, NearEntry>>>()
         var offers = 0
         var offersReceived = 0
@@ -210,15 +222,23 @@ internal class PromptPolicyEvaluation(
                 LeadTime.freshSample(o, f.seq, f.pitchDownDegrees)?.let(t.samples::add)
             }
 
-            // Appearance: what the generator made, before conflict resolution and cooldown.
+            // Appearance, entirely before the cooldown: each zone's own event as the generator made
+            // it, and every merged event the cooldown chooses among (a merge can say what no zone's
+            // own event says -- the generic word). Never the offer: whether something was offered
+            // must not move when, or whether, its stage appeared.
             val newlyNear = mutableListOf<Pair<UUID, ObstacleZoneGroup>>()
-            for (group in f.groups) {
-                val spoken = StageCredit.spoken(group, generator, analysis.enableProximityPrefix)
-                for (c in StageCredit.credits(spoken, listOf(group), generator)) {
-                    if (!c.counts) continue
+            val candidates = f.groups.map { g -> StageCredit.spoken(g, generator, analysis.enableProximityPrefix) to listOf(g) } +
+                f.merged.filter { it.category == EventCategory.OBSTACLE }.map { StageCredit.spoken(it) to f.groups }
+            for ((spoken, groups) in candidates) {
+                for (c in StageCredit.credits(spoken, groups, generator)) {
                     val t = tracks.getOrPut(c.trackId) { TrackState(c.trackId) }
+                    if (!c.counts) {
+                        t.ambiguous.getOrPut(c.stage) { Ambiguous(f.decidedAt) }
+                        continue
+                    }
                     if (c.stage !in t.stages) {
                         t.stages[c.stage] = StageState(f.decidedAt)
+                        val group = f.groups.first { g -> g.obstacles.any { it.id == c.trackId } }
                         if (c.stage == Stage.FIRST) {
                             val o = group.obstacles.first { it.id == c.trackId }
                             t.category = o.category
@@ -242,20 +262,19 @@ internal class PromptPolicyEvaluation(
                 if (f.offeredReceived) offersReceived++
                 val completedAt = if (f.offeredReceived) completionOf(f.offeredId) else null
                 if (completedAt != null) offersCompleted++
-                if (f.offeredReceived) received += offered
                 if (offered.category == EventCategory.OBSTACLE) {
                     val spoken = StageCredit.spoken(offered)
+                    // The offer only adds offers, receipts and completions: it is one of the merged
+                    // candidates, so every stage it speaks for has appeared already.
                     for (c in StageCredit.credits(spoken, f.groups, generator)) {
-                        val t = tracks.getOrPut(c.trackId) { TrackState(c.trackId) }
+                        val t = tracks.getValue(c.trackId)
                         if (!c.counts) {
-                            val ambiguous = t.ambiguous.getOrPut(c.stage) { Ambiguous(f.decidedAt) }
+                            val ambiguous = checkNotNull(t.ambiguous[c.stage]) { "seq ${f.seq}: an offer outside the candidates" }
                             ambiguous.offers++
                             if (f.offeredReceived) ambiguous.received = true
                             continue
                         }
-                        // A merge can say a stage its zone's own event did not (the generic word); the
-                        // offer is then where it appeared.
-                        val stage = t.stages.getOrPut(c.stage) { StageState(f.decidedAt) }
+                        val stage = checkNotNull(t.stages[c.stage]) { "seq ${f.seq}: an offer outside the candidates" }
                         stage.offers++
                         if (f.offeredReceived && stage.receivedAt == null) stage.receivedAt = f.decidedAt
                         if (completedAt != null) stage.completedAtNanos = minOf(stage.completedAtNanos ?: Long.MAX_VALUE, completedAt)
@@ -272,7 +291,7 @@ internal class PromptPolicyEvaluation(
 
             // D1.6: what happened on the frame each hazard's NEAR stage first appeared.
             for ((trackId, group) in newlyNear) {
-                nearEntries += trackId to (f.seq to nearEntry(trackId, group, f, received))
+                nearEntries += trackId to (f.seq to nearEntry(trackId, group, f))
             }
         }
 
@@ -368,18 +387,25 @@ internal class PromptPolicyEvaluation(
         )
     }
 
-    private fun nearEntry(trackId: UUID, group: ObstacleZoneGroup, f: Frame, received: List<SceneEvent>): NearEntry {
+    /**
+     * Why the frame on which a hazard's NEAR stage appeared did or did not say it. A hold is read from
+     * the cooldown as that very decision found it ([Frame.cooldown]), for the merged candidate that
+     * carries the hazard's zone -- the event the cooldown actually judged.
+     */
+    private fun nearEntry(trackId: UUID, group: ObstacleZoneGroup, f: Frame): NearEntry {
         fun says(event: SceneEvent) = event.category == EventCategory.OBSTACLE &&
             StageCredit.credits(StageCredit.spoken(event), f.groups, generator).any { it.trackId == trackId && it.stage == Stage.NEAR && it.counts }
         val offered = f.decided.firstOrNull()
         if (offered != null && says(offered)) return NearEntry.OFFERED
         if (f.decided.any(::says)) return NearEntry.PASSED_NOT_OFFERED
-        if (f.resolved.none { it.category == EventCategory.OBSTACLE && group.zone in it.relatedZones }) return NearEntry.SUPPRESSED
-        val own = f.generated.firstOrNull { it.category == EventCategory.OBSTACLE && it.relatedZones == listOf(group.zone) }
-            ?: return NearEntry.HELD_OTHER
-        // Approximation, labelled in the report: the latest received prompt on any of the same keys.
-        val blamed = received.lastOrNull { prior -> prior.cooldownKeys.any { it in own.cooldownKeys } }
-        return if (blamed != null && blamed.priority == own.priority) NearEntry.HELD_SAME_PRIORITY else NearEntry.HELD_OTHER
+        val candidate = f.merged.firstOrNull { it.category == EventCategory.OBSTACLE && group.zone in it.relatedZones }
+            ?: return NearEntry.SUPPRESSED
+        val groups = f.cooldown?.holds(candidate) ?: return NearEntry.UNEXPLAINED
+        // A merged event is held only when every component's group is; what matters for this hazard
+        // is its own zone's group -- another zone's recent prompt says nothing about its escalation.
+        val own = groups.filter { "obstacle_${group.zone.name}" in it.keys }.ifEmpty { groups }
+        val same = own.any { g -> g.holds.any { it.recordedPriority == candidate.priority } }
+        return if (same) NearEntry.HELD_SAME_PRIORITY else NearEntry.HELD_HIGHER_PRIORITY
     }
 
     /**

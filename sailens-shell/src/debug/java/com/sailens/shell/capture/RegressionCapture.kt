@@ -66,8 +66,13 @@ internal data class RegressionCaptureConfig(
 internal interface SpeechLifecycleSessions {
     fun begin(sessionId: String)
 
-    /** Synchronous: the session's attempts still without an outcome are reported before it returns. */
-    fun end(sessionId: String)
+    /**
+     * Synchronous: the session's attempts still without an outcome, and every event decided before
+     * the call, are reported before it returns.
+     *
+     * @return events it could not deliver in time; the record counts them as dropped.
+     */
+    fun end(sessionId: String): Int
 }
 
 /**
@@ -124,8 +129,9 @@ internal class RegressionCapture(
     /** Stops recording, writes everything queued and returns the counters. */
     suspend fun finish(sessionId: String): RegressionStats? {
         val s = session?.takeIf { it.id == sessionId } ?: return null
-        // Before recording stops: what the speech side still owes the session is reported now.
-        runCatching { speechSessions?.end(sessionId) }
+        // Before recording stops: what the speech side still owes the session is reported now, and
+        // whatever it could not hand over in time is counted, never silently lost.
+        endSpeechSession(s)
         s.recording = false
         s.queue.close()
         s.utterances.close()
@@ -149,8 +155,13 @@ internal class RegressionCapture(
         return s.stats()
     }
 
+    private fun endSpeechSession(s: Session) {
+        val undelivered = runCatching { speechSessions?.end(s.id) ?: 0 }.getOrDefault(0)
+        if (undelivered > 0) s.utteranceEventsDropped.addAndGet(undelivered.toLong())
+    }
+
     private fun abandon(s: Session, reason: String) {
-        runCatching { speechSessions?.end(s.id) }
+        endSpeechSession(s)
         s.recording = false
         s.writerJob?.cancel()
         s.queue.close()
@@ -218,7 +229,12 @@ internal class RegressionCapture(
 
     // Not guarded(): a lost lifecycle event is counted against the lifecycle, never against a frame.
     override fun onUtterance(sessionId: String?, record: RegressionUtteranceRecord) {
-        val s = session?.takeIf { it.recording && it.id == sessionId } ?: return
+        val s = session?.takeIf { it.id == sessionId } ?: return
+        if (!s.recording) {
+            // The session is closing: an event of it arriving now is lost, and counted.
+            s.utteranceEventsDropped.incrementAndGet()
+            return
+        }
         try {
             if (s.utterances.trySend(record).isFailure) s.utteranceEventsDropped.incrementAndGet()
         } catch (e: Exception) {
