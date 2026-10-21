@@ -751,11 +751,14 @@ pitch −30°…+10°, the used level never becomes less near than today's); occ
     - `GROUND_UNSEEN` is split out of `OCCLUDED`. It is common indoors, where the sem model reads
       reflective floors as building, and the evaluation needs to see it separately.
     - A box cut short at the bottom (legs behind a wall) reads farther and *taller*, not shorter.
-      Within the tolerances such a box often passes the check. Reading farther than the truth, it
-      never claims the obstacle is nearer than it is. It can still raise today's level when today's
-      reads farther still: a person truly 0.5 m away whose box reads at least 0.79 m goes from MEDIUM
-      to NEAR, which is right. The check bites on gross cases, such as a person box that ends at the
-      knee.
+      Within the tolerances such a box often passes the check.
+      - Its *point estimate* reads farther than the truth.
+      - Its *lower bound*, which carries the height and gravity tolerances and is what the fusion
+        uses, can still be nearer than the truth. For example: camera at 1.2 m, 25° down, a 0.9 m
+        person truly 1.6 m away with the bottom 5 cm hidden reads 1.67 m with a lower bound of
+        1.32 m, and goes from MEDIUM to NEAR.
+      - What is guaranteed is only the fusion's: the level used is never farther than today's.
+      - The check bites on gross cases, such as a person box that ends at the knee.
   - **Height ranges** (proposals, not calibrated): person 0.7–2.4 m, bicycle 0.6–2.2 m, vehicle
     0.9–4.5 m.
     - Static classes have no range.
