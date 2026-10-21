@@ -52,4 +52,15 @@ class RevokeTargetsTest {
         val replayed = listOf(recordedHigh.copy(id = java.util.UUID.randomUUID()))
         assertEquals(emptyMap<String, Any>(), RegressionReplay.revokeTargets(recorded, replayed, CounterfactualDelivery.ALL_DELIVERED))
     }
+
+    @Test
+    fun `identical events are matched one to one`() {
+        // Review round 2: two identical recorded events must not both land on one replayed event.
+        val first = recordedHigh
+        val second = recordedHigh.copy(id = java.util.UUID.randomUUID())
+        val replayed = listOf(recordedHigh.copy(id = java.util.UUID.randomUUID()), recordedHigh.copy(id = java.util.UUID.randomUUID()))
+        val targets = RegressionReplay.revokeTargets(listOf(first.toRecord(), second.toRecord()), replayed, CounterfactualDelivery.UNCHANGED_AS_RECORDED)
+        assertEquals(setOf(replayed[0].id, replayed[1].id), targets.values.toSet())
+        assertEquals(2, targets.size)
+    }
 }
