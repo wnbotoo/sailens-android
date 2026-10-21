@@ -70,6 +70,11 @@ data class RegressionStats(
      * session's lifecycle incomplete; exact replay does not depend on them.
      */
     val utteranceEventsDropped: Long = 0,
+    /**
+     * Lifecycle events written beyond what the speech side said the session produced: the accounting
+     * itself failed. Like a drop, it makes the session's lifecycle incomplete.
+     */
+    val utteranceEventsUnreconciled: Long = 0,
 )
 
 /**

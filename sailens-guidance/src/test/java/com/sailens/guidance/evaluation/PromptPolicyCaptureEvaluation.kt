@@ -93,7 +93,7 @@ internal class PromptPolicyCaptureEvaluation(private val phone: PhoneGeometrySet
         val evidence = when {
             !block.utteranceLifecycle -> LifecycleEvidence.NONE
             session.utterances.any { it.event == UtteranceRecordEvents.SCREEN_READER_PUBLISHED } -> LifecycleEvidence.NOT_MODELLABLE
-            block.stats.utteranceEventsDropped > 0 -> LifecycleEvidence.INCOMPLETE
+            block.stats.utteranceEventsDropped > 0 || block.stats.utteranceEventsUnreconciled > 0 -> LifecycleEvidence.INCOMPLETE
             else -> LifecycleEvidence.RECORDED
         }
         val credit = if (evidence.completionKnown) CompletionCredit.of(session.utterances) else null

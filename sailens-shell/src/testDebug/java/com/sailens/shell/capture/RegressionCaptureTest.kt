@@ -71,8 +71,9 @@ class RegressionCaptureTest {
         val calls = mutableListOf<String>()
         var onEnd: (String) -> Unit = {}
 
-        /** What the speech side says the session produced. */
+        /** What the speech side says the session produced; a later ending of the same session says 0, as a non-idempotent side would. */
         var produced = 0
+        private val ended = mutableSetOf<String>()
         override fun begin(sessionId: String) {
             calls += "begin $sessionId"
         }
@@ -80,7 +81,7 @@ class RegressionCaptureTest {
         override fun end(sessionId: String): Int {
             calls += "end $sessionId"
             onEnd(sessionId)
-            return produced
+            return if (ended.add(sessionId)) produced else 0
         }
     }
 
@@ -370,6 +371,53 @@ class RegressionCaptureTest {
 
         assertEquals(1, stats.utteranceEventsRecorded)
         assertEquals(1, stats.utteranceEventsDropped)
+    }
+
+    @Test
+    fun `a new session starting while the old one drains shares the old one's single speech ending`() {
+        // finish(s1) is inside the speech side's end; meanwhile the controller starts s2, which
+        // abandons s1. The speech side must be ended once, and its count kept.
+        val entered = java.util.concurrent.CountDownLatch(1)
+        val release = java.util.concurrent.CountDownLatch(1)
+        val speech = FakeSpeechSessions().apply { produced = 2 }
+        speech.onEnd = { id ->
+            if (id == "s1") {
+                entered.countDown()
+                release.await()
+            }
+        }
+        val capture = capture(speechSessions = speech)
+        capture.startSession("s1")
+        capture.attach("s1", sessionDir("s1"))
+        capture.onUtterance("s1", utterance(UtteranceRecordEvents.SUBMITTED, "a"))
+        capture.process(1) // lets the writer take the submission
+
+        var stats: com.sailens.guidance.trace.capture.RegressionStats? = null
+        val finishing = Thread { stats = runBlocking { capture.finish("s1") } }.apply { start() }
+        entered.await()
+        val starting = Thread { capture.startSession("s2") }.apply { start() }
+        Thread.sleep(100)
+        release.countDown()
+        finishing.join(5_000)
+        starting.join(5_000)
+
+        assertEquals("ended once", 1, speech.calls.count { it == "end s1" })
+        val s = stats!!
+        assertEquals("every produced event is either written or dropped, once", 2L, s.utteranceEventsRecorded + s.utteranceEventsDropped)
+        assertTrue("one was really lost", s.utteranceEventsDropped >= 1)
+        assertEquals(0, s.utteranceEventsUnreconciled)
+    }
+
+    @Test
+    fun `more written than the speech side produced is reported as unreconciled, not hidden`() = runBlocking {
+        val capture = capture(speechSessions = FakeSpeechSessions().apply { produced = 0 })
+        capture.startSession("s1")
+        capture.attach("s1", sessionDir("s1"))
+        capture.onUtterance("s1", utterance(UtteranceRecordEvents.SUBMITTED, "a"))
+        val stats = capture.finish("s1")!!
+
+        assertEquals(0, stats.utteranceEventsDropped)
+        assertEquals(1, stats.utteranceEventsUnreconciled)
     }
 
     @Test

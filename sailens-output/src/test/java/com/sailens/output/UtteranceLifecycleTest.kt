@@ -333,6 +333,50 @@ class UtteranceLifecycleTest {
     }
 
     @Test
+    fun `ending a session again returns the same count, and a second ending waits for the first`() {
+        val gate = Gate(UtteranceEventKind.DONE)
+        val life = UtteranceLifecycle { 0L }.apply { observer = gate }
+        life.beginSession("s1")
+        life.submitting(entry("a"), 1)
+        life.submitted("a")
+        val callback = thread { life.engineCallback(UtteranceEventKind.DONE, "a", 1, atNanos = 5) } // stuck in delivery
+        gate.entered.await()
+
+        val results = Collections.synchronizedList(mutableListOf<Int>())
+        val first = thread { results += life.endSession("s1", drainTimeoutMs = 10_000) }
+        Thread.sleep(100)
+        val second = thread { results += life.endSession("s1", drainTimeoutMs = 10_000) }
+        Thread.sleep(100)
+        assertTrue("the second ending waits for the first", first.isAlive && second.isAlive)
+        gate.release.countDown()
+        first.join(5_000)
+        second.join(5_000)
+        callback.join(5_000)
+
+        assertEquals(listOf(2, 2), results)
+        assertEquals("and later still", 2, life.endSession("s1"))
+    }
+
+    @Test
+    fun `a closed session stays closed, and an abandoned attempt stays silent, however many sessions end after`() {
+        lifecycle.beginSession("old")
+        submit(entry("a"))
+        lifecycle.submitting(entry("unconfirmed"), 1)
+        lifecycle.endSession("old", drainTimeoutMs = 10)
+        repeat(100) { i ->
+            lifecycle.beginSession("other-$i")
+            lifecycle.endSession("other-$i")
+        }
+        events.clear()
+
+        lifecycle.engineCallback(UtteranceEventKind.DONE, "a", 1, atNanos = 9)
+        lifecycle.submitted("unconfirmed")
+        lifecycle.engineCallback(UtteranceEventKind.DONE, "unconfirmed", 1, atNanos = 10)
+
+        assertTrue("nothing of the old session is reported: $events", events.isEmpty())
+    }
+
+    @Test
     fun `old attempts are forgotten beyond the cap, settled ones first`() {
         submit(entry("open"))
         for (i in 0 until UtteranceLifecycle.MAX_ATTEMPTS + 10) {

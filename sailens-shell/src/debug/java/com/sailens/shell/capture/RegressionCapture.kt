@@ -156,7 +156,13 @@ internal class RegressionCapture(
         return s.stats()
     }
 
-    private fun endSpeechSession(s: Session) {
+    /**
+     * Ends the speech side of [s] once: [finish] and an [abandon] racing it (a new session starting
+     * while the old one drains) share one ending and one count.
+     */
+    private fun endSpeechSession(s: Session) = synchronized(s.speechEnding) {
+        if (s.speechEnded) return
+        s.speechEnded = true
         s.lifecycleProduced = speechSessions?.let { sessions -> runCatching { sessions.end(s.id) }.getOrNull() }
     }
 
@@ -287,6 +293,8 @@ internal class RegressionCapture(
 
         /** What the speech side said the session produced when it ended; null without speech hooks. */
         @Volatile var lifecycleProduced: Int? = null
+        val speechEnding = Any()
+        var speechEnded = false
         val bytes = AtomicLong()
         private var strayClockReads = 0L
 
@@ -299,16 +307,18 @@ internal class RegressionCapture(
             windowFramesStored = windowFramesStored.get(),
             windowFramesDropped = windowFramesDropped.get(),
             utteranceEventsRecorded = utteranceEventsRecorded.get(),
-            utteranceEventsDropped = utteranceDrops(),
+            utteranceEventsDropped = utteranceBalance()?.let { maxOf(0L, it) } ?: utteranceEventsDropped.get(),
+            utteranceEventsUnreconciled = utteranceBalance()?.let { maxOf(0L, -it) } ?: 0,
         )
 
         /**
-         * With the speech hooks, everything produced and not written -- whether it overflowed, failed
-         * to write, or arrived too late -- each event once. Without them, what this side counted.
+         * With the speech hooks: produced minus written. Positive, everything not written -- whether
+         * it overflowed, failed to write, or arrived too late -- each event once; negative, more was
+         * written than produced, which only broken accounting can do. Null without the hooks.
          */
-        private fun utteranceDrops(): Long {
-            val produced = lifecycleProduced ?: return utteranceEventsDropped.get()
-            return maxOf(0L, produced + ownUtteranceRecords.get() - utteranceEventsRecorded.get())
+        private fun utteranceBalance(): Long? {
+            val produced = lifecycleProduced ?: return null
+            return produced + ownUtteranceRecords.get() - utteranceEventsRecorded.get()
         }
 
         private var hookFailures = 0L

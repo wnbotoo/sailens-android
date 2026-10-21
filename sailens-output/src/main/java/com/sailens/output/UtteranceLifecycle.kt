@@ -159,23 +159,29 @@ internal class UtteranceLifecycle(private val nanoClock: () -> Long) {
     /** Submissions registered and not yet confirmed or refused, per session. */
     private val pending = HashMap<String, MutableSet<String>>()
 
-    /** Ended sessions: nothing more of theirs is reported. */
-    private val closed = LinkedHashSet<String>()
+    /**
+     * Ended sessions, and what each produced: nothing more of theirs is reported, and ending one again
+     * returns the same count. Never trimmed -- one small entry per session, and forgetting one would
+     * let a surviving attempt of it be reported again.
+     */
+    private val closed = HashMap<String, Int>()
 
-    /** Attempts given up on while unconfirmed: nothing of theirs is reported. */
-    private val abandoned = LinkedHashSet<String>()
+    /** Serializes [endSession]: a second ending of a session waits for the first and shares its result. */
+    private val ending = Object()
 
     fun beginSession(token: String) = synchronized(this) { session = token }
 
     /**
      * Ends [token]'s session. Waits up to [drainTimeoutMs] for its unconfirmed submissions; reports
      * every attempt of it still without an outcome as unknown; closes it; then waits for what is on
-     * its way to the observer, within the same time limit.
+     * its way to the observer, within the same time limit. Ending it again changes nothing and
+     * returns the same count, waiting for a first ending still in progress.
      *
      * @return how many events the session produced, delivered or not (an abandoned submission counts
      *   as one): a recorder that wrote fewer lost the difference. 0 when nothing was observed.
      */
-    fun endSession(token: String, drainTimeoutMs: Long = END_DRAIN_TIMEOUT_MS): Int {
+    fun endSession(token: String, drainTimeoutMs: Long = END_DRAIN_TIMEOUT_MS): Int = synchronized(ending) {
+        synchronized(delivery) { closed[token] }?.let { return it }
         val deadline = System.nanoTime() + drainTimeoutMs * 1_000_000
         awaitDrained(deadline) { pending[token].isNullOrEmpty() }
         val target = observer
@@ -183,21 +189,22 @@ internal class UtteranceLifecycle(private val nanoClock: () -> Long) {
             if (session == token) session = null
             val unknown = if (target == null) emptyList() else settleOpen(UtteranceReasons.SESSION_ENDED) { it.session == token }
             synchronized(delivery) {
+                // Still unconfirmed: abandoned. Each counts as one lost event, and being of the
+                // closed session, nothing of it is reported afterwards.
                 val stuck = pending.remove(token).orEmpty()
-                abandoned += stuck
-                trimOldest(abandoned, MAX_ATTEMPTS)
                 if (stuck.isNotEmpty()) produced[token] = (produced[token] ?: 0) + stuck.size
                 val kept = registerLocked(unknown)
-                closed += token
-                trimOldest(closed, MAX_CLOSED_SESSIONS)
+                // The count is final from here: nothing more of the session is registered.
+                closed[token] = produced[token] ?: 0
                 kept
             }
         }
         if (target != null) deliver(target, events)
         awaitDrained(deadline) { (inFlight[token] ?: 0) == 0 }
-        return synchronized(delivery) {
+        synchronized(delivery) {
             inFlight.remove(token)
-            produced.remove(token) ?: 0
+            produced.remove(token)
+            closed.getValue(token)
         }
     }
 
@@ -394,11 +401,13 @@ internal class UtteranceLifecycle(private val nanoClock: () -> Long) {
     }
 
     /**
-     * Holding [delivery]: drops what belongs to a closed session or an abandoned attempt, and counts
-     * the rest for their sessions as produced and in flight.
+     * Holding [delivery]: drops what belongs to a closed session (abandoned attempts included), and
+     * counts the rest for their sessions as produced and in flight. An attempt forgotten after
+     * [MAX_ATTEMPTS] newer ones has no session any more: it is reported with none, so no session's
+     * record takes it, and counted for none.
      */
     private fun registerLocked(events: List<UtteranceEvent>): List<UtteranceEvent> =
-        events.filter { e -> e.attemptId !in abandoned && (e.session == null || e.session !in closed) }.onEach { e ->
+        events.filter { e -> e.session == null || e.session !in closed }.onEach { e ->
             val s = e.session ?: return@onEach
             produced[s] = (produced[s] ?: 0) + 1
             inFlight[s] = (inFlight[s] ?: 0) + 1
@@ -421,16 +430,11 @@ internal class UtteranceLifecycle(private val nanoClock: () -> Long) {
         }
     }
 
-    private fun trimOldest(set: LinkedHashSet<String>, max: Int) {
-        while (set.size > max) set.remove(set.first())
-    }
 
     companion object {
         const val MAX_ATTEMPTS: Int = 512
 
         /** Long enough for a descheduled thread, short enough never to stall a session's end. */
         const val END_DRAIN_TIMEOUT_MS: Long = 500
-
-        const val MAX_CLOSED_SESSIONS: Int = 32
     }
 }
