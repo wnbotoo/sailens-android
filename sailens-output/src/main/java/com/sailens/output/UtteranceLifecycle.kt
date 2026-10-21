@@ -169,6 +169,7 @@ internal class UtteranceLifecycle(private val nanoClock: () -> Long) {
     /** Serializes [endSession]: a second ending of a session waits for the first and shares its result. */
     private val ending = Object()
 
+    /** [token] must be new: an ended session stays ended, and anything begun under its token again is not reported. */
     fun beginSession(token: String) = synchronized(this) { session = token }
 
     /**

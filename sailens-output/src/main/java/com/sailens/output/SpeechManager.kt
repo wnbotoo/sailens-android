@@ -105,7 +105,8 @@ public class SpeechManager(
 
     /**
      * Attempts submitted from now on belong to the session [token], for good: their events carry it,
-     * never a later session's, and once it has ended nothing of it is reported. Safe from any thread.
+     * never a later session's, and once it has ended nothing of it is reported. [token] must be new:
+     * an ended session stays ended, so reusing its token reports nothing. Safe from any thread.
      */
     public fun beginLifecycleSession(token: String) {
         lifecycle.beginSession(token)
