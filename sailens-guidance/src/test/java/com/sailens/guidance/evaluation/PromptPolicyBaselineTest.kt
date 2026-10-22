@@ -23,6 +23,10 @@ import java.util.Locale
  * Reports go to `sailens-guidance/build/replay/<sessionId>.detfirst.txt` and a summary over all
  * complete captures to `detfirst-baseline.txt`; numbers only. The test fails on any replay problem
  * and unless at least one complete capture was evaluated.
+ *
+ * Captures of the sealed acceptance set ([SealedCaptures]) are skipped, and the summary says how
+ * many, unless `-PunsealCapture` is given -- which the D1.8 plan allows only after the thresholds are
+ * frozen.
  */
 class PromptPolicyBaselineTest {
 
@@ -33,12 +37,18 @@ class PromptPolicyBaselineTest {
         val out = File(System.getProperty("sailens.replay.out").orEmpty().ifBlank { "build/replay" }).apply { mkdirs() }
         val height = System.getProperty("sailens.m3a.phoneHeight").orEmpty().ifBlank { "1.15" }.toFloat()
         val evaluation = PromptPolicyCaptureEvaluation(PhoneGeometrySettings(height, HeightSource.PRESET))
-        val captures = File(path).walkTopDown()
+        val found = File(path).walkTopDown()
             .filter { it.isFile && it.name == CaptureSchema.MANIFEST_FILE }
             .mapNotNull { it.parentFile }
             .sortedBy { it.name }
             .toList()
-        assertTrue("no capture under $path", captures.isNotEmpty())
+        assertTrue("no capture under $path", found.isNotEmpty())
+        val unseal = System.getProperty("sailens.replay.unseal") == "true"
+        val (sealed, captures) = found.partition { !unseal && SealedCaptures.isSealed(it) }
+        assumeTrue(
+            "all ${sealed.size} capture(s) under $path are sealed (det-first D1.8); pass -PunsealCapture only after the thresholds are frozen",
+            captures.isNotEmpty(),
+        )
 
         val results = captures.mapNotNull { evaluation.evaluate(CaptureSessionReader.read(it).orThrow()) }
         val problems = results.flatMap { it.problems }
@@ -47,7 +57,7 @@ class PromptPolicyBaselineTest {
 
         val summary = buildString {
             appendLine("det-first PR-0 baseline, phone height preset ${String.format(Locale.ROOT, "%.2f", height)} m")
-            appendLine("captures ${results.size}, complete and evaluated ${complete.size}; problems ${problems.size}")
+            appendLine("captures ${results.size}, complete and evaluated ${complete.size}; problems ${problems.size}; sealed and skipped ${sealed.size}")
             problems.forEach { appendLine("  $it") }
             appendLine()
             appendLine("ALL COMPLETE CAPTURES")
