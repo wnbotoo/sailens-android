@@ -87,8 +87,8 @@ the device refused 13, model refuses while the device accepted 42; CRITICAL misj
 
 ## Next
 
-- Device (SM8850): the D1.7 speech-duration table (Settings → Diagnostics → Speech durations, Chinese
-  and English); then the D1.8 recordings with the lifecycle, split before recording into a
+- Done 2026-10-22: the D1.7 speech-duration table, [detfirst-tts-durations-2026-10.md](detfirst-tts-durations-2026-10.md).
+- Device (SM8850): the D1.8 recordings with the lifecycle, split before recording into a
   calibration/baseline set and a sealed acceptance set (assignment kept in a local file: session id +
   date).
 - With lifecycle evidence, re-run this baseline: completion, lead time against completion, and the
