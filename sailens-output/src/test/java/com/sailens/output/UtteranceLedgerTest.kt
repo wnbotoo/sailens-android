@@ -178,6 +178,42 @@ class UtteranceLedgerTest {
         assertNull(ledger.highestLivePriority(nowMs = 15_001))
     }
 
+    // ---- What was dropped, for the speech lifecycle (measurement only) -----------------------------
+
+    @Test
+    fun `a flush and a clear say what they dropped, in order`() {
+        ledger.add(entry("first", owner = null))
+        ledger.add(entry("second", owner = describe))
+
+        assertEquals(listOf("first", "second"), ledger.flushAndAdd(entry("warning", owner = null)).map { it.id })
+        assertEquals(listOf("warning"), ledger.clear().map { it.id })
+        assertEquals(emptyList<String>(), ledger.clear().map { it.id })
+    }
+
+    @Test
+    fun `a detailed withdrawal splits what goes back from what was withdrawn or had expired`() {
+        ledger.add(entry("stale", owner = null, expiresAtMs = 1_000))
+        ledger.add(entry("warning", owner = null, expiresAtMs = 5_000))
+        ledger.add(entry("describe-1", owner = describe))
+
+        val withdrawal = ledger.withdrawDetailed(describe, nowMs = 2_000)
+
+        assertEquals(listOf("warning"), withdrawal.survivors.map { it.id })
+        assertEquals(listOf("describe-1"), withdrawal.withdrawn.map { it.id })
+        assertEquals(listOf("stale"), withdrawal.expired.map { it.id })
+        assertEquals(0, ledger.size())
+    }
+
+    @Test
+    fun `an entry's logical id defaults to its id and survives a fresh id`() {
+        val original = entry("event-1", owner = null)
+        val handedBack = original.copy(id = "event-1~requeued_0", requeuedFrom = original.id)
+
+        assertEquals("event-1", original.logicalId)
+        assertEquals("event-1", handedBack.logicalId)
+        assertEquals("event-1", handedBack.requeuedFrom)
+    }
+
     private fun entry(id: String, owner: SpeechOwner?, expiresAtMs: Long? = null, priority: Int? = null) =
         UtteranceLedger.Entry(id = id, text = "text of $id", owner = owner, expiresAtMs = expiresAtMs, priority = priority)
 }

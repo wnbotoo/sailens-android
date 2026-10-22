@@ -11,7 +11,7 @@ import sys
 import tempfile
 import unittest
 import zlib
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 
 import numpy as np
 
@@ -19,7 +19,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import capture_stats  # noqa: E402
 import contact_sheet  # noqa: E402
 import timing_align  # noqa: E402
-from sailens_capture import CLASS_MAP_HEADER, CLASS_MAP_MAGIC, UnsupportedCapture, find_captures, load_capture  # noqa: E402
+from sailens_capture import (  # noqa: E402
+    CLASS_MAP_HEADER, CLASS_MAP_MAGIC, SEALED_MARKER, UnsupportedCapture, find_captures, is_sealed, load_capture,
+)
 
 START_NS = 5_000_000_000
 START_WALL = 1_700_000_000_000
@@ -128,6 +130,47 @@ class RegressionReaderTest(unittest.TestCase):
             wrong = dict(capture.regression_frames[0], seq=7)
             with self.assertRaises(ValueError):
                 capture.class_map(wrong)
+
+
+class LifecycleAndSealTest(unittest.TestCase):
+    """Schema 1.5 (the speech lifecycle) and the det-first D1.8 sealed set."""
+
+    def test_lifecycle_records_read_back_without_warnings(self):
+        with tempfile.TemporaryDirectory() as root:
+            line = json.dumps({"type": "regression_utterance", "event": "submitted", "attemptId": "a",
+                               "logicalId": "a", "engineGeneration": 1, "elapsedRealtimeNanos": 5})
+            directory = write_capture(root, "s", mode="model_regression", extra_lines={"regression.jsonl": [line]},
+                                      manifest_overrides={"schemaMinor": 5,
+                                                          "regression": {"recorderVersion": 1, "utteranceLifecycle": True}})
+            capture = load_capture(directory)
+            self.assertEqual([], capture.warnings)
+            self.assertEqual("submitted", capture.utterances[0]["event"])
+
+    def test_a_marker_above_the_given_or_the_real_path_seals(self):
+        with tempfile.TemporaryDirectory() as root:
+            sealed_session = os.path.join(root, "sealed", "a")
+            calibration_session = os.path.join(root, "calibration", "b")
+            os.makedirs(sealed_session)
+            os.makedirs(calibration_session)
+            open(os.path.join(root, "sealed", SEALED_MARKER), "w").close()
+            self.assertTrue(is_sealed(sealed_session))
+            self.assertFalse(is_sealed(calibration_session))
+            self.assertFalse(is_sealed(os.path.join(root, "sealed", "..", "calibration", "b")),
+                             "'..' is resolved before looking for the marker")
+            alias = os.path.join(root, "alias-a")
+            try:
+                os.symlink(sealed_session, alias, target_is_directory=True)
+            except (OSError, NotImplementedError):
+                self.skipTest("cannot create a directory link here")
+            self.assertTrue(is_sealed(alias), "an alias does not unseal")
+
+    def test_contact_sheets_refuse_a_sealed_capture(self):
+        with tempfile.TemporaryDirectory() as root:
+            directory = write_capture(os.path.join(root, "sealed"), "s")
+            open(os.path.join(root, "sealed", SEALED_MARKER), "w").close()
+            with self.assertRaises(SystemExit):
+                with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                    contact_sheet.main([directory, "--markers"])
 
 
 class StatsTest(unittest.TestCase):

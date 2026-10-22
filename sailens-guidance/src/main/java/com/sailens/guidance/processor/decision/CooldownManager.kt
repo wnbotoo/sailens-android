@@ -197,6 +197,52 @@ class CooldownManager(
         recentEmissions.lastIndexOf(undo.emittedAtMs).takeIf { it >= 0 }?.let(recentEmissions::removeAt)
     }
 
+    /**
+     * A read-only copy of the records, for measurement (det-first plan D1.6): taken just before a
+     * decision with that decision's [now] and motion state, it says which keys hold an event back and
+     * at what recorded priority. Changes nothing -- not even the emission window, which is counted,
+     * not trimmed.
+     */
+    @Synchronized
+    internal fun snapshot(now: Long, stationary: Boolean): Snapshot {
+        var scale = 1.0f
+        if (stationary) scale *= stationaryCooldownScale
+        if (recentEmissions.count { now - it <= stormWindowMs } >= stormEventThreshold) scale *= stormCooldownScale
+        return Snapshot(now, scale.coerceAtMost(maxCooldownScale), lastEventRecords.mapValues { (_, r) -> r.timestampMs to r.priority })
+    }
+
+    /** One key holding an event back, and the priority recorded on it. */
+    data class Hold(val key: String, val recordedPriority: EventPriority)
+
+    inner class Snapshot internal constructor(
+        private val now: Long,
+        private val scale: Float,
+        private val records: Map<String, Pair<Long, EventPriority>>,
+    ) {
+        /**
+         * Null when [event] passes, as [filter] would decide at this snapshot; else, for each of its
+         * cooldown groups (a merged event has one per component), the keys holding that group.
+         */
+        fun holds(event: SceneEvent): List<GroupHold>? {
+            val eventScale = if (event.isExemptFromScaling()) 1.0f else scale
+            val groups = event.cooldownGroupsOrDefault().map { group ->
+                GroupHold(
+                    keys = group,
+                    holds = group.mapNotNull { key ->
+                        val (timestampMs, priority) = records[key] ?: return@mapNotNull null
+                        val held = now - timestampMs < event.scaledCooldownFor(key, eventScale) &&
+                            event.priority.value <= priority.value
+                        Hold(key, priority).takeIf { held }
+                    },
+                )
+            }
+            return if (groups.any { it.holds.isEmpty() }) null else groups
+        }
+    }
+
+    /** One cooldown group of an event and the keys in it that hold the event back. */
+    data class GroupHold(val keys: Set<String>, val holds: List<Hold>)
+
     @Synchronized
     fun reset() {
         lastEventRecords.clear()

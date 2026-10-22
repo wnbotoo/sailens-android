@@ -142,7 +142,7 @@ internal class GroundContactEvaluation(private val phone: PhoneGeometrySettings)
         )
     }
 
-    private sealed interface GeometrySource {
+    internal sealed interface GeometrySource {
         /** [exact]: as the device had it; [evaluation]: the same with the evaluation's phone settings. */
         class Available(
             val description: String,
@@ -153,7 +153,7 @@ internal class GroundContactEvaluation(private val phone: PhoneGeometrySettings)
         class NotEvaluable(val why: String) : GeometrySource
     }
 
-    private fun geometrySource(session: CaptureSession, phone: PhoneGeometrySettings): GeometrySource {
+    internal fun geometrySource(session: CaptureSession, phone: PhoneGeometrySettings): GeometrySource {
         val frames = session.regressionFrames
         if (frames.isNotEmpty() && frames.all { it.geometry != null }) {
             return GeometrySource.Available(

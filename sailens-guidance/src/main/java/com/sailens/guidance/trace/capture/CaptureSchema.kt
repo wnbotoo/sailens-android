@@ -19,7 +19,8 @@ import kotlinx.serialization.json.Json
  *   anchors.jsonl      ClockAnchorRecord at start, periodically and at the end
  *   markers.jsonl      MarkerRecord per "missed alert" press
  *   regression.jsonl   model_regression only: RegressionFrameRecord per processed frame,
- *                      RegressionRevokeRecord per revoked prompt
+ *                      RegressionRevokeRecord per revoked prompt, RegressionUtteranceRecord
+ *                      per speech-lifecycle event
  *   classmaps.bin      model_regression only: the semantic class maps (ClassMapStore)
  *   windows.jsonl      model_regression only: WindowFrameRecord per full-resolution event frame
  *   windows/           the event-window images
@@ -43,8 +44,9 @@ object CaptureSchema {
      * 1: `CaptureStats.framesMissedBySubscriber`. 2: `CaptureManifest.modelArtifacts`.
      * 3: the `model_regression` mode -- `regression.jsonl`, `classmaps.bin`, `windows.jsonl`,
      * `CaptureManifest.regression`, `group`, `sceneLabel`. 4: `RegressionFrameRecord.geometry`.
+     * 5: `RegressionUtteranceRecord`, `RegressionManifest.utteranceLifecycle` and its counters.
      */
-    const val MINOR: Int = 4
+    const val MINOR: Int = 5
 
     const val MANIFEST_FILE: String = "manifest.json"
     const val FRAMES_FILE: String = "frames.jsonl"

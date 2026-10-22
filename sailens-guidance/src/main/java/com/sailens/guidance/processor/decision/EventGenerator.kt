@@ -90,9 +90,9 @@ class EventGenerator(
         }
 
         // 4.  障碍物事件
-        val significantObstacles = snapshot.obstacles.filter(::shouldAnnounceObstacle)
-        if (significantObstacles.isNotEmpty()) {
-            events.addAll(createObstacleEvents(significantObstacles, now))
+        val obstacleGroups = announcedObstacleGroups(snapshot.obstacles)
+        if (obstacleGroups.isNotEmpty()) {
+            events.addAll(createObstacleEvents(obstacleGroups, now))
         }
 
         // 5. 路口事件
@@ -312,13 +312,15 @@ class EventGenerator(
         )
     }
 
-    private fun createObstacleEvents(
-        obstacles: List<DetectedObstacle>,
-        now: Long,
-    ): List<SceneEvent> {
-        val byZone = obstacles.groupBy { it.zone }
-
-        return byZone.map { (zone, zoneObstacles) ->
+    /**
+     * The obstacle events [generate] makes from [obstacles], before any event exists: which tracked
+     * obstacles pass the announcement gates, grouped one event per zone, in event order.
+     *
+     * Pure, so an evaluation can ask which obstacles an obstacle prompt speaks for (det-first plan
+     * D1.1) by calling the very code that decided it.
+     */
+    internal fun announcedObstacleGroups(obstacles: List<DetectedObstacle>): List<ObstacleZoneGroup> =
+        obstacles.filter(::shouldAnnounceObstacle).groupBy { it.zone }.map { (zone, zoneObstacles) ->
             val primaryObstacle = zoneObstacles.maxWithOrNull(
                 compareBy<DetectedObstacle> { it.urgency.value }
                     .thenBy { obstacleCategoryPriority(it.category) }
@@ -326,24 +328,37 @@ class EventGenerator(
                     .thenBy { it.areaRatio }
             ) ?: zoneObstacles.first()
             val maxUrgency = zoneObstacles.maxOf { it.urgency }
-            val priority = obstacleEventPriority(primaryObstacle, maxUrgency)
-            // 用该方位里**最近**的那个障碍物定紧迫度：主障碍物是按紧急度/类别选出来的，
-            // 未必是离得最近的，而"要不要立刻停下"取决于最近的那个。
-            val nearestDistance = zoneObstacles.minOf { it.distance }
-
-            SceneEvent(
-                timestamp = now,
-                category = EventCategory.OBSTACLE,
-                priority = priority,
-                messageKey = obstacleMessageKey(zone, primaryObstacle.category),
-                messageParams = mapOf("count" to zoneObstacles.size.toString()),
-                expiresAt = now + 3000,
-                dedupeKey = "obstacle_${zone.name}",
-                cooldownKeys = obstacleCooldownKeys(listOf(zone)),
-                relatedZones = listOf(zone),
-                distance = nearestDistance.takeIf { config.enableProximityPrefix },
+            ObstacleZoneGroup(
+                zone = zone,
+                obstacles = zoneObstacles,
+                primary = primaryObstacle,
+                priority = obstacleEventPriority(primaryObstacle, maxUrgency),
+                // 用该方位里**最近**的那个障碍物定紧迫度：主障碍物是按紧急度/类别选出来的，
+                // 未必是离得最近的，而"要不要立刻停下"取决于最近的那个。
+                nearestDistance = zoneObstacles.minOf { it.distance },
             )
         }
+
+    /** The priority [obstacle]'s event would take were it alone in its zone. */
+    internal fun ownObstaclePriority(obstacle: DetectedObstacle): EventPriority =
+        obstacleEventPriority(obstacle, obstacle.urgency)
+
+    private fun createObstacleEvents(
+        groups: List<ObstacleZoneGroup>,
+        now: Long,
+    ): List<SceneEvent> = groups.map { group ->
+        SceneEvent(
+            timestamp = now,
+            category = EventCategory.OBSTACLE,
+            priority = group.priority,
+            messageKey = obstacleMessageKey(group.zone, group.primary.category),
+            messageParams = mapOf("count" to group.obstacles.size.toString()),
+            expiresAt = now + 3000,
+            dedupeKey = "obstacle_${group.zone.name}",
+            cooldownKeys = obstacleCooldownKeys(listOf(group.zone)),
+            relatedZones = listOf(group.zone),
+            distance = group.nearestDistance.takeIf { config.enableProximityPrefix },
+        )
     }
 
     private fun obstacleMessageKey(
@@ -365,7 +380,7 @@ class EventGenerator(
      * 注意这里只影响措辞。[ObstacleCategory.BICYCLE] 在感知侧仍然独立存在，
      * 因为 RoadSafetyAnalyzer 依赖它——停在路边的自行车不该触发机动车道警告。
      */
-    private fun obstacleCategorySuffix(category: ObstacleCategory): String? {
+    internal fun obstacleCategorySuffix(category: ObstacleCategory): String? {
         return when (category) {
             ObstacleCategory.PERSON -> SceneEventMessageKeys.SUFFIX_PERSON
             ObstacleCategory.BICYCLE,
@@ -510,3 +525,17 @@ class EventGenerator(
         return keys
     }
 }
+
+/**
+ * One zone's obstacle event before it is made ([EventGenerator.announcedObstacleGroups]): what it
+ * speaks for. The event names [primary]'s category, takes [priority], and carries the NEAR prefix
+ * from [nearestDistance].
+ */
+internal data class ObstacleZoneGroup(
+    val zone: DirectionZone,
+    /** Every announced obstacle in [zone], in tracker order. */
+    val obstacles: List<DetectedObstacle>,
+    val primary: DetectedObstacle,
+    val priority: EventPriority,
+    val nearestDistance: DistanceLevel,
+)

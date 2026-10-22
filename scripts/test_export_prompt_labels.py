@@ -50,6 +50,19 @@ class ExportPromptLabelsTest(unittest.TestCase):
         with open(out, encoding="utf-8-sig", newline="") as f:
             return code, list(csv.DictReader(f)), stderr.getvalue()
 
+    def test_traces_of_the_sealed_set_are_refused_unless_unsealed(self):
+        sealed = os.path.join(self.tmp.name, "sealed")
+        os.makedirs(sealed)
+        open(os.path.join(sealed, "SEALED"), "w").close()
+        trace = os.path.join(sealed, "trace_s.jsonl")
+        with open(trace, "w", encoding="utf-8") as f:
+            f.write("\n".join(json.dumps(r) for r in self.session()) + "\n")
+        out = os.path.join(self.tmp.name, "sealed.csv")
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                export_prompt_labels.main([trace, "-o", out])
+            self.assertEqual(0, export_prompt_labels.main([trace, "-o", out, "--unseal"]))
+
     def session(self):
         return [
             {"type": "session_start", "sessionId": "s", "startedAt": START},

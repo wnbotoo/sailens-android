@@ -403,6 +403,14 @@ R3 回放：JVM 回放框架（`RegressionReplay`）及其报告。然后是真�
 每段采集一份报告，写到 `sailens-guidance/build/replay/<sessionId>.txt`：回放了多少帧、第一处不一致（帧、内容、
 期望值、实际值）、近似帧、因丢帧停在哪里。
 
+**语音生命周期（schema 1.5，det 优先 PR-0）。** debug 采集还会记录每一句交给语音引擎的话后来怎样了：
+`regression.jsonl` 里的 `RegressionUtteranceRecord`（submitted / refused / started / done / stopped / error /
+requeued / requeue_failed / superseded / cancelled / unknown_terminal，以及 screen_reader_published），
+在观察到它的线程上当场计时，带 attempt id、逻辑 id（导航提示就是事件 id）和引擎代次。它们有自己的队列和丢弃计数
+（`RegressionStats.utteranceEventsDropped`），所以不会让记录丢帧；回放不读它们。旧记录的
+`RegressionManifest.utteranceLifecycle` 都是 false，表示"没有生命周期证据"，不是"零失败"。读取它们的测量是
+`PromptPolicyBaselineTest`（[实验记录](experiments/detfirst-pr0-baseline-2026-10.zh-CN.md)）。
+
 ## 5. M1 — 资格与安全状态（精确复现现状）；M1b — 停止压住已排队事件
 
 **Guidance 侧（`GuidanceQualification`）** 按能力划分，每个流水线结果算一次：

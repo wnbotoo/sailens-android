@@ -10,6 +10,7 @@ import com.sailens.guidance.depth.GroundContactDistanceEstimator
 import com.sailens.guidance.depth.ImagePositionDepthEstimator
 import com.sailens.guidance.geometry.CameraGeometry
 import com.sailens.guidance.model.analysis.ConnectivityStats
+import com.sailens.guidance.model.analysis.SceneSnapshot
 import com.sailens.guidance.model.perception.DetectedObstacle
 import com.sailens.guidance.model.perception.ObstacleModelOutput
 import com.sailens.guidance.model.perception.SegmentationMask
@@ -110,8 +111,21 @@ class RegressionReplay(
         UNCHANGED_AS_RECORDED,
     }
 
-    /** What the replayed path made of one frame, for evaluations that look past the decided events. */
-    data class FrameOutcome(val obstacles: List<DetectedObstacle>, val events: List<SceneEvent>)
+    /**
+     * What the replayed path made of one frame, for evaluations that look past the decided events.
+     *
+     * @param snapshot the scene the decision step was given, and [decidedAt] the time it read: with
+     *   them an evaluation can ask the (stateless) event generator what it made before the cooldown.
+     * @param cooldown a read-only copy of the cooldown as the decision found it, which says what held
+     *   an event back.
+     */
+    data class FrameOutcome(
+        val obstacles: List<DetectedObstacle>,
+        val events: List<SceneEvent>,
+        val snapshot: SceneSnapshot? = null,
+        val decidedAt: Long? = null,
+        val cooldown: CooldownManager.Snapshot? = null,
+    )
 
     /** Stops the replay of one frame with a precise reason. */
     private class Divergence(val what: String, val expected: String, val actual: String) : RuntimeException(what)
@@ -126,6 +140,7 @@ class RegressionReplay(
      *   apply. Set for a counterfactual run: decisions are not compared, and revokes follow
      *   [CounterfactualDelivery]. Every other check stays.
      * @param onFrame each successfully processed frame's tracked obstacles and decided events.
+     * @param trackIds the tracker's id source; an evaluation pairing two runs numbers tracks by birth.
      */
     fun replay(
         frames: List<RegressionFrameRecord>,
@@ -135,8 +150,9 @@ class RegressionReplay(
         geometryOf: (RegressionFrameRecord) -> CameraGeometry? = { it.geometry?.toGeometry() },
         onFrame: (RegressionFrameRecord, FrameOutcome) -> Unit = { _, _ -> },
         counterfactual: CounterfactualDelivery? = null,
+        trackIds: ObstacleTracker.TrackIdSource = ObstacleTracker.TrackIdSource.RANDOM,
     ): Report {
-        val world = World(classMap)
+        val world = World(classMap, trackIds)
         val revokesByDecision = revokes.groupBy { it.decisionsBefore }
         val replayedIdOf = HashMap<String, UUID>()
         var decisions = 0
@@ -164,9 +180,11 @@ class RegressionReplay(
                         replayedIdOf[revoke.eventId]?.let(world.cooldown::revoke)
                     }
                     world.stationary.value = record.stationary ?: false
+                    // Read-only, before the decision changes it; the clock is peeked, not consumed.
+                    val cooldownBefore = world.nextDecisionTime()?.let { world.cooldown.snapshot(it, world.stationary.value) }
                     val events = world.decide(snapshot)
                     decisions++
-                    onFrame(record, FrameOutcome(result.getOrThrow().obstacles, events))
+                    onFrame(record, FrameOutcome(result.getOrThrow().obstacles, events, snapshot, world.decidedAt, cooldownBefore))
                     if (counterfactual == null) compareEvents(record, events)
                     replayedIdOf.putAll(revokeTargets(record.events, events, counterfactual))
                 }
@@ -228,7 +246,10 @@ class RegressionReplay(
     }
 
     /** One replay's components and stand-ins, built from scratch like a new Guidance session. */
-    private inner class World(private val classMap: (RegressionFrameRecord) -> IntArray?) {
+    private inner class World(
+        private val classMap: (RegressionFrameRecord) -> IntArray?,
+        trackIds: ObstacleTracker.TrackIdSource,
+    ) {
         private lateinit var record: RegressionFrameRecord
         private val tapes = mapOf(
             RegressionClocks.PERCEPTION to Tape(RegressionClocks.PERCEPTION),
@@ -294,7 +315,7 @@ class RegressionReplay(
             depthRepository = DefaultDepthRepository(ImagePositionDepthEstimator(), GroundContactDistanceEstimator(navigationSemantics)),
             segmentationAnalyzer = SegmentationAnalyzer(config = analysisConfig, navigationSemantics = navigationSemantics),
             obstacleExtractor = ObstacleExtractor(config = perceptionConfig, navigationSemantics = navigationSemantics),
-            obstacleTracker = ObstacleTracker(config = perceptionConfig),
+            obstacleTracker = ObstacleTracker(config = perceptionConfig, trackIds = trackIds),
             clock = tapes.getValue(RegressionClocks.PERCEPTION)::next,
         )
         val analyzeScene = AnalyzeSceneUseCase(
@@ -310,13 +331,19 @@ class RegressionReplay(
                 clock = tapes.getValue(RegressionClocks.GROUND)::next,
             ),
         )
+        /** What the decision clock will return next, without consuming it. */
+        fun nextDecisionTime(): Long? = tapes.getValue(RegressionClocks.DECIDE).peek()
+
+        /** The decision clock's last reading: the `now` of the latest decision. */
+        var decidedAt: Long? = null
+            private set
         val decide = DecideEventsUseCase(
             eventGenerator = EventGenerator(config = analysisConfig),
             conflictResolver = EventConflictResolver(),
             eventMerger = EventMerger(),
             cooldownManager = cooldown,
             deviceSensorRepository = sensors,
-            clock = tapes.getValue(RegressionClocks.DECIDE)::next,
+            clock = { tapes.getValue(RegressionClocks.DECIDE).next().also { decidedAt = it } },
         )
 
         fun load(next: RegressionFrameRecord) {
@@ -375,6 +402,8 @@ class RegressionReplay(
             if (next >= values.size) throw Divergence("$component clock reads", "${values.size}", "more")
             return values[next++]
         }
+
+        fun peek(): Long? = values.getOrNull(next)
 
         fun checkUsedUp() {
             if (next != values.size) throw Divergence("$component clock reads", "${values.size}", "$next")

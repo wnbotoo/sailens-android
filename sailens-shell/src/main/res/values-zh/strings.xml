@@ -381,6 +381,16 @@
     <string name="field_capture_cap_value">%1$d GB</string>
 
     <!-- 接地点距离，M3a（调试诊断） -->
+    <string name="btn_open_tts_duration">语音时长</string>
+    <string name="settings_diagnostics_tts_duration_supporting">按你的语速测量每句导航提示的时长，供喇叭模型使用</string>
+    <string name="title_tts_duration_page">语音时长</string>
+    <string name="tts_duration_intro">用一个单独的语音引擎、按你的语速，把每句导航提示各念三遍并记录时长。请先停止导航，并保持周围安静。结果表格保存在手机上。</string>
+    <string name="tts_duration_measure_zh">测量中文</string>
+    <string name="tts_duration_measure_en">测量英文</string>
+    <string name="tts_duration_cancel">停止测量</string>
+    <string name="tts_duration_progress">正在测量：%1$d / %2$d</string>
+    <string name="tts_duration_problem">未能测量：%1$s</string>
+    <string name="tts_duration_saved">已保存到 %1$s</string>
     <string name="btn_open_ground_contact">接地点距离（实验）</string>
     <string name="settings_diagnostics_ground_contact_supporting">手机携带方式，以及按障碍物接地点估算距离的开关</string>
     <string name="title_ground_contact_page">接地点距离</string>

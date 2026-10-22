@@ -48,6 +48,7 @@ fun SettingsScreen(
     onOpenFieldCapture: () -> Unit,
     onOpenModelConsistency: () -> Unit,
     onOpenGroundContact: () -> Unit,
+    onOpenTtsDuration: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: SettingsViewModel = koinViewModel(),
 ) {
@@ -132,6 +133,7 @@ fun SettingsScreen(
                     onOpenFieldCapture = onOpenFieldCapture,
                     onOpenModelConsistency = onOpenModelConsistency,
                     onOpenGroundContact = onOpenGroundContact,
+                    onOpenTtsDuration = onOpenTtsDuration,
                 )
             }
 

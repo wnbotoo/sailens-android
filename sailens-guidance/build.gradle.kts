@@ -55,6 +55,8 @@ android {
             test.systemProperty("sailens.replay.out", layout.buildDirectory.dir("replay").get().asFile.path)
             // M3a evaluation (GroundContactCaptureEvaluationTest): the phone height to assume, metres.
             test.systemProperty("sailens.m3a.phoneHeight", project.findProperty("m3aPhoneHeight")?.toString().orEmpty())
+            // det-first D1.8: the sealed acceptance set is evaluated only once the thresholds are frozen.
+            test.systemProperty("sailens.replay.unseal", project.hasProperty("unsealCapture").toString())
             // A capture path given means this run must actually replay, not reuse a cached result.
             if (project.hasProperty("replayCapture")) test.outputs.upToDateWhen { false }
             // M2a scenario goldens: -PupdateGoldens rewrites them in the source tree.

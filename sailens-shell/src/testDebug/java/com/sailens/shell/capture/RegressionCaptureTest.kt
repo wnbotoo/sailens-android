@@ -22,6 +22,11 @@ import com.sailens.guidance.trace.capture.CaptureSchema
 import com.sailens.guidance.trace.capture.CaptureSessionReader
 import com.sailens.guidance.trace.capture.RegressionClocks
 import com.sailens.guidance.trace.capture.RegressionManifest
+import com.sailens.guidance.trace.capture.RegressionUtteranceRecord
+import com.sailens.guidance.trace.capture.UtteranceRecordEvents
+import com.sailens.guidance.model.trace.PromptDeliveryChannels
+import com.sailens.output.UtteranceEvent
+import com.sailens.output.UtteranceEventKind
 import com.sailens.guidance.trace.capture.SemanticRuns
 import com.sailens.guidance.trace.capture.WindowTriggers
 import com.sailens.guidance.trace.capture.orThrow
@@ -48,14 +53,40 @@ class RegressionCaptureTest {
     private val log = RecordingLog()
     private val clock = FakeClock()
 
-    private fun capture(config: RegressionCaptureConfig = RegressionCaptureConfig()) = RegressionCapture(
+    private fun capture(
+        config: RegressionCaptureConfig = RegressionCaptureConfig(),
+        speechSessions: SpeechLifecycleSessions? = null,
+    ) = RegressionCapture(
         manifestBase = { RegressionManifest(taxonomyId = "cityscapes-19", depthSource = "position") },
         encoder = JpegEncoder { image, _ -> ByteArray(image.width * image.height) { 1 } },
         clock = clock,
         log = log,
         writerDispatcher = Dispatchers.IO.limitedParallelism(1),
         config = config,
+        speechSessions = speechSessions,
     )
+
+    /** The speech side's session hooks; [onEnd] reports what the session still owed, as SpeechManager does. */
+    private class FakeSpeechSessions : SpeechLifecycleSessions {
+        val calls = mutableListOf<String>()
+        var onEnd: (String) -> Unit = {}
+
+        /** What the speech side says the session produced; a later ending of the same session says 0, as a non-idempotent side would. */
+        var produced = 0
+        private val ended = mutableSetOf<String>()
+        override fun begin(sessionId: String) {
+            calls += "begin $sessionId"
+        }
+
+        override fun end(sessionId: String): Int {
+            calls += "end $sessionId"
+            onEnd(sessionId)
+            return if (ended.add(sessionId)) produced else 0
+        }
+    }
+
+    private fun utterance(event: String, attempt: String, at: Long = 1) =
+        RegressionUtteranceRecord(event = event, attemptId = attempt, logicalId = attempt, engineGeneration = 1, elapsedRealtimeNanos = at)
 
     private fun ids(seq: Long) = IntArray(8 * 6) { ((it + seq) % 19).toInt() }
 
@@ -296,6 +327,205 @@ class RegressionCaptureTest {
         assertEquals(listOf(1L, 2L), session.regressionFrames.map { it.seq })
         assertTrue(session.manifest.complete)
     }
+
+    // ---- the speech lifecycle (det-first plan D1.3) ----------------------------------------------
+
+    @Test
+    fun `the session's lifecycle events are recorded beside its frames and read back without warnings`() = runBlocking {
+        val speech = FakeSpeechSessions().apply { produced = 3 }
+        val capture = capture(speechSessions = speech)
+        speech.onEnd = { id -> capture.onUtterance(id, utterance(UtteranceRecordEvents.UNKNOWN_TERMINAL, "open", at = 99)) }
+        assertTrue("the manifest says the record keeps the lifecycle", capture.manifestBlock().utteranceLifecycle)
+        capture.startSession("s1")
+        capture.onUtterance("s1", utterance(UtteranceRecordEvents.SUBMITTED, "a"))
+        capture.process(1)
+        capture.attach("s1", sessionDir("s1"))
+        capture.onUtterance("s1", utterance(UtteranceRecordEvents.DONE, "a", at = 2))
+        capture.process(2)
+        val stats = capture.finish("s1")!!
+
+        assertEquals(listOf("begin s1", "end s1"), speech.calls)
+        assertEquals(3, stats.utteranceEventsRecorded)
+        assertEquals(0, stats.utteranceEventsDropped)
+        assertEquals(2, stats.framesRecorded)
+        val session = CaptureSessionReader.read(File(tmp.root, "s1")).orThrow()
+        assertEquals(emptyList<String>(), session.warnings)
+        assertEquals(
+            "what the speech side owed at the end is recorded before the record closes",
+            listOf("submitted", "done", "unknown_terminal"),
+            session.utterances.map { it.event },
+        )
+    }
+
+    @Test
+    fun `drops are what the speech side produced and the record did not write, each counted once`() = runBlocking {
+        // The session produced a submission and a done; only the submission arrived before the end.
+        val speech = FakeSpeechSessions().apply { produced = 2 }
+        val capture = capture(speechSessions = speech)
+        capture.startSession("s1")
+        capture.attach("s1", sessionDir("s1"))
+        capture.onUtterance("s1", utterance(UtteranceRecordEvents.SUBMITTED, "a"))
+        val stats = capture.finish("s1")!!
+        // The done arrives late, after the record closed: still one loss, not two.
+        capture.onUtterance("s1", utterance(UtteranceRecordEvents.DONE, "a"))
+
+        assertEquals(1, stats.utteranceEventsRecorded)
+        assertEquals(1, stats.utteranceEventsDropped)
+    }
+
+    @Test
+    fun `a new session starting while the old one drains shares the old one's single speech ending`() {
+        // finish(s1) is inside the speech side's end; meanwhile the controller starts s2, which
+        // abandons s1. The speech side must be ended once, and its count kept.
+        val entered = java.util.concurrent.CountDownLatch(1)
+        val release = java.util.concurrent.CountDownLatch(1)
+        val speech = FakeSpeechSessions().apply { produced = 2 }
+        speech.onEnd = { id ->
+            if (id == "s1") {
+                entered.countDown()
+                release.await()
+            }
+        }
+        val capture = capture(speechSessions = speech)
+        capture.startSession("s1")
+        capture.attach("s1", sessionDir("s1"))
+        capture.onUtterance("s1", utterance(UtteranceRecordEvents.SUBMITTED, "a"))
+        capture.process(1) // lets the writer take the submission
+
+        var stats: com.sailens.guidance.trace.capture.RegressionStats? = null
+        val finishing = Thread { stats = runBlocking { capture.finish("s1") } }.apply { start() }
+        entered.await()
+        val starting = Thread { capture.startSession("s2") }.apply { start() }
+        Thread.sleep(100)
+        release.countDown()
+        finishing.join(5_000)
+        starting.join(5_000)
+
+        assertEquals("ended once", 1, speech.calls.count { it == "end s1" })
+        val s = stats!!
+        assertEquals("every produced event is either written or dropped, once", 2L, s.utteranceEventsRecorded + s.utteranceEventsDropped)
+        assertTrue("one was really lost", s.utteranceEventsDropped >= 1)
+        assertEquals(0, s.utteranceEventsUnreconciled)
+    }
+
+    @Test
+    fun `more written than the speech side produced is reported as unreconciled, not hidden`() = runBlocking {
+        val capture = capture(speechSessions = FakeSpeechSessions().apply { produced = 0 })
+        capture.startSession("s1")
+        capture.attach("s1", sessionDir("s1"))
+        capture.onUtterance("s1", utterance(UtteranceRecordEvents.SUBMITTED, "a"))
+        val stats = capture.finish("s1")!!
+
+        assertEquals(0, stats.utteranceEventsDropped)
+        assertEquals(1, stats.utteranceEventsUnreconciled)
+    }
+
+    @Test
+    fun `another session's late event never marks this one incomplete`() = runBlocking {
+        val speech = FakeSpeechSessions().apply { produced = 1 }
+        val capture = capture(speechSessions = speech)
+        capture.startSession("s2")
+        capture.attach("s2", sessionDir("s2"))
+        capture.onUtterance("s1", utterance(UtteranceRecordEvents.DONE, "old"))
+        capture.onUtterance("s2", utterance(UtteranceRecordEvents.SUBMITTED, "b"))
+        val stats = capture.finish("s2")!!
+
+        assertEquals(1, stats.utteranceEventsRecorded)
+        assertEquals(0, stats.utteranceEventsDropped)
+    }
+
+    @Test
+    fun `without the speech hooks the manifest says there is no lifecycle evidence`() {
+        assertFalse(capture().manifestBlock().utteranceLifecycle)
+    }
+
+    @Test
+    fun `a late event of an ended session is never written into the next one`() = runBlocking {
+        val capture = capture(speechSessions = FakeSpeechSessions())
+        capture.startSession("s1")
+        capture.attach("s1", sessionDir("s1"))
+        capture.finish("s1")
+        capture.startSession("s2")
+        capture.attach("s2", sessionDir("s2"))
+        capture.onUtterance("s1", utterance(UtteranceRecordEvents.DONE, "late"))
+        capture.onUtterance(null, utterance(UtteranceRecordEvents.STOPPED, "unknown"))
+        capture.onUtterance("s2", utterance(UtteranceRecordEvents.SUBMITTED, "b"))
+        val stats = capture.finish("s2")!!
+
+        assertEquals(listOf("b"), CaptureSessionReader.read(File(tmp.root, "s2")).orThrow().utterances.map { it.attemptId })
+        assertEquals(0, stats.utteranceEventsDropped)
+    }
+
+    @Test
+    fun `lifecycle events that do not fit are counted dropped and never cost a frame`() = runBlocking {
+        val capture = capture(RegressionCaptureConfig(utteranceQueueCapacity = 2), FakeSpeechSessions().apply { produced = 5 })
+        capture.startSession("s1")
+        capture.process(1)
+        repeat(5) { capture.onUtterance("s1", utterance(UtteranceRecordEvents.STARTED, "a$it")) }
+        capture.attach("s1", sessionDir("s1"))
+        val stats = capture.finish("s1")!!
+
+        assertEquals(2, stats.utteranceEventsRecorded)
+        assertEquals(3, stats.utteranceEventsDropped)
+        assertEquals(1, stats.framesRecorded)
+        assertEquals(0, stats.framesLost)
+        assertNull(stats.firstLostSeq)
+    }
+
+    @Test
+    fun `a capture that never starts writing counts its queued lifecycle events dropped`() = runBlocking {
+        val capture = capture(speechSessions = FakeSpeechSessions().apply { produced = 1 })
+        capture.startSession("s1")
+        capture.onUtterance("s1", utterance(UtteranceRecordEvents.SUBMITTED, "a"))
+        val stats = capture.finish("s1")!!
+        assertEquals(1, stats.utteranceEventsDropped)
+    }
+
+    @Test
+    fun `a prompt handed to the screen reader is noted, since that path reports no lifecycle`() = runBlocking {
+        val capture = capture(speechSessions = FakeSpeechSessions())
+        capture.startSession("s1")
+        capture.attach("s1", sessionDir("s1"))
+        capture.process(1)
+        capture.onPromptOutcome(outcome("e1", via = listOf(PromptDeliveryChannels.SCREEN_READER)))
+        capture.onPromptOutcome(outcome("e2", via = listOf(PromptDeliveryChannels.SPEECH)))
+        capture.finish("s1")
+
+        val noted = CaptureSessionReader.read(File(tmp.root, "s1")).orThrow().utterances.single()
+        assertEquals(UtteranceRecordEvents.SCREEN_READER_PUBLISHED, noted.event)
+        assertEquals("e1", noted.logicalId)
+    }
+
+    @Test
+    fun `the bridge carries every field of the speech side's event`() {
+        val event = UtteranceEvent(
+            kind = UtteranceEventKind.REQUEUE_FAILED, attemptId = "a~1", logicalId = "a", engineGeneration = 3, session = "s1",
+            elapsedRealtimeNanos = 42, reason = "r", interrupted = true, errorCode = -5, previousAttemptId = "a", owner = "describe",
+            priority = 2, textLength = 9,
+        )
+        assertEquals(
+            RegressionUtteranceRecord(
+                event = "requeue_failed", attemptId = "a~1", logicalId = "a", engineGeneration = 3, elapsedRealtimeNanos = 42,
+                reason = "r", interrupted = true, errorCode = -5, previousAttemptId = "a", owner = "describe", priority = 2, textLength = 9,
+            ),
+            event.toRecord(),
+        )
+        val seen = mutableListOf<Pair<String?, RegressionUtteranceRecord>>()
+        val recorder = object : com.sailens.guidance.trace.regression.RegressionRecorder {
+            override val isRecording = true
+            override fun onUtterance(sessionId: String?, record: RegressionUtteranceRecord) {
+                seen += sessionId to record
+            }
+        }
+        UtteranceLifecycleRecording(recorder).onUtteranceEvent(event)
+        assertEquals(listOf("s1" to event.toRecord()), seen)
+    }
+
+    private fun outcome(id: String, via: List<String>) = PromptOutcomeTrace(
+        eventId = id, sourceSequenceNumber = 1, messageKey = "event_obstacle_center_person", category = "obstacle", priority = "high",
+        deliveredAt = 5, deliveredVia = via, speechEnabled = true, screenReaderActive = PromptDeliveryChannels.SCREEN_READER in via,
+        hapticsEnabled = false,
+    )
 
     @Test
     fun `below the free-storage floor a capture is refused and the record stops`() = runBlocking {

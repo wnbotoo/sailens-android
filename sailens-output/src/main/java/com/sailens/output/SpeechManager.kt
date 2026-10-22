@@ -76,12 +76,51 @@ public class SpeechManager(
     private val ledger = UtteranceLedger()
     private var nextResubmitId = 0L
 
+    /**
+     * Measurement only (det-first plan D1.3): reports what became of each submission to whoever
+     * [setLifecycleObserver] names. Nothing here reads it back.
+     */
+    private val lifecycle = UtteranceLifecycle(SystemClock::elapsedRealtimeNanos)
+
+    /** Counts engine instances; each listener keeps the generation of the instance it serves. */
+    private var engineGeneration = 0L
+
+    /** The generation of [tts]. */
+    private var ttsGeneration = 0L
+
     private var speechRate = DEFAULT_SPEECH_RATE
 
     private val _state = MutableStateFlow(SpeechEngineState.IDLE)
     public val state: StateFlow<SpeechEngineState> = _state.asStateFlow()
 
     public val isReady: Boolean get() = _isReady
+
+    /**
+     * Reports every submission's lifecycle to [observer] (null stops reporting). For measurement:
+     * no decision about what is said reads it, and an observer that throws is ignored.
+     */
+    public fun setLifecycleObserver(observer: UtteranceLifecycleObserver?) {
+        lifecycle.observer = observer
+    }
+
+    /**
+     * Attempts submitted from now on belong to the session [token], for good: their events carry it,
+     * never a later session's, and once it has ended nothing of it is reported. [token] must be new:
+     * an ended session stays ended, so reusing its token reports nothing. Safe from any thread.
+     */
+    public fun beginLifecycleSession(token: String) {
+        lifecycle.beginSession(token)
+    }
+
+    /**
+     * Ends [token]'s session: its submissions still without any outcome are reported as unknown, and
+     * nothing more of the session is reported afterwards. Waits at most half a second, on the
+     * caller's thread, for unconfirmed submissions and for events still on their way to the observer.
+     *
+     * @return how many events the session produced, delivered or not: an observer that received
+     *   fewer lost the difference.
+     */
+    public fun endLifecycleSession(token: String): Int = lifecycle.endSession(token)
 
     /**
      * 设置语速（相对正常语速的倍率）。
@@ -146,6 +185,7 @@ public class SpeechManager(
             logger.warning(TAG, "Discarding stale TTS instance before retry")
             tts?.shutdown()
             tts = null
+            lifecycle.generationEnded(ttsGeneration)
         }
 
         isInitializing = true
@@ -159,6 +199,7 @@ public class SpeechManager(
             )
         )
 
+        val generation = ++engineGeneration
         var createdEngine: TextToSpeech? = null
         createdEngine = TextToSpeech(context.applicationContext) { status ->
             mainHandler.post {
@@ -166,10 +207,12 @@ public class SpeechManager(
                     attempt = attempt,
                     createdEngine = createdEngine,
                     status = status,
+                    generation = generation,
                 )
             }
         }
         tts = createdEngine
+        ttsGeneration = generation
         scheduleInitTimeout(attempt)
     }
 
@@ -198,6 +241,7 @@ public class SpeechManager(
                 "Dropping expired scene event before speaking",
                 mapOf("key" to announcement.key)
             )
+            announcement.refused(UtteranceReasons.EXPIRED)
             return false
         }
 
@@ -207,6 +251,7 @@ public class SpeechManager(
                 "Refusing announcement because the engine is not ready",
                 mapOf("key" to announcement.key)
             )
+            announcement.refused(UtteranceReasons.ENGINE_NOT_READY)
             if (!isInitializing) {
                 initializeOnMain(forceRetry = false)
             }
@@ -217,9 +262,15 @@ public class SpeechManager(
     }
 
     private fun speakReadyAnnouncement(announcement: Announcement): Boolean {
-        if (!_isReady) return false
+        if (!_isReady) {
+            announcement.refused(UtteranceReasons.ENGINE_NOT_READY)
+            return false
+        }
         val now = SystemClock.elapsedRealtime()
-        if (announcement.isExpired(now)) return false
+        if (announcement.isExpired(now)) {
+            announcement.refused(UtteranceReasons.EXPIRED)
+            return false
+        }
 
         // 只有**严格更高**的优先级才能打断正在念的播报。否则一条 MEDIUM 的"路况复杂"会在
         // CRITICAL 的"注意，前方有车"念到一半时把它 FLUSH 掉，而那条 CRITICAL 在冷却期内
@@ -235,6 +286,7 @@ public class SpeechManager(
                     "speakingPriority" to speakingPriority,
                 )
             )
+            announcement.refused(UtteranceReasons.OUTRANKED)
             return false
         }
 
@@ -244,13 +296,22 @@ public class SpeechManager(
         val queueMode = TextToSpeech.QUEUE_FLUSH
 
         val utteranceId = announcement.id
+        val entry = UtteranceLedger.Entry(
+            id = utteranceId,
+            text = text,
+            owner = null,
+            expiresAtMs = announcement.expiresAtMs,
+            priority = announcement.priority,
+        )
         requestAudioFocus()
         latestUtteranceId = utteranceId
+        lifecycle.submitting(entry, ttsGeneration)
         val result = tts?.speak(text, queueMode, null, utteranceId) ?: TextToSpeech.ERROR
         if (result == TextToSpeech.ERROR) {
+            lifecycle.submitFailed(utteranceId)
             // A flush-mode request that failed may or may not have emptied the engine. Forget the
             // queue rather than risk handing already-dropped speech back to it later.
-            ledger.clear()
+            lifecycle.removed(ledger.clear(), UtteranceEventKind.CANCELLED, UtteranceReasons.SPEAK_FAILED)
             // speak() 直接失败时不会有任何 utterance 回调，必须就地归还焦点，
             // 否则别人的音频会一直被压着。
             releaseAudioFocus()
@@ -265,15 +326,8 @@ public class SpeechManager(
             )
             return false
         } else {
-            ledger.flushAndAdd(
-                UtteranceLedger.Entry(
-                    id = utteranceId,
-                    text = text,
-                    owner = null,
-                    expiresAtMs = announcement.expiresAtMs,
-                    priority = announcement.priority,
-                )
-            )
+            lifecycle.submitted(utteranceId)
+            lifecycle.removed(ledger.flushAndAdd(entry), UtteranceEventKind.SUPERSEDED, reason = null)
             logger.debug(
                 TAG,
                 "TTS speak requested",
@@ -301,27 +355,28 @@ public class SpeechManager(
      */
     public fun speakSystemNotice(text: String, owner: SpeechOwner? = null, priority: Int? = null) {
         runOnMain {
+            val utteranceId = "$SYSTEM_NOTICE_UTTERANCE_ID_PREFIX${nextSystemNoticeId++}"
             if (!_isReady) {
                 logger.warning(TAG, "Dropping system notice because TTS is not ready")
+                lifecycle.refused(utteranceId, utteranceId, UtteranceReasons.ENGINE_NOT_READY, priority)
                 return@runOnMain
             }
-            val utteranceId = "$SYSTEM_NOTICE_UTTERANCE_ID_PREFIX${nextSystemNoticeId++}"
+            // The deadline is set below, once the engine has taken it, as it always was: the
+            // protected time starts when the notice is queued, not before.
+            val submission = UtteranceLedger.Entry(id = utteranceId, text = text, owner = owner, expiresAtMs = null, priority = priority)
             requestAudioFocus()
             latestUtteranceId = utteranceId
+            lifecycle.submitting(submission, ttsGeneration)
             val result = tts?.speak(text, TextToSpeech.QUEUE_ADD, null, utteranceId)
                 ?: TextToSpeech.ERROR
             if (result == TextToSpeech.ERROR) {
+                lifecycle.submitFailed(utteranceId)
                 releaseAudioFocus()
                 logger.warning(TAG, "TTS system notice failed")
             } else {
+                lifecycle.submitted(utteranceId)
                 ledger.add(
-                    UtteranceLedger.Entry(
-                        id = utteranceId,
-                        text = text,
-                        owner = owner,
-                        expiresAtMs = priority?.let { SystemClock.elapsedRealtime() + PROTECTED_NOTICE_MAX_MS },
-                        priority = priority,
-                    )
+                    submission.copy(expiresAtMs = priority?.let { SystemClock.elapsedRealtime() + PROTECTED_NOTICE_MAX_MS }),
                 )
             }
         }
@@ -344,7 +399,10 @@ public class SpeechManager(
         runOnMain {
             if (!ledger.has(owner)) return@runOnMain
 
-            val survivors = ledger.withdraw(owner, SystemClock.elapsedRealtime())
+            val withdrawal = ledger.withdrawDetailed(owner, SystemClock.elapsedRealtime())
+            val survivors = withdrawal.survivors
+            lifecycle.removed(withdrawal.withdrawn, UtteranceEventKind.CANCELLED, UtteranceReasons.WITHDRAWN)
+            lifecycle.removed(withdrawal.expired, UtteranceEventKind.CANCELLED, UtteranceReasons.EXPIRED_ON_WITHDRAW)
             if (_isReady) tts?.stop()
             if (survivors.isEmpty()) {
                 // stop() does not promise a callback for every dropped utterance.
@@ -359,7 +417,9 @@ public class SpeechManager(
             )
             // Keep the audio focus we already hold: releasing it here would let other apps' audio
             // swell for a moment between the flush and the hand-back.
-            val lastHandedBack = ledger.handBack(survivors.map(::withFreshId), ::submitAgain)
+            val lastHandedBack = ledger.handBack(survivors.map(::withFreshId)) { fresh ->
+                submitAgain(fresh, previousId = checkNotNull(fresh.requeuedFrom))
+            }
             if (lastHandedBack == null) {
                 // The engine took none of it back, so nothing will finish and give the focus back.
                 // Other apps' audio would stay ducked until the next stop or release.
@@ -380,17 +440,23 @@ public class SpeechManager(
      * the flushed original release audio focus under the replacement.
      */
     private fun withFreshId(entry: UtteranceLedger.Entry): UtteranceLedger.Entry =
-        entry.copy(id = "${entry.id}$REQUEUE_UTTERANCE_ID_SUFFIX${nextResubmitId++}")
+        entry.copy(id = "${entry.id}$REQUEUE_UTTERANCE_ID_SUFFIX${nextResubmitId++}", requeuedFrom = entry.id)
 
-    /** Hands one utterance back to the engine. Returns whether the engine accepted it. */
-    private fun submitAgain(entry: UtteranceLedger.Entry): Boolean {
+    /**
+     * Hands one utterance back to the engine, as [previousId]'s replacement. Returns whether the
+     * engine accepted it.
+     */
+    private fun submitAgain(entry: UtteranceLedger.Entry, previousId: String): Boolean {
         requestAudioFocus()
+        lifecycle.submitting(entry, ttsGeneration, previousAttemptId = previousId)
         val result = tts?.speak(entry.text, TextToSpeech.QUEUE_ADD, null, entry.id)
             ?: TextToSpeech.ERROR
         if (result == TextToSpeech.ERROR) {
+            lifecycle.submitFailed(entry.id)
             logger.warning(TAG, "TTS re-queue failed", mapOf("utteranceId" to entry.id))
             return false
         }
+        lifecycle.submitted(entry.id)
         return true
     }
 
@@ -437,7 +503,7 @@ public class SpeechManager(
     }
 
     private fun stopOnMain() {
-        ledger.clear()
+        lifecycle.removed(ledger.clear(), UtteranceEventKind.CANCELLED, UtteranceReasons.STOP)
         if (_isReady) {
             tts?.stop()
         } else {
@@ -459,6 +525,7 @@ public class SpeechManager(
         stopOnMain()
         tts?.shutdown()
         tts = null
+        lifecycle.generationEnded(ttsGeneration)
         _isReady = false
         isInitializing = false
         initFailureCount = 0
@@ -495,6 +562,7 @@ public class SpeechManager(
         attempt: Int,
         createdEngine: TextToSpeech?,
         status: Int,
+        generation: Long,
     ) {
         if (attempt != initAttempt) {
             logger.debug(
@@ -518,7 +586,7 @@ public class SpeechManager(
                 return
             }
 
-            configureEngine(engine)
+            configureEngine(engine, generation)
         } else {
             recordInitFailure(
                 message = "TTS initialization failed",
@@ -528,7 +596,7 @@ public class SpeechManager(
         }
     }
 
-    private fun configureEngine(engine: TextToSpeech) {
+    private fun configureEngine(engine: TextToSpeech, generation: Long) {
         clearInitTimeout()
         isInitializing = false
         tts = engine
@@ -561,7 +629,7 @@ public class SpeechManager(
 
         engine.setAudioAttributes(guidanceAudioAttributes())
         engine.setSpeechRate(speechRate)
-        engine.setOnUtteranceProgressListener(createUtteranceListener())
+        engine.setOnUtteranceProgressListener(createUtteranceListener(generation))
         _isReady = true
         initFailureCount = 0
         nextInitRetryAtMs = 0L
@@ -592,11 +660,13 @@ public class SpeechManager(
         if (engine != null) {
             if (tts === engine) {
                 tts = null
+                lifecycle.generationEnded(ttsGeneration)
             }
             engine.shutdown()
         } else {
             tts?.shutdown()
             tts = null
+            lifecycle.generationEnded(ttsGeneration)
         }
 
         releaseAudioFocus()
@@ -665,30 +735,44 @@ public class SpeechManager(
         return result >= TextToSpeech.LANG_AVAILABLE
     }
 
-    private fun createUtteranceListener(): UtteranceProgressListener {
+    /**
+     * @param generation the engine instance this listener serves, fixed here: a late callback from a
+     *   replaced engine is reported as that engine's, never as the current one's.
+     */
+    private fun createUtteranceListener(generation: Long): UtteranceProgressListener {
         // 回调来自引擎线程，而焦点/计数状态都只在主线程上改，所以统一 post 回主线程。
+        // 生命周期事件例外：时间必须在回调发生的线程上当场读，投递到主线程之后再读就晚了。
         return object : UtteranceProgressListener() {
             override fun onStart(utteranceId: String?) {
+                lifecycle.engineCallback(UtteranceEventKind.STARTED, utteranceId, generation, SystemClock.elapsedRealtimeNanos())
                 logger.debug(TAG, "TTS utterance started", mapOf("utteranceId" to (utteranceId ?: "unknown")))
             }
 
             override fun onDone(utteranceId: String?) {
+                lifecycle.engineCallback(UtteranceEventKind.DONE, utteranceId, generation, SystemClock.elapsedRealtimeNanos())
                 logger.debug(TAG, "TTS utterance completed", mapOf("utteranceId" to (utteranceId ?: "unknown")))
                 onUtteranceFinished(utteranceId)
             }
 
             override fun onStop(utteranceId: String?, interrupted: Boolean) {
+                lifecycle.engineCallback(
+                    UtteranceEventKind.STOPPED, utteranceId, generation, SystemClock.elapsedRealtimeNanos(), interrupted = interrupted,
+                )
                 // QUEUE_FLUSH 打断上一条时走这里。不减计数会让焦点永远归还不了。
                 onUtteranceFinished(utteranceId)
             }
 
             @Deprecated("Deprecated in Java")
             override fun onError(utteranceId: String?) {
+                lifecycle.engineCallback(UtteranceEventKind.ERROR, utteranceId, generation, SystemClock.elapsedRealtimeNanos())
                 logger.warning(TAG, "TTS utterance failed", mapOf("utteranceId" to (utteranceId ?: "unknown")))
                 onUtteranceFinished(utteranceId)
             }
 
             override fun onError(utteranceId: String?, errorCode: Int) {
+                lifecycle.engineCallback(
+                    UtteranceEventKind.ERROR, utteranceId, generation, SystemClock.elapsedRealtimeNanos(), errorCode = errorCode,
+                )
                 logger.warning(
                     TAG,
                     "TTS utterance failed",
@@ -712,6 +796,10 @@ public class SpeechManager(
             if (utteranceId != null && utteranceId != latestUtteranceId) return@runOnMain
             releaseAudioFocus()
         }
+    }
+
+    private fun Announcement.refused(reason: String) {
+        lifecycle.refused(attemptId = id, logicalId = id, reason = reason, priority = priority)
     }
 
     private fun runOnMain(block: () -> Unit) {

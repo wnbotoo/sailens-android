@@ -8,6 +8,7 @@ import com.sailens.guidance.model.perception.ObstacleDetection
 import com.sailens.guidance.model.perception.SegmentationOutput
 import com.sailens.guidance.model.scene.SceneEvent
 import com.sailens.guidance.processor.analysis.FrameQualityResult
+import com.sailens.guidance.trace.capture.RegressionUtteranceRecord
 import java.util.UUID
 
 /**
@@ -53,6 +54,13 @@ interface RegressionRecorder {
 
     /** A revoked cooldown entry, applied after [decisionsBefore] decisions. */
     fun onRevoke(eventId: UUID, decisionsBefore: Long) {}
+
+    /**
+     * A speech-lifecycle event of an utterance submitted in the session [sessionId] (det-first plan
+     * D1.3). Comes from any thread, the speech engine's included; must not block. Recorded only into
+     * that very session: a late event of an ended session is not written into the next one.
+     */
+    fun onUtterance(sessionId: String?, record: RegressionUtteranceRecord) {}
 
     /** Records nothing. */
     object None : RegressionRecorder {

@@ -40,6 +40,8 @@ data class DetectedObstacle(
     val timestamp: Long,
     /** The evidence behind [distance] at the detection that last updated this track (M3a). */
     val distanceEstimate: DistanceEstimate? = null,
+    /** The frame whose detection last updated this track; null where the tracker was not told. */
+    val measurement: ObstacleMeasurement? = null,
 ) {
     fun isStable(minFrames: Int = 3): Boolean = stableFrames >= minFrames
 
@@ -50,3 +52,24 @@ data class DetectedObstacle(
         return urgency >= minUrgency && isStable(minFrames)
     }
 }
+
+/**
+ * The frame whose detection last updated a track (det-first plan D1.5).
+ *
+ * A track the latest detection run did not match keeps reporting its last box, distance and
+ * estimate, stamped with the current time; so does every predicted frame. Only this says whether
+ * what a [DetectedObstacle] reports was measured on the frame at hand: compare [frameSequence] with
+ * that frame's, never times -- two updates can fall in the same millisecond. Observation only: no
+ * decision reads it.
+ */
+data class ObstacleMeasurement(
+    /** `ImageFrame.sequenceNumber` of the frame the detection ran on. */
+    val frameSequence: Long,
+    /** `ImageFrame.timestamp` of that frame: when the camera took it, on the camera's clock (ns). */
+    val frameTimestampNanos: Long,
+    /** The tracker's time of the update (its `lastSeen`): when processing finished, not when the frame was taken. */
+    val processedAt: Long,
+)
+
+/** The frame a batch of detections came from, as the tracker is told it. */
+data class ObstacleSourceFrame(val sequenceNumber: Long, val timestampNanos: Long)

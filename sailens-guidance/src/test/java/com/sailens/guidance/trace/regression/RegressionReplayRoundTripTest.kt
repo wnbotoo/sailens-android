@@ -84,6 +84,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -451,6 +452,7 @@ class RegressionReplayRoundTripTest {
         complete: Boolean = true,
         framesRecorded: Long = session.recorder!!.frames.size.toLong(),
         firstLostSeq: Long? = null,
+        utterances: List<com.sailens.guidance.trace.capture.RegressionUtteranceRecord>? = null,
     ): com.sailens.guidance.trace.capture.CaptureSession {
         val recorder = session.recorder!!
         java.io.FileOutputStream(java.io.File(dir, CaptureSchema.CLASS_MAPS_FILE)).use { out ->
@@ -462,7 +464,8 @@ class RegressionReplayRoundTripTest {
             }
         }
         java.io.File(dir, CaptureSchema.REGRESSION_FILE).writeText(
-            (frames.map(CaptureSchema::encodeRecord) + recorder.revokes.map(CaptureSchema::encodeRecord))
+            (frames.map(CaptureSchema::encodeRecord) + recorder.revokes.map(CaptureSchema::encodeRecord) +
+                utterances.orEmpty().map(CaptureSchema::encodeRecord))
                 .joinToString(separator = "\n", postfix = "\n"),
         )
         java.io.File(dir, CaptureSchema.MANIFEST_FILE).writeText(
@@ -479,7 +482,9 @@ class RegressionReplayRoundTripTest {
                             framesRecorded = framesRecorded,
                             framesLost = if (firstLostSeq != null) 1 else 0,
                             firstLostSeq = firstLostSeq,
+                            utteranceEventsRecorded = utterances.orEmpty().size.toLong(),
                         ),
+                        utteranceLifecycle = utterances != null,
                     ),
                 ),
             ),
@@ -512,6 +517,61 @@ class RegressionReplayRoundTripTest {
             assertNull(report.firstMismatch?.toString(), report.firstMismatch)
             assertEquals(frameCount.toInt(), report.framesReplayed)
         }
+    }
+
+    /** A submission and a done for every offered prompt: what a session with the lifecycle records. */
+    private fun spokenLifecycle(session: Session): List<com.sailens.guidance.trace.capture.RegressionUtteranceRecord> =
+        session.recorder!!.frames.mapNotNull { it.events.firstOrNull()?.id }.flatMapIndexed { i, id ->
+            listOf(
+                com.sailens.guidance.trace.capture.RegressionUtteranceRecord("submitted", id, id, 1, elapsedRealtimeNanos = i * 10L),
+                com.sailens.guidance.trace.capture.RegressionUtteranceRecord("done", id, id, 1, elapsedRealtimeNanos = i * 10L + 5),
+            )
+        }
+
+    @Test
+    fun `a record with the speech lifecycle reads without warnings and replays exactly as before`() {
+        val session = runSession(record = true)
+        val utterances = spokenLifecycle(session)
+        assertTrue("the session must offer prompts", utterances.isNotEmpty())
+        fun replay(read: com.sailens.guidance.trace.capture.CaptureSession) = RegressionReplay(session.activeConfig, analysisConfig, semantics)
+            .replay(read.regressionFrames, read.revokes, classMap = { com.sailens.guidance.trace.capture.CaptureSessionReader.classMap(read, it) })
+        withTempDir { newDir ->
+            withTempDir { oldDir ->
+                val withLifecycle = writeCapture(session, newDir, utterances = utterances)
+                val older = writeCapture(session, oldDir)
+                assertEquals(emptyList<String>(), withLifecycle.warnings)
+                assertEquals(emptyList<String>(), older.warnings)
+                assertEquals(utterances, withLifecycle.utterances)
+                assertTrue(withLifecycle.manifest.regression!!.utteranceLifecycle)
+                assertFalse("an older record says it has no lifecycle evidence", older.manifest.regression!!.utteranceLifecycle)
+                assertTrue(older.utterances.isEmpty())
+                val a = replay(withLifecycle)
+                val b = replay(older)
+                assertTrue(a.exact)
+                assertTrue(b.exact)
+                assertEquals(frameCount.toInt(), a.framesReplayed)
+                assertEquals(b.framesReplayed, a.framesReplayed)
+            }
+        }
+    }
+
+    @Test
+    fun `the det-first baseline evaluates a capture with and without the lifecycle, and says which`() {
+        val session = runSession(record = true)
+        val utterances = spokenLifecycle(session)
+        val baseline = com.sailens.guidance.evaluation.PromptPolicyCaptureEvaluation(PhoneGeometrySettings(1.3f, HeightSource.PRESET, Placement.HANDHELD_CHEST))
+        val recorded = withTempDir { dir -> baseline.evaluate(writeCapture(session, dir, utterances = utterances))!! }
+        val older = withTempDir { dir -> baseline.evaluate(writeCapture(session, dir))!! }
+
+        assertEquals(emptyList<String>(), recorded.problems)
+        assertEquals(emptyList<String>(), older.problems)
+        assertTrue(recorded.complete)
+        assertEquals("recorded", recorded.evaluation!!.evidence.label)
+        assertEquals(utterances.size / 2 - session.recorder!!.revokes.size, recorded.evaluation!!.offersCompleted)
+        assertEquals("no lifecycle evidence", older.evaluation!!.evidence.label)
+        assertEquals("never zero failures: completion is not counted at all", 0, older.evaluation!!.offersCompleted)
+        assertTrue(older.text, older.text.contains("completion is UNDETERMINABLE"))
+        assertTrue(recorded.text, recorded.text.contains("births identical in the exact and all_delivered runs: yes"))
     }
 
     /** The phone settings the M3a sessions here ran with, so the evaluation's exact run matches. */
