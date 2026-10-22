@@ -32,7 +32,11 @@ RECORD_FILES = (
 RECORD_TYPES = {
     "frame": "frames", "sensor": "sensors", "clock_anchor": "anchors", "marker": "markers",
     "regression_frame": "regression_frames", "regression_revoke": "revokes", "window_frame": "window_frames",
+    "regression_utterance": "utterances",
 }
+
+# det-first D1.8: a capture under a directory holding this file belongs to the sealed acceptance set.
+SEALED_MARKER = "SEALED"
 
 # classmaps.bin entry header (ClassMapStore, big-endian): magic, seq, width, height, crc32, length.
 CLASS_MAP_MAGIC = 0x53434D31
@@ -60,6 +64,9 @@ class Capture:
     regression_frames: list = field(default_factory=list)
     revokes: list = field(default_factory=list)
     window_frames: list = field(default_factory=list)
+    # the speech lifecycle (schema 1.5); empty also when the record keeps none -- see
+    # manifest["regression"]["utteranceLifecycle"]
+    utterances: list = field(default_factory=list)
 
     @property
     def mode(self) -> str:
@@ -170,6 +177,27 @@ def read_class_map(path: str, ref: dict, seq: int):
     if len(raw) != width * height or zlib.crc32(raw) != ref["crc32"]:
         raise ValueError(f"frame {seq}: class map does not match its CRC")
     return np.frombuffer(raw, dtype=np.uint8).reshape(height, width)
+
+
+def is_sealed(path: str) -> bool:
+    """Whether ``path`` belongs to the det-first D1.8 sealed acceptance set: a ``SEALED`` file in it or
+    any directory above it, above the path as given (normalized) or above its real location (links and
+    junctions resolved). Either one seals. Mirrors ``SealedCaptures`` (sailens-guidance tests)."""
+    for start in {os.path.normpath(os.path.abspath(path)), os.path.realpath(path)}:
+        current = start
+        while True:
+            if os.path.isfile(os.path.join(current, SEALED_MARKER)):
+                return True
+            parent = os.path.dirname(current)
+            if parent == current:
+                break
+            current = parent
+    return False
+
+
+def refuse_sealed(paths, unseal: bool) -> list:
+    """The sealed ones among ``paths``, unless ``unseal``: a tool that shows results must refuse them."""
+    return [] if unseal else [p for p in paths if is_sealed(p)]
 
 
 def find_captures(root: str) -> list:

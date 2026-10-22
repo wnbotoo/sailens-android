@@ -17,7 +17,11 @@ det 优先方案 D1.8 要求带语音生命周期重新录一批数据，**在�
 2. **两组覆盖同样的场景层。** 每个场景层内，C 和 S 槽位一样多、交替排列。这样不看 S，用 C 的数量就能估计 S 有多少样本。
 3. **样本量按独立的危险阶段算，不按会话数算。** 先录试点验证采集链路，再按 C 组统计出的缺口补录。
    补录时 C 和 S 同时各加一样多的槽位。
-4. **封存组只做完整性检查。** 可以检查录制完整、精确回放通过；不跑任何指标（基线测试会拒绝，见第 5 节）。
+4. **封存组只做完整性检查。** 可以跑完整性检查（`capture_stats.py`）和精确回放（`CaptureReplayTest`）；任何会显示结果的
+   工具都不跑，直到门槛冻结写进 `docs/experiments/`。会显示结果的工具见到 `SEALED` 标记一律拒绝（第 5 节）：det 优先基线
+   （`PromptPolicyBaselineTest`）、M3a 评估（`GroundContactCaptureEvaluationTest`）、contact sheet（`contact_sheet.py`）和
+   提示标注表（`export_prompt_labels.py`）。标记既按给出的路径向上找，也按真实位置向上找，所以链接或 junction 不能绕过。
+   以后新增的指标入口必须用同一个检查（`SealedCaptures.forMetrics`、`sailens_capture.refuse_sealed`）。
    门槛冻结并写进 `docs/experiments/` 之后才打开。
 
 ## 2. 录制前检查（每天出门前）
@@ -82,7 +86,7 @@ det 优先方案 D1.8 要求带语音生命周期重新录一批数据，**在�
 C:\Users\wnbot\AndroidStudioProjects\sailens-captures\detfirst-d18\
   assignment.csv
   calibration\<sessionId>\      C 组的会话（从手机导出后放这里）
-  sealed\SEALED                 空文件：封存标记，基线测试见到就拒绝评估
+  sealed\SEALED                 空文件：封存标记，所有会显示结果的工具见到就拒绝
   sealed\<sessionId>\           S 组的会话
 ```
 
@@ -115,7 +119,8 @@ S-O1-01,O1,S,outdoor,,,,planned,
    gradlew :sailens-guidance:testDebugUnitTest --tests "*PromptPolicyBaselineTest*" -PreplayCapture=<...\detfirst-d18\calibration> -Pm3aPhoneHeight=1.15
    ```
 
-   对着 `sealed` 跑会被拒绝。门槛冻结之后才加 `-PunsealCapture` 打开。
+   对着 `sealed` 跑会被拒绝，M3a 评估、contact sheet 和标注表也一样。门槛冻结之后才加 `-PunsealCapture`（Gradle）或
+   `--unseal`（Python 工具）打开。
 4. 按第 4 节第 3 条决定要不要补录。
 
 ## 7. 什么时候打开封存组

@@ -27,6 +27,9 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent / "capture"))
+from sailens_capture import refuse_sealed  # noqa: E402  (det-first D1.8 sealed set)
+
 COLUMNS = [
     "segment",
     "session_id",
@@ -157,7 +160,13 @@ def main(argv=None):
     parser.add_argument("-o", "--output", default="prompts.csv", help="CSV to write")
     parser.add_argument("--include-revoked", action="store_true",
                         help="also list prompts that were revoked (never heard)")
+    parser.add_argument("--unseal", action="store_true",
+                        help="allow traces of the det-first sealed set (only once its thresholds are frozen)")
     args = parser.parse_args(argv)
+    sealed = refuse_sealed(args.traces, args.unseal)
+    if sealed:
+        parser.error(f"{len(sealed)} trace(s) belong to the sealed acceptance set (det-first D1.8); "
+                     "--unseal only after the thresholds are frozen")
 
     rows = []
     for path in args.traces:

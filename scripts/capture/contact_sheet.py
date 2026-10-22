@@ -20,7 +20,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from sailens_capture import load_capture, load_trace, read_image  # noqa: E402
+from sailens_capture import load_capture, load_trace, read_image, refuse_sealed  # noqa: E402
 
 TILE_LONG_SIDE = 240
 COLUMNS = 6
@@ -107,9 +107,14 @@ def main(argv=None):
     parser.add_argument("--markers", action="store_true", help="one sheet per missed-alert marker")
     parser.add_argument("--window", type=float, default=2.0, help="seconds either side (default 2)")
     parser.add_argument("--out", default="sheets", help="output directory (default ./sheets)")
+    parser.add_argument("--unseal", action="store_true",
+                        help="allow a capture of the det-first sealed set (only once its thresholds are frozen)")
     args = parser.parse_args(argv)
     if not (args.prompts or args.markers or args.event):
         parser.error("choose --prompts, --event or --markers")
+    if refuse_sealed([args.capture] + ([args.trace] if args.trace else []), args.unseal):
+        parser.error("this capture belongs to the sealed acceptance set (det-first D1.8); "
+                     "--unseal only after the thresholds are frozen")
     capture = load_capture(args.capture)
     for warning in capture.warnings:
         print(f"~ {warning}", file=sys.stderr)

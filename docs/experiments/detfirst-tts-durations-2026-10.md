@@ -45,8 +45,12 @@ Observations (no decision is taken here):
   being spoken, more than today's 1.5 m NEAR distance. This bears on Q4 (NEAR at 2.0 m in the
   det-first experiment) and on D2's thresholds; it is recorded here as arithmetic, not as a finding
   about any recorded hazard.
-- The speaker model's flat 1.4 s default overstates plain English prompts and understates every NEAR
-  prompt; this table replaces it once calibration starts (D1.4).
+- No single figure fits: around the speaker model's flat 1.4 s default, short prompts take less
+  ("person ahead" 834 ms in English, "path blocked" 1 054 ms in Chinese) and long ones more. Every
+  Chinese NEAR obstacle prompt takes longer (1 864–2 495 ms); of the 27 plain obstacle prompts, 15
+  take longer in English (834–1 668 ms overall) and 14 in Chinese (1 134–1 877 ms); English NEAR
+  prompts take 1 354–2 313 ms, all but one longer. The speaker model should use the per-sentence
+  durations of this table once calibration starts (D1.4).
 
 ## Appendix: the tables as the tool wrote them
 

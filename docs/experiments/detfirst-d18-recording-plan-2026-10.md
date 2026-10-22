@@ -23,9 +23,14 @@ repository or online.
    alternate. So the C counts estimate how much S holds, without looking at S.
 3. **Sample size is counted in independent hazard stages, not sessions.** A pilot first proves the
    pipeline; further slots are added where the C counts fall short, always one C and one S at a time.
-4. **The sealed set gets integrity checks only.** Completeness and exact replay may be checked; no
-   metric is computed (the baseline test refuses, section 5) until the thresholds are frozen in
-   `docs/experiments/`.
+4. **The sealed set gets integrity checks only.** Completeness (`capture_stats.py`) and exact replay
+   (`CaptureReplayTest`) may run on it; nothing that shows results does, until the thresholds are
+   frozen in `docs/experiments/`. Every tool that shows results refuses a capture under a `SEALED`
+   marker (section 5): the det-first baseline (`PromptPolicyBaselineTest`), the M3a evaluation
+   (`GroundContactCaptureEvaluationTest`), contact sheets (`contact_sheet.py`) and the prompt
+   labelling sheet (`export_prompt_labels.py`). The marker is found above the path as given or above
+   its real location, so a link or junction does not unseal. A new metric entry must use the same
+   check (`SealedCaptures.forMetrics`, `sailens_capture.refuse_sealed`).
 
 ## 2. Before each outing
 
@@ -96,7 +101,7 @@ Outside the repository, beside the other recordings:
 C:\Users\wnbot\AndroidStudioProjects\sailens-captures\detfirst-d18\
   assignment.csv
   calibration\<sessionId>\      C sessions, as exported from the phone
-  sealed\SEALED                 empty marker file: the baseline test refuses to evaluate below it
+  sealed\SEALED                 empty marker file: every tool that shows results refuses below it
   sealed\<sessionId>\           S sessions
 ```
 
@@ -132,7 +137,9 @@ S-O1-01,O1,S,outdoor,,,,planned,
    gradlew :sailens-guidance:testDebugUnitTest --tests "*PromptPolicyBaselineTest*" -PreplayCapture=<...\detfirst-d18\calibration> -Pm3aPhoneHeight=1.15
    ```
 
-   Pointed at `sealed`, it refuses. `-PunsealCapture` opens it, only after the thresholds are frozen.
+   Pointed at `sealed`, it refuses, as do the M3a evaluation, contact sheets and the labelling sheet.
+   `-PunsealCapture` (Gradle) or `--unseal` (Python tools) opens it, only after the thresholds are
+   frozen.
 4. Decide on further slots as in section 4, item 3.
 
 ## 7. When the sealed set is opened

@@ -2,7 +2,6 @@ package com.sailens.guidance.evaluation
 
 import com.sailens.guidance.geometry.HeightSource
 import com.sailens.guidance.geometry.PhoneGeometrySettings
-import com.sailens.guidance.trace.capture.CaptureSchema
 import com.sailens.guidance.trace.capture.CaptureSessionReader
 import com.sailens.guidance.trace.capture.orThrow
 import org.junit.Assert.assertTrue
@@ -37,18 +36,11 @@ class PromptPolicyBaselineTest {
         val out = File(System.getProperty("sailens.replay.out").orEmpty().ifBlank { "build/replay" }).apply { mkdirs() }
         val height = System.getProperty("sailens.m3a.phoneHeight").orEmpty().ifBlank { "1.15" }.toFloat()
         val evaluation = PromptPolicyCaptureEvaluation(PhoneGeometrySettings(height, HeightSource.PRESET))
-        val found = File(path).walkTopDown()
-            .filter { it.isFile && it.name == CaptureSchema.MANIFEST_FILE }
-            .mapNotNull { it.parentFile }
-            .sortedBy { it.name }
-            .toList()
-        assertTrue("no capture under $path", found.isNotEmpty())
-        val unseal = System.getProperty("sailens.replay.unseal") == "true"
-        val (sealed, captures) = found.partition { !unseal && SealedCaptures.isSealed(it) }
-        assumeTrue(
-            "all ${sealed.size} capture(s) under $path are sealed (det-first D1.8); pass -PunsealCapture only after the thresholds are frozen",
-            captures.isNotEmpty(),
-        )
+        val split = SealedCaptures.forMetrics(File(path))
+        val sealed = split.sealed
+        val captures = split.open
+        assertTrue("no capture under $path", captures.isNotEmpty() || sealed.isNotEmpty())
+        assumeTrue(SealedCaptures.refusalMessage(path, sealed.size), captures.isNotEmpty())
 
         val results = captures.mapNotNull { evaluation.evaluate(CaptureSessionReader.read(it).orThrow()) }
         val problems = results.flatMap { it.problems }
