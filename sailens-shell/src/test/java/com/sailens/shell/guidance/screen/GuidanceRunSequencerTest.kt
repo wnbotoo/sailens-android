@@ -95,4 +95,35 @@ class GuidanceRunSequencerTest {
 
         assertEquals(listOf("decided", "reset", "released"), log.toList())
     }
+
+    @Test
+    fun `stopping a run that is still waiting keeps waiting for the frame before it`() = runBlocking {
+        runs.start(blockingFrame)
+        inFrame.await()
+        runs.stop()
+        runs.start { log += "waiting run ran" } // waits for the frame and the first reset
+
+        val stoppedAgain = runs.stop() // cancels the waiting run
+        assertNull("reset ran while the frame was in flight", withTimeoutOrNull(200) { stoppedAgain.join() })
+        finishFrame.countDown()
+        stoppedAgain.join()
+
+        assertEquals(listOf("decided", "reset", "reset"), log.toList())
+    }
+
+    @Test
+    fun `the owner going away while a run waits still releases only after the frame before it`() = runBlocking {
+        runs.start(blockingFrame)
+        inFrame.await()
+        runs.stop()
+        runs.start { log += "waiting run ran" }
+        scope.cancel() // onCleared: the pending reset and the waiting run are both cancelled
+
+        val stopped = runs.stop(on = otherScope) { log += "released" }
+        assertNull("released while the frame was in flight", withTimeoutOrNull(200) { stopped.join() })
+        finishFrame.countDown()
+        stopped.join()
+
+        assertEquals(listOf("decided", "reset", "released"), log.toList())
+    }
 }
