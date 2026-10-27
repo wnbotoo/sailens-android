@@ -108,7 +108,8 @@ class SceneAnalysisViewModel(
     private val _uiEffect = MutableSharedFlow<SceneAnalysisUiEffect>()
     val uiEffect: SharedFlow<SceneAnalysisUiEffect> = _uiEffect.asSharedFlow()
 
-    private var analysisJob: Job? = null
+    /** The processors are reset only after a stopped run's last frame is done; see [GuidanceRunSequencer]. */
+    private val runs = GuidanceRunSequencer(viewModelScope) { stopSceneAnalysisUseCase() }
     private var stallWatchJob: Job? = null
     private val stallDetector = GuidanceStallDetector()
     private var releaseJob: Job? = null
@@ -282,8 +283,7 @@ class SceneAnalysisViewModel(
 
     private fun startSceneAnalysis() {
         frameCount = 0
-        analysisJob?.cancel()
-        analysisJob = viewModelScope.launch {
+        runs.start {
             // Wait for ongoing resource release to complete (with timeout protection)
             var waitTime = 0L
             val maxWaitMs = 2000L
@@ -546,13 +546,11 @@ class SceneAnalysisViewModel(
 
     private fun stopSceneAnalysis() {
         stopStallWatch()
-        analysisJob?.cancel()
-        analysisJob = null
+        runs.stop()
         overlayRenderRequestId++
         overlayRenderJob?.cancel()
         overlayRenderJob = null
         latestSceneResult = null
-        stopSceneAnalysisUseCase()
         speechManager.stop()
         hapticManager.cancel()
         _uiState.update {
@@ -577,11 +575,8 @@ class SceneAnalysisViewModel(
 
     override fun onCleared() {
         stopStallWatch()
-        analysisJob?.cancel()
-        analysisJob = null
         overlayRenderJob?.cancel()
         overlayRenderJob = null
-        stopSceneAnalysisUseCase()
         hapticManager.cancel()
         releaseSceneAnalysisResources()
         // The engine is shared with the Describe screen. Give back this screen's claim; the owner
@@ -651,7 +646,9 @@ class SceneAnalysisViewModel(
     private fun releaseSceneAnalysisResources() {
         releaseJob?.cancel()
         isReleasingResources = true
-        releaseJob = releaseScope.launch {
+        // viewModelScope is already cancelled here, so the run is stopped in releaseScope: the reset
+        // waits for its last frame, and the models are released only after that frame is done.
+        releaseJob = runs.stop(on = releaseScope) {
             try {
                 withContext(Dispatchers.IO) {
                     runCatching {
