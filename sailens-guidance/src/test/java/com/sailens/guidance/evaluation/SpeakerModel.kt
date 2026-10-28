@@ -168,6 +168,9 @@ internal class SpeakerModel(private val startLatencyMs: Long = 0) {
         val startErrorsMs = pairs.mapNotNull { (p, a) -> if (p.startAtMs != null && a.startedAtMs != null) p.startAtMs - a.startedAtMs else null }
         val doneErrorsMs = pairs.mapNotNull { (p, a) -> if (p.completed && p.endAtMs != null && a.doneAtMs != null) p.endAtMs - a.doneAtMs else null }
 
+        /** Sentences whose predicted end misses the device's by more than [END_ERROR_BOUND_MS] (threshold A13). */
+        val doneBeyondBound = doneErrorsMs.count { abs(it) > END_ERROR_BOUND_MS }
+
         /** Each disagreement by the refusing side's reason ("model accepts/device refused(<why>)" and the converse). */
         val disagreements: Map<String, Int> = pairs.filter { (p, a) -> p.accepted != a.accepted }
             .groupingBy { (p, a) -> if (p.accepted) "device refused(${a.refusal ?: "?"})" else "model refused(${p.reason ?: "?"})" }
@@ -203,6 +206,13 @@ internal class SpeakerModel(private val startLatencyMs: Long = 0) {
             }
             if (startErrorsMs.isNotEmpty() || doneErrorsMs.isNotEmpty()) {
                 appendLine("    timing error |start| p50/p95 ${quantiles(startErrorsMs)} ms; |done| p50/p95 ${quantiles(doneErrorsMs)} ms")
+                if (doneErrorsMs.isNotEmpty()) {
+                    val sorted = doneErrorsMs.map(::abs).sorted()
+                    appendLine(
+                        "    |done| p99 ${String.format(Locale.ROOT, "%.0f", sorted[((sorted.size - 1) * 0.99).toInt()])} ms, max ${String.format(Locale.ROOT, "%.0f", sorted.last())} ms; " +
+                            "beyond ${END_ERROR_BOUND_MS} ms (R10's ε) ${doneBeyondBound} of ${sorted.size}",
+                    )
+                }
             } else {
                 appendLine("    timing error: no lifecycle timing to compare")
             }
@@ -225,6 +235,13 @@ internal class SpeakerModel(private val startLatencyMs: Long = 0) {
     companion object {
         /** SpeechManager.PROTECTED_NOTICE_MAX_MS (sailens-output is not a dependency of this module). */
         const val PROTECTED_NOTICE_MAX_MS: Long = 15_000
+
+        /**
+         * ε of the threshold note's R10: the per-sentence end-time error the counterfactual branch
+         * enumeration covers. C's leave-one-out |done| errors stay within it for all but a few
+         * sentences; threshold A13 checks the same on S.
+         */
+        const val END_ERROR_BOUND_MS: Long = 150
 
         /** A sentence's duration when nothing better is known; the D1.7 table replaces it. */
         const val DEFAULT_DURATION_MS: Long = 1_400

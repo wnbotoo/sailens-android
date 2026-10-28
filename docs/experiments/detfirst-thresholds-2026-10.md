@@ -7,7 +7,7 @@ is opened: the `SpeakerModel` calibration thresholds (D1.4-2) and the D2–D4 su
 This note proposes both, plus the questions the user has to decide. **It uses the calibration/baseline
 set (C) only**; no tool that shows results has opened S.
 
-> **Status: proposal, revision 3 (after review round 2), not frozen.** Freezing takes all three: the user decides every item of
+> **Status: proposal, revision 4 (after review round 3), not frozen.** Freezing takes all three: the user decides every item of
 > section 5 (done 2026-10-28, every recommendation accepted); the GPT review has no findings;
 > the freezing commit is written into the "threshold freeze" line of the local assignment file
 > `detfirst-d18\assignment.csv`. Until that line is filled in, S may not be used for any metric.
@@ -49,7 +49,9 @@ set (C) only**; no tool that shows results has opened S.
      the first frame's only);
   5. revision 3: which capture is C or S comes from a frozen session list, not the `SEALED` marker; the
      X3 and X5 windows run on until both speakers are idle; X3 also opens on `speak_error` and
-     `speak_failed`.
+     `speak_failed`;
+  6. revision 4: `SpeakerRobustness` (R10's per-sentence independent error branches, open-loop core);
+     the calibration report adds the |done| p99, the maximum and the count beyond ε (A13).
 
 ## 2. C baseline (the reference for the success thresholds)
 
@@ -183,6 +185,7 @@ and has to pass too (it does now). Four principles:
 | A10 | \|done\| error p95 | ≤ 150 ms | 150 ms | 70 ms |
 | A11 | Per-capture floor: captures with ≥ 50 offers, accept precision and completion precision | each ≥ 0.80 | 0.85 | lowest 0.880 / 0.860 (C-O2-02) |
 | A12 | Closed-loop check (below) | four parts, below | three parts | to be measured on C once PR-1b implements it |
+| A13 | Share of sentences (spoken to the end by both) whose end misses the device's by more than ε = 150 ms (R10) | ≤ 2% | (new in revision 4) | 4 / 472 (0.8%) |
 
 The model stays usable for M5 after the loosening because revision 2's M5 no longer needs the model's
 errors to cancel between the arms: errors in the baseline arm only add undeterminable stages
@@ -228,7 +231,14 @@ the lifecycle only frees the speaker at the right moment. Revision 3: the X3 and
 on until **both the device's and the model's speaker are idle** (review round 2 P1-2's
 counterexample: the device's notice ends at 1 990 ms, the model's at 2 000 ms, and an offer at
 1 995 ms still rests on the notice's duration). Until then the model's predictions can still depend
-on the excluded stretch indirectly. X2, X3 and X5 are implemented in code
+on the excluded stretch indirectly. In the open-loop calibration the offers are fixed, so both speakers idle is enough. In the **closed
+loop** (A12, the counterfactual arms) it is not: accepts and refusals inside the window leave cooldown
+records, revokes and re-offers that shape later offers after the speakers are idle (review round 3
+P2). So in the closed loop the stages after an X3 or X5 window stay undeterminable until the cooldown
+state can be shown independent of what happened in the window: most simply, no cooldown record is
+still in force (the last record is older than the 8 s cooldown ceiling) and no prompt was emitted in
+the 20 s storm window; failing that, they count under §4.2. PR-1b needs a test with "both speakers
+idle, cooldowns still different". X2, X3 and X5 are implemented in code
 (`PromptPolicyCaptureEvaluation.speakerInputs`), and the calibration report counts exclusions by
 reason.
 
@@ -236,11 +246,11 @@ reason.
 
 - **Frozen are the thresholds and the model itself**: `SpeakerModel.kt`,
   `PromptPolicyCaptureEvaluation.speakerInputs`, `SpeakerDurations.kt` (with the frozen C duration
-  table), `D18Sets.kt` (which capture is C and which is S) and `TtsDurations.kt` as of the freezing
+  table), `D18Sets.kt` (which capture is C and which is S), `SpeakerRobustness.kt` and `TtsDurations.kt` as of the freezing
   commit. Any later
   change to one of them needs a new calibration; if S is open by then, it can no longer calibrate the
   changed model, and a new sealed set has to be recorded.
-- **Failing on S** (any of A1–A12, or X2/X3/X5 over their limit): per plan D1.4-3, D3 (PR-1b) is judged
+- **Failing on S** (any of A1–A13, or X2/X3/X5 over their limit): per plan D1.4-3, D3 (PR-1b) is judged
   on device data only; M5 for D2 and D4 can only be reported at the receipt level, labelled "not
   completion-verified", and **no switch may be flipped on it** (§4 M5). PR-4 then waits for a new batch
   of device recordings.
@@ -261,9 +271,9 @@ reason.
 - C spoke only 28 wordings to the end. Counterfactual runs will offer more wordings never finished
   (NEAR sentences for other zone combinations, for example); those use the D1.7 table plus 45 ms,
   coarser than a measured wording. Each run reports the fallback offers per arm; the experiment arm
-  perturbs them twice as much (R10).
-- R10 perturbs **all sentences together** toward longer or shorter; combinations where different
-  sentences err in opposite directions are not covered.
+  gives them twice the ε (R10).
+- R10 covers independent errors up to ε per sentence; sentences erring more (0.8% on C) are not
+  covered.
 
 ## 4. (b) D2–D4 success thresholds (Q6)
 
@@ -321,24 +331,39 @@ reason.
     new in the experiment arm, reported apart and bound by M4, are checked only for part of their
     false-alarm behaviour; it **does not show their recall or lead time**, and the acceptance record
     says so rather than counting it as evidence of a pass.
-- **R10 The experiment arm's completions are judged robustly.** The model's durations and start
-  times carry errors (C's |done| p95 70 ms, A10 allows 150 ms; the 45 ms offset is a median, not an
-  upper bound). A sentence that ends a few tens of milliseconds before a higher-priority prompt
-  arrives is "spoken to the end" for the model and may be cut off for real (review round 2 P1-3's
-  counterexample: "前方有行人" is 1 285 ms in the frozen table, and 40 ms longer for real cuts it off).
-  A4 and A7 are overall rates and cannot rule out such a false completion of one stage. So a stage of
-  the experiment arm counts as spoken to the end (M5's kept, and M1 and M2's successes) only if it is
-  spoken to the end in **every** one of these runs:
-  - the nominal run;
-  - every sentence's duration +δ;
-  - every sentence's duration −δ;
-  - every sentence's duration +δ, with the start latency +150 ms.
-  δ = 150 ms (A10's limit); for a wording whose duration comes from the D1.7 fallback, δ = 300 ms. Each
-  run recomputes the arbitration in full: accept/refuse, interruptions, cooldown revokes and the
-  offers after them. A stage spoken to the end in the nominal run but not in one perturbed run is
-  undeterminable in M5 (§4.2, counted as a regression) and no success in M1 or M2. The baseline arm is
-  not perturbed: it only decides whether the model reproduces the device. This can only make the
-  experiment look worse; the thresholds stay. Implemented with PR-1b.
+- **R10 The experiment arm's completions are judged robustly (revision 4).** Every sentence's
+  predicted end carries an error (C, leave one out: |done| p95 70 ms, p99 137 ms, max 752 ms). A
+  sentence that ends a few tens of milliseconds before the next prompt arrives is "spoken to the end"
+  for the model and may be cut off for real -- or, the other way round, may block the sentence after
+  it. A4 and A7 are overall rates and cannot rule out such a false completion of one stage. Revision 3
+  used four uniform perturbations; review round 3 gave a counterexample: A, B and P a dozen or so
+  milliseconds apart, where making everything longer refuses B and clears the way for P, but B alone
+  40 ms longer blocks P -- all four uniform runs keep P. So errors are now **independent per
+  sentence**:
+  - each sentence's end is an interval [nominal − ε, nominal + ε], ε = 150 ms, independent of every
+    other sentence's; for a wording on the D1.7 fallback, ε = 300 ms.
+  - The speaker model's arbitration is run forward. Wherever a step compares a time with a sentence's
+    end and the interval straddles that time ("already ended" and "still speaking" both possible),
+    the run splits in two, each carrying the narrowed interval on. Every outcome any independent
+    error within ε can reach is reached that way (`SpeakerRobustness`).
+  - A stage of the experiment arm counts as spoken to the end (M5's kept, M1 and M2's successes) only
+    if it is spoken to the end before its deadline in **every branch**: M5's deadline is
+    t_dev + 0.5 s, M1 and M2's the crossing. Refused, cut off or late in one branch, it does not
+    count: undeterminable in M5 (§4.2, counted as a regression), no success in M1 or M2.
+  - Branches with equal state merge. More than 64 branches at once, and every stage involved is
+    undeterminable.
+  - Closed loop (the counterfactual arms) re-runs the decisions in every branch (cooldown records,
+    revokes and the offers after them), and branches merge only when the speaker state **and** the
+    cooldown state are equal. That part comes with PR-1b, with the A/B/P counterexample as a
+    closed-loop test (P must not be kept). The open-loop core and the A/B/P open-loop test are in this
+    PR (`SpeakerRobustness`, `SpeakerRobustnessTest`).
+  - **ε is a coverage, not an upper bound on the error.** Of the 472 sentences both sides spoke to the
+    end on C, 4 (0.8%) missed the device's end by more than 150 ms; A13 checks the same on S. A sentence
+    erring beyond ε can still make a stage look kept when it was not; that remaining risk is written
+    into the acceptance record.
+  - The baseline arm does not branch: it only decides whether the model reproduces the device, and a
+    stage it cannot reproduce is undeterminable anyway. This can only make the experiment look worse;
+    the thresholds stay.
 
 ### 4.2 M5, no regression (for the shipped combination)
 
@@ -355,8 +380,8 @@ both arms does not guarantee that the errors cancel. Hence the rules below.
 - For each stage of P, both arms run closed loop on the model (R3):
   - **the baseline arm reproduces** it: the baseline arm speaks it to the end, first completion within
     0.5 s of t_dev;
-  - **the experiment arm keeps** it: the experiment arm speaks it to the end **robustly** (R10), with
-    its first completion ≤ t_dev + 0.5 s in every run.
+  - **the experiment arm keeps** it: the experiment arm speaks it to the end **robustly** (R10), that is,
+    with its first completion ≤ t_dev + 0.5 s in every branch.
   - Experiment arm keeps it → **kept**.
   - Experiment arm does not keep it, baseline arm reproduces it → **regression** (the model
     reproduces the device here, so the difference can only come from the experiment).
@@ -440,7 +465,7 @@ both arms does not guarantee that the errors cancel. Hence the rules below.
 
 ### 4.6 PR-4 (enabling)
 
-Switches are flipped only when all of these hold: A1–A12 of section 3 pass on S; the thresholds of
+Switches are flipped only when all of these hold: A1–A13 of section 3 pass on S; the thresholds of
 4.2–4.5 pass on S (M4 and M5 at all three heights); PR-1b's and PR-3's device cases pass; M3a's
 placement is in the user settings (Q9). Then the user walks once outdoors and once indoors: no crash,
 exact replay, and the user's own judgement (the user's decision, not a threshold). PR-D5 is accepted
