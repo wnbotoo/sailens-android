@@ -9,9 +9,8 @@ set (C) only**; no tool that shows results has opened S.
 
 > **Status: proposal, not frozen.** Freezing takes all three: the user decides every item of
 > section 5 (done 2026-10-28, every recommendation accepted); the GPT review has no findings;
-> the freezing commit is written into the "threshold
-> freeze" line of the local assignment file `detfirst-d18\assignment.csv`. Until that line is filled
-> in, S may not be used for any metric.
+> the freezing commit is written into the "threshold freeze" line of the local assignment file
+> `detfirst-d18\assignment.csv`. Until that line is filled in, S may not be used for any metric.
 
 ## 1. Data and conventions
 
