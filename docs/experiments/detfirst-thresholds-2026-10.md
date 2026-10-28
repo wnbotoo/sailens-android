@@ -8,7 +8,8 @@ This note proposes both, plus the questions the user has to decide. **It uses th
 set (C) only**; no tool that shows results has opened S.
 
 > **Status: proposal, not frozen.** Freezing takes all three: the user decides every item of
-> section 5; the GPT review has no findings; the freezing commit is written into the "threshold
+> section 5 (done 2026-10-28, every recommendation accepted); the GPT review has no findings;
+> the freezing commit is written into the "threshold
 > freeze" line of the local assignment file `detfirst-d18\assignment.csv`. Until that line is filled
 > in, S may not be used for any metric.
 
@@ -300,7 +301,10 @@ placement is in the user settings (Q9). Then the user walks once outdoors and on
 exact replay, and the user's own judgement (the user's decision, not a threshold). PR-D5 is accepted
 on the device under its own detailed design, outside Q6.
 
-## 5. (c) To decide
+## 5. (c) Decisions
+
+**On 2026-10-28 the user decided every item below as recommended**, Q14 (open S once) and Q6 (the
+numbers of sections 3 and 4 as written) included. Any later change to an item is recorded per R6.
 
 | # | Question | Recommendation | Why |
 |---|---|---|---|
