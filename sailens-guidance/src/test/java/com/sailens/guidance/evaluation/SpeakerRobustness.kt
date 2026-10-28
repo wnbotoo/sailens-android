@@ -32,34 +32,49 @@ internal class SpeakerRobustness(
         UNDETERMINED,
     }
 
+    /**
+     * [latestEndMs]: for [Verdict.KEPT], the latest the sentence can end over every branch -- what M1
+     * classifies against the crossing (LeadTime's own BEFORE), so a branch that ends later cannot be
+     * hidden by one that ends earlier.
+     */
+    data class Outcome(val verdict: Verdict, val latestEndMs: Long? = null)
+
     private enum class Target { PENDING, KEPT, LOST }
 
     /** A sentence on the speaker; it ends somewhere in [endLo, endHi] (ms, inclusive). */
     private data class Item(val id: String, val priority: Int?, val expiresAtMs: Long?, val endLo: Long, val endHi: Long)
 
-    private data class State(val queue: List<Item>, val ready: Boolean, val target: Target)
+    private data class State(val queue: List<Item>, val ready: Boolean, val target: Target, val targetEndMs: Long? = null)
 
-    fun verdict(inputs: List<SpeakerModel.Input>, targetId: String, deadlineMs: Long): Verdict {
+    /**
+     * Whether [targetId] is spoken to the end by [deadlineMs] in every branch. The deadline is the
+     * caller's: M5 passes t_dev + 0.5 s; M2, a completion rate with no distance in it, passes none
+     * ([Long.MAX_VALUE]); M1 passes none and classifies [Outcome.latestEndMs] against the crossing.
+     */
+    fun check(inputs: List<SpeakerModel.Input>, targetId: String, deadlineMs: Long = Long.MAX_VALUE): Outcome {
         var states = listOf(State(emptyList(), ready = true, target = Target.PENDING))
         for (input in inputs.sortedBy { it.atMs }) {
             states = states.flatMap { advance(it, input.atMs, targetId, deadlineMs) }.flatMap { step(it, input, targetId) }.distinct()
-            if (states.size > maxBranches) return Verdict.UNDETERMINED
-            if (states.any { it.target == Target.LOST }) return Verdict.LOST
-            if (states.all { it.target == Target.KEPT }) return Verdict.KEPT
+            if (states.size > maxBranches) return Outcome(Verdict.UNDETERMINED)
+            if (states.any { it.target == Target.LOST }) return Outcome(Verdict.LOST)
+            if (states.all { it.target == Target.KEPT }) return Outcome(Verdict.KEPT, states.maxOf { it.targetEndMs!! })
         }
         states = states.flatMap { advance(it, Long.MAX_VALUE, targetId, deadlineMs) }
         return when {
-            states.any { it.target != Target.KEPT } -> Verdict.LOST
-            else -> Verdict.KEPT
+            states.any { it.target != Target.KEPT } -> Outcome(Verdict.LOST)
+            else -> Outcome(Verdict.KEPT, states.maxOf { it.targetEndMs!! })
         }
     }
+
+    fun verdict(inputs: List<SpeakerModel.Input>, targetId: String, deadlineMs: Long = Long.MAX_VALUE): Verdict = check(inputs, targetId, deadlineMs).verdict
 
     /** Everything that has ended by [t]; a straddled end splits the state. */
     private fun advance(state: State, t: Long, targetId: String, deadlineMs: Long): List<State> {
         val front = state.queue.firstOrNull() ?: return listOf(state)
         fun ended(item: Item): State {
-            val target = if (item.id == targetId) (if (item.endHi <= deadlineMs) Target.KEPT else Target.LOST) else state.target
-            return state.copy(queue = state.queue.drop(1), target = target)
+            if (item.id != targetId) return state.copy(queue = state.queue.drop(1))
+            val kept = item.endHi <= deadlineMs
+            return state.copy(queue = state.queue.drop(1), target = if (kept) Target.KEPT else Target.LOST, targetEndMs = if (kept) item.endHi else null)
         }
         return when {
             // Live iff its end is after t, as SpeakerModel.advance has it.
@@ -87,7 +102,7 @@ internal class SpeakerRobustness(
                     val cutTarget = state.queue.any { it.id == targetId }
                     val start = t + startLatencyMs
                     val item = Item(input.id, input.priority, input.expiresAtMs, start + input.durationMs - epsilonMs, start + input.durationMs + epsilonMs)
-                    listOf(State(listOf(item), state.ready, if (cutTarget) Target.LOST else state.target))
+                    listOf(state.copy(queue = listOf(item), target = if (cutTarget) Target.LOST else state.target))
                 }
             }
             is SpeakerModel.Queued -> {

@@ -7,7 +7,7 @@ is opened: the `SpeakerModel` calibration thresholds (D1.4-2) and the D2–D4 su
 This note proposes both, plus the questions the user has to decide. **It uses the calibration/baseline
 set (C) only**; no tool that shows results has opened S.
 
-> **Status: proposal, revision 4 (after review round 3), not frozen.** Freezing takes all three: the user decides every item of
+> **Status: proposal, revision 5 (after review round 4), not frozen.** Freezing takes all three: the user decides every item of
 > section 5 (done 2026-10-28, every recommendation accepted); the GPT review has no findings;
 > the freezing commit is written into the "threshold freeze" line of the local assignment file
 > `detfirst-d18\assignment.csv`. Until that line is filled in, S may not be used for any metric.
@@ -51,7 +51,9 @@ set (C) only**; no tool that shows results has opened S.
      X3 and X5 windows run on until both speakers are idle; X3 also opens on `speak_error` and
      `speak_failed`;
   6. revision 4: `SpeakerRobustness` (R10's per-sentence independent error branches, open-loop core);
-     the calibration report adds the |done| p99, the maximum and the count beyond ε (A13).
+     the calibration report adds the |done| p99, the maximum and the count beyond ε (A13);
+  7. revision 5: `SpeakerRobustness.check` takes its deadline from the caller (M5 passes t_dev + 0.5 s,
+     M2 none) and returns the latest completion over all branches for M1.
 
 ## 2. C baseline (the reference for the success thresholds)
 
@@ -235,10 +237,22 @@ on the excluded stretch indirectly. In the open-loop calibration the offers are 
 loop** (A12, the counterfactual arms) it is not: accepts and refusals inside the window leave cooldown
 records, revokes and re-offers that shape later offers after the speakers are idle (review round 3
 P2). So in the closed loop the stages after an X3 or X5 window stay undeterminable until the cooldown
-state can be shown independent of what happened in the window: most simply, no cooldown record is
-still in force (the last record is older than the 8 s cooldown ceiling) and no prompt was emitted in
-the 20 s storm window; failing that, they count under §4.2. PR-1b needs a test with "both speakers
-idle, cooldowns still different". X2, X3 and X5 are implemented in code
+state can be shown independent of what happened in the window. The cooldown is the only decision
+state that depends on delivery (`CooldownManager`'s records, undo log and storm count); the test is
+that all three hold (revision 5, review round 4 P1-1: revision 3's "8 s cooldown ceiling" was wrong;
+8 s caps scaling only, and longer base cooldowns are not bound by it):
+- every record in the cooldown table is older than the longest cooldown its key can have for any
+  event at any scale: the key's own cooldown where it has one, else the cooldown of the event category
+  that uses the key; scaling caps at max(base, 8 s), so `GROUND_UNRECOGNIZED` needs 60 s, sensor
+  prompts 15 s, road warnings and traffic lights 12 s. Which category a key belongs to follows the rules
+  by which `EventGenerator` / `EventMerger` build keys, with a test listing every key prefix; a key that
+  cannot be placed takes the table's longest, 60 s.
+- no prompt was emitted in the 20 s storm window;
+- the undo log holds no record that could still be revoked.
+Failing that, they count under §4.2. PR-1b needs two tests: "both speakers idle, cooldowns still
+different", and "after 21 s of silence, a 60 s cooldown that was recorded in one history and revoked
+in the other still holds the same later prompt in one and lets it through in the other" (the test may
+release only after 60 s). X2, X3 and X5 are implemented in code
 (`PromptPolicyCaptureEvaluation.speakerInputs`), and the calibration report counts exclusions by
 reason.
 
@@ -348,12 +362,20 @@ reason.
     end and the interval straddles that time ("already ended" and "still speaking" both possible),
     the run splits in two, each carrying the narrowed interval on. Every outcome any independent
     error within ε can reach is reached that way (`SpeakerRobustness`).
-  - A stage of the experiment arm counts as spoken to the end (M5's kept, M1 and M2's successes) only
-    if it is spoken to the end before its deadline in **every branch**: M5's deadline is
-    t_dev + 0.5 s, M1 and M2's the crossing. Refused, cut off or late in one branch, it does not
-    count: undeterminable in M5 (§4.2, counted as a regression), no success in M1 or M2.
+  - A stage of the experiment arm counts as spoken to the end only if it is spoken to the end in
+    **every branch**; each metric's deadline is frozen on its own (revision 5, review round 4 P1-2):
+    - **M5**: kept only if spoken to the end before t_dev + 0.5 s in every branch; otherwise
+      undeterminable (§4.2, counted as a regression).
+    - **M1** (C1–C3): **the latest completion over all branches** is classified by `LeadTime`'s own
+      definition; only "before" (BEFORE) is a success.
+    - **M2** (B1–B3): its completion-rate contract stays -- the NEAR wording of the same hazard spoken
+      to the end in every branch is a success, **with no distance or crossing condition** (Q4: M2 is
+      judged on completion, not lead time). Spoken to the end only after the crossing still counts.
+    Refused or cut off in one branch, it does not count.
   - Branches with equal state merge. More than 64 branches at once, and every stage involved is
-    undeterminable.
+    undeterminable. Open loop, C's 2 372 offers never reach that limit at ε = 150/300 ms (checked by
+    review round 4); the closed loop is rehearsed in full on C, and reaching the limit still blocks --
+    it is not tuned after looking at S.
   - Closed loop (the counterfactual arms) re-runs the decisions in every branch (cooldown records,
     revokes and the offers after them), and branches merge only when the speaker state **and** the
     cooldown state are equal. That part comes with PR-1b, with the A/B/P counterexample as a
@@ -362,7 +384,8 @@ reason.
   - **ε is a coverage, not an upper bound on the error.** Of the 472 sentences both sides spoke to the
     end on C, 4 (0.8%) missed the device's end by more than 150 ms; A13 checks the same on S. A sentence
     erring beyond ε can still make a stage look kept when it was not; that remaining risk is written
-    into the acceptance record.
+    into the acceptance record. A13 is a conditional gate on timing drift; it **does not mean "98% of
+    prompts or hazards are protected by R10"**, and it exempts no known real regression.
   - The baseline arm does not branch: it only decides whether the model reproduces the device, and a
     stage it cannot reproduce is undeterminable anyway. This can only make the experiment look worse;
     the thresholds stay.

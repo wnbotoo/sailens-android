@@ -72,4 +72,16 @@ class SpeakerRobustnessTest {
             assertEquals(p.id, expected, SpeakerRobustness(epsilonMs = 0).verdict(inputs, p.id, Long.MAX_VALUE))
         }
     }
+
+    @Test
+    fun `M2 has no deadline - a NEAR wording spoken to the end after the crossing still counts`() {
+        val near = listOf(Offer(0, "other", 3, 3_000, 1_237), Offer(2_000, "near", 3, 5_000, 1_982))
+        val crossingMs = 3_000L
+        // Spoken to the end at about 3 982 ms, after the crossing: no M1 success, still an M2 success.
+        assertEquals(Verdict.LOST, SpeakerRobustness().verdict(near, "near", crossingMs))
+        val m2 = SpeakerRobustness().check(near, "near")
+        assertEquals(Verdict.KEPT, m2.verdict)
+        // M1 classifies the latest end over every branch.
+        assertEquals(2_000L + 1_982 + 150, m2.latestEndMs)
+    }
 }
