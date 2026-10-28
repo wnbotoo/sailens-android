@@ -67,7 +67,7 @@ class GuidancePromptOfferTest {
             deliver = { calls += "deliver:${primary.messageKey}"; delivery },
             revoke = { calls += "revoke"; revoke(primary) },
             record = { outcomes += it },
-        )
+        ).delivered
     }
 
     @Test

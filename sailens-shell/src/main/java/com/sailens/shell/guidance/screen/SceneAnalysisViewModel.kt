@@ -112,6 +112,7 @@ class SceneAnalysisViewModel(
     private val runs = GuidanceRunSequencer(viewModelScope) { stopSceneAnalysisUseCase() }
     private var stallWatchJob: Job? = null
     private val stallDetector = GuidanceStallDetector()
+    private val speechUnavailableAlert = SpeechUnavailableAlert()
     private var releaseJob: Job? = null
     private var overlayRenderJob: Job? = null
     /**
@@ -147,22 +148,13 @@ class SceneAnalysisViewModel(
         }
         viewModelScope.launch {
             speechManager.state.collect { engineState ->
-                val previousState = _uiState.value
-                val shouldAlert = shouldAlertSpeechUnavailable(
-                    previousEngineState = previousState.speechEngineState,
-                    newEngineState = engineState,
-                    speechEnabled = previousState.isSpeechEnabled,
-                    screenReaderActive = previousState.isScreenReaderActive,
-                )
                 _uiState.update {
                     it.copy(
                         speechEngineState = engineState,
                         isSpeechReady = engineState == SpeechEngineState.READY,
                     )
                 }
-                if (shouldAlert) {
-                    onSpeechEngineUnavailable()
-                }
+                checkSpeechUnavailable()
             }
         }
         viewModelScope.launch {
@@ -198,6 +190,16 @@ class SceneAnalysisViewModel(
             speechManager.stop()
         } else if (_uiState.value.isSpeechEnabled) {
             initializeSpeech()
+        }
+        // Back on own speech: an outage that began under the screen reader is announced now.
+        checkSpeechUnavailable()
+    }
+
+    /** Alerts once per speech outage, as soon as the user relies on own speech; see [SpeechUnavailableAlert]. */
+    private fun checkSpeechUnavailable() {
+        val state = _uiState.value
+        if (speechUnavailableAlert.update(state.speechEngineState, state.isSpeechEnabled, state.isScreenReaderActive)) {
+            onSpeechEngineUnavailable()
         }
     }
 
@@ -245,6 +247,7 @@ class SceneAnalysisViewModel(
         if (!settings.hapticsEnabled && previous.isHapticsEnabled) {
             hapticManager.cancel()
         }
+        checkSpeechUnavailable()
     }
 
     fun setOverlayMode(overlayMode: SceneOverlayMode) {
@@ -379,7 +382,7 @@ class SceneAnalysisViewModel(
         // 等描述 / 打断描述 / 送达 / 没送达就撤销冷却，并为这条提示写一条 prompt_outcome（实际送达的
         // 通道或撤回原因）——整条规则在 offerAndTraceGuidancePrompt 里，有单测。协调器是整个 shell
         // 共用的那一个，所以打断的就是用户正在听的那一段描述，不管它在哪个屏幕上。
-        val delivered = offerAndTraceGuidancePrompt(
+        val delivery = offerAndTraceGuidancePrompt(
             event = primaryEvent,
             sourceSequenceNumber = sequenceNumber,
             outputs = GuidanceOutputSettings(
@@ -394,9 +397,9 @@ class SceneAnalysisViewModel(
             revoke = { revokeUndeliveredEvent(primaryEvent) },
             record = traceService::recordPromptOutcome,
         )
-        if (!delivered) return
-
-        if (state.hasGuidanceOutputChannel()) {
+        // Replay history follows what the user actually heard or felt, not the state read before the
+        // offer: the first prompt an engine speaks after an outage still had "unavailable" there.
+        if (delivery.reachedUser) {
             _uiState.update { it.copy(lastAnnouncedEvent = primaryEvent) }
         }
     }
@@ -409,7 +412,7 @@ class SceneAnalysisViewModel(
     private fun deliver(event: SceneEvent, state: SceneAnalysisUiState): GuidanceDeliveryResult = deliverGuidanceEvent(
         speechEnabled = state.isSpeechEnabled,
         screenReaderActive = state.isScreenReaderActive,
-        speechEngineReady = speechManager.isReady,
+        speechEngineReady = { speechManager.isReady },
         hapticsEnabled = state.isHapticsEnabled,
         // 屏幕阅读器接管时走 shell 唯一的播报出口：描述屏在最上面时，这个屏幕的界面根本没有被
         // 组合，自己收的话这句会被静默丢掉。语速/音量/语言跟随用户在 TalkBack 里的既有设置。

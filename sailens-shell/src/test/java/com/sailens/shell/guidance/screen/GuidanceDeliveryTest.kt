@@ -22,15 +22,34 @@ class GuidanceDeliveryTest {
         haptics: Boolean = false,
         speakAccepts: Boolean = true,
         vibrateAccepts: Boolean = true,
-    ) = deliverGuidanceEvent(
-        speechEnabled = speech,
-        screenReaderActive = screenReader,
-        speechEngineReady = ready,
-        hapticsEnabled = haptics,
-        announceToScreenReader = { calls += "announce" },
-        speak = { calls += "speak"; speakAccepts },
-        vibrate = { calls += "vibrate"; vibrateAccepts },
-    ).channels
+        // The engine's readiness once speak() has returned: false when that attempt killed it.
+        readyAfterSpeak: Boolean = ready,
+    ): List<String> {
+        var engineReady = ready
+        return deliverGuidanceEvent(
+            speechEnabled = speech,
+            screenReaderActive = screenReader,
+            speechEngineReady = { engineReady },
+            hapticsEnabled = haptics,
+            announceToScreenReader = { calls += "announce" },
+            speak = { calls += "speak"; engineReady = readyAfterSpeak; speakAccepts },
+            vibrate = { calls += "vibrate"; vibrateAccepts },
+        ).channels
+    }
+
+    @Test
+    fun `an engine that fails while speaking leaves the prompt to vibration`() {
+        // 2026-10-28: the engine counted as ready but every speak() failed, and the prompt was
+        // dropped without trying the motor: nothing was heard or felt.
+        assertEquals(listOf(HAPTICS), deliver(haptics = true, speakAccepts = false, readyAfterSpeak = false))
+        assertEquals(listOf("speak", "vibrate"), calls) // and the failed engine is not asked again
+    }
+
+    @Test
+    fun `an engine that fails while speaking, with vibration off, reaches no one`() {
+        assertEquals(emptyList<String>(), deliver(speakAccepts = false, readyAfterSpeak = false))
+        assertEquals(listOf("speak"), calls)
+    }
 
     @Test
     fun `speech-only user whose engine is still starting has not received the prompt`() {
