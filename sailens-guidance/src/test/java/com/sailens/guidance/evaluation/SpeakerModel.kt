@@ -116,22 +116,51 @@ internal class SpeakerModel(private val startLatencyMs: Long = 0) {
     }
 
     /** What actually happened to one offer, from the device. */
-    data class Actual(val accepted: Boolean, val startedAtMs: Double? = null, val doneAtMs: Double? = null, val critical: Boolean = false)
+    data class Actual(
+        val accepted: Boolean,
+        val startedAtMs: Double? = null,
+        val doneAtMs: Double? = null,
+        val critical: Boolean = false,
+        /** The device's refusal reason, when it refused. */
+        val refusal: String? = null,
+    )
 
     /**
      * Agreement of [predictions] with [actual] (descriptive until the D1.4 thresholds are frozen):
-     * accept/refuse precision and recall, start/done timing errors, CRITICAL misjudgements.
+     * accept/refuse and spoken-to-the-end precision and recall, start/done timing errors, CRITICAL
+     * misjudgements by direction, and the reasons behind each disagreement.
      */
-    class Calibration(predictions: List<Prediction>, actual: Map<String, Actual>) {
-        private val pairs = predictions.mapNotNull { p -> actual[p.id]?.let { p to it } }
+    class Calibration private constructor(
+        private val pairs: List<Pair<Prediction, Actual>>,
+        /** Where each offer's duration came from ("measured", "d1.7 table", "default"), counted. */
+        val durationSources: Map<String, Int>,
+    ) {
+        constructor(predictions: List<Prediction>, actual: Map<String, Actual>, durationSources: Map<String, Int> = emptyMap()) :
+            this(predictions.mapNotNull { p -> actual[p.id]?.let { p to it } }, durationSources)
+
         val n = pairs.size
         val acceptedBoth = pairs.count { (p, a) -> p.accepted && a.accepted }
         val acceptedPredictedOnly = pairs.count { (p, a) -> p.accepted && !a.accepted }
         val refusedPredictedOnly = pairs.count { (p, a) -> !p.accepted && a.accepted }
         val refusedBoth = pairs.count { (p, a) -> !p.accepted && !a.accepted }
         val criticalMisjudged = pairs.count { (p, a) -> a.critical && p.accepted != a.accepted }
+        val criticalOffers = pairs.count { (_, a) -> a.critical }
+
+        /** CRITICAL offers the model accepts although the device refused them: the direction that hides a loss. */
+        val criticalAcceptOverclaimed = pairs.count { (p, a) -> a.critical && p.accepted && !a.accepted }
+
+        // Spoken to the end: what M2 and M5 count, so agreement on completion, not only on acceptance.
+        val completedBoth = pairs.count { (p, a) -> p.completed && a.doneAtMs != null }
+        val completedPredictedOnly = pairs.count { (p, a) -> p.completed && a.doneAtMs == null }
+        val completedActualOnly = pairs.count { (p, a) -> !p.completed && a.doneAtMs != null }
+        val criticalCompletionOverclaimed = pairs.count { (p, a) -> a.critical && p.completed && a.doneAtMs == null }
         val startErrorsMs = pairs.mapNotNull { (p, a) -> if (p.startAtMs != null && a.startedAtMs != null) p.startAtMs - a.startedAtMs else null }
         val doneErrorsMs = pairs.mapNotNull { (p, a) -> if (p.completed && p.endAtMs != null && a.doneAtMs != null) p.endAtMs - a.doneAtMs else null }
+
+        /** Each disagreement by the refusing side's reason ("model accepts/device refused(<why>)" and the converse). */
+        val disagreements: Map<String, Int> = pairs.filter { (p, a) -> p.accepted != a.accepted }
+            .groupingBy { (p, a) -> if (p.accepted) "device refused(${a.refusal ?: "?"})" else "model refused(${p.reason ?: "?"})" }
+            .eachCount().toSortedMap()
 
         fun render(label: String): String = buildString {
             appendLine("  speaker model ($label) -- DESCRIPTIVE ONLY: no D1.4 threshold is frozen, nothing is accepted on it")
@@ -148,12 +177,30 @@ internal class SpeakerModel(private val startLatencyMs: Long = 0) {
                 "    accept precision ${ratio(acceptedBoth, acceptedBoth + acceptedPredictedOnly)} recall ${ratio(acceptedBoth, acceptedBoth + refusedPredictedOnly)}; " +
                     "refuse precision ${ratio(refusedBoth, refusedBoth + refusedPredictedOnly)} recall ${ratio(refusedBoth, refusedBoth + acceptedPredictedOnly)}",
             )
+            appendLine(
+                "    spoken to the end: by both $completedBoth, model only $completedPredictedOnly, device only $completedActualOnly; " +
+                    "completion precision ${ratio(completedBoth, completedBoth + completedPredictedOnly)} recall ${ratio(completedBoth, completedBoth + completedActualOnly)}",
+            )
+            appendLine(
+                "    CRITICAL offers $criticalOffers: model accepts/device refused $criticalAcceptOverclaimed, " +
+                    "model completes/device did not $criticalCompletionOverclaimed",
+            )
+            if (disagreements.isNotEmpty()) appendLine("    disagreements: ${disagreements.entries.joinToString { "${it.key} ${it.value}" }}")
+            if (durationSources.isNotEmpty()) {
+                appendLine("    offer durations by wording: ${durationSources.entries.joinToString { "${it.key} ${it.value}" }} (default ${DEFAULT_DURATION_MS} ms)")
+            }
             if (startErrorsMs.isNotEmpty() || doneErrorsMs.isNotEmpty()) {
                 appendLine("    timing error |start| p50/p95 ${quantiles(startErrorsMs)} ms; |done| p50/p95 ${quantiles(doneErrorsMs)} ms")
             } else {
                 appendLine("    timing error: no lifecycle timing to compare")
             }
         }
+
+        /** This and [other] as one set (offer ids are unique across captures). */
+        operator fun plus(other: Calibration) = Calibration(
+            pairs + other.pairs,
+            (durationSources.keys + other.durationSources.keys).associateWith { (durationSources[it] ?: 0) + (other.durationSources[it] ?: 0) }.toSortedMap(),
+        )
 
         private fun ratio(a: Int, b: Int) = if (b == 0) "-" else String.format(Locale.ROOT, "%.3f", a.toDouble() / b)
         private fun quantiles(errors: List<Double>): String {

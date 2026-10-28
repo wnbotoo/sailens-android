@@ -48,12 +48,19 @@ class PromptPolicyBaselineTest {
         results.filter { it.evaluable }.forEach { File(out, "${it.id}.detfirst.txt").writeText(it.text) }
 
         val summary = buildString {
-            appendLine("det-first PR-0 baseline, phone height preset ${String.format(Locale.ROOT, "%.2f", height)} m")
+            appendLine(
+                "det-first PR-0 baseline, phone height preset ${String.format(Locale.ROOT, "%.2f", height)} m " +
+                    "(only for captures without recorded geometry; each capture says which height its distances use)",
+            )
             appendLine("captures ${results.size}, complete and evaluated ${complete.size}; problems ${problems.size}; sealed and skipped ${sealed.size}")
             problems.forEach { appendLine("  $it") }
             appendLine()
             appendLine("ALL COMPLETE CAPTURES")
             append(PromptPolicyReport.render(complete.mapNotNull { it.evaluation }))
+            // Pooled only over captures whose lifecycle was recorded in full, like the stage counts.
+            complete.filter { it.evaluation?.evidence == PromptPolicyEvaluation.LifecycleEvidence.RECORDED }
+                .mapNotNull { it.calibration }.reduceOrNull(SpeakerModel.Calibration::plus)
+                ?.let { append(it.render("against the lifecycle, all complete captures with a recorded lifecycle")) }
             results.forEach { appendLine().append(it.text) }
         }
         File(out, "detfirst-baseline.txt").writeText(summary)

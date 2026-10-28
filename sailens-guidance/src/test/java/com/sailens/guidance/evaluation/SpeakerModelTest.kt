@@ -78,4 +78,44 @@ class SpeakerModelTest {
         assertEquals(1, c.criticalMisjudged)
         assertTrue(c.render("test").contains("DESCRIPTIVE ONLY"))
     }
+
+    @Test
+    fun `calibration counts completion, the direction of CRITICAL errors and the refusing side's reason, and pools`() {
+        val predictions = model.run(
+            listOf(
+                Offer(0, "a", 3, 3_000, 1_000),
+                Offer(100, "b", 3, 3_100, 1_000),
+                Offer(2_000, "c", 2, 5_000, 1_000),
+            ),
+        )
+        val c = SpeakerModel.Calibration(
+            predictions,
+            mapOf(
+                // The model completes "a"; the device refused it and took "b" instead.
+                "a" to SpeakerModel.Actual(accepted = false, critical = true, refusal = "outranked"),
+                "b" to SpeakerModel.Actual(accepted = true, startedAtMs = 100.0, doneAtMs = 1_100.0, critical = true),
+                "c" to SpeakerModel.Actual(accepted = true, startedAtMs = 2_000.0, doneAtMs = 3_000.0),
+            ),
+            durationSources = mapOf("measured" to 3),
+        )
+        assertEquals(1, c.completedBoth)
+        assertEquals(1, c.completedPredictedOnly)
+        assertEquals(1, c.completedActualOnly)
+        assertEquals(2, c.criticalOffers)
+        assertEquals(1, c.criticalAcceptOverclaimed)
+        assertEquals(1, c.criticalCompletionOverclaimed)
+        assertEquals(mapOf("device refused(outranked)" to 1, "model refused(outranked)" to 1), c.disagreements)
+
+        val pooled = c + c
+        assertEquals(2 * c.n, pooled.n)
+        assertEquals(2, pooled.criticalAcceptOverclaimed)
+        assertEquals(mapOf("measured" to 6), pooled.durationSources)
+    }
+
+    @Test
+    fun `the D1_7 table tells the NEAR wording apart`() {
+        assertEquals(1_193L, TtsDurations.zhCnRate130("event_obstacle_center_vehicle", near = false))
+        assertEquals(1_952L, TtsDurations.zhCnRate130("event_obstacle_center_vehicle", near = true))
+        assertEquals(null, TtsDurations.zhCnRate130("event_blocked", near = true))
+    }
 }

@@ -108,7 +108,11 @@ internal class PromptPolicyCaptureEvaluation(private val phone: PhoneGeometrySet
                     (if (incomplete.isEmpty()) " (complete)" else " (INCOMPLETE: ${incomplete.joinToString("; ")})") +
                     "; exact replay ${exact.framesReplayed} frames, exact ${exact.exact}",
             )
-            appendLine("  geometry: ${geometry.description}; phone height ${fmt(phone.heightMeters)} m (${phone.source.name.lowercase()})")
+            // Every run here is the device's own decision stream, so distances use the phone height the
+            // device used; the evaluation's height is applied only where geometry is not recorded.
+            val used = session.regressionFrames.firstNotNullOfOrNull { it.geometry }?.let { "${fmt(it.phoneHeightM)} m (${it.heightSource.lowercase()}, as recorded)" }
+                ?: "${fmt(phone.heightMeters)} m (${phone.source.name.lowercase()})"
+            appendLine("  geometry: ${geometry.description}; phone height used for distances $used")
             appendLine("  track births identical in the exact and all_delivered runs: ${if (birthsPair) "yes" else "NO"} (${births.births.size} births)")
             append(PromptPolicyReport.render(listOf(result)))
             append(calibration.render(if (evidence.completionKnown) "against the lifecycle" else "against revokes only, default durations"))
@@ -130,7 +134,8 @@ internal class PromptPolicyCaptureEvaluation(private val phone: PhoneGeometrySet
         val durations = if (credit == null) {
             emptyMap()
         } else {
-            val keyOf = frames.mapNotNull { f -> f.offeredId?.let { it to f.decided.first().messageKey } }.toMap()
+            // Keyed by wording, not only by message key: the NEAR prefix adds about 0.6 s (D1.7).
+            val keyOf = frames.mapNotNull { f -> f.offeredId?.let { it to f.decided.first().let { e -> e.messageKey to e.isNear } } }.toMap()
             credit.byLogicalId.values.mapNotNull { logical ->
                 val key = keyOf[logical.logicalId] ?: return@mapNotNull null
                 val attempt = logical.attempts.firstOrNull { it.startedAtNanos != null && it.doneAtNanos != null } ?: return@mapNotNull null
@@ -140,11 +145,17 @@ internal class PromptPolicyCaptureEvaluation(private val phone: PhoneGeometrySet
         val inputs = mutableListOf<SpeakerModel.Input>()
         val actual = HashMap<String, SpeakerModel.Actual>()
         val offered = HashSet<String>()
+        val sources = sortedMapOf<String, Int>()
         for (f in frames) {
             val event = f.decided.firstOrNull() ?: continue
             val id = f.offeredId ?: continue
             offered += id
-            inputs += SpeakerModel.Offer(f.decidedAt, id, event.priority.value, event.expiresAt, durations[event.messageKey] ?: SpeakerModel.DEFAULT_DURATION_MS)
+            // This capture's own measurement of the wording, else the D1.7 table, else the default.
+            val (source, duration) = durations[event.messageKey to event.isNear]?.let { "measured" to it }
+                ?: TtsDurations.zhCnRate130(event.messageKey, event.isNear)?.let { "d1.7 table" to it }
+                ?: ("default" to SpeakerModel.DEFAULT_DURATION_MS)
+            sources.merge(source, 1, Int::plus)
+            inputs += SpeakerModel.Offer(f.decidedAt, id, event.priority.value, event.expiresAt, duration)
             val critical = event.priority == EventPriority.CRITICAL
             actual[id] = if (credit == null) {
                 SpeakerModel.Actual(accepted = f.offeredReceived, critical = critical)
@@ -152,6 +163,7 @@ internal class PromptPolicyCaptureEvaluation(private val phone: PhoneGeometrySet
                 val logical = credit[id]
                 SpeakerModel.Actual(
                     accepted = logical?.neverAccepted == false,
+                    refusal = logical?.attempts?.firstNotNullOfOrNull { a -> a.records.firstOrNull { it.event == UtteranceRecordEvents.REFUSED }?.reason } ?: if (logical == null) "no_record" else null,
                     startedAtMs = logical?.firstStartedAtNanos?.let { it / 1e6 },
                     doneAtMs = logical?.completedAtNanos?.let { it / 1e6 },
                     critical = critical,
@@ -168,7 +180,7 @@ internal class PromptPolicyCaptureEvaluation(private val phone: PhoneGeometrySet
                 inputs += SpeakerModel.Queued(submitted.elapsedRealtimeNanos / 1_000_000, logical.logicalId, submitted.priority, duration, submitted.owner)
             }
         }
-        return SpeakerModel.Calibration(SpeakerModel().run(inputs), actual)
+        return SpeakerModel.Calibration(SpeakerModel().run(inputs), actual, durationSources = sources)
     }
 
     private fun fmt(v: Float) = String.format(Locale.ROOT, "%.2f", v)
