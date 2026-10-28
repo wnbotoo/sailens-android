@@ -42,43 +42,56 @@ class PromptPolicyBaselineTest {
         assertTrue("no capture under $path", captures.isNotEmpty() || sealed.isNotEmpty())
         assumeTrue(SealedCaptures.refusalMessage(path, sealed.size), captures.isNotEmpty())
 
-        val evaluated = captures.mapNotNull { dir -> evaluation.evaluate(CaptureSessionReader.read(dir).orThrow())?.let { dir to it } }
-        val results = evaluated.map { it.second }
+        val results = captures.mapNotNull { evaluation.evaluate(CaptureSessionReader.read(it).orThrow()) }
         val problems = results.flatMap { it.problems }
         val complete = results.filter { it.complete && it.evaluation != null }
 
-        // A sentence's duration never comes from the capture being scored (threshold note §3.2): a
-        // sealed capture takes the table frozen from C; a calibration capture takes the median over
-        // the other calibration captures (leave one out), so C's numbers are as independent as S's.
-        val samples = evaluated.filter { !SealedCaptures.isSealed(it.first) }.associate { (_, r) -> r.id to r.speaker?.measured.orEmpty() }
-        fun durationsFor(dir: File, r: PromptPolicyCaptureEvaluation.Result) =
-            if (SealedCaptures.isSealed(dir)) SpeakerDurations.FROZEN_C else SpeakerDurations.pooled(samples.filterKeys { it != r.id }.values.flatten(), "other captures")
-        val calibrations = evaluated.associate { (dir, r) -> r.id to r.speaker?.calibrate(durationsFor(dir, r)) }
-        val reports = results.associate { it.id to it.report(calibrations[it.id]) }
+        // A sentence's duration never comes from the capture being scored (threshold note §3.2). The
+        // set a capture belongs to comes from the frozen list (D18Sets), never from the SEALED marker,
+        // which only gates access: an S capture takes the table frozen from C; a C capture takes the
+        // median over the other C captures (leave one out); any other capture is not scored.
+        val samples = results.filter { D18Sets.of(it.id) == D18Sets.Group.CALIBRATION }.associate { it.id to it.speaker?.measured.orEmpty() }
+        fun durationsFor(r: PromptPolicyCaptureEvaluation.Result) = when (D18Sets.of(r.id)) {
+            D18Sets.Group.CALIBRATION -> SpeakerDurations.pooled(samples.filterKeys { it != r.id }.values.flatten(), "other C captures")
+            D18Sets.Group.SEALED -> SpeakerDurations.FROZEN_C
+            null -> null
+        }
+        val calibrations = results.associate { r -> r.id to durationsFor(r)?.let { r.speaker?.calibrate(it) } }
+        val reports = results.associate { it.id to it.report(calibrations[it.id], D18Sets.of(it.id)) }
         results.filter { it.evaluable }.forEach { File(out, "${it.id}.detfirst.txt").writeText(reports.getValue(it.id)) }
         val table = SpeakerDurations.pooled(samples.values.flatten(), "c table").wordings.toSortedMap(compareBy({ it.first }, { it.second }))
         File(out, "speaker-durations-pooled.txt").writeText(table.entries.joinToString("\n") { (w, ms) -> "    entry(\"${w.first}\", ${w.second}, $ms)," } + "\n")
+        // With all of C here, its pooled table must still be the frozen one, or S would be scored on a
+        // table nobody reviewed.
+        val tableProblem = if (samples.keys == D18Sets.CALIBRATION && table != SpeakerDurations.FROZEN_C.wordings) {
+            "the duration table pooled over C differs from SpeakerDurations.FROZEN_C"
+        } else {
+            null
+        }
+        val allProblems = problems + listOfNotNull(tableProblem)
 
         val summary = buildString {
             appendLine(
                 "det-first PR-0 baseline, phone height preset ${String.format(Locale.ROOT, "%.2f", height)} m " +
                     "(only for captures without recorded geometry; each capture says which height its distances use)",
             )
-            appendLine("captures ${results.size}, complete and evaluated ${complete.size}; problems ${problems.size}; sealed and skipped ${sealed.size}")
-            problems.forEach { appendLine("  $it") }
+            appendLine("captures ${results.size}, complete and evaluated ${complete.size}; problems ${allProblems.size}; sealed and skipped ${sealed.size}")
+            allProblems.forEach { appendLine("  $it") }
             appendLine()
             appendLine("ALL COMPLETE CAPTURES")
             append(PromptPolicyReport.render(complete.mapNotNull { it.evaluation }))
             // Pooled only over captures whose lifecycle was recorded in full, like the stage counts.
             val recorded = complete.filter { it.evaluation?.evidence == PromptPolicyEvaluation.LifecycleEvidence.RECORDED }
             recorded.mapNotNull { calibrations[it.id] }.reduceOrNull(SpeakerModel.Calibration::plus)
-                ?.let { append(it.render("against the lifecycle, all complete captures with a recorded lifecycle; sealed: frozen C table, others: leave one out")) }
-            recorded.mapNotNull { it.speaker?.calibrate(SpeakerDurations.D17_ONLY) }.reduceOrNull(SpeakerModel.Calibration::plus)
+                ?.let { append(it.render("against the lifecycle, all complete captures with a recorded lifecycle; S: frozen C table, C: leave one out")) }
+            recorded.filter { D18Sets.of(it.id) != null }.mapNotNull { it.speaker?.calibrate(SpeakerDurations.D17_ONLY) }.reduceOrNull(SpeakerModel.Calibration::plus)
                 ?.let { append(it.render("for reference: the D1.7 table alone")) }
+            val unknown = results.count { D18Sets.of(it.id) == null }
+            if (unknown > 0) appendLine("  speaker model: $unknown capture(s) in neither frozen D1.8 set, not scored")
             if (samples.isNotEmpty()) {
                 val same = table == SpeakerDurations.FROZEN_C.wordings
                 appendLine(
-                    "  duration table pooled over the ${samples.size} unsealed captures: ${table.size} wordings; equals the frozen C table: ${if (same) "yes" else "NO"}; " +
+                    "  duration table pooled over ${samples.size} of the ${D18Sets.CALIBRATION.size} C captures: ${table.size} wordings; equals the frozen C table: ${if (same) "yes" else "NO"}; " +
                         "D1.7 fallback offset of the frozen table ${SpeakerDurations.FROZEN_C.d17OffsetMs} ms",
                 )
             }
@@ -86,7 +99,7 @@ class PromptPolicyBaselineTest {
         }
         File(out, "detfirst-baseline.txt").writeText(summary)
         println(summary)
-        assertTrue("evaluation problems: $problems", problems.isEmpty())
+        assertTrue("evaluation problems: $allProblems", allProblems.isEmpty())
         assertTrue("no complete model_regression capture was evaluated under $path", complete.isNotEmpty())
     }
 }

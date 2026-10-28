@@ -7,7 +7,7 @@ is opened: the `SpeakerModel` calibration thresholds (D1.4-2) and the D2–D4 su
 This note proposes both, plus the questions the user has to decide. **It uses the calibration/baseline
 set (C) only**; no tool that shows results has opened S.
 
-> **Status: proposal, revision 2 (after review round 1), not frozen.** Freezing takes all three: the user decides every item of
+> **Status: proposal, revision 3 (after review round 2), not frozen.** Freezing takes all three: the user decides every item of
 > section 5 (done 2026-10-28, every recommendation accepted); the GPT review has no findings;
 > the freezing commit is written into the "threshold freeze" line of the local assignment file
 > `detfirst-d18\assignment.csv`. Until that line is filled in, S may not be used for any metric.
@@ -38,7 +38,7 @@ set (C) only**; no tool that shows results has opened S.
   no number of the C report outside the speaker model (compared line by line):
   1. the speaker model takes a sentence's duration by **wording** (message key plus whether it
      carries the NEAR prefix), no longer by message key alone;
-  2. durations **never come from the capture being scored** (revision 2, review P1-1): S takes the
+  2. durations **never come from the capture being scored** (revision 2, review round 1 P1-1): S takes the
      frozen C table; each C capture takes the median over the other 13 (leave one out); a wording
      missing there falls back to the D1.7 duration table (zh-CN, rate 1.30), and only then to the
      1.4 s default;
@@ -46,7 +46,10 @@ set (C) only**; no tool that shows results has opened S.
      disagreements by the refusing side's reason, where durations came from, exclusions by reason
      (X2, X3, X5), a block pooled over all of C, and a reference block with the D1.7 table alone;
   4. the report states the phone height its distances use, counted per frame (revision 2: no longer
-     the first frame's only).
+     the first frame's only);
+  5. revision 3: which capture is C or S comes from a frozen session list, not the `SEALED` marker; the
+     X3 and X5 windows run on until both speakers are idle; X3 also opens on `speak_error` and
+     `speak_failed`.
 
 ## 2. C baseline (the reference for the success thresholds)
 
@@ -92,7 +95,7 @@ device's), predicts accept/refuse and the start and end times, and is compared w
 The columns differ only in where a sentence's duration comes from:
 
 - **PR-0**: by message key alone, from the capture's own lifecycle;
-- **revision 1**: by wording, from the capture's own lifecycle -- **not independent** (review P1-1),
+- **revision 1**: by wording, from the capture's own lifecycle -- **not independent** (review round 1 P1-1),
   kept for comparison only;
 - **revision 2 (what the thresholds rest on)**: by wording, **leave one out** (each capture's
   durations from the other 13), falling back to the D1.7 table plus the offset below.
@@ -139,11 +142,17 @@ and has to pass too (it does now). Four principles:
 
 - **Durations do not come from the capture being scored.** Revision 1 took durations by wording from
   the capture's own lifecycle and then predicted that same capture's end times; a wording finished
-  once was "predicted" to the millisecond (review P1-1), so the 69 ms done error was not independent.
+  once was "predicted" to the millisecond (review round 1 P1-1), so the 69 ms done error was not independent.
   Now S uses only the **frozen C duration table** (`SpeakerDurations.FROZEN_C`: per wording, the median
   over all 14 C captures, then the D1.7 table plus a 45 ms offset, then the 1.4 s default), and S's own lifecycle is used for
   scoring only; C's numbers are **leave one out** (each capture's durations from the other 13), as
   independent as S's. Section 3.1's numbers are computed that way.
+  Whether a capture belongs to C or S is decided by the frozen session list (`D18Sets`: the 14 + 13
+  session ids recorded in the assignment file), **not by the `SEALED` marker**: the marker only governs
+  whether a capture may be looked at (the recording plan lets it be removed after the freeze), and
+  removing it must not make S a source of the duration table (review round 2 P1-1). A capture on
+  neither list is not scored by the speaker model. With all of C present, C's pooled table must equal
+  the frozen one, or the test fails.
 - **Stricter on the experiment arm's "spoken to the end".** In a counterfactual evaluation, the
   experiment arm's "the model thinks it was spoken to the end and it was not" hides a regression
   (unsafe), so completion precision and CRITICAL "the model accepts / completes and the device did not"
@@ -208,14 +217,18 @@ counterfactual (§4.2: unless resolved by its one rule, they count as regression
 |---|---|---|---|
 | X1 | Captures without a full lifecycle | Evidence other than RECORDED (none, dropped or unreconciled events, a screen-reader session): the whole capture stays out of calibration and the model is not used on it | 0 captures |
 | X2 | Logical utterances with an evidence conflict | Out of calibration and out of acceptance; more than 1% of S's offers fails calibration | 0 |
-| X3 | Engine failure and restart windows | The record gives the model no engine readiness. Every offer from an engine generation's first `error`, `unknown_terminal` or "engine not ready / speak error" refusal until the next generation's first `started` (or the end of the session if there is none) is excluded; more than 2% of S's offers fails calibration | 0 (all generation 1) |
+| X3 | Engine failure and restart windows | The record gives the model no engine readiness. Every offer from an engine generation's first `error`, `unknown_terminal`, refusal for "engine not ready" (`engine_not_ready`) or "speak error" (`speak_error`), or queue forgotten for `speak_failed`, until the next generation's first `started` (or the end of the session if there is none), extended until **both** the device's and the model's speaker are idle, is excluded; more than 2% of S's offers fails calibration | 0 (all generation 1) |
 | X4 | Prompts with no outcome when the record ends | Out of the timing errors only; accept/refuse counted as usual | counted separately in the S report |
-| X5 | Offers while a system notice or a description holds the speaker | Offers from its submission to its last lifecycle record (or submission + duration, whichever is later) are not scored; more than 2% of S's offers fails calibration | 0 (C has no description or notice) |
+| X5 | Offers while a system notice or a description holds the speaker | Offers from its submission to its last lifecycle record (or submission + duration, whichever is later), extended until **both** the device's and the model's speaker are idle, are not scored; more than 2% of S's offers fails calibration | 0 (C has no description or notice) |
 
 X5 is new in revision 2. The model still queues notices and descriptions, but their durations can
 only come from this capture's own lifecycle (their texts vary; there is no table). Per section 3.2 a
 scored prediction may not use the scored capture's lifecycle, so offers in that time are not scored;
-the lifecycle only frees the speaker at the right moment. X2, X3 and X5 are implemented in code
+the lifecycle only frees the speaker at the right moment. Revision 3: the X3 and X5 windows both run
+on until **both the device's and the model's speaker are idle** (review round 2 P1-2's
+counterexample: the device's notice ends at 1 990 ms, the model's at 2 000 ms, and an offer at
+1 995 ms still rests on the notice's duration). Until then the model's predictions can still depend
+on the excluded stretch indirectly. X2, X3 and X5 are implemented in code
 (`PromptPolicyCaptureEvaluation.speakerInputs`), and the calibration report counts exclusions by
 reason.
 
@@ -223,7 +236,8 @@ reason.
 
 - **Frozen are the thresholds and the model itself**: `SpeakerModel.kt`,
   `PromptPolicyCaptureEvaluation.speakerInputs`, `SpeakerDurations.kt` (with the frozen C duration
-  table) and `TtsDurations.kt` as of the freezing commit. Any later
+  table), `D18Sets.kt` (which capture is C and which is S) and `TtsDurations.kt` as of the freezing
+  commit. Any later
   change to one of them needs a new calibration; if S is open by then, it can no longer calibrate the
   changed model, and a new sealed set has to be recorded.
 - **Failing on S** (any of A1–A12, or X2/X3/X5 over their limit): per plan D1.4-3, D3 (PR-1b) is judged
@@ -246,11 +260,10 @@ reason.
   disagreements come from, and it cannot be removed.
 - C spoke only 28 wordings to the end. Counterfactual runs will offer more wordings never finished
   (NEAR sentences for other zone combinations, for example); those use the D1.7 table plus 45 ms,
-  coarser than a measured wording. So each run reports the fallback offers per arm, and **in the
-  experiment arm** a prompt whose duration comes from the fallback counts as spoken to the end only if
-  nothing cuts it until 150 ms (A10's limit) after its predicted end (this can only lower the
-  experiment arm's completions: the conservative direction). This is implemented with counterfactual
-  delivery (PR-1b).
+  coarser than a measured wording. Each run reports the fallback offers per arm; the experiment arm
+  perturbs them twice as much (R10).
+- R10 perturbs **all sentences together** toward longer or shorter; combinations where different
+  sentences err in opposite directions are not covered.
 
 ## 4. (b) D2–D4 success thresholds (Q6)
 
@@ -304,6 +317,28 @@ reason.
   - The implementation comes with the first counterfactual PR (PR-1b), and must turn the review's
     counterexample into a test: a track the experiment arm admits at the side first, classed
     `person/front` by the reference run, still counts as `person/front`.
+  - R9 only answers "for the hazards in the reference cohort, did the experiment speak better". Hazards
+    new in the experiment arm, reported apart and bound by M4, are checked only for part of their
+    false-alarm behaviour; it **does not show their recall or lead time**, and the acceptance record
+    says so rather than counting it as evidence of a pass.
+- **R10 The experiment arm's completions are judged robustly.** The model's durations and start
+  times carry errors (C's |done| p95 70 ms, A10 allows 150 ms; the 45 ms offset is a median, not an
+  upper bound). A sentence that ends a few tens of milliseconds before a higher-priority prompt
+  arrives is "spoken to the end" for the model and may be cut off for real (review round 2 P1-3's
+  counterexample: "前方有行人" is 1 285 ms in the frozen table, and 40 ms longer for real cuts it off).
+  A4 and A7 are overall rates and cannot rule out such a false completion of one stage. So a stage of
+  the experiment arm counts as spoken to the end (M5's kept, and M1 and M2's successes) only if it is
+  spoken to the end in **every** one of these runs:
+  - the nominal run;
+  - every sentence's duration +δ;
+  - every sentence's duration −δ;
+  - every sentence's duration +δ, with the start latency +150 ms.
+  δ = 150 ms (A10's limit); for a wording whose duration comes from the D1.7 fallback, δ = 300 ms. Each
+  run recomputes the arbitration in full: accept/refuse, interruptions, cooldown revokes and the
+  offers after them. A stage spoken to the end in the nominal run but not in one perturbed run is
+  undeterminable in M5 (§4.2, counted as a regression) and no success in M1 or M2. The baseline arm is
+  not perturbed: it only decides whether the model reproduces the device. This can only make the
+  experiment look worse; the thresholds stay. Implemented with PR-1b.
 
 ### 4.2 M5, no regression (for the shipped combination)
 
@@ -320,17 +355,21 @@ both arms does not guarantee that the errors cancel. Hence the rules below.
 - For each stage of P, both arms run closed loop on the model (R3):
   - **the baseline arm reproduces** it: the baseline arm speaks it to the end, first completion within
     0.5 s of t_dev;
-  - **the experiment arm keeps** it: the experiment arm speaks it to the end, first completion
-    ≤ t_dev + 0.5 s.
+  - **the experiment arm keeps** it: the experiment arm speaks it to the end **robustly** (R10), with
+    its first completion ≤ t_dev + 0.5 s in every run.
   - Experiment arm keeps it → **kept**.
   - Experiment arm does not keep it, baseline arm reproduces it → **regression** (the model
     reproduces the device here, so the difference can only come from the experiment).
   - Experiment arm does not keep it, baseline arm does not reproduce it either → **undeterminable**:
     the model cannot be trusted here. The only way to resolve it: there is a time t0 (no later than
     the stage's first offer in the device record) at which the device, the baseline arm and the
-    experiment arm all have an idle speaker, and from t0 to t_dev + 0.5 s all three offer the same
-    prompts one for one (time, wording, priority). Then the experiment changed nothing on the speaker
-    in that time, the device's outcome is the experiment arm's, and it counts as kept. **Every other
+    experiment arm all have an idle speaker, and from t0 to t_dev + 0.5 s **every input** all three
+    give the speaker is the same one for one: each prompt's time, wording, priority, expiry and speaker
+    rank (after PR-1b), and every notice, description, cancellation, requeue and engine readiness
+    change (on the device's side, as its lifecycle records them). Then the experiment changed nothing
+    on the speaker in that time, the device's outcome is the experiment arm's, and it counts as kept.
+    If any of these cannot be shown equal from the records, it is not resolved (review round 2 P2-1:
+    comparing only time, wording and priority, a different expiry can reverse the outcome). **Every other
     undeterminable stage counts as a regression** (blocking); a manual review cannot resolve it.
 - A stage that was only received does not count; neither does another hazard or an earlier ordinary
   prompt (plan §4).

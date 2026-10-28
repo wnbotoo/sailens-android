@@ -164,5 +164,47 @@ class SpeakerModelTest {
             ),
         )
         assertEquals(listOf(1_000L until 2_000L, 3_000L..Long.MAX_VALUE), windows)
+        // speak() returning ERROR opens one too.
+        val speakError = PromptPolicyCaptureEvaluation.engineFailureWindows(
+            listOf(r(UtteranceRecordEvents.REFUSED, 1_000, 1, "speak_error"), r(UtteranceRecordEvents.STARTED, 2_000, 2)),
+        )
+        assertEquals(listOf(1_000L until 2_000L), speakError)
+    }
+
+    @Test
+    fun `an exclusion runs on until neither speaker holds anything`() {
+        // The device's notice ends at 1 990 ms, the model's (its recorded duration) at 2 000 ms: the
+        // offer at 1 995 ms still rests on the notice's duration, so it is excluded too.
+        val inputs = PromptPolicyCaptureEvaluation.SpeakerInputs(
+            offers = listOf(
+                PromptPolicyCaptureEvaluation.OfferInput(1_995, "o1", 3, 4_000, "event_obstacle_center_person" to false),
+                PromptPolicyCaptureEvaluation.OfferInput(6_000, "o2", 3, 9_000, "event_obstacle_center_person" to false),
+            ),
+            queued = listOf(Queued(0, "notice", priority = null, durationMs = 2_000)),
+            actual = mapOf(
+                "o1" to SpeakerModel.Actual(accepted = true),
+                "o2" to SpeakerModel.Actual(accepted = true),
+            ),
+            excluded = emptyMap(),
+            windows = listOf(0L..1_990L to "x5 notice or description speaking"),
+            deviceBusy = listOf(0L..1_990L),
+            measured = emptyList(),
+            label = "test",
+        )
+        val c = inputs.calibrate(SpeakerDurations.FROZEN_C)
+        assertEquals(mapOf("x5 notice or description speaking" to 1), c.excluded)
+        assertEquals(1, c.n)
+        assertEquals(2_000L, PromptPolicyCaptureEvaluation.idleFrom(1_990, listOf(0L..1_990L, 0L..2_000L)))
+        assertEquals(3_500L, PromptPolicyCaptureEvaluation.idleFrom(1_000, listOf(0L..2_000L, 1_900L..3_500L)))
+        assertEquals(5_000L, PromptPolicyCaptureEvaluation.idleFrom(5_000, listOf(0L..2_000L)))
+    }
+
+    @Test
+    fun `the D1_8 sets are fixed by session id and do not overlap`() {
+        assertEquals(14, D18Sets.CALIBRATION.size)
+        assertEquals(13, D18Sets.SEALED.size)
+        assertTrue(D18Sets.CALIBRATION.intersect(D18Sets.SEALED).isEmpty())
+        assertEquals(D18Sets.Group.SEALED, D18Sets.of("66adf21f-64bf-4a42-9948-5dab8b715902"))
+        assertEquals(null, D18Sets.of("00000000-0000-0000-0000-000000000000"))
     }
 }

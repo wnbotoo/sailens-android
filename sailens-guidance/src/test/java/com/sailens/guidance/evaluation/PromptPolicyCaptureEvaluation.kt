@@ -37,8 +37,12 @@ internal class PromptPolicyCaptureEvaluation(private val phone: PhoneGeometrySet
         val evaluation: PromptPolicyEvaluation.Result?,
         val speaker: SpeakerInputs?,
     ) {
-        fun report(calibration: SpeakerModel.Calibration?): String =
-            if (calibration == null || speaker == null) text else text + calibration.render(speaker.label)
+        fun report(calibration: SpeakerModel.Calibration?, set: D18Sets.Group?): String = when {
+            speaker == null -> text
+            set == null -> text + "  speaker model: not scored -- the capture is in neither frozen D1.8 set (D18Sets)\n"
+            calibration == null -> text
+            else -> text + calibration.render("${speaker.label}, ${set.name.lowercase()} set")
+        }
     }
 
     /**
@@ -51,8 +55,12 @@ internal class PromptPolicyCaptureEvaluation(private val phone: PhoneGeometrySet
         private val offers: List<OfferInput>,
         private val queued: List<SpeakerModel.Queued>,
         private val actual: Map<String, SpeakerModel.Actual>,
-        /** Offer id to the exclusion named in advance that leaves it out of the score. */
+        /** Offer id to an exclusion that holds whatever the model predicts (X2). */
         private val excluded: Map<String, String>,
+        /** Windows that start an exclusion (X3, X5), each running on until both speakers are idle. */
+        private val windows: List<Pair<LongRange, String>>,
+        /** When the device's speaker held something: each accepted attempt, submission to its last record. */
+        private val deviceBusy: List<LongRange>,
         val measured: List<Pair<Wording, Long>>,
         val label: String,
     ) {
@@ -63,7 +71,18 @@ internal class PromptPolicyCaptureEvaluation(private val phone: PhoneGeometrySet
                 sources.merge(source, 1, Int::plus)
                 SpeakerModel.Offer(o.atMs, o.id, o.priority, o.expiresAtMs, duration)
             } + queued
-            return SpeakerModel.Calibration(SpeakerModel().run(inputs), actual, sources, excluded)
+            val predictions = SpeakerModel().run(inputs)
+            // An exclusion ends only where neither speaker holds anything: until then what the model
+            // predicts can still rest on the excluded stretch -- a notice the model frees 10 ms after
+            // the device did still decides the next offer.
+            val modelBusy = predictions.mapNotNull { p -> if (p.accepted && p.startAtMs != null && p.endAtMs != null) p.startAtMs..p.endAtMs else null }
+            val busy = deviceBusy + modelBusy
+            val all = HashMap(excluded)
+            for ((window, why) in windows) {
+                val end = idleFrom(window.last, busy)
+                for (o in offers) if (o.id !in all && o.atMs >= window.first && o.atMs <= end) all[o.id] = why
+            }
+            return SpeakerModel.Calibration(predictions, actual, sources, all)
         }
     }
 
@@ -162,11 +181,11 @@ internal class PromptPolicyCaptureEvaluation(private val phone: PhoneGeometrySet
      * description and haptics-only delivery: descriptive, and labelled so.
      *
      * Exclusions named in advance (threshold note §3.3) leave an offer unscored: X2 its lifecycle
-     * contradicts itself; X3 it was decided in an engine failure window -- from a generation's first
-     * `error`, `unknown_terminal` or "engine not ready" refusal to the first `started` of a later
-     * generation (the record does not give the model the engine's readiness); X5 it was decided while
-     * a notice or a description held the speaker -- their durations can only come from this
-     * capture's own lifecycle, which must not decide a scored offer.
+     * contradicts itself; X3 it was decided in an engine failure window ([engineFailureWindows]; the
+     * record does not give the model the engine's readiness); X5 it was decided while a notice or a
+     * description held the speaker -- their durations can only come from this capture's own
+     * lifecycle, which must not decide a scored offer. X3 and X5 run on until neither the device's
+     * speaker nor the model's holds anything ([SpeakerInputs.calibrate]).
      */
     private fun speakerInputs(
         frames: List<PromptPolicyEvaluation.Frame>,
@@ -200,10 +219,15 @@ internal class PromptPolicyCaptureEvaluation(private val phone: PhoneGeometrySet
         }
         val queued = mutableListOf<SpeakerModel.Queued>()
         val excluded = HashMap<String, String>()
+        val windows = mutableListOf<Pair<LongRange, String>>()
+        val deviceBusy = mutableListOf<LongRange>()
         val measured = mutableListOf<Pair<Wording, Long>>()
         if (credit != null && evidence.completionKnown) {
-            val held = mutableListOf<LongRange>()
             for (logical in credit.byLogicalId.values) {
+                for (a in logical.attempts) {
+                    val from = a.submittedAtNanos ?: continue
+                    deviceBusy += from / 1_000_000..a.records.maxOf { it.elapsedRealtimeNanos } / 1_000_000
+                }
                 val wording = wordingOf[logical.logicalId]
                 if (wording != null) {
                     if (logical.evidenceConflict) excluded[logical.logicalId] = "x2 evidence conflict"
@@ -217,28 +241,34 @@ internal class PromptPolicyCaptureEvaluation(private val phone: PhoneGeometrySet
                 val duration = if (attempt.startedAtNanos != null && attempt.doneAtNanos != null) (attempt.doneAtNanos - attempt.startedAtNanos) / 1_000_000 else SpeakerModel.DEFAULT_DURATION_MS
                 queued += SpeakerModel.Queued(submitted.elapsedRealtimeNanos / 1_000_000, logical.logicalId, submitted.priority, duration, submitted.owner)
                 val end = attempt.records.maxOf { it.elapsedRealtimeNanos } / 1_000_000
-                held += submitted.elapsedRealtimeNanos / 1_000_000..maxOf(end, submitted.elapsedRealtimeNanos / 1_000_000 + duration)
+                windows += submitted.elapsedRealtimeNanos / 1_000_000..maxOf(end, submitted.elapsedRealtimeNanos / 1_000_000 + duration) to "x5 notice or description speaking"
             }
-            val failures = engineFailureWindows(session.utterances)
-            for (o in offers) {
-                if (o.id in excluded) continue
-                when {
-                    failures.any { o.atMs in it } -> excluded[o.id] = "x3 engine failure window"
-                    held.any { o.atMs in it } -> excluded[o.id] = "x5 notice or description speaking"
-                }
-            }
+            engineFailureWindows(session.utterances).forEach { windows += it to "x3 engine failure window" }
+            windows.sortBy { if (it.second.startsWith("x3")) 0 else 1 }
         }
         val label = if (evidence.completionKnown) "against the lifecycle" else "against revokes only"
-        return SpeakerInputs(offers, queued, actual, excluded, measured, label)
+        return SpeakerInputs(offers, queued, actual, excluded, windows, deviceBusy, measured, label)
     }
 
     private fun fmt(v: Float) = String.format(Locale.ROOT, "%.2f", v)
 
     internal companion object {
-        /** sailens-output's `UtteranceReasons.ENGINE_NOT_READY` (not a dependency of this module). */
+        // sailens-output's `UtteranceReasons` (not a dependency of this module).
         private const val ENGINE_NOT_READY = "engine_not_ready"
+        private const val SPEAK_ERROR = "speak_error"
+        private const val SPEAK_FAILED = "speak_failed"
 
-        /** X3: from a generation's first sign of failure to the first `started` of a later generation (or the end). */
+        /** The first moment at or after [t] that lies inside none of [busy]. */
+        fun idleFrom(t: Long, busy: List<LongRange>): Long {
+            var end = t
+            while (true) end = busy.filter { it.first <= end && it.last > end }.maxOfOrNull { it.last } ?: return end
+        }
+
+        /**
+         * X3: from a generation's first sign of failure (`error`, `unknown_terminal`, a refusal for
+         * "engine not ready" or `speak_error`, a queue forgotten for `speak_failed`) to the first
+         * `started` of a later generation, or the end.
+         */
         fun engineFailureWindows(utterances: List<RegressionUtteranceRecord>): List<LongRange> {
             val records = utterances.sortedBy { it.elapsedRealtimeNanos }
             val windows = mutableListOf<LongRange>()
@@ -256,7 +286,8 @@ internal class PromptPolicyCaptureEvaluation(private val phone: PhoneGeometrySet
                     continue
                 }
                 val failing = r.event == UtteranceRecordEvents.ERROR || r.event == UtteranceRecordEvents.UNKNOWN_TERMINAL ||
-                    (r.event == UtteranceRecordEvents.REFUSED && r.reason == ENGINE_NOT_READY)
+                    (r.event == UtteranceRecordEvents.REFUSED && (r.reason == ENGINE_NOT_READY || r.reason == SPEAK_ERROR)) ||
+                    (r.event == UtteranceRecordEvents.CANCELLED && r.reason == SPEAK_FAILED)
                 if (failing) failedFrom = at to (r.engineGeneration ?: latest)
             }
             failedFrom?.let { windows += it.first..Long.MAX_VALUE }
