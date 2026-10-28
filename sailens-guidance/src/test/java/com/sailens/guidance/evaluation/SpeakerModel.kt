@@ -11,8 +11,8 @@ import kotlin.math.abs
  * engine is not ready, or when speech of equal or higher priority is still live (queued or speaking
  * and not past its deadline); accepted, it flushes the queue and starts now -- and its queueing of
  * system notices and descriptions (QUEUE_ADD, behind what is queued). What it cannot know comes in
- * as inputs: each sentence's duration (measured from the lifecycle, or the TTS duration table), the
- * engine's readiness, notices and descriptions.
+ * as inputs: each sentence's duration ([SpeakerDurations]: from other captures or the TTS duration
+ * table, never from the capture being scored), the engine's readiness, notices and descriptions.
  *
  * **Calibration is a gate, not a report.** Until thresholds are frozen in `docs/experiments/` before
  * the sealed acceptance set is looked at, its output is descriptive only and accepts nothing
@@ -132,11 +132,22 @@ internal class SpeakerModel(private val startLatencyMs: Long = 0) {
      */
     class Calibration private constructor(
         private val pairs: List<Pair<Prediction, Actual>>,
-        /** Where each offer's duration came from ("measured", "d1.7 table", "default"), counted. */
+        /** Where each offer's duration came from ("c table", "d1.7 table", "default"), counted. */
         val durationSources: Map<String, Int>,
+        /** Offers left out by an exclusion named in advance (X2, X3, X5 of the threshold note), by exclusion. */
+        val excluded: Map<String, Int>,
     ) {
-        constructor(predictions: List<Prediction>, actual: Map<String, Actual>, durationSources: Map<String, Int> = emptyMap()) :
-            this(predictions.mapNotNull { p -> actual[p.id]?.let { p to it } }, durationSources)
+        /** Offers in [excluded] (id to exclusion) are run through the model but not scored. */
+        constructor(
+            predictions: List<Prediction>,
+            actual: Map<String, Actual>,
+            durationSources: Map<String, Int> = emptyMap(),
+            excluded: Map<String, String> = emptyMap(),
+        ) : this(
+            predictions.mapNotNull { p -> if (p.id in excluded) null else actual[p.id]?.let { p to it } },
+            durationSources,
+            excluded.filterKeys { it in actual }.values.groupingBy { it }.eachCount().toSortedMap(),
+        )
 
         val n = pairs.size
         val acceptedBoth = pairs.count { (p, a) -> p.accepted && a.accepted }
@@ -186,6 +197,7 @@ internal class SpeakerModel(private val startLatencyMs: Long = 0) {
                     "model completes/device did not $criticalCompletionOverclaimed",
             )
             if (disagreements.isNotEmpty()) appendLine("    disagreements: ${disagreements.entries.joinToString { "${it.key} ${it.value}" }}")
+            if (excluded.isNotEmpty()) appendLine("    excluded, not scored: ${excluded.entries.joinToString { "${it.key} ${it.value}" }}")
             if (durationSources.isNotEmpty()) {
                 appendLine("    offer durations by wording: ${durationSources.entries.joinToString { "${it.key} ${it.value}" }} (default ${DEFAULT_DURATION_MS} ms)")
             }
@@ -197,10 +209,9 @@ internal class SpeakerModel(private val startLatencyMs: Long = 0) {
         }
 
         /** This and [other] as one set (offer ids are unique across captures). */
-        operator fun plus(other: Calibration) = Calibration(
-            pairs + other.pairs,
-            (durationSources.keys + other.durationSources.keys).associateWith { (durationSources[it] ?: 0) + (other.durationSources[it] ?: 0) }.toSortedMap(),
-        )
+        operator fun plus(other: Calibration) = Calibration(pairs + other.pairs, sum(durationSources, other.durationSources), sum(excluded, other.excluded))
+
+        private fun sum(a: Map<String, Int>, b: Map<String, Int>) = (a.keys + b.keys).associateWith { (a[it] ?: 0) + (b[it] ?: 0) }.toSortedMap()
 
         private fun ratio(a: Int, b: Int) = if (b == 0) "-" else String.format(Locale.ROOT, "%.3f", a.toDouble() / b)
         private fun quantiles(errors: List<Double>): String {

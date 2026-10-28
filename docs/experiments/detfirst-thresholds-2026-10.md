@@ -7,7 +7,7 @@ is opened: the `SpeakerModel` calibration thresholds (D1.4-2) and the D2–D4 su
 This note proposes both, plus the questions the user has to decide. **It uses the calibration/baseline
 set (C) only**; no tool that shows results has opened S.
 
-> **Status: proposal, not frozen.** Freezing takes all three: the user decides every item of
+> **Status: proposal, revision 2 (after review round 1), not frozen.** Freezing takes all three: the user decides every item of
 > section 5 (done 2026-10-28, every recommendation accepted); the GPT review has no findings;
 > the freezing commit is written into the "threshold freeze" line of the local assignment file
 > `detfirst-d18\assignment.csv`. Until that line is filled in, S may not be used for any metric.
@@ -38,12 +38,15 @@ set (C) only**; no tool that shows results has opened S.
   no number of the C report outside the speaker model (compared line by line):
   1. the speaker model takes a sentence's duration by **wording** (message key plus whether it
      carries the NEAR prefix), no longer by message key alone;
-  2. a wording this capture never spoke to the end falls back to the D1.7 duration table (zh-CN,
-     rate 1.30), and only one missing from the table to the 1.4 s default;
+  2. durations **never come from the capture being scored** (revision 2, review P1-1): S takes the
+     frozen C table; each C capture takes the median over the other 13 (leave one out); a wording
+     missing there falls back to the D1.7 duration table (zh-CN, rate 1.30), and only then to the
+     1.4 s default;
   3. the calibration report adds agreement on being spoken to the end, CRITICAL errors by direction,
-     disagreements by the refusing side's reason, where durations came from, and a line pooled over
-     all of C;
-  4. the report states the phone height its distances use.
+     disagreements by the refusing side's reason, where durations came from, exclusions by reason
+     (X2, X3, X5), a block pooled over all of C, and a reference block with the D1.7 table alone;
+  4. the report states the phone height its distances use, counted per frame (revision 2: no longer
+     the first frame's only).
 
 ## 2. C baseline (the reference for the success thresholds)
 
@@ -86,80 +89,120 @@ undeterminable.
 
 The speaker model takes every prompt the device actually offered (open loop: the offer stream is the
 device's), predicts accept/refuse and the start and end times, and is compared with the lifecycle.
+The columns differ only in where a sentence's duration comes from:
 
-| | Before (PR-0 report) | After (this PR) |
-|---|---|---|
-| Accept: precision / recall | 0.946 / 0.931 | 0.965 / 0.957 |
-| Refuse: precision / recall | 0.976 / 0.981 | 0.985 / 0.987 |
-| Spoken to the end: precision / recall | (not counted) | 0.956 / 0.951 |
-| CRITICAL misjudged (both directions) | 33 | 21 (1.7% of 1 244 CRITICAL offers) |
-| CRITICAL: model accepts, device refused / model completes, device did not | (not counted) | 10 (0.8%) / 12 (1.0%) |
-| \|start\| error p50 / p95 (pooled) | per capture 6–9 / 10–103 ms | 7 / 62 ms (per capture p95 10–103) |
-| \|done\| error p50 / p95 (pooled) | per capture 7–46 / 11–734 ms | 12 / 69 ms (per capture p95 11–81) |
-| Worst capture: accept precision / completion precision | 0.867 / — | 0.905 / 0.886 (both C-P-02) |
-| Durations from: this capture / D1.7 table / default | — / — / all unmeasured | 2 068 / 304 / 0 |
+- **PR-0**: by message key alone, from the capture's own lifecycle;
+- **revision 1**: by wording, from the capture's own lifecycle -- **not independent** (review P1-1),
+  kept for comparison only;
+- **revision 2 (what the thresholds rest on)**: by wording, **leave one out** (each capture's
+  durations from the other 13), falling back to the D1.7 table plus the offset below.
 
-- Before, seven captures had a done-error p95 of 658–734 ms, because a sentence with the "注意，"
-  (NEAR) prefix -- about +0.6 s in Chinese, D1.7 -- shared one duration with the sentence without it.
-  Taken by wording, the done error is back to tens of milliseconds, and accept/refuse disagreements
-  fall from 76 to 49. 304 offers have a wording this capture never spoke to the end and now take
-  the D1.7 duration; on C that predicts exactly what the 1.4 s default did (no number changed). It is
-  there for later counterfactual runs, which will offer wordings the baseline never finished (more
-  NEAR sentences, for one): the default would make a ~2 s NEAR sentence too short, which errs
-  towards "it was finished", the dangerous direction.
-- C has no description, no system notice and no engine restart (every capture has only engine
-  generation 1); every device refusal is "equal or higher is speaking" (`outranked`). The remaining
-  disagreements are therefore all **boundary moments**: a new prompt arrives in the tens of
-  milliseconds around the end of a sentence, and the two sides order them differently.
-- The worst capture is C-P-02 (hospital corridor, about 4.4 min and 341 offers, the most offers per
-  minute): accept precision 0.905, completion precision 0.886, all 17 disagreements of the boundary
-  kind above. It is not excluded; A11's per-capture floor leaves room for it.
+| | PR-0 | Revision 1 (not independent) | Revision 2: leave one out | Reference: D1.7 table alone |
+|---|---|---|---|---|
+| Accept: precision / recall | 0.946 / 0.931 | 0.965 / 0.957 | **0.954 / 0.934** | 0.911 / 0.912 |
+| Refuse: precision / recall | 0.976 / 0.981 | 0.985 / 0.987 | **0.977 / 0.984** | 0.968 / 0.968 |
+| Spoken to the end: precision / recall | (not counted) | 0.956 / 0.951 | **0.950 / 0.931** | 0.895 / 0.903 |
+| CRITICAL accept/refuse misjudged (both directions, of 1 244) | 33 | 21 | **36 (2.9%)** | 54 |
+| CRITICAL: model accepts, device refused / model completes, device did not | (not counted) | 10 / 12 | **16 (1.3%) / 17 (1.4%)** | 28 / 30 |
+| \|start\| error p50 / p95 (pooled) | per capture 6–9 / 10–103 ms | 7 / 62 ms | **7 / 61 ms** | 7 / 61 ms |
+| \|done\| error p50 / p95 (pooled) | per capture 7–46 / 11–734 ms | 12 / 69 ms | **20 / 70 ms** | 54 / 106 ms |
+| Worst capture: accept precision / completion precision | 0.867 / — | 0.905 / 0.886 | **0.880 / 0.860** (C-O2-02) | — |
+| Duration sources | own capture | own 2 068 / D1.7 304 | **other captures 2 333 / D1.7 39** / default 0 | D1.7 2 372 |
+
+- In PR-0, seven captures had a done-error p95 of 658–734 ms, because sentences with the "注意，"
+  prefix (about +0.6 s in Chinese, D1.7) shared one duration with those without. Keying by wording is
+  right and stays in revision 2.
+- Revision 1's numbers flatter: a wording finished once predicts itself, with zero end-time error.
+  Leave one out costs about 1–2 points on accept and on completion, and CRITICAL misjudgements rise
+  from 21 to 36. **Revision 2's thresholds rest on the leave-one-out numbers** (section 3.2).
+- **The D1.7 table alone is clearly worse** (completion precision 0.895): on the device a sentence
+  runs from `started` to `done` some 40–50 ms longer than D1.7 timed it alone (for example "前方有车辆"
+  1 237 vs 1 193 ms, with the prefix 2 000 vs 1 952 ms), which flips the call at the end-of-sentence
+  boundary. So what is frozen is the **C table**: per wording, the median over all 14 C captures, 28
+  wordings (`SpeakerDurations.FROZEN_C`). A wording missing from it falls back to the D1.7 table plus
+  the median difference over the 28 wordings both have (45 ms, range −10 to +66 ms): a too-short
+  duration leans toward "spoken to the end", the direction that hides a regression.
+- C contains no description, no system notice and no engine restart (all 14 captures ran on engine
+  generation 1), so X2, X3 and X5 exclude nothing; the device's refusals are all "equal or higher
+  priority speaking" (`outranked`). The remaining 69 disagreements are all **boundary moments**: a
+  new prompt arrives in the few tens of milliseconds in which a sentence ends, and the two sides
+  order the events differently.
+- The worst capture is C-O2-02 (outdoor, about 5.8 min and 254 offers; its manifest scene name
+  repeats the discarded C-O2-01): accept precision 0.880, completion precision 0.860, and of its 165
+  CRITICAL offers the model accepts 6 the device refused. It is not excluded; A11's per-capture floor
+  leaves room for it.
 
 ### 3.2 Thresholds
 
 Computed on S, **pooled over all S sessions** with a fully recorded lifecycle; C is reported as well
-and has to pass too (it does now). Three principles:
+and has to pass too (it does now). Four principles:
 
-- **Stricter in the dangerous direction.** In a counterfactual evaluation, "the model thinks it was
-  spoken to the end and it was not" hides a regression (unsafe); "the model thinks it was not and it
-  was" only makes the experiment look worse (conservative). So completion precision and CRITICAL
-  "the model accepts / completes and the device did not" get thresholds of their own.
-- **Below C's values, leaving room for sampling error.** S should have about 2 000 offers and about
-  550 receipts; the standard error of accept precision is about 0.8 points.
+- **Durations do not come from the capture being scored.** Revision 1 took durations by wording from
+  the capture's own lifecycle and then predicted that same capture's end times; a wording finished
+  once was "predicted" to the millisecond (review P1-1), so the 69 ms done error was not independent.
+  Now S uses only the **frozen C duration table** (`SpeakerDurations.FROZEN_C`: per wording, the median
+  over all 14 C captures, then the D1.7 table plus a 45 ms offset, then the 1.4 s default), and S's own lifecycle is used for
+  scoring only; C's numbers are **leave one out** (each capture's durations from the other 13), as
+  independent as S's. Section 3.1's numbers are computed that way.
+- **Stricter on the experiment arm's "spoken to the end".** In a counterfactual evaluation, the
+  experiment arm's "the model thinks it was spoken to the end and it was not" hides a regression
+  (unsafe), so completion precision and CRITICAL "the model accepts / completes and the device did not"
+  get thresholds of their own. Revision 1 took the other direction (the baseline arm's "not spoken to
+  the end") to be merely conservative; the review showed it removes protected stages from M5. Revision
+  2's M5 takes the device's real completions as the protected set (§4.2), which makes that direction
+  conservative.
+- **Below C's values, leaving room for sampling error.** S should have about 2 000 offers, about 550
+  receipts and about 1 100 CRITICAL offers; each threshold sits about 2.5–3.5 standard errors (at S's
+  expected counts) below C's leave-one-out value. Revision 1's thresholds were set on numbers that
+  were not independent; revision 2 resets them on the leave-one-out numbers, which loosens A2, A3, A4,
+  A6–A8 and A11 (a revision before S opens, under R6: the reasons and the C evidence are this section
+  and section 3.1).
 - **Timing limits well inside M5's 0.5 s tolerance**, or M5's "no later than the baseline by more
   than 0.5 s" means nothing.
 
-| # | Metric | Threshold (S pooled) | C pooled |
-|---|---|---|---|
-| A1 | Accept precision | ≥ 0.93 | 0.965 |
-| A2 | Accept recall | ≥ 0.92 | 0.957 |
-| A3 | Refuse precision / recall | each ≥ 0.97 | 0.985 / 0.987 |
-| A4 | Completion precision (model completes → device completed) | ≥ 0.93 | 0.956 |
-| A5 | Completion recall | ≥ 0.90 | 0.951 |
-| A6 | CRITICAL: model accepts, device refused | ≤ 1.5% of CRITICAL offers | 10 / 1 244 (0.8%) |
-| A7 | CRITICAL: model completes, device did not | ≤ 1.5% of CRITICAL offers | 12 / 1 244 (1.0%) |
-| A8 | CRITICAL, both directions | ≤ 3% of CRITICAL offers | 21 / 1 244 (1.7%) |
-| A9 | \|start\| error p95 | ≤ 150 ms | 62 ms |
-| A10 | \|done\| error p95 | ≤ 150 ms | 69 ms |
-| A11 | Per-capture floor: captures with ≥ 50 offers, accept precision and completion precision | each ≥ 0.85 | lowest 0.905 / 0.886 (C-P-02) |
-| A12 | Closed-loop check (below) | three parts, below | to be measured on C once PR-1b implements it |
+| # | Metric | Threshold (S pooled) | Revision 1 | C pooled (leave one out) |
+|---|---|---|---|---|
+| A1 | Accept precision | ≥ 0.93 | 0.93 | 0.954 |
+| A2 | Accept recall | ≥ 0.90 | 0.92 | 0.934 |
+| A3 | Refuse precision / recall | each ≥ 0.965 | 0.97 | 0.977 / 0.984 |
+| A4 | Completion precision (model completes → device completed) | ≥ 0.92 | 0.93 | 0.950 |
+| A5 | Completion recall | ≥ 0.90 | 0.90 | 0.931 |
+| A6 | CRITICAL: model accepts, device refused | ≤ 2.5% of CRITICAL offers | 1.5% | 16 / 1 244 (1.3%) |
+| A7 | CRITICAL: model completes, device did not | ≤ 2.5% of CRITICAL offers | 1.5% | 17 / 1 244 (1.4%) |
+| A8 | CRITICAL accept/refuse misjudged, both directions | ≤ 4.5% of CRITICAL offers | 3% | 36 / 1 244 (2.9%) |
+| A9 | \|start\| error p95 | ≤ 150 ms | 150 ms | 61 ms |
+| A10 | \|done\| error p95 | ≤ 150 ms | 150 ms | 70 ms |
+| A11 | Per-capture floor: captures with ≥ 50 offers, accept precision and completion precision | each ≥ 0.80 | 0.85 | lowest 0.880 / 0.860 (C-O2-02) |
+| A12 | Closed-loop check (below) | four parts, below | three parts | to be measured on C once PR-1b implements it |
+
+The model stays usable for M5 after the loosening because revision 2's M5 no longer needs the model's
+errors to cancel between the arms: errors in the baseline arm only add undeterminable stages
+(conservative), and the experiment arm's "spoken to the end" is bound by A4 and A7.
 
 **A12 closed-loop check.** Section 3.1 is open loop: the offers come from the device. A
 counterfactual run is closed loop: a refusal by the model revokes the cooldown and changes later
 offers. Agreement in the open loop is not agreement in the closed loop. So one more check: rerun
-today's policy with `SPEAKER_MODEL` delivery, **the recorded phone height (1.2 m)** and the recorded
-configuration, and compare with the device, hazard stage by hazard stage, whether each CRITICAL and
-NEAR stage was spoken to the end -- of the stages the device completed, the model completes ≥ 0.90;
-of the stages the model completes, the device completed ≥ 0.90; and the total count spoken to the end
-differs by at most 10%. `SPEAKER_MODEL` delivery does not exist yet (it is part of PR-1b / PR-2); once
-it does, it is **measured on C first, and if C fails, S is not opened** (the model or the threshold is
-revised under rule R6 of section 4.1).
+today's policy with `SPEAKER_MODEL` delivery, **the recorded phone height (1.2 m)**, the recorded
+configuration and section 3.2's duration rule (S: the frozen C table; C: leave one out), and compare
+with the device stage by stage over §4.2's protected set P (R9's reference cohort):
+
+| # | Metric | Threshold |
+|---|---|---|
+| A12a | Stage recall: of P's stages, the share the model also speaks to the end with its first completion within 0.5 s of the device's (§4.2's "baseline arm reproduces") | front vehicles' and front persons' CRITICAL and "blocked" ≥ 0.95; all of P ≥ 0.90 |
+| A12b | Stage precision: of the protected-kind stages the model speaks to the end, the share the device did too | ≥ 0.90 |
+| A12c | First completion time: stages both spoke to the end, p95 of \|model − device\| | ≤ 250 ms (M5's tolerance is 0.5 s) |
+| A12d | Total spoken to the end | differs by ≤ 10% |
+
+A stage A12a does not reproduce becomes undeterminable in §4.2 and most likely counts as a
+regression, hence the stricter front CRITICAL limit. `SPEAKER_MODEL` delivery does not exist yet (it
+is part of PR-1b / PR-2); once it does, it is **measured on C first, and if C fails, S is not
+opened** (the model or the threshold is revised under rule R6 of section 4.1).
 
 ### 3.3 Exclusions named in advance
 
 These are the only exclusions. Where one applies, the model **may not be used**: the stages
 concerned are judged on device evidence only in an acceptance, and are "undeterminable" in a
-counterfactual.
+counterfactual (§4.2: unless resolved by its one rule, they count as regressions).
 
 | # | Exclusion | Rule | On C |
 |---|---|---|---|
@@ -167,17 +210,23 @@ counterfactual.
 | X2 | Logical utterances with an evidence conflict | Out of calibration and out of acceptance; more than 1% of S's offers fails calibration | 0 |
 | X3 | Engine failure and restart windows | The record gives the model no engine readiness. Every offer from an engine generation's first `error`, `unknown_terminal` or "engine not ready / speak error" refusal until the next generation's first `started` (or the end of the session if there is none) is excluded; more than 2% of S's offers fails calibration | 0 (all generation 1) |
 | X4 | Prompts with no outcome when the record ends | Out of the timing errors only; accept/refuse counted as usual | counted separately in the S report |
+| X5 | Offers while a system notice or a description holds the speaker | Offers from its submission to its last lifecycle record (or submission + duration, whichever is later) are not scored; more than 2% of S's offers fails calibration | 0 (C has no description or notice) |
 
-Descriptions and system notices are **not** excluded: the model queues them. But C contains none, so
-that path is uncalibrated (3.5).
+X5 is new in revision 2. The model still queues notices and descriptions, but their durations can
+only come from this capture's own lifecycle (their texts vary; there is no table). Per section 3.2 a
+scored prediction may not use the scored capture's lifecycle, so offers in that time are not scored;
+the lifecycle only frees the speaker at the right moment. X2, X3 and X5 are implemented in code
+(`PromptPolicyCaptureEvaluation.speakerInputs`), and the calibration report counts exclusions by
+reason.
 
 ### 3.4 What is frozen; what happens if it fails
 
 - **Frozen are the thresholds and the model itself**: `SpeakerModel.kt`,
-  `PromptPolicyCaptureEvaluation.calibrate` and `TtsDurations.kt` as of the freezing commit. Any later
+  `PromptPolicyCaptureEvaluation.speakerInputs`, `SpeakerDurations.kt` (with the frozen C duration
+  table) and `TtsDurations.kt` as of the freezing commit. Any later
   change to one of them needs a new calibration; if S is open by then, it can no longer calibrate the
   changed model, and a new sealed set has to be recorded.
-- **Failing on S** (any of A1–A12, or X2/X3 over their limit): per plan D1.4-3, D3 (PR-1b) is judged
+- **Failing on S** (any of A1–A12, or X2/X3/X5 over their limit): per plan D1.4-3, D3 (PR-1b) is judged
   on device data only; M5 for D2 and D4 can only be reported at the receipt level, labelled "not
   completion-verified", and **no switch may be flipped on it** (§4 M5). PR-4 then waits for a new batch
   of device recordings.
@@ -192,8 +241,16 @@ that path is uncalibrated (3.5).
 - Queueing of descriptions and system notices is uncalibrated. If D4a's mode notice or D5's notices
   enter a counterfactual run, their durations and queueing are measured the D1.7 way and verified on
   the device.
-- Durations are medians per wording; one wording varies by a dozen or so milliseconds between plays.
-  That is where the remaining boundary disagreements come from, and it cannot be removed.
+- Durations are C's medians per wording; one wording varies by a few tens of milliseconds between
+  captures and plays (leave-one-out done error median 20 ms). That is where the remaining boundary
+  disagreements come from, and it cannot be removed.
+- C spoke only 28 wordings to the end. Counterfactual runs will offer more wordings never finished
+  (NEAR sentences for other zone combinations, for example); those use the D1.7 table plus 45 ms,
+  coarser than a measured wording. So each run reports the fallback offers per arm, and **in the
+  experiment arm** a prompt whose duration comes from the fallback counts as spoken to the end only if
+  nothing cuts it until 150 ms (A10's limit) after its predicted end (this can only lower the
+  experiment arm's completions: the conservative direction). This is implemented with counterfactual
+  delivery (PR-1b).
 
 ## 4. (b) D2–D4 success thresholds (Q6)
 
@@ -225,22 +282,69 @@ that path is uncalibrated (3.5).
   parameters are frozen. The parameter freeze gets a line of its own (Q14).
 - **R8 Intervals reported.** Ratio metrics are judged on the point estimate, with a Wilson 95%
   interval reported (not used for the decision).
+- **R9 Reference hazard cohort: both arms are scored on one set.** Revision 1 fixed only the NEAR
+  definition. The review pointed out that today's evaluator classes a hazard by its category and
+  bearing **when its first stage appears**: a metric threshold makes a hazard appear earlier, possibly
+  at the side first, so it is classed `person/side` and leaves the front denominator. Therefore:
+  - hazard identity = the track (birth-order ids injected by the replay); both arms and the device's
+    exact replay must give birth to the same tracks (R3).
+  - **The reference cohort = the hazards appearing in the device's exact replay** (today's policy, the
+    run behind the C report), with category and bearing by that run's rule, frozen. An experiment
+    that changes when a hazard appears does not change which class it belongs to.
+  - Denominators follow the reference cohort: M1's "front person first" = hazards whose reference
+    class is `person/front`; M2's NEAR denominator = hazards whose NEAR stage appeared in the reference
+    run by today's definition; M5's P uses the same cohort. The experiment arm speaking the matching
+    wording to the end for the same hazard (first: any prompt that speaks of it; NEAR: the NEAR
+    wording) counts, whatever bearing the experiment arm would class it under.
+  - Whether a crossing can be bracketed, an undetermined order and an unknowable end are decided by the
+    track's own fresh distance samples alone (`LeadTime`), independent of the policy; both arms and
+    the reference run use the same samples.
+  - Hazards new in the experiment arm, absent from the reference cohort, stay out of M1, M2 and M5's
+    denominators and are reported apart; M4 (C4, C5, C8) binds them.
+  - The implementation comes with the first counterfactual PR (PR-1b), and must turn the review's
+    counterexample into a test: a track the experiment arm admits at the side first, classed
+    `person/front` by the reference run, still counts as `person/front`.
 
 ### 4.2 M5, no regression (for the shipped combination)
 
-- **Scope**: every CRITICAL and NEAR stage the baseline arm spoke to the end (CRITICAL includes the
-  single stage of "blocked" and of a covered camera), plus front persons' first stage (a front
-  person's first prompt is at least HIGH but not necessarily CRITICAL).
-- **A regression** = in the experiment arm, the same stage of the same hazard is not spoken to the
-  end, or is spoken to the end more than 0.5 s later than in the baseline arm. A stage that was only
-  received does not count; neither does another hazard or an earlier ordinary prompt (plan §4).
+Revision 1 ran both arms on the model and took the protected set from the model's baseline arm. The
+review pointed out that a stage the device did speak to the end but the model misses in the baseline
+arm never enters the protected set, so the experiment arm dropping it is no regression; one model in
+both arms does not guarantee that the errors cancel. Hence the rules below.
+
+- **The protected set P comes from the device, not the model.** P = every CRITICAL and NEAR stage the
+  device spoke to the end on S (CRITICAL includes the single stage of "blocked" and of a covered
+  camera), plus front persons' first stage (a front person's first prompt is at least HIGH but not
+  necessarily CRITICAL). Hazards and stages follow R9's reference cohort; a stage's completion time
+  t_dev = the device's first completion. Whatever the model judges, no stage leaves P.
+- For each stage of P, both arms run closed loop on the model (R3):
+  - **the baseline arm reproduces** it: the baseline arm speaks it to the end, first completion within
+    0.5 s of t_dev;
+  - **the experiment arm keeps** it: the experiment arm speaks it to the end, first completion
+    ≤ t_dev + 0.5 s.
+  - Experiment arm keeps it → **kept**.
+  - Experiment arm does not keep it, baseline arm reproduces it → **regression** (the model
+    reproduces the device here, so the difference can only come from the experiment).
+  - Experiment arm does not keep it, baseline arm does not reproduce it either → **undeterminable**:
+    the model cannot be trusted here. The only way to resolve it: there is a time t0 (no later than
+    the stage's first offer in the device record) at which the device, the baseline arm and the
+    experiment arm all have an idle speaker, and from t0 to t_dev + 0.5 s all three offer the same
+    prompts one for one (time, wording, priority). Then the experiment changed nothing on the speaker
+    in that time, the device's outcome is the experiment arm's, and it counts as kept. **Every other
+    undeterminable stage counts as a regression** (blocking); a manual review cannot resolve it.
+- A stage that was only received does not count; neither does another hazard or an earlier ordinary
+  prompt (plan §4).
 - **Threshold M5**:
-  - front vehicles' and front persons' CRITICAL stages and "blocked": **0 regressions**;
-  - over the whole scope: regressions ≤ max(2, 1% of the baseline arm's completed stages);
-  - every regression is reviewed by hand on a contact sheet and written into the acceptance record;
-    the review is for understanding the cause and **exempts nothing**.
-- The same comparison of "device baseline vs experiment arm" (the device's real completion vs the
-  model) is reported, not judged.
+  - front vehicles' and front persons' CRITICAL stages and "blocked": **0 regressions** (counting the
+    undeterminable ones that count as regressions);
+  - over the whole scope: regressions ≤ max(2, 1% of |P|);
+  - every regression and every undeterminable stage is reviewed by hand on a contact sheet and written
+    into the acceptance record; the review is for understanding the cause and **exempts nothing**.
+- All counts are reported: kept, regressed, undeterminable (resolved / counted as regressions). The
+  same comparison of "the model's baseline arm vs the experiment arm" is reported, not judged.
+- Directions: the model thinking "not spoken to the end" in the experiment arm only adds regressions
+  (conservative); thinking "spoken to the end" hides one, which A4 and A7 bound; a miss in the
+  baseline arm only adds undeterminable stages (conservative).
 
 ### 4.3 PR-1b (D3a-2 approach escalation, D3b speaker ranking, D3c remove neither)
 
@@ -256,8 +360,9 @@ that path is uncalibrated (3.5).
 | B8 | Device: own TTS and TalkBack each run the scripted cases listed in PR-1b's detailed design | all pass | — |
 
 - M2 counts its denominator with **today's NEAR definition**, not the experiment field (Q4's 2.0 m):
-  otherwise widening NEAR would change the denominator by itself. A NEAR wording spoken earlier in the
-  experiment counts as success as long as it is the same hazard.
+  otherwise widening NEAR would change the denominator by itself. Category and bearing follow R9's
+  reference cohort, so the experiment cannot change whether a hazard counts as "front" either. A NEAR
+  wording spoken earlier in the experiment counts as success as long as it is the same hazard.
 - D1.6 (held by a same-priority cooldown) goes to about 0 by definition after D3a-2; it is reported,
   not a threshold. The real thresholds are B1–B3.
 
@@ -279,7 +384,9 @@ that path is uncalibrated (3.5).
 - **There is circularity here**: the metric threshold uses M3a's ground-contact estimate, and M1's
   crossing is measured by the same estimator. Part of C1/C2's improvement is therefore by
   construction. The independent checks are C8 (user labels), C4/C5 (false-alarm proxies) and R4's
-  height sensitivity.
+  height sensitivity. They bound false alarms; they **do not independently prove lead time at true
+  distances**, so Q1, Q4 and Q8's values are candidates under test, and passing on S shows they hold
+  under this estimator only. Denominators follow R9's reference cohort.
 - Static obstacles get no distance threshold (coverage 0–25% on C, undeterminable); only M4 and M5
   bind them.
 
@@ -329,6 +436,7 @@ gradlew :sailens-guidance:testDebugUnitTest --tests "*PromptPolicyBaselineTest*"
 
 The report is at `sailens-guidance/build/replay/detfirst-baseline.txt`. On this PR it differs from
 `detfirst-d18\reports\detfirst-baseline-C-2026-10-28.txt` only in the header, the speaker-model lines
-(including the new pooled block) and each capture's geometry line; every other line is identical.
+(including the pooled block, the D1.7-only reference block and the duration-table line) and each
+capture's geometry line; every other line is identical.
 Do not run it on `sealed`; until both the threshold-freeze and parameter-freeze lines are filled in,
 `-PunsealCapture` is not used.

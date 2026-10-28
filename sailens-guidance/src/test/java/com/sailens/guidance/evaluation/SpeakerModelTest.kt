@@ -2,6 +2,8 @@ package com.sailens.guidance.evaluation
 
 import com.sailens.guidance.evaluation.SpeakerModel.Offer
 import com.sailens.guidance.evaluation.SpeakerModel.Queued
+import com.sailens.guidance.trace.capture.RegressionUtteranceRecord
+import com.sailens.guidance.trace.capture.UtteranceRecordEvents
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -117,5 +119,50 @@ class SpeakerModelTest {
         assertEquals(1_193L, TtsDurations.zhCnRate130("event_obstacle_center_vehicle", near = false))
         assertEquals(1_952L, TtsDurations.zhCnRate130("event_obstacle_center_vehicle", near = true))
         assertEquals(null, TtsDurations.zhCnRate130("event_blocked", near = true))
+    }
+
+    @Test
+    fun `durations come from other captures, then the D1_7 table, then the default`() {
+        val wording = "event_obstacle_center_vehicle" to true
+        val pooled = SpeakerDurations.pooled(listOf(wording to 2_100L, wording to 1_900L, wording to 2_000L), "other captures")
+        assertEquals("other captures" to 2_000L, pooled.of(wording))
+        // D1.7 has the NEAR wording at 1 952 ms: the device measured 48 ms longer, which carries over.
+        assertEquals(48L, pooled.d17OffsetMs)
+        assertEquals("d1.7 table" to 1_193L + 48, pooled.of("event_obstacle_center_vehicle" to false))
+        assertEquals("default" to SpeakerModel.DEFAULT_DURATION_MS, pooled.of("event_blocked" to true))
+        assertEquals("d1.7 table" to 1_193L, SpeakerDurations.D17_ONLY.of("event_obstacle_center_vehicle" to false))
+        assertEquals(45L, SpeakerDurations.FROZEN_C.d17OffsetMs)
+    }
+
+    @Test
+    fun `an excluded offer is run but not scored, and is counted by exclusion`() {
+        val predictions = model.run(listOf(Offer(0, "a", 3, 3_000, 1_000), Offer(100, "b", 3, 3_100, 1_000)))
+        val actual = mapOf(
+            "a" to SpeakerModel.Actual(accepted = true, startedAtMs = 0.0, doneAtMs = 1_000.0),
+            "b" to SpeakerModel.Actual(accepted = true),
+        )
+        val c = SpeakerModel.Calibration(predictions, actual, excluded = mapOf("b" to "x3 engine failure window"))
+        assertEquals(1, c.n)
+        assertEquals(0, c.refusedPredictedOnly)
+        assertEquals(mapOf("x3 engine failure window" to 1), c.excluded)
+        assertEquals(mapOf("x3 engine failure window" to 2), (c + c).excluded)
+    }
+
+    @Test
+    fun `an engine failure window runs from the first sign of failure to a later generation's first start`() {
+        fun r(event: String, atMs: Long, generation: Long?, reason: String? = null) =
+            RegressionUtteranceRecord(event, attemptId = "x$atMs", logicalId = "x$atMs", engineGeneration = generation, elapsedRealtimeNanos = atMs * 1_000_000, reason = reason)
+        val windows = PromptPolicyCaptureEvaluation.engineFailureWindows(
+            listOf(
+                r(UtteranceRecordEvents.STARTED, 100, 1),
+                r(UtteranceRecordEvents.ERROR, 1_000, 1),
+                r(UtteranceRecordEvents.REFUSED, 1_200, null, "engine_not_ready"),
+                // The failed generation starting again does not end it.
+                r(UtteranceRecordEvents.STARTED, 1_500, 1),
+                r(UtteranceRecordEvents.STARTED, 2_000, 2),
+                r(UtteranceRecordEvents.REFUSED, 3_000, null, "engine_not_ready"),
+            ),
+        )
+        assertEquals(listOf(1_000L until 2_000L, 3_000L..Long.MAX_VALUE), windows)
     }
 }

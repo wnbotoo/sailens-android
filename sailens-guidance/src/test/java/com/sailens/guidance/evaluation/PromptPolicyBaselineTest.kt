@@ -42,10 +42,22 @@ class PromptPolicyBaselineTest {
         assertTrue("no capture under $path", captures.isNotEmpty() || sealed.isNotEmpty())
         assumeTrue(SealedCaptures.refusalMessage(path, sealed.size), captures.isNotEmpty())
 
-        val results = captures.mapNotNull { evaluation.evaluate(CaptureSessionReader.read(it).orThrow()) }
+        val evaluated = captures.mapNotNull { dir -> evaluation.evaluate(CaptureSessionReader.read(dir).orThrow())?.let { dir to it } }
+        val results = evaluated.map { it.second }
         val problems = results.flatMap { it.problems }
         val complete = results.filter { it.complete && it.evaluation != null }
-        results.filter { it.evaluable }.forEach { File(out, "${it.id}.detfirst.txt").writeText(it.text) }
+
+        // A sentence's duration never comes from the capture being scored (threshold note §3.2): a
+        // sealed capture takes the table frozen from C; a calibration capture takes the median over
+        // the other calibration captures (leave one out), so C's numbers are as independent as S's.
+        val samples = evaluated.filter { !SealedCaptures.isSealed(it.first) }.associate { (_, r) -> r.id to r.speaker?.measured.orEmpty() }
+        fun durationsFor(dir: File, r: PromptPolicyCaptureEvaluation.Result) =
+            if (SealedCaptures.isSealed(dir)) SpeakerDurations.FROZEN_C else SpeakerDurations.pooled(samples.filterKeys { it != r.id }.values.flatten(), "other captures")
+        val calibrations = evaluated.associate { (dir, r) -> r.id to r.speaker?.calibrate(durationsFor(dir, r)) }
+        val reports = results.associate { it.id to it.report(calibrations[it.id]) }
+        results.filter { it.evaluable }.forEach { File(out, "${it.id}.detfirst.txt").writeText(reports.getValue(it.id)) }
+        val table = SpeakerDurations.pooled(samples.values.flatten(), "c table").wordings.toSortedMap(compareBy({ it.first }, { it.second }))
+        File(out, "speaker-durations-pooled.txt").writeText(table.entries.joinToString("\n") { (w, ms) -> "    entry(\"${w.first}\", ${w.second}, $ms)," } + "\n")
 
         val summary = buildString {
             appendLine(
@@ -58,10 +70,19 @@ class PromptPolicyBaselineTest {
             appendLine("ALL COMPLETE CAPTURES")
             append(PromptPolicyReport.render(complete.mapNotNull { it.evaluation }))
             // Pooled only over captures whose lifecycle was recorded in full, like the stage counts.
-            complete.filter { it.evaluation?.evidence == PromptPolicyEvaluation.LifecycleEvidence.RECORDED }
-                .mapNotNull { it.calibration }.reduceOrNull(SpeakerModel.Calibration::plus)
-                ?.let { append(it.render("against the lifecycle, all complete captures with a recorded lifecycle")) }
-            results.forEach { appendLine().append(it.text) }
+            val recorded = complete.filter { it.evaluation?.evidence == PromptPolicyEvaluation.LifecycleEvidence.RECORDED }
+            recorded.mapNotNull { calibrations[it.id] }.reduceOrNull(SpeakerModel.Calibration::plus)
+                ?.let { append(it.render("against the lifecycle, all complete captures with a recorded lifecycle; sealed: frozen C table, others: leave one out")) }
+            recorded.mapNotNull { it.speaker?.calibrate(SpeakerDurations.D17_ONLY) }.reduceOrNull(SpeakerModel.Calibration::plus)
+                ?.let { append(it.render("for reference: the D1.7 table alone")) }
+            if (samples.isNotEmpty()) {
+                val same = table == SpeakerDurations.FROZEN_C.wordings
+                appendLine(
+                    "  duration table pooled over the ${samples.size} unsealed captures: ${table.size} wordings; equals the frozen C table: ${if (same) "yes" else "NO"}; " +
+                        "D1.7 fallback offset of the frozen table ${SpeakerDurations.FROZEN_C.d17OffsetMs} ms",
+                )
+            }
+            results.forEach { appendLine().append(reports.getValue(it.id)) }
         }
         File(out, "detfirst-baseline.txt").writeText(summary)
         println(summary)
