@@ -409,7 +409,7 @@ class SceneAnalysisViewModel(
     private fun deliver(event: SceneEvent, state: SceneAnalysisUiState): GuidanceDeliveryResult = deliverGuidanceEvent(
         speechEnabled = state.isSpeechEnabled,
         screenReaderActive = state.isScreenReaderActive,
-        speechEngineReady = speechManager.isReady,
+        speechEngineReady = { speechManager.isReady },
         hapticsEnabled = state.isHapticsEnabled,
         // 屏幕阅读器接管时走 shell 唯一的播报出口：描述屏在最上面时，这个屏幕的界面根本没有被
         // 组合，自己收的话这句会被静默丢掉。语速/音量/语言跟随用户在 TalkBack 里的既有设置。

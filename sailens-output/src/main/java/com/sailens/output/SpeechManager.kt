@@ -93,6 +93,13 @@ public class SpeechManager(
     private val _state = MutableStateFlow(SpeechEngineState.IDLE)
     public val state: StateFlow<SpeechEngineState> = _state.asStateFlow()
 
+    /** Whether the engine still speaks after it came up; see [SpeechEngineHealth]. Main thread. */
+    private val health = SpeechEngineHealth()
+
+    private fun setState(state: SpeechEngineState) {
+        _state.value = health.reported(state)
+    }
+
     public val isReady: Boolean get() = _isReady
 
     /**
@@ -189,7 +196,7 @@ public class SpeechManager(
         }
 
         isInitializing = true
-        _state.value = SpeechEngineState.INITIALIZING
+        setState(SpeechEngineState.INITIALIZING)
         val attempt = ++initAttempt
         logger.info(
             TAG,
@@ -324,9 +331,11 @@ public class SpeechManager(
                     "textLength" to text.length,
                 )
             )
+            onSubmitFailed(text.length)
             return false
         } else {
             lifecycle.submitted(utteranceId)
+            onSubmitAccepted()
             lifecycle.removed(ledger.flushAndAdd(entry), UtteranceEventKind.SUPERSEDED, reason = null)
             logger.debug(
                 TAG,
@@ -373,8 +382,10 @@ public class SpeechManager(
                 lifecycle.submitFailed(utteranceId)
                 releaseAudioFocus()
                 logger.warning(TAG, "TTS system notice failed")
+                onSubmitFailed(text.length)
             } else {
                 lifecycle.submitted(utteranceId)
+                onSubmitAccepted()
                 ledger.add(
                     submission.copy(expiresAtMs = priority?.let { SystemClock.elapsedRealtime() + PROTECTED_NOTICE_MAX_MS }),
                 )
@@ -457,7 +468,39 @@ public class SpeechManager(
             return false
         }
         lifecycle.submitted(entry.id)
+        onSubmitAccepted()
         return true
+    }
+
+    /**
+     * The engine refused a submission. Unless the text was too long, it has stopped speaking for good:
+     * drop it, report [SpeechEngineState.UNAVAILABLE] (the UI alerts through vibration) and build a
+     * new one, or stop rebuilding after repeated losses (see [SpeechEngineHealth]). Not called from
+     * [submitAgain]: that runs inside a hand-back, and the next prompt finds the loss anyway.
+     */
+    private fun onSubmitFailed(textLength: Int) {
+        val loss = health.onSubmitFailed(textLength, TextToSpeech.getMaxSpeechInputLength())
+        if (loss == SpeechEngineHealth.Loss.NONE) return
+        logger.warning(TAG, "TTS engine stopped accepting speech", mapOf("action" to loss.name))
+        lifecycle.removed(ledger.clear(), UtteranceEventKind.CANCELLED, UtteranceReasons.SPEAK_FAILED)
+        releaseAudioFocus()
+        _isReady = false
+        tts?.shutdown()
+        tts = null
+        lifecycle.generationEnded(ttsGeneration)
+        setState(SpeechEngineState.UNAVAILABLE)
+        when (loss) {
+            SpeechEngineHealth.Loss.REBUILD -> initializeOnMain(forceRetry = true)
+            // Automatic retries stay paused until someone calls initialize() again.
+            else -> initFailureCount = MAX_AUTOMATIC_INIT_FAILURES
+        }
+    }
+
+    private fun onSubmitAccepted() {
+        if (health.onSubmitAccepted()) {
+            logger.info(TAG, "TTS engine speaking again after a loss")
+            setState(SpeechEngineState.READY)
+        }
     }
 
     private fun requestAudioFocus() {
@@ -532,7 +575,8 @@ public class SpeechManager(
         nextInitRetryAtMs = 0L
         onReadyCallbacks.clear()
         initAttempt++
-        _state.value = SpeechEngineState.IDLE
+        health.reset()
+        setState(SpeechEngineState.IDLE)
     }
 
     private fun scheduleInitTimeout(attempt: Int) {
@@ -633,7 +677,8 @@ public class SpeechManager(
         _isReady = true
         initFailureCount = 0
         nextInitRetryAtMs = 0L
-        _state.value = SpeechEngineState.READY
+        // After a loss this still reports unavailable, until the new engine accepts speech.
+        setState(SpeechEngineState.READY)
         logger.info(
             TAG,
             "TTS initialized",
@@ -677,11 +722,13 @@ public class SpeechManager(
         val automaticRetriesPaused = initFailureCount >= MAX_AUTOMATIC_INIT_FAILURES
         // 只有放弃自动重试时才对外报 UNAVAILABLE：中间的几次失败还会自己恢复，
         // 过早报错会让用户白白关掉一个其实能用的功能。
-        _state.value = if (automaticRetriesPaused) {
-            SpeechEngineState.UNAVAILABLE
-        } else {
-            SpeechEngineState.INITIALIZING
-        }
+        setState(
+            if (automaticRetriesPaused) {
+                SpeechEngineState.UNAVAILABLE
+            } else {
+                SpeechEngineState.INITIALIZING
+            }
+        )
 
         logger.warning(
             TAG,

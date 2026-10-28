@@ -31,7 +31,9 @@ internal data class GuidanceDeliveryResult(val channels: List<String>) {
  *   and is listed only if the motor took it.
  * - **Own TTS, engine ready**: speech decides. [speak] is false when a prompt of equal or higher
  *   priority is still being spoken; then nothing vibrates either, because a rhythm felt without
- *   its words would still count as delivered and the words would never come.
+ *   its words would still count as delivered and the words would never come. [speak] is also false
+ *   when the engine has just failed (it is no longer ready afterwards): then this is the case below,
+ *   because otherwise a dead engine that still counted as ready silenced the vibration as well.
  * - **Own TTS, engine not ready**: speech cannot deliver (the attempt still asks the engine to
  *   start). Vibration, if enabled, is the channel that remains, and counts on its own — the prompt
  *   was felt, not heard.
@@ -43,7 +45,7 @@ internal data class GuidanceDeliveryResult(val channels: List<String>) {
 internal inline fun deliverGuidanceEvent(
     speechEnabled: Boolean,
     screenReaderActive: Boolean,
-    speechEngineReady: Boolean,
+    speechEngineReady: () -> Boolean,
     hapticsEnabled: Boolean,
     announceToScreenReader: () -> Unit,
     speak: () -> Boolean,
@@ -56,14 +58,19 @@ internal inline fun deliverGuidanceEvent(
             listOfNotNull(PromptDeliveryChannels.SCREEN_READER, PromptDeliveryChannels.HAPTICS.takeIf { vibrated })
         )
     }
-    if (speechEnabled && speechEngineReady) {
-        if (!speak()) return GuidanceDeliveryResult.NOT_DELIVERED
-        val vibrated = hapticsEnabled && vibrate()
-        return GuidanceDeliveryResult(
-            listOfNotNull(PromptDeliveryChannels.SPEECH, PromptDeliveryChannels.HAPTICS.takeIf { vibrated })
-        )
+    if (speechEnabled && speechEngineReady()) {
+        if (speak()) {
+            val vibrated = hapticsEnabled && vibrate()
+            return GuidanceDeliveryResult(
+                listOfNotNull(PromptDeliveryChannels.SPEECH, PromptDeliveryChannels.HAPTICS.takeIf { vibrated })
+            )
+        }
+        // Refused by a working engine (outranked, expired): offered again next frame. Refused
+        // because the engine just failed: fall through to the channel that remains.
+        if (speechEngineReady()) return GuidanceDeliveryResult.NOT_DELIVERED
+    } else if (speechEnabled) {
+        speak() // not ready: refused, but asks the engine to start
     }
-    if (speechEnabled) speak() // not ready: refused, but asks the engine to start
     if (hapticsEnabled) {
         return if (vibrate()) {
             GuidanceDeliveryResult(listOf(PromptDeliveryChannels.HAPTICS))
