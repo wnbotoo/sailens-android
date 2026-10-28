@@ -77,22 +77,26 @@ internal fun SceneAnalysisUiState.withFrameEvents(
     )
 }
 
-internal fun shouldAlertSpeechUnavailable(
-    previousEngineState: SpeechEngineState,
-    newEngineState: SpeechEngineState,
-    speechEnabled: Boolean,
-    screenReaderActive: Boolean,
-): Boolean =
-    previousEngineState != SpeechEngineState.UNAVAILABLE &&
-        newEngineState == SpeechEngineState.UNAVAILABLE &&
-        speechEnabled &&
-        !screenReaderActive
-
-internal fun SceneAnalysisUiState.hasGuidanceOutputChannel(): Boolean =
-    hasSpeechOutputChannel() || isHapticsEnabled
-
 /**
- * 语音那一条通道当前可用（自带 TTS 活着，或者读屏在替它播报）。
+ * Tells the user once per outage that the app's own speech is gone, as soon as they rely on it.
+ *
+ * Not a transition rule: an outage that began while the screen reader spoke (or speech was off)
+ * raised no alert, and when the user switches back to the app's own speech the engine state does
+ * not change again — it is still unavailable. So [update] runs whenever the engine state, the screen
+ * reader or the speech setting changes, and the alert is due when the user relies on own speech, the
+ * engine is unavailable, and this outage has not been announced yet.
  */
-internal fun SceneAnalysisUiState.hasSpeechOutputChannel(): Boolean =
-    isSpeechEnabled && (isScreenReaderActive || speechEngineState != SpeechEngineState.UNAVAILABLE)
+internal class SpeechUnavailableAlert {
+    private var announced = false
+
+    /** @return true when the alert is due now; it then counts as announced for this outage. */
+    fun update(engineState: SpeechEngineState, speechEnabled: Boolean, screenReaderActive: Boolean): Boolean {
+        if (engineState != SpeechEngineState.UNAVAILABLE) {
+            announced = false
+            return false
+        }
+        if (announced || !speechEnabled || screenReaderActive) return false
+        announced = true
+        return true
+    }
+}

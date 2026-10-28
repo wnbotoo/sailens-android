@@ -14,6 +14,9 @@ import com.sailens.guidance.model.trace.PromptRevokeReasons
 internal data class GuidanceDeliveryResult(val channels: List<String>) {
     val delivered: Boolean get() = channels.isNotEmpty()
 
+    /** Heard or felt, so worth replaying: anything but the status card alone. */
+    val reachedUser: Boolean get() = channels.any { it != PromptDeliveryChannels.STATUS_CARD }
+
     companion object {
         val NOT_DELIVERED = GuidanceDeliveryResult(emptyList())
     }
@@ -155,7 +158,7 @@ internal data class GuidanceOutputSettings(
  *
  * @param now wall-clock milliseconds, the clock of the frame trace's `pipelineCompletedAt`.
  * @param revoke takes back the provisional cooldown record.
- * @return whether the prompt was delivered.
+ * @return which channels took the prompt; none when it was not delivered.
  */
 internal inline fun offerAndTraceGuidancePrompt(
     event: SceneEvent,
@@ -167,7 +170,7 @@ internal inline fun offerAndTraceGuidancePrompt(
     deliver: () -> GuidanceDeliveryResult,
     revoke: () -> Unit,
     record: (PromptOutcomeTrace) -> Unit,
-): Boolean {
+): GuidanceDeliveryResult {
     var revokeReason: String? = null
     val result = offerGuidancePrompt(
         priority = event.priority,
@@ -196,5 +199,5 @@ internal inline fun offerAndTraceGuidancePrompt(
             hapticsEnabled = outputs.hapticsEnabled,
         )
     )
-    return result.delivered
+    return result
 }
