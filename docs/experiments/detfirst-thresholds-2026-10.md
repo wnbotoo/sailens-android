@@ -302,7 +302,9 @@ reason.
   parameters, and if they are, the acceptance concerned is void and a new sealed set has to be
   recorded.
 - **R7 S is opened once**: after the `SpeakerModel` version, PR-1b / PR-2 / PR-3's code and all their
-  parameters are frozen. The parameter freeze gets a line of its own (Q14).
+  parameters are frozen. The parameter freeze gets a line of its own (Q14). The acceptance entry that
+  opens it checks against `D18Sets.SEALED`: all 13 captures present, complete and replayed exactly;
+  one missing or one extra, and nothing is judged.
 - **R8 Intervals reported.** Ratio metrics are judged on the point estimate, with a Wilson 95%
   interval reported (not used for the decision).
 - **R9 Reference hazard cohort: both arms are scored on one set.** Revision 1 fixed only the NEAR
