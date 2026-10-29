@@ -93,20 +93,24 @@ class MarkerRulesTest(RepoTest):
     def test_cpp_digit_separators_and_raw_strings(self):
         self.write("src/a.cpp", "\n".join([
             "int n = 1'000; /* M3a */",
-            "int h = 0xFF'FF; // P1-2",
-            "char c = '/'; // D5",
+            "int h = 0xFF'FF; // P1-2: a label",
+            "char c = '/'; // D1.5",
             'auto s = R"(// M3a inside a raw string)";',
             'auto t = u8R"x(text // M3o )" still raw)x"; // PR #9',
             "auto u = LR\"(\n// M0b in a multi-line raw string\n)\";",
+            "double d = .1'25; /* M3a */",
+            'auto q = R"a"b(// M3a with a quote in the delimiter)a"b";',
+            "auto w = u8'a'; // M3b after a prefixed character literal",
         ]))
-        self.assertEqual([(1, "milestone id"), (2, "review finding id"), (3, "plan id"), (5, "PR number")],
+        self.assertEqual([(1, "milestone id"), (2, "review finding id"), (3, "plan id"), (5, "PR number"),
+                          (9, "milestone id"), (11, "milestone id")],
                          [(f.line, f.rule) for f in self.findings() if f.path == "src/a.cpp"])
 
     def test_java_text_blocks_are_strings(self):
         self.write("src/A.java", "\n".join([
             'String s = """',
             "    // M3a inside a text block, \\\"\"\" escaped quotes too",
-            '    """; // P1-2',
+            '    """; // P1-2: a label',
         ]))
         self.assertEqual([(3, "review finding id")],
                          [(f.line, f.rule) for f in self.findings() if f.path == "src/A.java"])
@@ -119,6 +123,20 @@ class MarkerRulesTest(RepoTest):
             "// 见D7.2",
         ]))
         self.assertEqual(["milestone id", "milestone id", "date", "plan id"], self.rules("src/A.kt"))
+
+    def test_bare_ids_count_only_with_process_context(self):
+        self.write("src/A.kt", "\n".join([
+            "// Validated with Samsung Galaxy M14.",
+            "// The D3 layer is drawn last.",
+            "// See P1-2 of the datasheet.",
+            "// (M4) local world model",
+            "// D5: the vibration for a covered lens",
+            "// Planned for milestone M12.",
+            "// Review asked for P1-2 to be fixed.",
+        ]))
+        self.assertEqual([4, 5, 6, 7], [f.line for f in self.findings() if f.path == "src/A.kt"])
+        self.write("README.md", "### M12 — next\n\n- **D7**: the next plan item\n\nThe Galaxy M14 works.\n")
+        self.assertEqual([1, 3], [f.line for f in self.findings() if f.path == "README.md"])
 
     def test_a_model_name_is_not_review_history(self):
         self.write("src/A.kt", "// The VLM can be backed by GPT.\n// A 0xD5 mask, 3D boxes, an M-estimator.\n"
@@ -170,36 +188,65 @@ class LinkRulesTest(RepoTest):
         self.write("src/A.kt", "// docs/models.md §1.2 holds; models.md §1 too; models.md §9 does not\n")
         self.assertEqual(["missing section"], self.rules("src/A.kt"))
 
-    def test_relative_markdown_links_must_resolve(self):
+    def test_a_markdown_path_must_name_an_existing_file(self):
         self.write("docs/models.md", "# Models\n\n## 1. Contract\n\n[ok](models.zh-CN.md) [web](https://x.org/a.md) "
-                                     "[gone](roadmap.md) [anchor](#1-contract)\n")
-        self.assertEqual(["broken link"], self.rules("docs/models.md"))
+                                     "[gone](roadmap.md) [anchor](#1-contract) [up](../README.md)\n")
+        self.write("README.md", "x\n")
+        self.assertEqual(["missing document"], self.rules("docs/models.md"))
+
+    def test_paths_are_checked_as_written_whatever_the_link_syntax(self):
+        self.write("README.md", "\n".join([
+            '[titled](gone-a.md "a title") and [ok](docs/models.md "t")',
+            "[by reference][ref]",
+            "[ref]:",
+            "  gone-b.md",
+            "``[literal](gone-c.md)`` is still a path; a placeholder is [x](<name>.md)",
+            "[wrapped](",
+            "gone-d.md)",
+            "```",
+            "gone-e.md in a code block",
+            "```",
+            "[ok](models.zh-CN.md) [escaped](docs/a\\(b\\).md) is not a plain path, so not checked",
+        ]))
+        self.assertEqual([1, 4, 5, 7, 9], [f.line for f in self.findings() if f.path == "README.md"])
+
+    def test_in_code_only_comments_are_read_for_paths(self):
+        self.write("src/A.kt", "\n".join([
+            'val file = File(dir, "durations-$stamp.md")  // a file name made at run time',
+            "// see gone.md",
+        ]))
+        self.assertEqual([2], [f.line for f in self.findings() if f.path == "src/A.kt"])
 
     def test_a_docs_path_inside_an_external_url_is_not_this_repository(self):
         self.write("src/A.kt", "// see https://example.com/repo/blob/main/docs/api.md and docs/models.md §1\n")
         self.assertEqual([], self.rules("src/A.kt"))
 
-    def test_links_with_titles_references_and_parentheses_follow_markdown(self):
-        self.write("docs/file_(1).md", "x\n")
-        self.write("docs/file_(1).zh-CN.md", "x\n")
-        self.write("README.md", "\n".join([
-            '[titled](gone-a.md "a title")',
-            "[ok](docs/file_(1).md) [angle](<docs/file_(1).md>) [spaced](docs/file_%281%29.md)",
-            "[by reference][ref]",
-            "",
-            "[ref]: gone-b.md",
-            "`[not a link](gone-c.md)`",
-            "```",
-            "[in a code block](gone-d.md)",
-            "```",
-        ]))
-        self.assertEqual([(1, "broken link"), (5, "broken link")],
-                         [(f.line, f.rule) for f in self.findings() if f.path == "README.md"])
+    def test_a_url_does_not_swallow_the_local_path_after_it(self):
+        self.write("src/A.kt", 'val l = listOf("https://example.com/docs/api.md","docs/gone.md")\n'
+                               "// <https://example.com/x>docs/gone2.md\n")
+        self.assertEqual([1, 2], [f.line for f in self.findings() if f.path == "src/A.kt"])
 
     def test_a_heading_inside_a_code_block_is_not_a_section(self):
-        self.write("docs/models.md", "# Models\n\n## 1. Contract\n\n```\n## 9. Example\n```\n")
-        self.write("src/A.kt", "// models.md §1 holds, models.md §9 does not\n")
-        self.assertEqual(["missing section"], self.rules("src/A.kt"))
+        self.write("docs/models.md", "\n".join([
+            "# Models",
+            "## 1. Contract",
+            "```text",
+            "````not-a-closer",
+            "## 8. Inside the block",
+            "```",
+            "## 2. Outside",
+            "``` `backticks` in a backtick info string: not a fence",
+            "## 3. After a non-fence",
+            "> ```",
+            "> ## 9. Quoted code",
+            "> ```",
+            "~~~",
+            "## 7. Tilde block",
+            "~~~~",
+            "## 4. Last",
+        ]))
+        self.write("src/A.kt", "".join(f"// models.md §{n}\n" for n in (1, 2, 3, 4, 7, 8, 9)))
+        self.assertEqual([5, 6, 7], [f.line for f in self.findings() if f.path == "src/A.kt"])
 
 
 class DocsSetTest(RepoTest):

@@ -10,13 +10,17 @@ stale the day the plan changes. This checks, over the files git tracks:
    `#` comments in build and config files) -- comments only, so identifiers, serialized names and
    report text are never matched;
 2. the full text of every Markdown file;
-3. that every `docs/<name>.md` a tracked file mentions exists, and that `<name>.md §N` names a
-   heading of that document; relative Markdown links must resolve too;
+3. that every `.md` path written in a comment or in Markdown names a file that exists (relative to
+   the file, to the repository root or to docs/), that every `docs/<name>.md` in any text -- strings
+   included -- exists, and that `<name>.md §N` names a numbered heading of that document;
 4. that docs/ holds only the listed reference documents, each with its Chinese twin, and that every
    experiment record under docs/experiments/ has its twin.
 
-A false positive is fixed by narrowing a pattern or by adding a path exemption below, with its
-reason, in the same change. There is no per-line escape hatch.
+It is a guard over the forms this repository writes, not a parser. Paths are checked as written,
+whatever the Markdown syntax around them, so a placeholder is written `<name>.md`, never as a real
+looking name; a path with characters outside `[A-Za-z0-9_.-/]` is not checked. Unusual forms may slip
+through; blocking legitimate text is a bug. A false positive is fixed by narrowing a pattern or by
+adding a path exemption below, with its reason, in the same change. There is no per-line escape hatch.
 
 Usage: verify-no-process-history.py
 """
@@ -30,7 +34,6 @@ import sys
 import tokenize
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import unquote
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -53,11 +56,12 @@ DOCS = frozenset({
 _A = r"(?<![A-Za-z0-9_])"
 _Z = r"(?![A-Za-z0-9_])"
 
-# (rule, pattern). Applied to comment text and to Markdown. Ids are matched as families (any milestone
-# Mn with an optional letter, any plan item Dn), not as the list of ids used so far.
+# (rule, pattern). Applied to comment text and to Markdown. These forms only ever name process items;
+# ids are matched as families (any milestone Mn with a letter, any dotted or lettered plan item), not as
+# the list of ids used so far.
 MARKER_RULES = [
-    ("milestone id", re.compile(_A + r"M(?:0|[1-9]\d?)[a-z]?" + _Z)),
-    ("plan id", re.compile(_A + r"D[1-9]\d?(?:\.\d+(?:-\d+)?|[a-c](?:-\d+)?)?" + _Z)),
+    ("milestone id", re.compile(_A + r"M\d{1,2}[abo]" + _Z)),
+    ("plan id", re.compile(_A + r"D\d{1,2}(?:\.\d+(?:-\d+)?|[a-c](?:-\d+)?)" + _Z)),
     ("plan name", re.compile(_A + r"(?i:det-first)" + _Z + r"|det\s*优先|" + _A + r"plan v\d")),
     ("PR number", re.compile(
         _A + r"PR[ -]?#?\d+" + _Z + "|" + _A + r"PR-(?:\d[a-z]?|D\d)" + _Z + r"|\(#\d+\)|" + _A + r"pull/\d+"
@@ -67,11 +71,27 @@ MARKER_RULES = [
         r"(?i:" + _A + r"review(?:ed)?\s+round" + _Z + "|" + _A + r"review\s+finding|" + _A + r"round\s+\d+\s*[,:;)]"
         + "|" + _A + r"GPT[- ]?review)|GPT\s*评审|第\s*[0-9一二三四五六七八九十]+\s*轮\s*(?:评审|审)"
     )),
-    ("review finding id", re.compile(_A + r"P[0-3]-\d+" + _Z)),
     # Not inside a file name: experiment records are named after the month they were made in.
     ("date", re.compile(
         r"(?<![A-Za-z0-9_/.-])20\d\d-(?:0[1-9]|1[0-2])(?:-(?:0[1-9]|[12]\d|3[01]))?(?![A-Za-z0-9_-]|\.[A-Za-z0-9])"
     )),
+]
+# A bare M14, D3 or P1-2 is as likely a device model, a layer or a page number. These count only with
+# process context on the same line (PROCESS_WORD), as the label the comment or heading starts with
+# ("D5: ...", "### M4 — ..."), or alone in parentheses ("(M4)").
+AMBIGUOUS_RULES = [
+    ("milestone id", r"M\d{1,2}"),
+    ("plan id", r"D\d{1,2}"),
+    ("review finding id", r"P[0-3]-\d+"),
+]
+PROCESS_WORD = re.compile(
+    r"(?i:" + _A + r"(?:milestones?|roadmaps?|reviews?|reviewed|findings?)" + _Z + "|" + _A + r"round\s+\d)"
+    r"|里程碑|路线图|评审|轮次"
+)
+AMBIGUOUS_PATTERNS = [
+    (rule, re.compile(_A + core + _Z), re.compile(r"^[\s*#>/•-]*(?:\*\*)?" + core + r"(?:\*\*)?\s*[:,—–]"),
+     re.compile(r"\(\s*" + core + r"\s*[),;]"))
+    for rule, core in AMBIGUOUS_RULES
 ]
 # Comments only: Markdown uses "#1" for list items and anchors.
 COMMENT_ONLY_RULES = [
@@ -102,12 +122,21 @@ HASH_COMMENT_NAMES = {"CMakeLists.txt", ".gitignore", ".gitattributes", ".editor
 TEXT_FOR_LINKS = C_LIKE | HASH_COMMENTS | {".py", ".xml", ".md", ".txt", ".json"}
 
 DOC_MENTION = re.compile(r"(?<![\w.-])docs/([\w./-]+?\.md)\b")
+# A path to a Markdown file as written in prose or a comment: plain characters only.
+MD_PATH = re.compile(
+    r"(?<![A-Za-z0-9_./\\:<>$-])((?:\.{1,2}/)*(?:[A-Za-z0-9_-][A-Za-z0-9_.-]*/)*[A-Za-z0-9_-][A-Za-z0-9_.-]*\.md)"
+    r"(?![A-Za-z0-9_])"
+)
 SECTION_REF = re.compile(r"(?<![\w.-])((?:docs/)?(?:experiments/)?[\w-]+(?:\.zh-CN)?\.md)`?\)?\s*§\s*(\d+(?:\.\d+)*)")
-# A full URL names someone else's file, never this repository's.
-URL = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://\S+")
-MD_FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
-MD_REFERENCE_DEFINITION = re.compile(r"^ {0,3}\[[^\]]+\]:\s*(?:<([^>]*)>|(\S+))")
-HEADING_NUMBER = re.compile(r"^#{1,6}\s+(\d+(?:\.\d+)*)\.?\s")
+# A full URL names someone else's file, never this repository's. It ends where a string, a link or
+# code would: at whitespace, a quote, a bracket, a parenthesis or a backtick.
+URL = re.compile(r"""[A-Za-z][A-Za-z0-9+.-]*://[^\s"'<>()\[\]`]+""")
+# CommonMark fences: an opening backtick fence's info string has no backtick; a closing fence is the
+# same character, at least as long, and nothing but spaces after it. Block-quote markers come first.
+MD_QUOTE = re.compile(r"^(?: {0,3}>[ ]?)*")
+MD_FENCE_OPEN = re.compile(r"^ {0,3}(?:(`{3,})[^`]*|(~{3,}).*)$")
+MD_FENCE_CLOSE = re.compile(r"^ {0,3}(`{3,}|~{3,})[ \t]*$")
+HEADING_NUMBER = re.compile(r"^ {0,3}#{1,6}\s+(\d+(?:\.\d+)*)\.?\s")
 
 
 @dataclass(frozen=True)
@@ -123,15 +152,20 @@ class Finding:
 
 # ---- comment extraction: each yields (line number, comment text of that line) -------------------
 
-CPP_RAW_STRING = re.compile(r'(?:u8|u|U|L)?R"([^()\\\s"]{0,16})\(')
+# A d-char is any source character but space, parentheses, backslash and the controls (tab, vertical
+# tab, form feed, newline): a double quote is allowed.
+CPP_RAW_STRING = re.compile(r'(?:u8|u|U|L)?R"([^()\\ \t\v\f\n]{0,16})\(')
 
 
 def _starts_number(text: str, i: int) -> bool:
-    """Whether the token ending just before `i` is a number literal, as in C++14's `1'000`."""
+    """Whether the token ending just before `i` is a number literal, so the `'` at `i` is a C++14
+    digit separator (`1'000`, `0xFF'FF`, `.1'25`) and not the start of a character literal (`u8'a'`)."""
     j = i
     while j > 0 and (text[j - 1].isalnum() or text[j - 1] in "_'."):
         j -= 1
-    return j < i and text[j].isdigit()
+    while j < i and text[j] == "." and not (j + 1 < i and text[j + 1].isdigit()):
+        j += 1  # a member access or range dot before the token is not part of it
+    return j < i and (text[j].isdigit() or (text[j] == "." and j + 1 < i and text[j + 1].isdigit()))
 
 
 def c_like_comments(text: str, lang: str) -> list[tuple[int, str]]:
@@ -306,83 +340,60 @@ def exempt(path: str) -> bool:
     return any(path == prefix or path.startswith(prefix) for prefix in EXEMPT)
 
 
+def commented_lines(path: str, text: str) -> list[tuple[int, str]] | None:
+    """What the marker and path rules read: every line of Markdown, the comments of anything else."""
+    if path.endswith(".md"):
+        return list(enumerate(text.split("\n"), start=1))
+    return comments_of(path, text)
+
+
+def ambiguous_finding(content: str) -> str | None:
+    """The rule a bare M14 / D3 / P1-2 breaks, if the line gives it process context."""
+    for rule, bare, label, parenthesised in AMBIGUOUS_PATTERNS:
+        if bare.search(content) and (PROCESS_WORD.search(content) or label.match(content)
+                                     or parenthesised.search(content)):
+            return rule
+    return None
+
+
 def marker_findings(path: str, text: str) -> list[Finding]:
     if exempt(path):
         return []
-    if path.endswith(".md"):
-        lines = list(enumerate(text.split("\n"), start=1))
-        rules = MARKER_RULES
-    else:
-        found = comments_of(path, text)
-        if found is None:
-            return []
-        lines = found
-        rules = MARKER_RULES + COMMENT_ONLY_RULES
+    lines = commented_lines(path, text)
+    if lines is None:
+        return []
+    rules = MARKER_RULES if path.endswith(".md") else MARKER_RULES + COMMENT_ONLY_RULES
     out = []
     for number, content in lines:
-        for rule, pattern in rules:
-            if pattern.search(content):
-                out.append(Finding(path, number, rule, content))
-                break
+        rule = next((name for name, pattern in rules if pattern.search(content)), None) or ambiguous_finding(content)
+        if rule:
+            out.append(Finding(path, number, rule, content))
     return out
 
 
 def markdown_prose_lines(text: str) -> list[tuple[int, str]]:
-    """The lines of a Markdown file outside fenced code blocks, with their numbers."""
-    out, fence = [], None
+    """The lines of a Markdown file outside fenced code blocks, block-quote markers removed. A fence
+    opened inside a block quote also ends where the quote does."""
+    out: list[tuple[int, str]] = []
+    fence, fence_depth = None, 0
     for number, line in enumerate(text.split("\n"), start=1):
-        match = MD_FENCE.match(line)
-        if fence is None and match:
-            fence = match.group(1)
-        elif fence is not None and match and match.group(1)[0] == fence[0] and len(match.group(1)) >= len(fence):
-            fence = None
-        elif fence is None:
-            out.append((number, line))
-    return out
-
-
-def markdown_link_targets(line: str) -> list[str]:
-    """Destinations of the inline links (`[x](dest "title")`, `[x](<dest>)`, balanced parentheses) and
-    of a reference definition (`[x]: dest`) on one line of prose. Inline code is not a link."""
-    s = re.sub(r"`[^`]*`", lambda m: " " * len(m.group(0)), line)
-    targets = []
-    definition = MD_REFERENCE_DEFINITION.match(s)
-    if definition:
-        targets.append(definition.group(1) if definition.group(1) is not None else definition.group(2))
-    i = 0
-    while True:
-        j = s.find("](", i)
-        if j < 0:
-            return targets
-        k = j + 2
-        while k < len(s) and s[k] in " \t":
-            k += 1
-        if k < len(s) and s[k] == "<":
-            end = s.find(">", k)
-            if end < 0:
-                i = k
+        quote = MD_QUOTE.match(line).group(0)
+        depth, body = quote.count(">"), line[len(quote):]
+        if fence is not None:
+            close = MD_FENCE_CLOSE.match(body)
+            if depth < fence_depth:
+                fence = None  # the container ended, and the code block with it
+            elif close and close.group(1)[0] == fence[0] and len(close.group(1)) >= len(fence):
+                fence = None
                 continue
-            targets.append(s[k + 1:end])
-            i = end + 1
+            else:
+                continue
+        opening = MD_FENCE_OPEN.match(body)
+        if opening:
+            fence, fence_depth = opening.group(1) or opening.group(2), depth
             continue
-        start, depth = k, 0
-        while k < len(s):
-            c = s[k]
-            if c == "\\":
-                k += 2
-                continue
-            if c == "(":
-                depth += 1
-            elif c == ")":
-                if depth == 0:
-                    break
-                depth -= 1
-            elif c.isspace() and depth == 0:
-                break
-            k += 1
-        if k > start:
-            targets.append(s[start:k])
-        i = k
+        out.append((number, body))
+    return out
 
 
 def headings(doc: Path, cache: dict[Path, set[str]]) -> set[str]:
@@ -414,14 +425,14 @@ def link_findings(root: Path, path: str, text: str, cache: dict[Path, set[str]])
                 out.append(Finding(path, number, "missing document", name))
             elif section not in headings(doc, cache):
                 out.append(Finding(path, number, "missing section", f"{name} §{section}"))
-    if path.endswith(".md"):
-        for number, line in markdown_prose_lines(text):
-            for target in markdown_link_targets(line):
-                local = unquote(target.split("#", 1)[0])
-                if not local or re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", local):
-                    continue
-                if not (here / local).exists():
-                    out.append(Finding(path, number, "broken link", target))
+    # Any Markdown path written in prose or a comment, whatever the link syntax around it.
+    for number, content in commented_lines(path, text) or []:
+        for match in MD_PATH.finditer(URL.sub(" ", content)):
+            name = match.group(1)
+            if name.startswith("docs/") and DOC_MENTION.fullmatch(name):
+                continue  # already checked above, on the whole line
+            if not any((base / name).exists() for base in (here, root, root / "docs")):
+                out.append(Finding(path, number, "missing document", name))
     return out
 
 
