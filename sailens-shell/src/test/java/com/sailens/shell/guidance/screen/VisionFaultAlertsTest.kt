@@ -23,8 +23,23 @@ class VisionFaultAlertsTest {
     /** What the spoken channel does with an offer; by default own TTS accepts it. */
     private var answer: (VisionFaultAlerts.Notice) -> Offer = { Offer.ACCEPTED }
 
-    /** Whether the motor takes a rhythm; by default nothing else is playing. [vibrations] lists those played. */
-    private var motor: (EventPriority) -> Boolean = { true }
+    /**
+     * The motor, as HapticManager drives it: the real arbiter, and its timer that starts a reserved rhythm the
+     * moment the motor is free. Null: nothing else ever plays, so a rhythm starts at once.
+     */
+    private var motor: Motor? = null
+
+    private inner class Motor {
+        val arbiter = HapticArbiter(clock = { now })
+
+        /** A navigation rhythm, as `HapticManager.trigger` asks for it. */
+        fun navigation(priority: EventPriority, durationMs: Long): Boolean = arbiter.tryClaim(priority.value, durationMs)
+
+        /** HapticManager's timer. */
+        fun tick() {
+            arbiter.startReservedIfFree(now)
+        }
+    }
 
     private fun alertsWith(outputsLog: MutableList<Pair<Long, VisionFaultAlerts.Notice>>) = VisionFaultAlerts(
         outputs = object : VisionFaultAlerts.Outputs {
@@ -33,10 +48,16 @@ class VisionFaultAlertsTest {
                 return answer(notice)
             }
 
-            override fun vibrate(priority: EventPriority): Boolean {
-                if (!motor(priority)) return false
-                vibrations += now to priority
-                return true
+            override fun vibrate(priority: EventPriority, onPlayed: () -> Unit) {
+                val start = {
+                    vibrations += now to priority
+                    onPlayed()
+                }
+                motor?.arbiter?.claimOrReserve(priority.value, VISION_UNRELIABLE_MS, start) ?: start()
+            }
+
+            override fun cancelVibration() {
+                motor?.arbiter?.cancelReservation()
             }
         },
     )
@@ -45,12 +66,15 @@ class VisionFaultAlertsTest {
 
     private var settings = VisionFaultAlerts.Settings(speechEnabled = true, faultHapticsEnabled = true)
 
-    /** Frames every 100 ms from now until (not including) [untilMs], all showing [faults]. */
+    /** Frames every 100 ms from now until (not including) [untilMs], all showing [faults]; the motor's timer every 10 ms. */
     private fun frames(untilMs: Long, faults: VisionFaults, onFrame: () -> Unit = {}) {
         while (now < untilMs) {
             alerts.update(now, faults, settings)
             onFrame()
-            now += 100
+            repeat(10) {
+                now += 10
+                motor?.tick()
+            }
         }
     }
 
@@ -85,9 +109,9 @@ class VisionFaultAlertsTest {
 
         // No entry rhythm (switch off); a fallback at each cycle's 6 s deadline.
         assertEquals(listOf(6_000L, 21_000L), vibrations.map { it.first })
-        // The first attempt may still be playing, so it is not offered again before the deadline; then
-        // one resend, and nothing more that cycle.
-        assertEquals(listOf(0L, 6_000L, 15_000L, 21_000L), spoken(SceneEventMessageKeys.LOW_LIGHT).map { it.first })
+        // The first attempt may still be playing, and holds the floor up to its 6 s expiry, so it is offered
+        // again only after that; one resend, and nothing more that cycle. The fallback does not stop it.
+        assertEquals(listOf(0L, 6_100L, 15_000L, 21_100L), spoken(SceneEventMessageKeys.LOW_LIGHT).map { it.first })
     }
 
     @Test
@@ -98,7 +122,7 @@ class VisionFaultAlertsTest {
         frames(75_000, FLOOR)
 
         val notices = spoken(SceneEventMessageKeys.GROUND_UNRECOGNIZED)
-        assertEquals("taken at once, and resent at the deadline", listOf(0L, 10_000L), notices.take(2).map { it.first })
+        assertEquals("taken at once, and resent once its window is over", listOf(0L, 10_100L), notices.take(2).map { it.first })
         assertEquals("nothing more in the first cycle", 60_000L, notices[2].first)
         assertTrue("refused offers keep coming, no faster than every 500 ms", notices.size > 10)
         assertTrue(notices.zipWithNext().all { (a, b) -> b.first - a.first >= 500 })
@@ -289,21 +313,20 @@ class VisionFaultAlertsTest {
 
     @Test
     fun `a fault rhythm never cuts an obstacle rhythm of equal or higher priority, and is played once it ends`() {
-        // P1-2, with the real motor arbiter: in one frame a CRITICAL obstacle rhythm is accepted, then the
-        // floor enters (LOW).
-        val arbiter = HapticArbiter(clock = { now })
-        motor = { priority -> arbiter.tryClaim(priority.value, VISION_UNRELIABLE_MS) }
-        assertTrue(arbiter.tryClaim(EventPriority.CRITICAL.value, 300))
+        // Round 1, P1-2, with the real motor arbiter: in one frame a CRITICAL obstacle rhythm is accepted,
+        // then the floor enters (LOW).
+        val motor = Motor().also { motor = it }
+        assertTrue(motor.navigation(EventPriority.CRITICAL, 300))
         frames(1_000, FLOOR)
         assertEquals("entry rhythm after the obstacle rhythm, not over it", listOf(300L), vibrations.map { it.first })
 
-        // The fallback too: refused while a higher rhythm plays, then played, still regardless of the switch.
+        // The fallback too: it waits for a higher rhythm, then plays, still regardless of the switch.
         alerts.reset()
         vibrations.clear()
         settings = settings.copy(faultHapticsEnabled = false)
         val start = now
         frames(start + 9_900, FLOOR)
-        assertTrue(arbiter.tryClaim(EventPriority.HIGH.value, 400))
+        assertTrue(motor.navigation(EventPriority.HIGH, 400))
         frames(start + 11_000, FLOOR)
         assertEquals(listOf(start + 10_300), vibrations.map { it.first })
     }
@@ -311,10 +334,116 @@ class VisionFaultAlertsTest {
     @Test
     fun `with speech off a rhythm the motor refused is still owed`() {
         settings = VisionFaultAlerts.Settings(speechEnabled = false, faultHapticsEnabled = true)
-        val busyUntil = 700L
-        motor = { now >= busyUntil }
+        val motor = Motor().also { motor = it }
+        assertTrue(motor.navigation(EventPriority.CRITICAL, 700))
         frames(1_000, DARK)
         assertEquals(listOf(700L), vibrations.map { it.first })
+    }
+
+    // ---- Review round 2 ------------------------------------------------------------------------
+
+    /**
+     * P1-1: the review's sequence. A frame every 2 s, each with an obstacle rhythm asked for first (centre,
+     * front, side; HIGH then CRITICAL), the floor unrecognised throughout. Waiting for the next frame, the
+     * LOW rhythm was refused every time: 0 in 600 s. Now it starts the moment the obstacle rhythm ends.
+     */
+    @Test
+    fun `obstacle rhythms every frame cannot starve a fault rhythm, which comes as soon as the one playing ends`() {
+        val obstacles = listOf(
+            EventPriority.HIGH to 210L, EventPriority.CRITICAL to 210L, // ahead: two short
+            EventPriority.HIGH to 360L, EventPriority.CRITICAL to 360L, // right: three short
+            EventPriority.HIGH to 60L, EventPriority.CRITICAL to 60L, // left: one short
+        )
+        for (speechOn in listOf(false, true)) {
+            now = 0
+            alerts.reset()
+            vibrations.clear()
+            val motor = Motor().also { motor = it }
+            // Speech off: each cycle's rhythm is the notice. Speech on, switch off, never heard: the fallback.
+            settings = VisionFaultAlerts.Settings(speechEnabled = speechOn, faultHapticsEnabled = false)
+            var accepted = 0
+            var frame = 0
+            while (now < 600_000) {
+                val (priority, length) = obstacles[frame++ % obstacles.size]
+                if (motor.navigation(priority, length)) accepted++
+                alerts.update(now, FLOOR, settings)
+                repeat(200) {
+                    now += 10
+                    motor.tick()
+                }
+            }
+            val due = (0 until 10).map { it * 60_000L + if (speechOn) 10_000L else 0L }
+            val played = vibrations.map { it.first }
+            assertEquals("speechOn=$speechOn: one per cycle, $played", due.size, played.size)
+            for ((owed, at) in due.zip(played)) {
+                assertTrue("speechOn=$speechOn: owed at $owed, played at $at", at - owed in 0..360)
+            }
+            assertEquals("no obstacle rhythm refused: the fault rhythm ends before the next frame", 300, accepted)
+        }
+    }
+
+    @Test
+    fun `the fallback does not end the speech retries`() {
+        // P1-2: a description holds the floor until 11 s; the fallback at 10 s must not stop the notice.
+        settings = settings.copy(faultHapticsEnabled = false)
+        answer = { if (now < 11_000) Offer.REFUSED else Offer.ACCEPTED }
+        frames(12_000, FLOOR)
+        assertEquals(listOf(10_000L), vibrations.map { it.first })
+        assertEquals("said once the description is over", 11_000L, offers.last().first)
+    }
+
+    @Test
+    fun `a resend at the edge of the first attempt's window is not lost to the fallback`() {
+        // P1-2: as the speech ledger does, an attempt holds the floor up to and including its expiry, so a
+        // resend at exactly 6 s would be refused. It comes just after, and the fallback does not cancel it.
+        settings = settings.copy(faultHapticsEnabled = false)
+        val holding = mutableListOf<VisionFaultAlerts.Notice>()
+        answer = { notice ->
+            if (holding.any { now <= it.expiresAtMs }) {
+                Offer.REFUSED
+            } else {
+                holding += notice
+                Offer.ACCEPTED
+            }
+        }
+        frames(15_000, DARK)
+        assertEquals(listOf(0L, 6_100L), holding.map { it.expiresAtMs - 6_000L })
+        assertEquals(listOf(6_000L), vibrations.map { it.first })
+    }
+
+    @Test
+    fun `a fallback waiting for the motor is dropped when the notice is heard first`() {
+        // P2-3: owed at 6 s while the motor is busy until 7 s; the notice is heard at 6.2 s.
+        val motor = Motor().also { motor = it }
+        frames(5_900, DARK)
+        assertTrue(motor.navigation(EventPriority.CRITICAL, 1_100))
+        frames(6_200, DARK)
+        alerts.onSpoken(offers.first().second.id)
+        // No frame until the motor is free: hearing the notice alone has to drop the fallback.
+        while (now < 7_500) {
+            now += 10
+            motor.tick()
+        }
+        frames(8_000, DARK)
+        assertEquals("the entry rhythm only", listOf(0L), vibrations.map { it.first })
+    }
+
+    @Test
+    fun `turning fault vibration off drops an entry rhythm still waiting, but never the fallback`() {
+        // P2-4: entry with the switch on and the motor busy until 0.7 s; switched off at 0.2 s.
+        val motor = Motor().also { motor = it }
+        assertTrue(motor.navigation(EventPriority.CRITICAL, 700))
+        frames(200, FLOOR)
+        settings = settings.copy(faultHapticsEnabled = false)
+        alerts.settingsChanged(settings)
+        // No frame until well after the motor is free: the switch alone has to drop it.
+        while (now < 1_000) {
+            now += 10
+            motor.tick()
+        }
+        assertEquals(emptyList<Any>(), vibrations)
+        frames(11_000, FLOOR)
+        assertEquals("no entry rhythm; the fallback at 10 s regardless", listOf(10_000L), vibrations.map { it.first })
     }
 
     @Test

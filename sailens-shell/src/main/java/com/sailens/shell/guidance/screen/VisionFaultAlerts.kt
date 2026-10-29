@@ -22,32 +22,36 @@ import java.util.UUID
  *   plays;
  * - **every cycle** ([Fault.periodMs]) the state wants to be told once; a covered lens also vibrates each
  *   cycle;
- * - **told** means: own speech finished playing a notice ([onSpoken]); or the screen reader took one
- *   (it reports no completion, so this is acceptance, not evidence it was heard); or, with speech off,
- *   the rhythm played — with speech off the rhythm is the notice, and fault vibration counts as on
- *   whatever the switch says (Q11a);
+ * - **heard** means own speech finished playing a notice ([onSpoken]), or the screen reader took one (it
+ *   reports no completion, so this is acceptance, not evidence it was heard). Speech is retried until
+ *   heard, within [Timing.maxAcceptedAttemptsPerCycle];
+ * - **told** means heard, or a rhythm that stands for the notice played: the fallback, or, with speech
+ *   off, the cycle's rhythm (with speech off the rhythm is the notice, and fault vibration counts as on
+ *   whatever the switch says, Q11a). Being told by a rhythm does not stop the speech retries;
  * - **the fallback**: if the user has not been told within [Fault.deadlineMs] — notice dropped, cut off,
  *   expired, never confirmed, engine not ready, waiting for a description — the rhythm plays **whatever
- *   the switches say**, and again in every later cycle while that holds;
+ *   the switches say**, and again in every later cycle while that holds. A notice heard before it plays
+ *   cancels it;
  * - **recovering**: one best-effort notice that it is over.
  *
  * The time since the user was last told is a debt per track (frame quality, floor) that no change of
  * state pays: switching between a covered lens and darkness, or recovering and failing again, keeps it.
- * Only being told, or the fallback playing, clears it. Otherwise a state that keeps changing could put
- * the fallback off for ever.
+ * Only being told clears it. Otherwise a state that keeps changing could put the fallback off for ever.
  *
- * Every rhythm goes through the motor's arbitration at the state's priority ([Outputs.vibrate]): it never
- * cuts a rhythm of equal or higher priority, so an obstacle rhythm already playing is felt whole. A
- * rhythm refused for that is still owed, and offered again on the next frame. "Whatever the switches
- * say" is about the switches, not about the motor.
+ * Rhythms go through the motor ([Outputs.vibrate]): one never cuts a rhythm of equal or higher priority
+ * that is playing, but waits for it and then goes first, without waiting for a frame, so obstacle rhythms
+ * asked for every frame cannot starve it. An owed rhythm is checked again whenever its reason may have
+ * gone — the notice heard, a switch changed — and dropped if so. "Whatever the switches say" is about the
+ * switches, not the motor.
  *
  * Hysteresis: frame quality is already debounced upstream; on top of it, clear has to last
  * [Timing.recoveryHoldMs] before it counts, so a hand waving over the lens does not alternate "covered"
  * and "clear". The floor reading is already time-confirmed both ways. While frame quality is faulty the
  * floor track is frozen: a picture that cannot be trusted says nothing about the floor either.
  *
- * Pure and driven by frames ([update]) and completion callbacks ([onSpoken]), so every rule is testable
- * on the JVM. Without frames nothing happens here; the stall detector owns that failure.
+ * Pure and driven by frames ([update]), settings ([settingsChanged]) and completion callbacks ([onSpoken],
+ * the motor's), so every rule is testable on the JVM. Without frames no new state is seen here; the stall
+ * detector owns that failure.
  *
  * @param noticeIdPrefix distinct per instance: the speech engine is shared, so a late completion of an
  *   earlier instance's notice must never match this one's.
@@ -109,7 +113,7 @@ internal class VisionFaultAlerts(
         /** Nothing took it: equal or higher speech in progress, engine not ready, waiting for a description. */
         REFUSED,
 
-        /** Own TTS started it; it counts as told only once [onSpoken] says it finished playing. */
+        /** Own TTS started it; it counts as heard only once [onSpoken] says it finished playing. */
         ACCEPTED,
 
         /**
@@ -123,12 +127,16 @@ internal class VisionFaultAlerts(
         fun speak(notice: Notice): Offer
 
         /**
-         * Plays the vision-unreliable rhythm at [priority]'s strength, unless a rhythm of equal or higher
-         * priority is still playing. Switches are not consulted here: the caller has applied them.
-         *
-         * @return whether it played; when not, it is offered again on a later frame.
+         * Plays the vision-unreliable rhythm at [priority]'s strength as soon as the motor allows: at once,
+         * or — if a rhythm of equal or higher priority is playing — the moment it ends, ahead of anything
+         * asked for later and without waiting for a frame. Once started nothing cuts it. [onPlayed] is
+         * called when it starts, possibly before this returns. One request at a time: a newer one replaces
+         * it. Switches are not consulted: the caller has applied them.
          */
-        fun vibrate(priority: EventPriority): Boolean
+        fun vibrate(priority: EventPriority, onPlayed: () -> Unit)
+
+        /** Drops a requested rhythm that has not started. */
+        fun cancelVibration()
     }
 
     /**
@@ -144,14 +152,26 @@ internal class VisionFaultAlerts(
 
     private class Track(val fault: Fault, val debt: Debt) {
         var cycleStartMs = 0L
-        var told = false
+
+        /** This cycle's notice was heard out (or published to the screen reader). Ends the speech retries. */
+        var heard = false
         var acceptedAttempts = 0
         var lastAcceptedAtMs: Long? = null
         var lastOfferAtMs: Long? = null
         var fallbackRequested = false
 
-        /** A rhythm this cycle owes the user (entering, each cycle, the fallback), not played yet. */
-        var vibrationOwed = false
+        // Why a rhythm is owed this cycle; it is played once for all of them, and each can lapse alone.
+
+        /** Entering, or each cycle for a covered lens; governed by the fault vibration switch. */
+        var noticeBuzzOwed = false
+
+        /** With speech off, the cycle's rhythm is the notice. */
+        var speechOffBuzzOwed = false
+
+        /** The fallback: the user not told by the deadline. Lapses when the notice is heard. */
+        var fallbackBuzzOwed = false
+
+        val buzzOwed: Boolean get() = noticeBuzzOwed || speechOffBuzzOwed || fallbackBuzzOwed
 
         /** This cycle's attempts that may be playing: a late completion of an older one does not count. */
         val attemptIds = mutableSetOf<String>()
@@ -173,6 +193,10 @@ internal class VisionFaultAlerts(
     private val recoveries = ArrayDeque<Recovery>()
     private var nextNoticeId = 0L
 
+    /** The track whose rhythm is waiting for the motor, and the request's token (a stale start is ignored). */
+    private var buzzRequestedBy: Track? = null
+    private var buzzRequest = 0L
+
     /** One frame's states, after that frame's navigation prompt was offered. */
     fun update(now: Long, faults: VisionFaults, settings: Settings) {
         updateFrameQuality(now, faults.frameQuality, settings)
@@ -181,17 +205,29 @@ internal class VisionFaultAlerts(
 
         offerRecovery(now, settings)
         val active = if (frame != null) frame.takeIf { frameClearSinceMs == null } else ground
+        // Only the active track's rhythm may wait for the motor: one that ended, is frozen or is holding
+        // keeps what it owes but does not play it now.
+        if (buzzRequestedBy != null && buzzRequestedBy !== active) cancelBuzzRequest()
         active?.let { drive(it, now, settings) }
+    }
+
+    /** A switch changed: an owed rhythm that no longer has a reason is dropped now, not at the next frame. */
+    fun settingsChanged(settings: Settings) {
+        for (track in listOfNotNull(frame, ground)) {
+            recheckOwedBuzz(track, settings)
+            if (!track.buzzOwed && buzzRequestedBy === track) cancelBuzzRequest()
+        }
     }
 
     /** The engine finished playing the notice [id] (the screen reader never reports this). */
     fun onSpoken(id: String) {
         for (track in listOfNotNull(frame, ground)) {
-            if (id in track.attemptIds) told(track)
+            if (id in track.attemptIds) heard(track)
         }
     }
 
     fun reset() {
+        if (buzzRequestedBy != null) cancelBuzzRequest()
         frame = null
         frameClearSinceMs = null
         ground = null
@@ -236,43 +272,72 @@ internal class VisionFaultAlerts(
 
     private fun startCycle(track: Track, now: Long, settings: Settings, entering: Boolean) {
         track.cycleStartMs = now
-        track.told = false
+        track.heard = false
         track.acceptedAttempts = 0
         track.lastAcceptedAtMs = null
         track.lastOfferAtMs = null
         track.fallbackRequested = false
+        track.fallbackBuzzOwed = false
         track.attemptIds.clear()
         // Kept if the user was never told about an earlier cycle, an earlier kind or an earlier episode.
         if (track.debt.sinceMs == null) track.debt.sinceMs = now
         // With speech off the rhythm is the notice: every cycle, and the switch cannot turn it off.
-        track.vibrationOwed = if (!settings.speechEnabled) {
-            true
-        } else {
-            settings.faultHapticsEnabled && (entering || track.fault.vibratesEachCycle)
-        }
+        track.speechOffBuzzOwed = !settings.speechEnabled
+        track.noticeBuzzOwed = settings.speechEnabled && settings.faultHapticsEnabled &&
+            (entering || track.fault.vibratesEachCycle)
     }
 
     private fun drive(track: Track, now: Long, settings: Settings) {
         if (now - track.cycleStartMs >= track.fault.periodMs) startCycle(track, now, settings, entering = false)
+        recheckOwedBuzz(track, settings)
         if (settings.speechEnabled) offerNotice(track, now)
 
         val untoldSince = track.debt.sinceMs
-        if (!track.told && !track.fallbackRequested && untoldSince != null && now - untoldSince >= track.fault.deadlineMs) {
+        if (!track.heard && !track.fallbackRequested && untoldSince != null && now - untoldSince >= track.fault.deadlineMs) {
             track.fallbackRequested = true
-            track.vibrationOwed = true
+            track.fallbackBuzzOwed = true
         }
-        if (track.vibrationOwed && outputs.vibrate(track.fault.priority)) {
-            track.vibrationOwed = false
-            // The rhythm tells the user when it is the fallback, or the notice itself with speech off.
-            if (track.fallbackRequested || !settings.speechEnabled) told(track)
+        requestOwedBuzz(track)
+    }
+
+    /** Drops each reason for an owed rhythm that no longer holds; the fallback's own stays regardless of switches. */
+    private fun recheckOwedBuzz(track: Track, settings: Settings) {
+        if (!(settings.speechEnabled && settings.faultHapticsEnabled)) track.noticeBuzzOwed = false
+        if (settings.speechEnabled) track.speechOffBuzzOwed = false
+        if (track.heard) track.fallbackBuzzOwed = false
+    }
+
+    private fun requestOwedBuzz(track: Track) {
+        if (!track.buzzOwed) {
+            if (buzzRequestedBy === track) cancelBuzzRequest()
+            return
         }
+        if (buzzRequestedBy === track) return
+        val request = ++buzzRequest
+        buzzRequestedBy = track
+        outputs.vibrate(track.fault.priority) { if (request == buzzRequest) buzzPlayed(track) }
+    }
+
+    private fun buzzPlayed(track: Track) {
+        buzzRequestedBy = null
+        // The fallback, or the notice itself with speech off, tells the user. The speech retries go on.
+        if (track.fallbackBuzzOwed || track.speechOffBuzzOwed) track.debt.sinceMs = null
+        track.noticeBuzzOwed = false
+        track.speechOffBuzzOwed = false
+        track.fallbackBuzzOwed = false
+    }
+
+    private fun cancelBuzzRequest() {
+        buzzRequestedBy = null
+        buzzRequest++
+        outputs.cancelVibration()
     }
 
     private fun offerNotice(track: Track, now: Long) {
-        if (track.told || track.acceptedAttempts >= timing.maxAcceptedAttemptsPerCycle) return
-        // Taken once already: it may still be playing until its own deadline window is over.
+        if (track.heard || track.acceptedAttempts >= timing.maxAcceptedAttemptsPerCycle) return
+        // Taken once already: it may still be playing, and holds the floor, until its deadline window is over.
         val lastAccepted = track.lastAcceptedAtMs
-        if (lastAccepted != null && now - lastAccepted < track.fault.deadlineMs) return
+        if (lastAccepted != null && now - lastAccepted <= track.fault.deadlineMs) return
         if (!retryDue(track.lastOfferAtMs, now)) return
         track.lastOfferAtMs = now
         val notice = Notice(newNoticeId(), track.fault.messageKey, track.fault.priority, now + track.fault.deadlineMs)
@@ -284,13 +349,16 @@ internal class VisionFaultAlerts(
                 track.acceptedAttempts++
                 track.lastAcceptedAtMs = now
             }
-            Offer.PUBLISHED -> told(track)
+            Offer.PUBLISHED -> heard(track)
         }
     }
 
-    private fun told(track: Track) {
-        track.told = true
+    private fun heard(track: Track) {
+        track.heard = true
         track.debt.sinceMs = null
+        // A fallback not played yet has lost its reason.
+        track.fallbackBuzzOwed = false
+        if (!track.buzzOwed && buzzRequestedBy === track) cancelBuzzRequest()
     }
 
     /** The oldest recovery not said yet, one offer per frame; best effort, not tracked to completion. */

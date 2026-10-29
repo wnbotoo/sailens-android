@@ -125,13 +125,16 @@ class SceneAnalysisViewModel(
         outputs = object : VisionFaultAlerts.Outputs {
             override fun speak(notice: VisionFaultAlerts.Notice): VisionFaultAlerts.Offer = speakVisionNotice(notice)
 
-            // No switch here: VisionFaultAlerts has applied it, and its fallback ignores it. The motor's
-            // arbitration still applies: an obstacle rhythm of equal or higher priority is not cut short.
-            override fun vibrate(priority: EventPriority): Boolean = hapticManager.tryPlay(
+            // No switch here: VisionFaultAlerts has applied it, and its fallback ignores it. The motor still
+            // decides when: an obstacle rhythm of equal or higher priority is not cut short, only waited for.
+            override fun vibrate(priority: EventPriority, onPlayed: () -> Unit) = hapticManager.playOrReserve(
                 GuidanceHaptic.VISION_UNRELIABLE,
                 priority = priority,
                 amplitude = maxOf(GuidanceHaptic.amplitudeFor(priority), GuidanceHaptic.amplitudeFor(EventPriority.HIGH)),
+                onPlayed = onPlayed,
             )
+
+            override fun cancelVibration() = hapticManager.cancelReservation()
         },
     )
     private var releaseJob: Job? = null
@@ -269,6 +272,8 @@ class SceneAnalysisViewModel(
             hapticManager.cancel()
         }
         checkSpeechUnavailable()
+        // An owed vision-fault rhythm whose switch was just turned off is dropped now, not at the next frame.
+        visionFaultAlerts.settingsChanged(visionFaultSettings())
     }
 
     fun setOverlayMode(overlayMode: SceneOverlayMode) {

@@ -1,6 +1,8 @@
 package com.sailens.shell.device
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -42,5 +44,74 @@ class HapticArbiterTest {
         assertTrue(arbiter.tryClaim(priority = 3, durationMs = 400))
         arbiter.clear()
         assertTrue(arbiter.tryClaim(priority = 0, durationMs = 60))
+    }
+
+    // ---- Reservations (det-first D5's fault rhythms) ----------------------------------------------
+
+    private val started = mutableListOf<Long>()
+    private val start: () -> Unit = { started += now }
+
+    @Test
+    fun `a reservation does not cut an equal or higher rhythm, and starts when it ends`() {
+        assertTrue(arbiter.tryClaim(priority = 3, durationMs = 400))
+        assertFalse(arbiter.claimOrReserve(priority = 0, durationMs = 940, start = start))
+        assertEquals(1_400L, arbiter.reservationFreeAtMs())
+        now = 1_399
+        assertFalse(arbiter.startReservedIfFree())
+        now = 1_400
+        assertTrue(arbiter.startReservedIfFree())
+        assertEquals(listOf(1_400L), started)
+        assertNull(arbiter.reservationFreeAtMs())
+    }
+
+    @Test
+    fun `a reservation goes before any rhythm asked for after it, even at the same instant`() {
+        assertTrue(arbiter.tryClaim(priority = 2, durationMs = 300))
+        assertFalse(arbiter.claimOrReserve(priority = 0, durationMs = 940, start = start))
+        now = 1_300
+        // The timer has not run yet; a CRITICAL rhythm asks first and finds the reservation starting.
+        assertFalse(arbiter.tryClaim(priority = 3, durationMs = 210))
+        assertEquals(listOf(1_300L), started)
+    }
+
+    @Test
+    fun `once started nothing cuts it, but it starts at once over a strictly lower rhythm`() {
+        assertTrue(arbiter.tryClaim(priority = 1, durationMs = 400))
+        assertTrue(arbiter.claimOrReserve(priority = 3, durationMs = 940, start = start))
+        now += 100
+        assertFalse(arbiter.tryClaim(priority = 3, durationMs = 60))
+        now += 900
+        assertTrue(arbiter.tryClaim(priority = 0, durationMs = 60))
+    }
+
+    @Test
+    fun `a strictly higher rhythm interrupting the one playing makes the reservation wait for it`() {
+        assertTrue(arbiter.tryClaim(priority = 1, durationMs = 400))
+        assertFalse(arbiter.claimOrReserve(priority = 0, durationMs = 940, start = start))
+        now = 1_200
+        assertTrue(arbiter.tryClaim(priority = 3, durationMs = 400))
+        now = 1_400
+        assertFalse(arbiter.startReservedIfFree())
+        assertEquals(1_600L, arbiter.reservationFreeAtMs())
+        now = 1_600
+        assertTrue(arbiter.startReservedIfFree())
+    }
+
+    @Test
+    fun `a cancelled reservation never starts, and a newer one replaces it`() {
+        assertTrue(arbiter.tryClaim(priority = 3, durationMs = 400))
+        assertFalse(arbiter.claimOrReserve(priority = 0, durationMs = 940) { started += -1 })
+        assertFalse(arbiter.claimOrReserve(priority = 0, durationMs = 940, start = start))
+        now = 1_400
+        assertTrue(arbiter.startReservedIfFree())
+        assertEquals("only the newer one", listOf(1_400L), started)
+
+        now = 3_000
+        assertTrue(arbiter.tryClaim(priority = 3, durationMs = 400))
+        assertFalse(arbiter.claimOrReserve(priority = 0, durationMs = 940, start = start))
+        arbiter.cancelReservation()
+        now = 3_400
+        assertFalse(arbiter.startReservedIfFree())
+        assertEquals(listOf(1_400L), started)
     }
 }
