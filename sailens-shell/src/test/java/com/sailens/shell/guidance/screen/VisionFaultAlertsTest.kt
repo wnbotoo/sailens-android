@@ -39,6 +39,15 @@ class VisionFaultAlertsTest {
         fun tick() {
             arbiter.startReservedIfFree(now)
         }
+
+        /** When `HapticManager.cancelNavigation` stopped the motor. */
+        val stopped = mutableListOf<Long>()
+
+        /** Navigation vibration turned off, as `HapticManager.cancelNavigation` does it. */
+        fun navigationOff() {
+            if (arbiter.releaseNavigation(now)) stopped += now
+            arbiter.startReservedIfFree(now)
+        }
     }
 
     private fun alertsWith(outputsLog: MutableList<Pair<Long, VisionFaultAlerts.Notice>>) = VisionFaultAlerts(
@@ -463,6 +472,55 @@ class VisionFaultAlertsTest {
         now = 100
         frames(5_100, COVERED)
         assertEquals("still untold: the fallback comes", listOf(5_000L), vibrations.map { it.first })
+    }
+
+    // ---- Review round 3 ------------------------------------------------------------------------
+
+    @Test
+    fun `turning navigation vibration off does not cut a fault rhythm that has started`() {
+        // P1-1: speech off, the floor's rhythm starts at 0; navigation vibration is turned off at 100 ms.
+        // The motor used to be stopped for every pattern, the rhythm was cut, and nothing re-asked for it.
+        val motor = Motor().also { motor = it }
+        settings = VisionFaultAlerts.Settings(speechEnabled = false, faultHapticsEnabled = true)
+        frames(100, FLOOR)
+        assertEquals(listOf(0L), vibrations.map { it.first })
+        motor.navigationOff()
+        assertEquals("the fault rhythm plays on", emptyList<Long>(), motor.stopped)
+        assertTrue("and still holds the motor", !motor.navigation(EventPriority.CRITICAL, 210))
+
+        // A navigation rhythm playing is stopped, as before; a reservation waiting behind it then starts.
+        now = 2_000
+        assertTrue(motor.navigation(EventPriority.CRITICAL, 400))
+        alerts.reset()
+        vibrations.clear()
+        alerts.update(now, DARK, settings)
+        assertEquals("reserved behind the obstacle rhythm", emptyList<Any>(), vibrations)
+        now = 2_100
+        motor.navigationOff()
+        assertEquals(listOf(2_100L), motor.stopped)
+        assertEquals("starts as soon as the navigation rhythm is stopped", listOf(2_100L), vibrations.map { it.first })
+    }
+
+    @Test
+    fun `a frame showing the floor recovered withdraws its waiting rhythm before the frame's obstacle rhythm asks`() {
+        // P2-2: the fallback waits for the motor until 10.3 s; the frame at 10.3 s shows the floor recognised
+        // and brings a CRITICAL obstacle rhythm. In the view model's order -- observe, the prompt, act -- the
+        // stale floor rhythm must not start and refuse it.
+        val motor = Motor().also { motor = it }
+        settings = settings.copy(faultHapticsEnabled = false)
+        frames(9_900, FLOOR)
+        assertTrue(motor.navigation(EventPriority.CRITICAL, 400))
+        frames(10_200, FLOOR)
+        while (now < 10_290) {
+            now += 10
+            motor.tick()
+        }
+        now = 10_300
+        alerts.observe(now, VisionFaults.NONE, settings)
+        assertTrue("the obstacle rhythm is not refused for a stale floor rhythm", motor.navigation(EventPriority.CRITICAL, 210))
+        alerts.act(now, settings)
+        frames(12_000, VisionFaults.NONE)
+        assertEquals(emptyList<Any>(), vibrations)
     }
 
     private companion object {

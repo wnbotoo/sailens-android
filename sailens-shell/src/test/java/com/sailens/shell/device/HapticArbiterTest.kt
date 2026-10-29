@@ -98,6 +98,26 @@ class HapticArbiterTest {
     }
 
     @Test
+    fun `turning navigation vibration off releases a navigation rhythm, but not an alarm or a started reservation`() {
+        assertTrue(arbiter.tryClaim(priority = 3, durationMs = 400))
+        assertTrue("a navigation rhythm is stopped", arbiter.releaseNavigation())
+        assertTrue(arbiter.tryClaim(priority = 0, durationMs = 60))
+
+        now = 2_000
+        assertTrue(arbiter.claimOrReserve(priority = 0, durationMs = 940, start = start))
+        now = 2_100
+        assertFalse("a started fault rhythm plays on", arbiter.releaseNavigation())
+        assertFalse(arbiter.tryClaim(priority = 3, durationMs = 60))
+
+        now = 4_000
+        arbiter.claimUnconditionally(durationMs = 1_500)
+        now = 4_100
+        assertFalse("an alarm plays on", arbiter.releaseNavigation())
+        now = 5_500
+        assertTrue("once it has ended there is nothing to keep", arbiter.releaseNavigation())
+    }
+
+    @Test
     fun `a cancelled reservation never starts, and a newer one replaces it`() {
         assertTrue(arbiter.tryClaim(priority = 3, durationMs = 400))
         assertFalse(arbiter.claimOrReserve(priority = 0, durationMs = 940) { started += -1 })

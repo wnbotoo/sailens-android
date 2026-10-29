@@ -197,18 +197,38 @@ internal class VisionFaultAlerts(
     private var buzzRequestedBy: Track? = null
     private var buzzRequest = 0L
 
-    /** One frame's states, after that frame's navigation prompt was offered. */
-    fun update(now: Long, faults: VisionFaults, settings: Settings) {
+    /** The track whose state is told now, as of the last [observe]. */
+    private var active: Track? = null
+
+    /**
+     * A frame, part 1, **before** its navigation prompt is offered: what holds now. A rhythm waiting for the
+     * motor for a state that has just ended (or is frozen, or holding) is withdrawn here, before the prompt's
+     * own rhythm asks for the motor -- otherwise the stale reservation would start first and refuse it.
+     */
+    fun observe(now: Long, faults: VisionFaults, settings: Settings) {
         updateFrameQuality(now, faults.frameQuality, settings)
         // Frozen while frame quality is faulty, its hold included.
         if (frame == null) updateGround(now, faults.groundUnrecognized, settings)
-
-        offerRecovery(now, settings)
-        val active = if (frame != null) frame.takeIf { frameClearSinceMs == null } else ground
+        active = if (frame != null) frame.takeIf { frameClearSinceMs == null } else ground
         // Only the active track's rhythm may wait for the motor: one that ended, is frozen or is holding
         // keeps what it owes but does not play it now.
         if (buzzRequestedBy != null && buzzRequestedBy !== active) cancelBuzzRequest()
+    }
+
+    /**
+     * A frame, part 2, **after** its navigation prompt was offered: speak, owe and ask for rhythms. After,
+     * so a higher prompt in the same frame does not cut off a notice just begun, and an obstacle rhythm is
+     * not kept waiting by a rhythm asked for first.
+     */
+    fun act(now: Long, settings: Settings) {
+        offerRecovery(now, settings)
         active?.let { drive(it, now, settings) }
+    }
+
+    /** Both parts of a frame, for one with no navigation prompt in between. */
+    fun update(now: Long, faults: VisionFaults, settings: Settings) {
+        observe(now, faults, settings)
+        act(now, settings)
     }
 
     /** A switch changed: an owed rhythm that no longer has a reason is dropped now, not at the next frame. */
@@ -231,6 +251,7 @@ internal class VisionFaultAlerts(
         frame = null
         frameClearSinceMs = null
         ground = null
+        active = null
         frameDebt.sinceMs = null
         groundDebt.sinceMs = null
         recoveries.clear()

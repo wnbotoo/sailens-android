@@ -269,7 +269,8 @@ class SceneAnalysisViewModel(
         }
 
         if (!settings.hapticsEnabled && previous.isHapticsEnabled) {
-            hapticManager.cancel()
+            // Navigation rhythms only: an alarm or a vision-fault rhythm already playing is not this switch's.
+            hapticManager.cancelNavigation()
         }
         checkSpeechUnavailable()
         // An owed vision-fault rhythm whose switch was just turned off is dropped now, not at the next frame.
@@ -392,10 +393,14 @@ class SceneAnalysisViewModel(
                         )
                     )
                 }
+                // The frame's vision faults first, so a rhythm reserved for a state that has just ended is
+                // withdrawn before the prompt's own rhythm asks for the motor; what is said and felt about
+                // them only after the prompt, so a higher prompt in the same frame does not cut off a floor
+                // notice just begun.
+                val alertsNow = clock()
+                visionFaultAlerts.observe(alertsNow, result.visionFaults, visionFaultSettings())
                 onSceneEvents(events, result.sequenceNumber)
-                // After the frame's prompt: offered before it, a floor notice just begun would be cut
-                // off by a higher prompt in the same frame.
-                visionFaultAlerts.update(clock(), result.visionFaults, visionFaultSettings())
+                visionFaultAlerts.act(alertsNow, visionFaultSettings())
             }
         }
     }

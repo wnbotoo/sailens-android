@@ -81,13 +81,20 @@ class HapticManager(context: Context) {
     }
 
     /**
-     * Stops the pattern playing. A reserved rhythm is kept -- it is an alert, not a navigation prompt, and
-     * the motor is free for it now -- and starts at once; [cancelReservation] drops it.
+     * Navigation vibration was turned off: stops the navigation rhythm playing, if that is what plays. An
+     * alarm or a fault rhythm that has started plays to its end -- the switch does not govern them -- and a
+     * reserved one still starts when the motor is free.
      */
+    fun cancelNavigation() {
+        if (arbiter.releaseNavigation()) player.cancel()
+        arbiter.startReservedIfFree()
+    }
+
+    /** Guidance stopped: stops whatever plays and drops a reserved rhythm. */
     fun cancel() {
+        cancelReservation()
         arbiter.clear()
         player.cancel()
-        arbiter.startReservedIfFree()
     }
 
     private companion object {
@@ -182,5 +189,18 @@ internal class HapticArbiter(private val clock: () -> Long) {
     fun clear() {
         activePriority = null
         activeUntilMs = 0L
+    }
+
+    /**
+     * Navigation vibration was turned off. A protected pattern still playing (an alarm, or a reserved
+     * pattern once started) is not navigation and keeps the motor; anything else is released.
+     *
+     * @return whether the motor should be stopped.
+     */
+    @Synchronized
+    fun releaseNavigation(now: Long = clock()): Boolean {
+        if (activePriority == Int.MAX_VALUE && now < activeUntilMs) return false
+        clear()
+        return true
     }
 }
