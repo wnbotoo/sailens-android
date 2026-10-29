@@ -9,7 +9,7 @@ import com.sailens.shell.guidance.settings.PhoneGeometryStore
 import kotlinx.coroutines.flow.StateFlow
 
 /**
- * The debug "ground-contact distance" screen (M3a): how the phone is carried, and the experimental
+ * The debug "ground-contact distance" screen: how the phone is carried, and the experimental
  * switch. The switch is remembered by [store] and handed to [profiles], which applies it at the next
  * Guidance session start, so a running session (and its capture) never changes midway.
  */

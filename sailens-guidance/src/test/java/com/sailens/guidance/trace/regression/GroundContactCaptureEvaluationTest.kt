@@ -12,8 +12,8 @@ import java.io.File
 import java.util.Locale
 
 /**
- * M3a's offline evaluation ([GroundContactEvaluation]) on real model-regression captures. Skipped
- * unless a path is given -- captures contain faces and places and never enter the repository or CI:
+ * The ground-contact distance's offline evaluation ([GroundContactEvaluation]) on real
+ * model-regression captures. Skipped unless a path is given -- captures contain faces and places and never enter the repository or CI:
  *
  * ```
  * gradlew :sailens-guidance:testDebugUnitTest --tests "*GroundContactCaptureEvaluationTest*" -PreplayCapture=<dir> [-Pm3aPhoneHeight=1.15]
@@ -23,7 +23,7 @@ import java.util.Locale
  * `m3a-summary.txt`; they hold numbers only. The test fails on any replay problem, and unless at
  * least one complete capture was evaluated.
  *
- * Like every metric on local captures, it skips the det-first D1.8 sealed set ([SealedCaptures]).
+ * Like every metric on local captures, it skips the sealed acceptance set ([SealedCaptures]).
  */
 class GroundContactCaptureEvaluationTest {
 

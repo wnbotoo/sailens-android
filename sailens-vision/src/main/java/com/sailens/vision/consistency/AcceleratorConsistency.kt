@@ -6,9 +6,9 @@ import com.sailens.vision.semantic.SemanticClassMap
 /**
  * Does a model give the same answer on an accelerator as on the CPU, for the same input?
  *
- * Running on an accelerator is not evidence of computing correctly there. On 2026-10-11 two model
- * exports ran on the LiteRT GPU accelerator without a single error and answered wrongly: indoor
- * floors and pale paving came out as `building`, and an office chair the CPU found at 92% was
+ * Running on an accelerator is not evidence of computing correctly there. Two model exports
+ * (onnx2tf, NHWC) have run on the LiteRT GPU accelerator without a single error and answered
+ * wrongly: indoor floors and pale paving came out as `building`, and an office chair the CPU found at 92% was
  * never detected. Re-exports of the same weights were correct on the same GPU. Nothing in the
  * output looks broken, so only a comparison with a reference computation finds it -- for a user who
  * cannot see the scene, the same kind of safety property as the class channel order.
@@ -155,8 +155,8 @@ enum class ConsistencyVerdict {
 
 /**
  * Semantic agreement is judged in three bands. A correct accelerator on a sharp, steady view agrees
- * on 97-98% of the pixels; a broken one replaced whole regions (30% on 2026-10-11). In between
- * lies blur and unfamiliar content, where several classes score alike and ordinary numeric
+ * on 97-98% of the pixels; a broken one replaced whole regions (30% for the exports at the top of
+ * this file). In between lies blur and unfamiliar content, where several classes score alike and ordinary numeric
  * differences flip the winner: a shaken phone gave a correct model 86-96%. That band is
  * [ConsistencyVerdict.INCONCLUSIVE], not a failure -- retry with the phone held still.
  */

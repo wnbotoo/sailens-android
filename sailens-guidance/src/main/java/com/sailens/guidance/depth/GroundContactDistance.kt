@@ -21,7 +21,7 @@ import kotlin.math.sqrt
 import kotlin.math.tan
 
 /**
- * Ground-contact distance (M3a, implementation doc §8). Part of [com.sailens.guidance.config.PerceptionConfig],
+ * Ground-contact distance (docs/geometry.md §5). Part of [com.sailens.guidance.config.PerceptionConfig],
  * so a model-regression capture records it with the rest of the session's config.
  *
  * Off by default. Even when [enabled], a height that is only the runtime seed
@@ -29,7 +29,7 @@ import kotlin.math.tan
  * a body-height calibration. Off or not, the estimate is computed and traced, so field traces show
  * what it would have done.
  *
- * None of these values is calibrated against field data yet; they are the proposals of §8.
+ * None of these values is calibrated against field data yet.
  */
 @Serializable
 data class GroundContactDistanceConfig(
@@ -96,7 +96,7 @@ data class GroundContactEstimate(
 
 /**
  * A box's distance: today's level from the image position, the ground-contact estimate, and the
- * level used. [used] is never farther than [today] (risk-conservative fusion, §8).
+ * level used. [used] is never farther than [today] (risk-conservative fusion).
  */
 data class DistanceEstimate(
     val used: DistanceLevel,
@@ -129,7 +129,7 @@ data class DistanceFrame(
     }
 }
 
-/** The level fusion of §8, separate so its table can be tested exhaustively. */
+/** The level fusion, separate so its table can be tested exhaustively. */
 object DistanceFusion {
 
     fun nearerOf(a: DistanceLevel, b: DistanceLevel): DistanceLevel = if (a.value <= b.value) a else b
@@ -159,7 +159,7 @@ object DistanceFusion {
 }
 
 /**
- * Projects a box's bottom centre onto the ground plane (§8): the ray through the contact pixel, its
+ * Projects a box's bottom centre onto the ground plane: the ray through the contact pixel, its
  * angle β below the horizon from gravity, and `d = h / tan β` for phone height `h`. Then checks
  * whether that contact can be trusted.
  *
@@ -295,7 +295,7 @@ class GroundContactDistanceEstimator(semantics: NavigationSemantics) {
         // horizon or the top ray may point straight up or down.
         if (bottom - delta <= 0.0 || top + delta >= HALF_PI || top - delta <= -HALF_PI) return true
         // A bottom ray that may point straight down makes 1 / tan reach its limit, 0 -- exactly,
-        // not a clipped near-zero, or the enclosure shrinks (review round 3).
+        // not a clipped near-zero, or the enclosure shrinks.
         val inverseBottom = listOf(if (bottom + delta >= HALF_PI) 0.0 else 1 / tan(bottom + delta), 1 / tan(bottom - delta))
         val tanTop = listOf(tan(top - delta), tan(top + delta))
         val ratios = tanTop.flatMap { t -> inverseBottom.map { t * it } }

@@ -14,7 +14,8 @@ enum class IntrinsicsSource {
 /**
  * Pinhole intrinsics in the upright analysis image -- the frame buffer rotated by its
  * `rotationDegrees`, in which the semantic mask and the detection boxes share one coordinate space
- * (§2). Continuous pixel coordinates: pixel i spans [i, i+1), so the centre of a W-wide image is W/2.
+ * (docs/geometry.md §1). Continuous pixel coordinates: pixel i spans [i, i+1), so the centre of a
+ * W-wide image is W/2.
  *
  * @param bufferMappingAssumed true when the frame did not report its `sensorToBufferTransform` and
  *   the buffer was assumed to be a centred, aspect-preserving crop of the active array.
@@ -38,8 +39,8 @@ data class CameraIntrinsics(
 }
 
 /**
- * Resolves [CameraIntrinsics] from the raw facts (§7): calibration when reported, else an estimate
- * from focal length and sensor size; mapped into the buffer through the frame's
+ * Resolves [CameraIntrinsics] from the raw facts (docs/geometry.md §2): calibration when reported,
+ * else an estimate from focal length and sensor size; mapped into the buffer through the frame's
  * `sensorToBufferTransform`, then rotated upright. Null when neither source is usable.
  *
  * Coordinates: the transform takes **sensor coordinates** -- the system in which Camera2 gives the

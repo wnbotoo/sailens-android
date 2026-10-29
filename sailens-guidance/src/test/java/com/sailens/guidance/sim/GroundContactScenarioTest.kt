@@ -13,10 +13,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Every M2a scenario with the ground-contact distance (M3a) switched on and a chest preset of
+ * Every simulator scenario with the ground-contact distance switched on and a chest preset of
  * 1.3 m: its own goldens (`<name>.m3a.golden.txt`, with each obstacle's distance evidence), so the
- * diff against the plain golden is the behaviour M3a would change, and the invariants of §8 checked
- * on every frame. The plain goldens stay byte for byte as they were: off, M3a changes nothing.
+ * diff against the plain golden is the behaviour the distance would change, and the invariants of
+ * docs/geometry.md §5 checked on every frame. The plain goldens stay byte for byte as they are:
+ * off, the distance changes nothing.
  */
 class GroundContactScenarioTest {
 
@@ -52,7 +53,7 @@ class GroundContactScenarioTest {
     @Test fun `approach a parked car`() = check(Scenarios.approachParkedCar)
 
     @Test
-    fun `every scenario has an M3a golden test`() {
+    fun `every scenario has a ground-contact golden test`() {
         val tested = javaClass.declaredMethods.count { it.isAnnotationPresent(Test::class.java) } - 4
         assertEquals("add a test per scenario", Scenarios.all.size, tested)
     }

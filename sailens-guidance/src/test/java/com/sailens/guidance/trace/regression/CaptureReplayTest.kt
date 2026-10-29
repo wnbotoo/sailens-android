@@ -13,7 +13,7 @@ import org.junit.Test
 import java.io.File
 
 /**
- * Replays real model-regression captures from disk (M0b exit criterion 1). Skipped unless a path is
+ * Replays real model-regression captures from disk: each must replay exactly. Skipped unless a path is
  * given -- captures contain faces and places and never enter the repository or CI:
  *
  * ```

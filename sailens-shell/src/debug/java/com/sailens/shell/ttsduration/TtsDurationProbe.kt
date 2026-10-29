@@ -20,7 +20,7 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.resume
 
 /**
- * How long each Guidance sentence takes to say (det-first plan D1.7): the speaker model's
+ * How long each Guidance sentence takes to say: the speaker model's
  * durations and the time budget of every prompt rest on this table.
  *
  * Every Guidance message, with and without the NEAR prefix where it can carry one, plus the status

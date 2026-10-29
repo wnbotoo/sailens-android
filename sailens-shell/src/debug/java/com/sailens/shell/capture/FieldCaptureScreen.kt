@@ -271,7 +271,7 @@ private fun TimingSyncSection(armed: Boolean, enabled: Boolean, onArmedChange: (
 }
 
 /**
- * The model-regression record (M0b) and how sessions are named: one scene is one Guidance session,
+ * The model-regression record and how sessions are named: one scene is one Guidance session,
  * labelled with a group and a free-text scene name. Locked while recording, like the switch.
  */
 @OptIn(ExperimentalLayoutApi::class)

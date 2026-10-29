@@ -73,7 +73,7 @@ data class PerceptionConfig(
     val trackerMaxMissedFrames: Int = 5,
     val trackerMinStableFrames: Int = 3,
 
-    /** M3a ground-contact distance; off by default (see [GroundContactDistanceConfig]). */
+    /** The ground-contact distance; off by default (see [GroundContactDistanceConfig]). */
     val groundContact: GroundContactDistanceConfig = GroundContactDistanceConfig(),
 ) {
     /** det 是否参与运行（BASIC 挡位或未配置 provider 时关闭） */

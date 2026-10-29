@@ -9,7 +9,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 /**
- * Where a recorded revoke lands in replay (M3a review round 1, P1): a counterfactual run must not
+ * Where a recorded revoke lands in replay: a counterfactual run must not
  * pin the device's "not delivered" on a prompt the device never made -- such as the same prompt
  * upgraded to a priority that would have interrupted the speech that blocked the original.
  */
@@ -55,7 +55,7 @@ class RevokeTargetsTest {
 
     @Test
     fun `identical events are matched one to one`() {
-        // Review round 2: two identical recorded events must not both land on one replayed event.
+        // Two identical recorded events must not both land on one replayed event.
         val first = recordedHigh
         val second = recordedHigh.copy(id = java.util.UUID.randomUUID())
         val replayed = listOf(recordedHigh.copy(id = java.util.UUID.randomUUID()), recordedHigh.copy(id = java.util.UUID.randomUUID()))

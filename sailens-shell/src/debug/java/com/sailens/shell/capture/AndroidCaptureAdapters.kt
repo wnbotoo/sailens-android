@@ -46,7 +46,7 @@ internal class FieldCaptureSettingsStore(context: Context) {
 
     private val _modelRegression = MutableStateFlow(preferences.getBoolean(KEY_MODEL_REGRESSION, false))
 
-    /** With the switch on, record the model-regression record (M0b) as well as field evidence. */
+    /** With the switch on, record the model-regression record as well as field evidence. */
     val modelRegression: StateFlow<Boolean> = _modelRegression.asStateFlow()
 
     fun setModelRegression(on: Boolean) {

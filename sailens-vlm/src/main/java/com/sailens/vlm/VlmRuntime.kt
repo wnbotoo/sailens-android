@@ -12,8 +12,8 @@ import com.google.ai.edge.litert.Accelerator
  * ([com.sailens.runtime.session.AcceleratorSelector]).
  *
  * To enable VLM: implement [VlmRuntimeFactory] with LiteRT-LM or MediaPipe LLM Inference
- * (`LlmInference` + vision modality), add the dependency, and inject it into [LiteRtVlmEngine]. See
- * docs/vlm-asr-assistant-plan.md.
+ * (`LlmInference` + vision modality), add the dependency, and inject it into [LiteRtVlmEngine]. A
+ * concrete runtime belongs in its own module (docs/architecture.md §6.4).
  */
 public interface VlmRuntime : AutoCloseable {
 
@@ -59,6 +59,6 @@ public object UnavailableVlmRuntimeFactory : VlmRuntimeFactory {
 
     override fun create(context: Context, config: VlmModelConfig, accelerator: Accelerator): VlmRuntime =
         throw IllegalStateException(
-            "No VLM runtime wired. Provide a LiteRT-LM / MediaPipe VlmRuntimeFactory (see docs/vlm-asr-assistant-plan.md)."
+            "No VLM runtime wired. Provide a LiteRT-LM / MediaPipe VlmRuntimeFactory (see docs/architecture.md §6.4)."
         )
 }

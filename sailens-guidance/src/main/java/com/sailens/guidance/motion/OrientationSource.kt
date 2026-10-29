@@ -11,7 +11,7 @@ import com.sailens.guidance.geometry.SensorSample
 import com.sailens.guidance.geometry.Vec3
 
 /**
- * Gravity and rotation for M3o's per-frame geometry. Runs only while a Guidance session does:
+ * Gravity and rotation for the per-frame camera geometry. Runs only while a Guidance session does:
  * the session starts it and stops it, so the higher sensor rate costs nothing outside Guidance.
  */
 interface OrientationSource {
@@ -35,7 +35,7 @@ object NoOrientationSource : OrientationSource {
 }
 
 /**
- * `TYPE_GRAVITY` and `TYPE_GAME_ROTATION_VECTOR` at `SENSOR_DELAY_GAME` (§7), delivered on a thread
+ * `TYPE_GRAVITY` and `TYPE_GAME_ROTATION_VECTOR` at `SENSOR_DELAY_GAME`, delivered on a thread
  * of their own so ~100 events a second never queue behind the UI. A device without one of the
  * sensors simply never fills that half, and the geometry says so.
  */

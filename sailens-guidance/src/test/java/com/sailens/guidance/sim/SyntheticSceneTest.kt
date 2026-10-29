@@ -7,7 +7,7 @@ import kotlin.math.sqrt
 
 /**
  * The simulator's two outputs must describe the same camera: what it renders (class map, boxes)
- * and the M0a raw facts it hands M3o. Checked here by projecting world points the long way, from the
+ * and the raw facts it hands the camera geometry. Checked here by projecting world points the long way, from the
  * raw facts alone -- active-array intrinsics, sensor-to-buffer transform, rotation, gravity -- and
  * comparing with the renderer, which works from [SyntheticCamera]'s derived focal length and centre.
  */

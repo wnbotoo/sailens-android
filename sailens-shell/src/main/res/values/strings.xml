@@ -67,7 +67,7 @@
     <string name="label_feedback_haptics">Navigation vibration</string>
     <string name="settings_feedback_speech_supporting">Speak guidance and urgent risks during navigation.</string>
     <string name="settings_feedback_haptics_supporting">Convey obstacle direction and path alerts through vibration. With voice off, vibration is the only channel.</string>
-    <!-- det-first D5: the vibration for "Guidance cannot see". The fallback, voice-broken and
+    <!-- The vibration for "Guidance cannot see". The fallback, voice-broken and
          guidance-interrupted alerts ignore it, and the text says so: not a hidden exception. -->
     <string name="label_feedback_fault_haptics">Fault alert vibration</string>
     <string name="settings_feedback_fault_haptics_supporting">Vibrates (long, short, long) when the camera is covered, it is too dark, or the ground is not recognized. If the spoken alert cannot get through in time, it vibrates anyway. Voice-broken and guidance-interrupted alerts always vibrate.</string>
@@ -162,7 +162,7 @@
     <string name="btn_share_trace_file">Share JSONL</string>
     <string name="title_share_trace_file">Share trace file</string>
 
-    <!-- Field capture (debug builds only, M0a) -->
+    <!-- Field capture (debug builds only) -->
     <string name="btn_open_field_capture">Field capture</string>
     <string name="settings_diagnostics_field_capture_supporting">Record reduced camera frames and motion sensors during Guidance, for labelling and calibration.</string>
     <string name="title_field_capture_page">Field capture</string>
@@ -329,7 +329,7 @@
          style alerts are paused. The wording must say the way ahead is unknown, not that it is
          clear. Obstacle alerts continue. -->
     <string name="event_ground_unrecognized">Can\'t see the ground, can\'t tell if the way ahead is clear</string>
-    <!-- det-first D5: said once when each of the three states above is over. -->
+    <!-- Said once when each of the three states above is over. -->
     <string name="event_camera_restored">Camera is clear again</string>
     <string name="event_light_restored">Light is back to normal</string>
     <string name="event_ground_recognized">Ground recognized again, path alerts are back</string>
@@ -391,7 +391,7 @@
     <string name="model_consistency_coverage">Compared %1$d of %2$d models that run on an accelerator</string>
     <string name="model_consistency_status_incomplete">Inconclusive: %1$s. Every frame must be compared to pass; keep the camera on a steady view and run again</string>
     <string name="model_consistency_report_saved">Report saved: %1$s</string>
-    <!-- Field capture: model-regression record (M0b) -->
+    <!-- Field capture: model-regression record -->
     <string name="field_capture_model_regression">Also record the model-regression record</string>
     <string name="field_capture_model_regression_supporting">Every frame\'s model outputs and decisions, for exact replay, plus full-resolution frames around delivered prompts and markers. About 3.5 GB an hour outdoors. Record on SM8850 only.</string>
     <string name="field_capture_group_label">Group</string>
@@ -401,7 +401,7 @@
     <string name="field_capture_cap_label">Storage cap for captures</string>
     <string name="field_capture_cap_value">%1$d GB</string>
 
-    <!-- Ground-contact distance, M3a (debug diagnostics) -->
+    <!-- Ground-contact distance (debug diagnostics) -->
     <string name="btn_open_tts_duration">Speech durations</string>
     <string name="settings_diagnostics_tts_duration_supporting">Times every Guidance sentence at your speech rate, for the speaker model</string>
     <string name="title_tts_duration_page">Speech durations</string>

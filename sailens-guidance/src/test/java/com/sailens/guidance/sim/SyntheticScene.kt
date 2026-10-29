@@ -11,12 +11,12 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 /*
- * The physical truth of a simulator scenario (M2a, implementation doc §6): a pinhole camera on a
+ * The physical truth of a simulator scenario (docs/geometry.md §7): a pinhole camera on a
  * phone held at a height and pitch, looking into a world of horizontal ground patches, vertical
  * boxes and a far background. From it the simulator renders what the models would report -- a
- * semantic class map and detection boxes in the same upright frame -- and the M0a raw facts a
+ * semantic class map and detection boxes in the same upright frame -- and the raw facts a
  * capture would hold (camera characteristics, sensor-to-buffer transform, gravity samples), so
- * M3o can later resolve them exactly as it resolves a recording and check against this truth.
+ * the camera geometry resolves them exactly as it resolves a recording, checked against this truth.
  *
  * World axes: X right, Y up, Z forward along the ground; metres. Camera axes: x right, y down,
  * z along the optical axis, in the upright (rotated) analysis image.
@@ -57,7 +57,7 @@ data class SyntheticCamera(
     private val mapScale = mapWidth.toFloat() / bufferHeight
 
     /**
-     * Focal length and principal point in class-map pixels (what M3o must resolve to: 449.625, 180,
+     * Focal length and principal point in class-map pixels (what the geometry must resolve to: 449.625, 180,
      * 320). Continuous pixel coordinates -- pixel i spans [i, i+1) -- so the 90-degree rotation maps
      * buffer y to upright x as `bufferHeight - y`.
      */
@@ -65,7 +65,7 @@ data class SyntheticCamera(
     val cx: Float = (bufferHeight - (activeHeight / 2f * scale + offsetY)) * mapScale
     val cy: Float = (activeWidth / 2f * scale) * mapScale
 
-    /** The M0a camera record a capture of this camera would hold. */
+    /** The camera record a capture of this camera would hold. */
     fun cameraRecord(): CaptureCameraRecord = CaptureCameraRecord(
         cameraId = "0",
         capturedAtElapsedRealtimeNanos = 0,

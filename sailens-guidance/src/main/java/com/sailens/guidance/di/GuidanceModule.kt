@@ -76,7 +76,7 @@ val guidanceModule = module {
             config = get(),
             logService = get(),
         )
-        // Debug builds bind a RegressionRecorder (M0b); release binds none.
+        // Debug builds bind a RegressionRecorder; release binds none.
         getOrNull<RegressionRecorder>()?.let { RecordingConnectivityStatsExtractor(native, it) } ?: native
     }
 

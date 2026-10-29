@@ -25,7 +25,7 @@ import com.sailens.shell.design.theme.SailensDimens
 import org.koin.androidx.compose.koinViewModel
 import java.util.Locale
 
-/** The debug TTS-duration tool (det-first plan D1.7). */
+/** The debug TTS-duration tool: how long each Guidance sentence takes to say. */
 @Composable
 internal fun TtsDurationScreen(
     onNavigateBack: () -> Unit,

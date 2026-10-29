@@ -92,8 +92,8 @@ class CooldownManager(
     private class Emission(val timestampMs: Long, val eventId: UUID)
 
     // 撤回不再是"恢复写入前的快照"：快照只在撤回的恰好是最后一次写入时才对。A、B 先后写同一个 key、
-    // B 继承了 A 的优先级，先撤 A 再撤 B，快照会把 A 的记录恢复回来——两条都没送达，key 上却留着 A
-    // （det 优先方案 D3a-1）。所以记录拆成两段：
+    // B 继承了 A 的优先级，先撤 A 再撤 B，快照会把 A 的记录恢复回来——两条都没送达，key 上却留着 A。
+    // 所以记录拆成两段：
     //
     // - [confirmedRecords]：已确认的那段前缀按记录规则完整折叠的结果。继承链可以任意长，所以必须是
     //   完整折叠，不能按窗口裁掉旧写入再重放。
@@ -114,7 +114,7 @@ class CooldownManager(
     /**
      * 一次决策里对冷却的全部操作（设静止、过滤、记录）作为一个整体执行：送达方的撤销来自另一个
      * 线程，只能落在两次决策之间，不会插进一次决策的过滤和记录之间。这样撤销的位置是确定的，
-     * M0b 回放才能精确复现。
+     * 模型回归记录的回放才能精确复现。
      */
     @Synchronized
     fun <T> decide(block: CooldownManager.() -> T): T {
@@ -254,7 +254,7 @@ class CooldownManager(
     }
 
     /**
-     * The whole state, for the equivalence tests (det-first plan D3a-1): each key's current record as
+     * The whole state, for the equivalence tests: each key's current record as
      * (time, priority, writer), and the storm window's entries in order. Changes nothing.
      */
     @Synchronized
@@ -269,7 +269,7 @@ class CooldownManager(
     )
 
     /**
-     * A read-only copy of the records, for measurement (det-first plan D1.6): taken just before a
+     * A read-only copy of the records, for measurement: taken just before a
      * decision with that decision's [now] and motion state, it says which keys hold an event back and
      * at what recorded priority. Changes nothing -- not even the emission window, which is counted,
      * not trimmed.

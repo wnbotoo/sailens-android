@@ -391,7 +391,6 @@ itself. A snapshot is detached from the pool instead, so Describe owns an ordina
 for as long as its request takes.
 
 Describe rejects a stale snapshot. It must never silently describe a frame from several seconds ago.
-This preserves the intent already documented in the VLM/ASR assistant plan.
 
 A snapshot request is also bounded in time. It opens demand, waits for a frame that satisfies the
 freshness bound, and gives up rather than waiting indefinitely: a person who pressed a button is
@@ -903,7 +902,7 @@ Restoring either changes the detection postprocess and the frame budget, so both
 decisions rather than part of this refactor. Treat these lines as targets to restore, not as
 properties that were preserved.
 
-**Root cause and fix (2026-09 release review).** The zero-copy pair had three independent bugs, any
+**Root cause and fix.** The zero-copy pair had three independent bugs, any
 one of which keeps the handle path from ever running (they masked each other, which is why none
 surfaced):
 

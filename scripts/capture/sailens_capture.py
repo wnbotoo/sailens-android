@@ -1,9 +1,9 @@
-"""Reads Sailens field captures (M0a), model-regression records (M0b) and Guidance traces on the PC.
+"""Reads Sailens field captures, model-regression records and Guidance traces on the PC.
 
 Mirrors the JVM reader (`CaptureSessionReader`, sailens-guidance): the schema version is read from
 the raw manifest before anything else, an unknown major version is refused as unsupported, a torn
 JSONL line is skipped with a warning, unknown record types are counted, not fatal. Field names are
-the ones `CaptureSchema` writes; see docs/local-navigation-implementation.md §4.
+the ones `CaptureSchema` writes; see docs/field-capture.md §2.
 
 Time bases, kept apart on purpose:
 - ``sensorTimestampNanos`` (frames) is the camera's own timestamp. Guidance traces carry the same
@@ -35,7 +35,7 @@ RECORD_TYPES = {
     "regression_utterance": "utterances",
 }
 
-# det-first D1.8: a capture under a directory holding this file belongs to the sealed acceptance set.
+# A capture under a directory holding this file belongs to the sealed acceptance set.
 SEALED_MARKER = "SEALED"
 
 # classmaps.bin entry header (ClassMapStore, big-endian): magic, seq, width, height, crc32, length.
@@ -180,7 +180,7 @@ def read_class_map(path: str, ref: dict, seq: int):
 
 
 def is_sealed(path: str) -> bool:
-    """Whether ``path`` belongs to the det-first D1.8 sealed acceptance set: a ``SEALED`` file in it or
+    """Whether ``path`` belongs to the sealed acceptance set: a ``SEALED`` file in it or
     any directory above it, above the path as given (normalized) or above its real location (links and
     junctions resolved). Either one seals. Mirrors ``SealedCaptures`` (sailens-guidance tests)."""
     for start in {os.path.normpath(os.path.abspath(path)), os.path.realpath(path)}:

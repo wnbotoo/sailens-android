@@ -5,7 +5,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
 
 /**
- * The model-regression record (M0b, docs/local-navigation-implementation.md §4 "M0b").
+ * The model-regression record (docs/field-capture.md §7).
  *
  * Goal: replay the decision path exactly on the JVM. The record therefore holds every input of that
  * path the JVM cannot compute the same way itself -- the model outputs and the native kernels'
@@ -112,7 +112,7 @@ data class RegressionFrameRecord(
 ) : CaptureRecord
 
 /**
- * `CameraGeometry` as resolved for a frame (M3o), enums by name. Recorded rather than re-resolved
+ * `CameraGeometry` as resolved for a frame, enums by name. Recorded rather than re-resolved
  * from the sensor log because the live pipeline picks the nearest gravity sample *it has* when it
  * resolves, which a replay holding the whole log cannot know.
  */
@@ -314,8 +314,8 @@ data class RegressionRevokeRecord(
 ) : CaptureRecord
 
 /**
- * One event in the life of one utterance handed to the speech engine (det-first plan D1.3; schema
- * 1.5). Measurement only: replay never reads it.
+ * One event in the life of one utterance handed to the speech engine (schema 1.5). Measurement only:
+ * replay never reads it.
  *
  * Two ids, because the same words can be handed to the engine more than once: [attemptId] is one
  * submission's utterance id, [logicalId] what is being said -- for a Guidance prompt, the decided

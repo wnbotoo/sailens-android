@@ -2,8 +2,7 @@
 
 # 实验记录：几何地面探针（2026-09-24）
 
-[`../local-navigation-roadmap.zh-CN.md`](../local-navigation-roadmap.zh-CN.md) §5 里地面几何方案的依
-据。只在 PC 上做，没有真机。脚本：
+[`../geometry.zh-CN.md`](../geometry.zh-CN.md) §8 里地面几何方案的依据。只在 PC 上做，没有真机。脚本：
 [`scripts/experiments/geometry_probe/`](../../scripts/experiments/geometry_probe/)。原始汇总：
 [`results/summary-2026-09-24.txt`](../../scripts/experiments/geometry_probe/results/summary-2026-09-24.txt)，
 路沿逐帧结果：[`results/curb-2026-09-24.json`](../../scripts/experiments/geometry_probe/results/curb-2026-09-24.json)。
@@ -93,8 +92,8 @@ python summ.py > results/summary.txt
   PG 的输入先中心裁成正方形，再缩放到 192。这与 `litert-community` 导出版写明的做法（不保持宽高比，
   直接拉伸到 686×518）不同，也与上游 HF 处理器（`keep_aspect_ratio=true`、短边 518、取 14 的倍数）不
   同。对 DIODE（4:3），裁剪只去掉不到 1% 的宽度；对 Cityscapes（2:1），会裁掉两侧。所以这些数字是
-  "中心裁剪预处理下的 DA V2 Small"，不是官方预处理下的模型指标；生产契约会把预处理方式写明（实施文档
-  §9，深度输入变换）。
+  "中心裁剪预处理下的 DA V2 Small"，不是官方预处理下的模型指标；生产契约会把预处理方式写明
+  （[`../geometry.zh-CN.md`](../geometry.zh-CN.md) §6，深度输入变换）。
 
 - DIODE 是三脚架激光扫描仪（室外中位高度 2.4 m，室内约 1.2 m），不是手持手机；所以手机高度的影响按
   相对误差（h ± 15%）报告，而不是拿 1.3 m 去套 DIODE。

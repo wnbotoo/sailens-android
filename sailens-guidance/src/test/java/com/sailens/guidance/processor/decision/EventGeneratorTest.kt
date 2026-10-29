@@ -497,7 +497,7 @@ class EventGeneratorTest {
 
     @Test
     fun `vision faults name exactly the states the generator makes state events for, switches included`() {
-        // det-first plan D5: the shell alerts on these; they must never disagree with the events.
+        // The shell alerts on these; they must never disagree with the events.
         for (config in listOf(AnalysisConfig(), AnalysisConfig(enableSensorQualityEvents = false))) {
             val generator = EventGenerator(config)
             for (quality in FrameQuality.entries) {

@@ -6,7 +6,7 @@ package com.sailens.camera
  * Nothing here exposes Camera2 or CameraX types: the interop that reads them stays inside this
  * module, so a later CameraX API change (or another capture source) does not leak into callers.
  * Values are raw, in the units and coordinate systems Camera2 defines; mapping them into the
- * analysis image is the consumer's job (local-navigation-implementation §7, M3o).
+ * analysis image is the consumer's job (docs/geometry.md §2).
  *
  * A snapshot belongs to one camera binding. Some logical cameras change `SENSOR_ORIENTATION` with
  * device state (API 32+), so it is read again on every bind and never cached across bindings.

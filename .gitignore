@@ -1,17 +1,8 @@
 *.iml
 .gradle
 /local.properties
-/.idea/caches
-/.idea/libraries
-.idea/gradle.xml
-.idea/compiler.xml
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
-/.idea/copilot.*
-/.idea/copilotDiffState.xml
-/.idea/deploymentTargetSelector.xml
+# IDE state: Android Studio regenerates all of it, and none of it is shared project configuration.
+/.idea/
 .DS_Store
 /build
 /captures

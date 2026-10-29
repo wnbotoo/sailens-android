@@ -20,7 +20,7 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 /**
- * The risk-conservative fusion of §8, over its whole input table: the ground contact may raise
+ * The risk-conservative fusion (docs/geometry.md §5), over its whole input table: the ground contact may raise
  * risk or keep it, never lower it, and only when enabled, calibrated beyond the seed and valid.
  */
 class DistanceFusionTest {

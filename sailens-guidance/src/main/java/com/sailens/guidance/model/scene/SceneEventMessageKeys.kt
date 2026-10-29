@@ -4,7 +4,7 @@ import com.sailens.guidance.model.common.DirectionZone
 
 /**
  * Every [SceneEvent.messageKey] Guidance can emit, in one place, and the recovery notices the shell
- * says when a state of [com.sailens.guidance.model.analysis.VisionFaults] ends (det-first plan D5).
+ * says when a state of [com.sailens.guidance.model.analysis.VisionFaults] ends.
  *
  * The keys are Guidance's vocabulary; the words are the shell's (string resources). The two meet
  * at a key, and a key the shell cannot resolve is spoken as the raw key -- "event_obstacle_center"

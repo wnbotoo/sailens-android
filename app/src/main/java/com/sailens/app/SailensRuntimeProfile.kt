@@ -21,10 +21,10 @@ import com.sailens.shell.guidance.overlay.SceneOverlayConfig
  * physical `.tflite` for each (type, accelerator) pairing is resolved in the data layer by
  * `ModelSourceResolver` / `ModelCatalog`, so no file name appears here.
  *
- * There is one profile, [standard]: every model, the VLM included, targets the GPU. An `ultra`
- * tier that reserved the NPU for the VLM used to sit beside it, but nothing ever selected it — no
- * VLM runtime this app can ship gets the NPU on the target SoCs — so it was removed rather than
- * kept as a promise. A second profile comes back when a second hardware path actually exists.
+ * There is one profile, [standard]: every model, the VLM included, targets the GPU. No profile
+ * reserves the NPU for the VLM: no VLM runtime this app can ship gets the NPU on the target SoCs,
+ * so such a profile would be a promise nothing keeps. Add a second profile when a second hardware
+ * path actually exists.
  *
  * Orthogonal to the profile, [PerceptionProfile] decides *which* models run per frame (see
  * `PerceptionConfig.forProfile`): BASIC = sem only, DEFAULT = sem + det. The shipped default is

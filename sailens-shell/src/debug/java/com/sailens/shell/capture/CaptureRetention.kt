@@ -5,7 +5,7 @@ import com.sailens.guidance.trace.capture.CaptureSchema
 import java.io.File
 
 /**
- * Keeps the capture directory bounded (decided 2026-09-25): a session expires [maxAgeMs] after it
+ * Keeps the capture directory bounded: a session expires [maxAgeMs] after it
  * was recorded unless it was exported or pinned, and the total is kept under [maxTotalBytes] by
  * deleting the oldest sessions that are not pinned. The active session, and one being exported, is
  * never deleted here; the
@@ -100,7 +100,10 @@ internal class CaptureRetention(
 
     companion object {
         const val DEFAULT_MAX_AGE_MS: Long = 7L * 24 * 60 * 60 * 1000
-        /** 10 GB since M0b (decided 2026-10-09); 2 / 5 / 10 GB selectable on the capture page. */
+        /**
+         * 10 GB: a model-regression capture takes about 3.2-3.6 GB an hour outdoors. 2 / 5 / 10 GB
+         * selectable on the capture page.
+         */
         const val DEFAULT_MAX_TOTAL_BYTES: Long = 10L * 1024 * 1024 * 1024
     }
 }

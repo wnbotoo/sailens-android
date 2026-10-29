@@ -55,7 +55,7 @@ class EventGenerator(
 
     /**
      * The states [generate] makes the SENSOR_QUALITY and GROUND_UNRECOGNIZED events for, by the same
-     * test, so what the shell alerts on (det-first plan D5) and what Guidance generates events for are
+     * test, so what the shell alerts on and what Guidance generates events for are
      * one thing.
      */
     fun visionFaults(snapshot: SceneSnapshot): VisionFaults = VisionFaults(
@@ -328,8 +328,8 @@ class EventGenerator(
      * The obstacle events [generate] makes from [obstacles], before any event exists: which tracked
      * obstacles pass the announcement gates, grouped one event per zone, in event order.
      *
-     * Pure, so an evaluation can ask which obstacles an obstacle prompt speaks for (det-first plan
-     * D1.1) by calling the very code that decided it.
+     * Pure, so an evaluation can ask which obstacles an obstacle prompt speaks for by calling the very
+     * code that decided it.
      */
     internal fun announcedObstacleGroups(obstacles: List<DetectedObstacle>): List<ObstacleZoneGroup> =
         obstacles.filter(::shouldAnnounceObstacle).groupBy { it.zone }.map { (zone, zoneObstacles) ->

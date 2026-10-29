@@ -133,7 +133,7 @@ class RegressionReaderTest(unittest.TestCase):
 
 
 class LifecycleAndSealTest(unittest.TestCase):
-    """Schema 1.5 (the speech lifecycle) and the det-first D1.8 sealed set."""
+    """Schema 1.5 (the speech lifecycle) and the sealed acceptance set."""
 
     def test_lifecycle_records_read_back_without_warnings(self):
         with tempfile.TemporaryDirectory() as root:

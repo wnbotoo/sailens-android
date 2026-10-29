@@ -30,7 +30,7 @@ class PerceptionProfileManager(
     var activeConfig: PerceptionConfig = initialConfig
         private set
 
-    /** Whether the ground-contact distance (M3a) may decide, from the next session on. */
+    /** Whether the ground-contact distance may decide, from the next session on. */
     @Volatile
     var selectedGroundContact: Boolean = initialConfig.groundContact.enabled
         private set
@@ -45,9 +45,9 @@ class PerceptionProfileManager(
     }
 
     /**
-     * Records whether the ground-contact distance (M3a) is switched on; like the profile, it takes
+     * Records whether the ground-contact distance is switched on; like the profile, it takes
      * effect at the next [activateSelected], so a session (and its capture's recorded config) never
-     * changes midway. Its only caller is the debug settings screen until M3a's enable gate is met.
+     * changes midway. Its only caller is the debug settings screen: release keeps the distance off.
      */
     fun selectGroundContact(enabled: Boolean) {
         selectedGroundContact = enabled

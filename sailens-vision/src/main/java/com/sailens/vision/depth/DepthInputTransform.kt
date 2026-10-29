@@ -4,7 +4,7 @@ import kotlin.math.ceil
 
 /**
  * How a depth model's input was made from the upright analysis image. Part of the model's
- * configured contract (local-navigation-implementation §9): it cannot be read from the TFLite
+ * configured contract (docs/geometry.md §6): it cannot be read from the TFLite
  * metadata, and it must match how the export was validated.
  */
 enum class ResizePolicy {

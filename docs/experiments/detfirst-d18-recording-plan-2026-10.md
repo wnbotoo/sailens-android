@@ -11,7 +11,7 @@ by whole session, into two sets:
   is **not looked at** until every parameter and threshold is frozen.
 
 This plan keeps the safety, privacy and carrying rules of the
-[field recording manual](../field-recording-manual.md) and only states what differs for D1.8. The
+field recording manual and only states what differs for D1.8. The
 recordings contain faces and places: they stay on the phone and your own computer, never in a
 repository or online.
 

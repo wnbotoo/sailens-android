@@ -11,9 +11,9 @@ import kotlinx.coroutines.launch
  *
  * Cancelling a run does not stop the frame it is processing: the pipeline runs on
  * `Dispatchers.Default`, and its analysis and decision steps have no suspension point, so that
- * frame still finishes after `cancel()` returns. A reset made right then let the frame decide on
- * the freshly reset cooldown and leave its record, and one counted decision, to the next run (a
- * 2026-10-27 capture lost exact replay that way). So [reset] waits until every earlier run has
+ * frame still finishes after `cancel()` returns. A reset made right then would let the frame decide
+ * on the freshly reset cooldown and leave its record, and one counted decision, to the next run (a
+ * capture recorded across it loses exact replay). So [reset] waits until every earlier run has
  * finished, and a new run starts only after every earlier run and reset.
  *
  * The wait is on [barrier], not on the jobs themselves: a job cancelled while it waits completes at

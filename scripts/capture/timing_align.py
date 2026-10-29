@@ -1,4 +1,4 @@
-"""Frame-to-gyroscope time alignment from a timing-sync burst (M0a).
+"""Frame-to-gyroscope time alignment from a timing-sync burst.
 
     python timing_align.py <timing_sync capture dir or folder> [...] [--max-lag-ms 300] [--json] [--diagnose-camera-clock]
 
@@ -40,7 +40,7 @@ four parts could be checked (a full ~15 s burst) and the offset is not at the se
 
 Device result (several captures or a folder; exit code 0 once every device has >= 3 usable
 bursts): the median offset over that device's usable bursts, with its range and standard
-deviation as the uncertainty. M0a reports it; it does not gate on it. On SM8450 and SM8850 the
+deviation as the uncertainty. The tool reports it; it does not gate on it. On SM8450 and SM8850 the
 camera-clock offset varied by 9-14 ms between bursts while camera-to-receipt time stayed constant,
 so the camera clock is stable and what moves is where the image content sits relative to its
 start-of-exposure timestamp -- plausibly exposure time, which capture does not record yet.
@@ -209,7 +209,7 @@ def analyse(directory, max_lag_ms=300.0, diagnose_camera_clock=False):
         "modelArtifacts": capture.manifest.get("modelArtifacts", {}),
         "timestampSource": source,
         "cameraComparable": camera_comparable,
-        # The clock whose offset M0 may record as the frame-to-gyro alignment.
+        # The clock whose offset may be recorded as the frame-to-gyro alignment.
         "authoritativeClock": "camera" if camera_comparable else "received",
         "frames": len(capture.frames),
         "frameIntervalMedianMs": round(float(np.median(frame_dt)), 2) if len(frame_dt) else None,
@@ -297,8 +297,8 @@ def analyse(directory, max_lag_ms=300.0, diagnose_camera_clock=False):
 
 def device_summary(results, allow_unknown_build=False):
     """One result per device **and build** from its usable bursts: the median offset on the
-    authoritative clock and its spread across bursts, which is the measurement's uncertainty (M0a
-    reports it; it does not gate on it). Needs at least MIN_BURSTS usable bursts of that build.
+    authoritative clock and its spread across bursts, which is the measurement's uncertainty (it is
+    reported, not gated on). Needs at least MIN_BURSTS usable bursts of that build.
 
     A build is the git SHA **and** the packaged model hashes (the weights are not in git; the burst
     runs with Guidance, whose load depends on them). Bursts are never pooled across builds. A capture

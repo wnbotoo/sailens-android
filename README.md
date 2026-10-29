@@ -119,12 +119,8 @@ Every document below has a Chinese version alongside it (`*.zh-CN.md`), linked f
 | [`docs/npu-litert-qnn.md`](docs/npu-litert-qnn.md) | [中文](docs/npu-litert-qnn.zh-CN.md) | Qualcomm NPU wiring, delivery, diagnosis |
 | [`docs/trace_metrics_guide.md`](docs/trace_metrics_guide.md) | [中文](docs/trace_metrics_guide.zh-CN.md) | Trace / replay metric definitions |
 | [`docs/trace_replay_workflow.md`](docs/trace_replay_workflow.md) | [中文](docs/trace_replay_workflow.zh-CN.md) | Observe → replay → evaluate loop |
-| [`docs/vlm-asr-assistant-plan.md`](docs/vlm-asr-assistant-plan.md) | [中文](docs/vlm-asr-assistant-plan.zh-CN.md) | Planned VLM / ASR assistant path |
-| [`docs/background-guidance-plan.md`](docs/background-guidance-plan.md) | [中文](docs/background-guidance-plan.zh-CN.md) | Planned camera foreground service (screen-off guidance) |
-| [`docs/guidance-validation-roadmap.md`](docs/guidance-validation-roadmap.md) | [中文](docs/guidance-validation-roadmap.zh-CN.md) | Deferred device validation and spatial earcon gates |
-| [`docs/local-navigation-roadmap.md`](docs/local-navigation-roadmap.md) | [中文](docs/local-navigation-roadmap.zh-CN.md) | Proposed: local navigation milestones absorbing Project Guideline |
-| [`docs/local-navigation-implementation.md`](docs/local-navigation-implementation.md) | [中文](docs/local-navigation-implementation.zh-CN.md) | Proposed: contracts, placement and tests per milestone |
-| [`docs/field-recording-manual.md`](docs/field-recording-manual.md) | [中文](docs/field-recording-manual.zh-CN.md) | Stage 2 field recording: scenes, procedure, capture, labelling |
+| [`docs/geometry.md`](docs/geometry.md) | [中文](docs/geometry.zh-CN.md) | Camera geometry, ground-contact distance, depth ground fit, simulator |
+| [`docs/field-capture.md`](docs/field-capture.md) | [中文](docs/field-capture.zh-CN.md) | Field capture format, model-regression record and replay, prompt labelling |
 
 `AGENTS.md` is the repo guide for coding agents (English only — it is read by tools, not people).
 

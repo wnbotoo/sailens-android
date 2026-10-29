@@ -19,7 +19,7 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 /**
- * The ground fit on synthetic disparity rendered from M2a-style scenes (§9 tests): planes, a curb,
+ * The ground fit (docs/geometry.md §6) on synthetic disparity rendered from simulator scenes: planes, a curb,
  * a drop, walls, an indoor floor the sem model would call building, noise, an inverted model.
  * Disparity is `a/Z + b` with a = 10, b = 0.2, so on ground at 1.3 m the fit must find A = 10/1.3, t = 0.2.
  */
@@ -181,7 +181,7 @@ class GroundFitterTest {
     }
 
     /**
-     * Walking up to a 1.5 m drop and on until only its floor is in view (review finding on #25).
+     * Walking up to a 1.5 m drop and on until only its floor is in view.
      * The floor is a bigger, perfectly fittable plane; it must never become "the ground".
      */
     @Test
@@ -225,8 +225,8 @@ class GroundFitterTest {
         assertTrue(again.isValid)
         assertEquals(10f / 1.3f, again.disparityScale, 0.01f * 10f / 1.3f)
 
-        // Standing 0.4 m from the edge, the same depth frame over and over (review finding on #25:
-        // a hold that ran out after 30 fits took the drop's floor for the ground on the 31st). No
+        // Standing 0.4 m from the edge, the same depth frame over and over (a hold that ran out
+        // after 30 fits would take the drop's floor for the ground on the 31st). No
         // number of frames shows the user stepped down.
         val standing = GroundFitter()
         approach(standing)
@@ -243,8 +243,8 @@ class GroundFitterTest {
     }
 
     /**
-     * Relative-depth models output `a/Z + b` with a and b unknown and free per frame (review finding
-     * on #25): no choice of them may change a label.
+     * Relative-depth models output `a/Z + b` with a and b unknown and free per frame: no choice of
+     * them may change a label.
      */
     @Test
     fun `labels do not depend on the model's scale and shift`() {

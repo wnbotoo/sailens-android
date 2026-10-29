@@ -10,7 +10,7 @@ import com.sailens.guidance.geometry.CameraFactsSource
 import com.sailens.guidance.geometry.SensorRect
 
 /**
- * Hands Guidance the bound camera's facts for M3o geometry. The shell is where both sides meet:
+ * Hands Guidance the bound camera's facts for its camera geometry. The shell is where both sides meet:
  * Guidance does not know CameraX, and the camera module does not know Guidance.
  */
 class CameraFactsAdapter(private val camera: CameraCharacteristicsProvider) : CameraFactsSource {

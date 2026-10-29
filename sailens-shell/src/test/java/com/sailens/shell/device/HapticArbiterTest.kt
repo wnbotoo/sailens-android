@@ -46,7 +46,7 @@ class HapticArbiterTest {
         assertTrue(arbiter.tryClaim(priority = 0, durationMs = 60))
     }
 
-    // ---- Reservations (det-first D5's fault rhythms) ----------------------------------------------
+    // ---- Reservations (the vision-fault rhythms) --------------------------------------------------
 
     private val started = mutableListOf<Long>()
     private val start: () -> Unit = { started += now }

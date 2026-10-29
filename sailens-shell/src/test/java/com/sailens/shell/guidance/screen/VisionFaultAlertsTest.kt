@@ -11,7 +11,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * det-first plan D5 (docs/detfirst-batch1-design, 2.12): each state reaches the user, keeps reaching
+ * [VisionFaultAlerts]: each state reaches the user, keeps reaching
  * them while it lasts, and is never left silent because speech could not get through.
  */
 class VisionFaultAlertsTest {
@@ -267,11 +267,11 @@ class VisionFaultAlertsTest {
         assertEquals(listOf(10_000L), vibrations.map { it.first })
     }
 
-    // ---- Review round 1 ------------------------------------------------------------------------
+    // ---- The fallback cannot be put off, and fault rhythms share the motor ---------------------
 
     @Test
     fun `covered and dark taking turns cannot put the fallback off, whether the notice is accepted or refused`() {
-        // P1-1: each change of kind used to restart the deadline. Speech never gets through, switch off.
+        // A change of kind must not restart the deadline. Speech never gets through, switch off.
         for (refuse in listOf(false, true)) {
             alerts.reset()
             vibrations.clear()
@@ -322,7 +322,7 @@ class VisionFaultAlertsTest {
 
     @Test
     fun `a fault rhythm never cuts an obstacle rhythm of equal or higher priority, and is played once it ends`() {
-        // Round 1, P1-2, with the real motor arbiter: in one frame a CRITICAL obstacle rhythm is accepted,
+        // With the real motor arbiter: in one frame a CRITICAL obstacle rhythm is accepted,
         // then the floor enters (LOW).
         val motor = Motor().also { motor = it }
         assertTrue(motor.navigation(EventPriority.CRITICAL, 300))
@@ -349,12 +349,12 @@ class VisionFaultAlertsTest {
         assertEquals(listOf(700L), vibrations.map { it.first })
     }
 
-    // ---- Review round 2 ------------------------------------------------------------------------
+    // ---- Owed rhythms, speech retries and notice ids -------------------------------------------
 
     /**
-     * P1-1: the review's sequence. A frame every 2 s, each with an obstacle rhythm asked for first (centre,
-     * front, side; HIGH then CRITICAL), the floor unrecognised throughout. Waiting for the next frame, the
-     * LOW rhythm was refused every time: 0 in 600 s. Now it starts the moment the obstacle rhythm ends.
+     * A frame every 2 s, each with an obstacle rhythm asked for first (centre, front, side; HIGH then
+     * CRITICAL), the floor unrecognised throughout. A LOW rhythm that waited for the next frame would be
+     * refused every time (0 in 600 s); it starts the moment the obstacle rhythm ends instead.
      */
     @Test
     fun `obstacle rhythms every frame cannot starve a fault rhythm, which comes as soon as the one playing ends`() {
@@ -393,7 +393,7 @@ class VisionFaultAlertsTest {
 
     @Test
     fun `the fallback does not end the speech retries`() {
-        // P1-2: a description holds the floor until 11 s; the fallback at 10 s must not stop the notice.
+        // A description holds the floor until 11 s; the fallback at 10 s must not stop the notice.
         settings = settings.copy(faultHapticsEnabled = false)
         answer = { if (now < 11_000) Offer.REFUSED else Offer.ACCEPTED }
         frames(12_000, FLOOR)
@@ -403,7 +403,7 @@ class VisionFaultAlertsTest {
 
     @Test
     fun `a resend at the edge of the first attempt's window is not lost to the fallback`() {
-        // P1-2: as the speech ledger does, an attempt holds the floor up to and including its expiry, so a
+        // As the speech ledger does, an attempt holds the floor up to and including its expiry, so a
         // resend at exactly 6 s would be refused. It comes just after, and the fallback does not cancel it.
         settings = settings.copy(faultHapticsEnabled = false)
         val holding = mutableListOf<VisionFaultAlerts.Notice>()
@@ -422,7 +422,7 @@ class VisionFaultAlertsTest {
 
     @Test
     fun `a fallback waiting for the motor is dropped when the notice is heard first`() {
-        // P2-3: owed at 6 s while the motor is busy until 7 s; the notice is heard at 6.2 s.
+        // Owed at 6 s while the motor is busy until 7 s; the notice is heard at 6.2 s.
         val motor = Motor().also { motor = it }
         frames(5_900, DARK)
         assertTrue(motor.navigation(EventPriority.CRITICAL, 1_100))
@@ -439,7 +439,7 @@ class VisionFaultAlertsTest {
 
     @Test
     fun `turning fault vibration off drops an entry rhythm still waiting, but never the fallback`() {
-        // P2-4: entry with the switch on and the motor busy until 0.7 s; switched off at 0.2 s.
+        // Entry with the switch on and the motor busy until 0.7 s; switched off at 0.2 s.
         val motor = Motor().also { motor = it }
         assertTrue(motor.navigation(EventPriority.CRITICAL, 700))
         frames(200, FLOOR)
@@ -457,7 +457,7 @@ class VisionFaultAlertsTest {
 
     @Test
     fun `notice ids differ between instances, so a late completion of another instance's notice counts for nothing`() {
-        // P2-4: the speech engine is shared; a new screen's alerts must not take an old one's completion.
+        // The speech engine is shared; a new screen's alerts must not take an old one's completion.
         val otherOffers = mutableListOf<Pair<Long, VisionFaultAlerts.Notice>>()
         val other = alertsWith(otherOffers)
         other.update(0, COVERED, settings)
@@ -474,12 +474,12 @@ class VisionFaultAlertsTest {
         assertEquals("still untold: the fallback comes", listOf(5_000L), vibrations.map { it.first })
     }
 
-    // ---- Review round 3 ------------------------------------------------------------------------
+    // ---- Switches and recovery while a rhythm is owed or playing -------------------------------
 
     @Test
     fun `turning navigation vibration off does not cut a fault rhythm that has started`() {
-        // P1-1: speech off, the floor's rhythm starts at 0; navigation vibration is turned off at 100 ms.
-        // The motor used to be stopped for every pattern, the rhythm was cut, and nothing re-asked for it.
+        // Speech off, the floor's rhythm starts at 0; navigation vibration is turned off at 100 ms.
+        // Stopping the motor for every pattern would cut the rhythm, and nothing would ask for it again.
         val motor = Motor().also { motor = it }
         settings = VisionFaultAlerts.Settings(speechEnabled = false, faultHapticsEnabled = true)
         frames(100, FLOOR)
@@ -503,7 +503,7 @@ class VisionFaultAlertsTest {
 
     @Test
     fun `a frame showing the floor recovered withdraws its waiting rhythm before the frame's obstacle rhythm asks`() {
-        // P2-2: the fallback waits for the motor until 10.3 s; the frame at 10.3 s shows the floor recognised
+        // The fallback waits for the motor until 10.3 s; the frame at 10.3 s shows the floor recognised
         // and brings a CRITICAL obstacle rhythm. In the view model's order -- observe, the prompt, act -- the
         // stale floor rhythm must not start and refuse it.
         val motor = Motor().also { motor = it }

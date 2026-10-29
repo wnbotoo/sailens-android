@@ -26,8 +26,8 @@ import kotlinx.coroutines.withContext
  *
  * The actual LLM library is injected via [runtimeFactory]; with the default
  * [UnavailableVlmRuntimeFactory] the engine reports `isReady == false` and [initialize] throws, so
- * the app simply hides the "describe scene" action until a model is wired. See
- * docs/vlm-asr-assistant-plan.md for the LiteRT-LM / MediaPipe runtime wiring.
+ * the app simply hides the "describe scene" action until a model is wired. How to wire one is on
+ * [VlmRuntime]; the module boundary is docs/architecture.md §6.4.
  */
 public class LiteRtVlmEngine(
     private val context: Context,
@@ -163,9 +163,9 @@ public class LiteRtVlmEngine(
     private companion object {
         const val TAG = "LiteRtVlmEngine"
 
-        // Preference order, not an availability claim: as of the 2026-09 device testing a plain
-        // .litertlm bundle does NOT get the Qualcomm NPU (that needs per-SoC TF_LITE_AUX embedded in
-        // the model), so in practice this resolves to GPU today. Keeping NPU first costs nothing and
+        // Preference order, not an availability claim: a plain .litertlm bundle does NOT get the
+        // Qualcomm NPU (that needs per-SoC TF_LITE_AUX embedded in the model; checked on SM8850), so
+        // in practice this resolves to GPU. Keeping NPU first costs nothing and
         // means the path lights up on its own if/when an NPU-capable bundle is wired.
         val ACCELERATOR_FALLBACK_ORDER = listOf(
             Accelerator.NPU,

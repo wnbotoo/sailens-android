@@ -19,7 +19,7 @@ internal data class FieldCaptureUiState(
     val exporting: Boolean = false,
     /** The one-shot timing-sync burst will run at the next Guidance start. */
     val timingSyncArmed: Boolean = false,
-    /** Record the model-regression record (M0b) with field evidence. */
+    /** Record the model-regression record with field evidence. */
     val modelRegression: Boolean = false,
     val group: String? = null,
     val sceneLabel: String = "",

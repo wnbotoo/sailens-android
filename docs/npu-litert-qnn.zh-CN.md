@@ -297,8 +297,6 @@ bundle {
 
 按需的「描述我面前是什么」是一条**独立**于实时 sem/det 的低频路径(秒级,不是每帧)。VLM 不走 `CompiledModel`/`run()`(它要分词、编码图像、自回归解码),所以有自己的运行时——但**复用同一套加速器选择策略**(`AcceleratorSelector`)。
 
-应用侧触发策略、ASR 选择、快捷键入口和后续代码组织见 [vlm-asr-assistant-plan.zh-CN.md](vlm-asr-assistant-plan.zh-CN.md)。
-
 ### 架构(已落地骨架,编译通过)
 ```
 domain: SceneDescriber (initialize / describe(frame, prompt?) / release)   ← app 只依赖这个,无 litert

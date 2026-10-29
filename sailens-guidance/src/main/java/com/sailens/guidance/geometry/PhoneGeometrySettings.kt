@@ -15,7 +15,7 @@ enum class HeightSource {
 }
 
 /**
- * How the phone is carried (§8 "Phone height"). Each placement has a typical camera height for an
+ * How the phone is carried (docs/geometry.md §4). Each placement has a typical camera height for an
  * adult and a ratio of body height, for users who give theirs. Both are proposals to be checked
  * against captures, not calibrated values.
  */
@@ -26,8 +26,8 @@ enum class Placement(val presetHeightMeters: Float, val bodyHeightRatio: Float) 
 }
 
 /**
- * How the user carries the phone (§3). Owned by a shell store and injected into Guidance; the
- * runtime profile supplies only the default. Read by the ground-contact distance (M3a).
+ * How the user carries the phone. Owned by a shell store and injected into Guidance; the
+ * runtime profile supplies only the default. Read by the ground-contact distance.
  */
 data class PhoneGeometrySettings(
     val heightMeters: Float,
@@ -35,7 +35,7 @@ data class PhoneGeometrySettings(
     val placement: Placement? = null,
 ) {
     companion object {
-        /** The seed the roadmap settled on: chest height. */
+        /** The seed: chest height. */
         val DEFAULT = PhoneGeometrySettings(heightMeters = 1.3f, source = HeightSource.DEFAULT_SEED)
 
         /** Body heights taken as real; anything else is treated as not given. */

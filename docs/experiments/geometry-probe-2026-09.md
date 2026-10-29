@@ -3,7 +3,7 @@
 # Experiment note: geometry ground probe (2026-09-24)
 
 The evidence behind the ground-geometry choice in
-[`../local-navigation-roadmap.md`](../local-navigation-roadmap.md) §5. PC only, no device. Scripts:
+[`../geometry.md`](../geometry.md) §8. PC only, no device. Scripts:
 [`scripts/experiments/geometry_probe/`](../../scripts/experiments/geometry_probe/). Raw summary:
 [`results/summary-2026-09-24.txt`](../../scripts/experiments/geometry_probe/results/summary-2026-09-24.txt),
 curb rows: [`results/curb-2026-09-24.json`](../../scripts/experiments/geometry_probe/results/curb-2026-09-24.json).
@@ -102,7 +102,7 @@ Resolution (DA V2 Small, every third frame): 266×350 ground linearity 0.7% outd
   518, multiple of 14). For DIODE (4:3) the crop removes < 1% of the width; for Cityscapes (2:1) it
   removes the sides. The numbers are therefore "DA V2 Small under centre-crop preprocessing", not
   model metrics under an official policy; the production contract makes the policy explicit
-  (implementation §9, depth input transform).
+  ([`../geometry.md`](../geometry.md) §6, depth input transform).
 
 - DIODE is a tripod laser scanner (median outdoor height 2.4 m, indoor ~1.2 m), not a handheld phone;
   camera-height effects for a phone are therefore reported as a relative error (h ± 15%), not by
