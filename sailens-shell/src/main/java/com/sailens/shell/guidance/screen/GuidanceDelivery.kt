@@ -14,8 +14,13 @@ import com.sailens.guidance.model.trace.PromptRevokeReasons
 internal data class GuidanceDeliveryResult(val channels: List<String>) {
     val delivered: Boolean get() = channels.isNotEmpty()
 
-    /** Heard or felt, so worth replaying: anything but the status card alone. */
-    val reachedUser: Boolean get() = channels.any { it != PromptDeliveryChannels.STATUS_CARD }
+    /**
+     * Heard or felt, so worth replaying: anything but the status card alone. A hand-over to the
+     * vision-fault alerts is not either: it confirms the cooldown, but is no evidence the user got
+     * anything, so it must not replace the prompt a replay repeats.
+     */
+    val reachedUser: Boolean
+        get() = channels.any { it != PromptDeliveryChannels.STATUS_CARD && it != PromptDeliveryChannels.VISION_ALERTS }
 
     companion object {
         val NOT_DELIVERED = GuidanceDeliveryResult(emptyList())

@@ -141,6 +141,15 @@ class GuidancePromptOfferTest {
     }
 
     @Test
+    fun `a hand-over to the vision-fault alerts is not something the user got, so it is not replayed`() {
+        // Review round 1, P2-3: it confirms the cooldown but must not replace the replay history.
+        val handedOver = GuidanceDeliveryResult(listOf(PromptDeliveryChannels.VISION_ALERTS))
+        assertTrue(handedOver.delivered)
+        assertEquals(false, handedOver.reachedUser)
+        assertEquals(true, GuidanceDeliveryResult(listOf(SPEECH)).reachedUser)
+    }
+
+    @Test
     fun `a prompt the speech engine refuses is revoked and offered again`() {
         val trafficLight = snapshot(trafficLight = true)
 

@@ -159,8 +159,11 @@ LOW) are ordinary navigation events today and go through `deliverGuidanceEvent`:
   otherwise a higher prompt later in the same frame would cut off the floor notice that had just started).
 - **When one of these events is the frame's first**, the shell no longer speaks it itself. It confirms the cooldown
   record and writes a `prompt_outcome` through a new channel, `vision_alerts`. The cooldown keeps throttling the event as
-  today (status card, replay, trace cadence unchanged); whether the user heard is `VisionFaultAlerts`' own business.
-  Otherwise the state would be said twice on entry (once by the event, once by the alert).
+  today (status card and trace cadence unchanged); whether the user heard is `VisionFaultAlerts`' own business.
+  Otherwise the state would be said twice on entry (once by the event, once by the alert). **A hand-over is no evidence
+  the user got anything**, so it does not update the replay history (`lastAnnouncedEvent`): the cooldown is confirmed on the
+  hand-over, the replay history only on real output (review round 1, P2-3). D5's own notices do not enter the replay
+  history either: they repeat by themselves every cycle.
 
 ### 2.3 States and hysteresis
 
@@ -172,13 +175,20 @@ Two tracks:
   vibration, nothing said again) and the cycle carries on. A hand waving in front of the lens therefore does not produce
   "covered / clear / covered".
   A direct change between OBSTRUCTED and TOO_DARK starts the new state's cycle (its notice is said), without the entry
-  vibration and without a recovery notice.
+  vibration and without a recovery notice. **The deadline is not restarted**, though: see "the untold debt" below.
 - **Floor**: RECOGNIZED / UNRECOGNIZED, from `GroundRecognitionAnalyzer`'s confirmed result (entering needs
   `groundUnrecognizedEnterMs`, leaving `groundUnrecognizedExitMs` — today's confirmation times); no further hold.
   **While frame quality is faulty (hold included) the floor track is frozen**: when the picture cannot be trusted, neither
   can the floor reading — the same reason `EventConflictResolver` lets SENSOR_QUALITY suppress every other event. Once frame
   quality recovers, the floor track continues from its current input: still unrecognised starts the floor notice; told
   unrecognised before and recognised now says the floor is back.
+
+**The untold debt (review round 1, P1-1)**: each track (frame quality, floor) keeps the time since which the user has not
+been told. No change of state clears it: OBSTRUCTED↔TOO_DARK, or recovering and failing again, keep the earlier time; only
+**being told** (2.6) or **the fallback actually playing** clears it. The deadline D runs from it. Otherwise a state that
+keeps changing could put the fallback off for ever (the review's reproduction: alternating every 4 s, no fallback in 60 s).
+The cost: a fault the user was never told about leaves a debt that makes the next fault fall back at once, even much
+later — there is a fault then, it just buzzes before D.
 
 ### 2.4 Notices and cadence per state
 
@@ -192,6 +202,12 @@ Two tracks:
   LOW), moved from the cooldown into `VisionFaultAlerts`.
 - Every vibration is `VISION_UNRELIABLE` (long-short-long), at no less than the HIGH amplitude (the CRITICAL one for a
   covered lens), as `amplitudeFor(event)` does today.
+- **Vibrations go through the motor's arbitration** (review round 1, P1-2): the state's priority claims the motor
+  (`HapticManager.tryPlay`, the same rule as the navigation prompts' `trigger`), so a rhythm of equal or higher priority
+  still playing is **not cut**; the buzz is owed and offered again on later frames until it plays. An obstacle rhythm
+  accepted earlier in the same frame is felt whole, and the floor alert buzzes after it. A strictly higher navigation
+  rhythm can still cut a lower fault rhythm — as when these three were events going through `trigger`. "Whatever the
+  switches say" is about the switches, not the motor.
 - Where D comes from: the D1.7 duration table at rate 1.30 gives 1.18 / 1.06 / 3.41 s for the three Chinese sentences and
   1.03 / 1.01 / 2.95 s in English; the slowest rate, 0.7, stretches them about 1.86× (2.2 / 2.0 / 6.3 s). D has to hold
   "the prompt still being spoken + this sentence". At rate 1.30 every D leaves more than twice that; at the slowest rate a
@@ -215,13 +231,16 @@ Two tracks:
   description first; the floor (LOW) waits for it, while its deadline runs and the fallback vibration comes when it passes.
 - **Retries**: refused (equal or higher speech in progress, engine not ready, waiting for a description) — offered again on
   later frames, at most every 500 ms (a refusal leaves a record in PR-0's lifecycle recording too and must not flood it).
-  **Once accepted, it is not offered again before the deadline**: it may still be playing, and offering it again would
-  only be refused by itself (equal priority cannot interrupt) or say it twice. Not heard out by the deadline, it is resent
-  once. So **at most 2 accepted attempts per cycle** (the first and one resend after the deadline): a notice that was cut
-  off gets a second chance, but in a busy mall the user does not hear half a sentence again and again. A state never has
-  more than one notice being spoken.
-- **TalkBack**: with speech on and the screen reader active, the notice is published to the screen reader and counts as
-  heard out (the screen reader has no completion callback; this matches PR-1a's acceptance). See 2.11.
+  **Once accepted, it is not offered again within its own deadline window (accepted at + D)**: it may still be playing,
+  and offering it again would only be refused by itself (equal priority cannot interrupt) or say it twice. Window over
+  and not heard out, it is resent once. So **at most 2 accepted attempts per cycle** (the first and one resend): a notice
+  that was cut off gets a second chance, but in a busy mall the user does not hear half a sentence again and again. A
+  state never has more than one notice being spoken.
+- **Notice ids**: `vision_notice_<instance UUID>_<n>`. The speech engine is shared, so a late completion of an earlier
+  screen instance's notice must never count for a new instance's (review round 1, P2-4).
+- **TalkBack**: with speech on and the screen reader active, the notice is published to the screen reader and **this
+  cycle counts as told** — acceptance, not evidence it was heard (the screen reader has no completion callback; this matches
+  PR-1a's acceptance). Own TTS's heard-out guarantee does not extend to it. See 2.11.
 - **Speech off**: nothing is said; see 2.7.
 
 ### 2.6 Heard out, compensation, and the fallback
@@ -235,15 +254,19 @@ Two tracks:
   it is attached only while a debug recording runs, has one slot and reconciles per session, and PR-0 promised that no
   decision reads it; a production decision must not depend on whether a debug recording is running. Both read the same
   engine evidence (`onDone`).
-- **Compensation**: when the deadline D passes and this cycle's notice has not been heard out — for any reason (dropped,
-  cut off, expired, no completion callback, engine not ready, waiting for a description):
-  1. **one fallback vibration, whatever the switches say** (neither navigation nor fault vibration is consulted);
+- **Told** (clears the debt): own TTS heard it out; or the screen reader took it (acceptance, see 2.5); or, with speech
+  off, this cycle's buzz played.
+- **Compensation**: when debt time + D passes and the user has not been told — for any reason (dropped, cut off, expired,
+  no completion callback, engine not ready, waiting for a description):
+  1. **one fallback vibration, whatever the switches say** (neither navigation nor fault vibration is consulted; motor
+     arbitration applies, see 2.4); once it plays, the debt is cleared;
   2. one resend (a notice never taken yet keeps being offered every 500 ms until it is; at most 2 accepted attempts per
      cycle).
-  Every later cycle does the same: deadline passed and not heard out — another fallback. So while the notice cannot be
-  said, the fallback vibration keeps coming at the state's cycle (8 / 15 / 60 s) until the notice is heard out or the
-  state recovers. An engine that stays READY while the notice is cut off again and again, or never reports completion,
-  takes exactly this path.
+  Every later cycle does the same: a new cycle starts a new debt, and a fallback comes at its deadline if the user is not
+  told. So while the notice cannot be said, the fallback vibration keeps coming at the state's cycle (8 / 15 / 60 s)
+  until the notice is heard out or the state recovers, and a state that keeps changing cannot put it off (2.3's debt).
+  An engine that stays READY while the notice is cut off again and again, or never reports completion, takes exactly
+  this path.
 - **An extra fallback**: at a slow rate or with a late callback, the fallback can come while the notice is still being
   spoken; an equal-priority notice cannot interrupt itself, so nothing is said twice — the cost is one vibration.
 
@@ -266,7 +289,8 @@ back when speech is turned on again.
 
 With speech off a notice cannot be said, so each cycle's buzz is the vibration itself: covered lens every 8 s, too dark
 every 15 s, floor every 60 s, until recovery. This is plan D5-3's "keep falling back at the state's cadence" when speech is
-off; there is no separate fallback, and no cycle buzzes twice.
+off; there is no separate fallback, and no cycle buzzes twice. With the motor busy, the buzz is owed and plays once it is
+free.
 
 ### 2.8 Recovery notices
 
@@ -307,8 +331,12 @@ off; there is no separate fallback, and no cycle buzzes twice.
 
 ### 2.11 Known limits
 
-- **TalkBack**: published counts as heard out, so D5's fallback guarantee holds for own TTS only; for screen-reader users
-  the non-speech guarantee is the entry vibration (while fault vibration is on).
+- **TalkBack**: published counts as told — acceptance, not "heard out"; D5's "heard out or the fallback" guarantee holds
+  for own TTS only. For screen-reader users the non-speech guarantee is the entry vibration (while fault vibration is on).
+- **The debt never expires**: a short fault the user was never told about makes the next fault, however much later, fall
+  back at once (2.3). Deliberately: any expiry could be got round by a fail–recover–fail rhythm.
+- **A lower fault rhythm can be cut by a higher navigation rhythm** (2.4), as when these were events going through
+  `trigger`; once played it counts, and it is not repeated.
 - **Speech off**: no recovery notice; the periodic vibration stopping is the only sign.
 - **Screen only** (speech off, both vibrations wanted off): fault vibration is locked on, so complete silence is not
   possible (the choice made in Q11a).
@@ -333,12 +361,26 @@ off; there is no separate fallback, and no cycle buzzes twice.
 5. Hysteresis: OK for less than 2 s says no recovery and repeats no entry vibration; recovery only after 2 s.
    OBSTRUCTED↔TOO_DARK says no recovery and gives no entry vibration.
 6. Speech off: nothing said; one vibration per cycle (fault vibration locked); never two in one cycle.
-7. TalkBack: published is heard out; no fallback.
+7. TalkBack: published counts as told; no fallback.
 8. The floor track frozen during a frame-quality fault; after recovery the floor enters or recovers from its current state.
 9. A frame fault drops every unsaid recovery notice; when the lens and the floor recover in one frame, both are said.
 10. Retries at most every 500 ms.
 11. Fault vibration off and the notice heard out in time: no vibration at all.
 12. Floor waiting for a description within D: the description is not cut; the fallback comes at the deadline.
+13. (Round 1, P1-1) Covered and dark alternating every 4 s, the notice never finishing (accepted and refused alike): the
+    fallback still comes, never more than 9 s apart.
+14. (Round 1, P1-1) Fail–recover–fail, each episode shorter than the deadline: the debt survives the recovery and the
+    fallback comes in the second episode; the floor likewise.
+15. A notice heard out clears the debt: a later change of kind starts its deadline afresh.
+16. (Round 1, P1-2) With the real `HapticArbiter`: a CRITICAL obstacle rhythm accepted, then the floor entering in the same
+    frame → the floor buzz waits for the obstacle rhythm to end; the fallback does not cut a higher rhythm either and
+    plays as soon as it ends.
+17. Speech off with the motor busy: this cycle's buzz is owed and plays once the motor is free.
+18. (Round 1, P2-4) Two instances' notice ids differ; another instance's completion counts for nothing and the fallback
+    comes.
+
+`GuidancePromptOfferTest` (round 1, P2-3): a `vision_alerts` hand-over confirms the cooldown but has `reachedUser` false and
+does not update the replay history.
 
 Also: `SpeechManager`'s `onSpoken` registry (`SpokenCallbacks`, JVM): a handed-back id matches the original, called once,
 bounded at 16; `GuidanceDelivery`'s `vision_alerts` branch (confirmation, trace record); the effective setting (speech off →
@@ -367,3 +409,17 @@ Not done here: PR-1b, PR-2, PR-3, PR-4; no det-first threshold changes; S stays 
 - PR-D5: Guidance's decisions do not change, so the report should be identical too; the shell is outside replay (replay
   uses the recorded revocation positions). It also means D5's notices holding the speaker are not in group C's evaluation —
   group C was recorded on the old code, which has no D5.
+
+## 5. Review handling
+
+### Round 1 (GPT, 2026-10-29; reviewed #34 `cfc1223`, #35 `2d81872`)
+
+Verdict: design No-Go, PR-1a Go (no findings), PR-D5 No-Go. All four accepted.
+
+| # | Finding | Handling |
+|---|---|---|
+| P1-1 | Covered↔dark changes restarted the cycle, so the fallback could be put off for ever (reproduced: alternating every 4 s, no fallback in 60 s) | Each track keeps an untold debt that no change of state clears (kind change, recovery and failing again); only being told or the fallback playing clears it, and the deadline runs from it (2.3, 2.6). Sequences 13–15 |
+| P1-2 | The floor alert took the motor unconditionally with `play()`, cutting a CRITICAL obstacle rhythm accepted in the same frame | Fault rhythms go through `HapticManager.tryPlay` (the same arbitration as `trigger`); refused, the buzz is owed and offered again on later frames; "whatever the switches say" does not mean bypassing the motor (2.4). Sequences 16–17 |
+| P2-3 | A `vision_alerts` hand-over made `reachedUser` true and replaced the replay history | The hand-over only confirms the cooldown; `reachedUser` is false and the replay history is not touched (2.2) |
+| P2-4 | Notice ids restarted at `vision_notice_0` per instance, so a late completion of an old instance counted for a new one | Ids carry an instance UUID (2.5). Sequence 18 |
+| Note | TalkBack must not be claimed as heard out | Wording now "published counts as told (acceptance)"; `Offer.SPOKEN` renamed `PUBLISHED`; the heard-out guarantee does not extend to the screen reader (2.5, 2.11) |

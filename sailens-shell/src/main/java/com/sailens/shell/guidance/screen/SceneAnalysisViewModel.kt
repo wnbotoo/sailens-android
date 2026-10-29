@@ -125,13 +125,13 @@ class SceneAnalysisViewModel(
         outputs = object : VisionFaultAlerts.Outputs {
             override fun speak(notice: VisionFaultAlerts.Notice): VisionFaultAlerts.Offer = speakVisionNotice(notice)
 
-            override fun vibrate(priority: EventPriority) {
-                // Unconditionally: VisionFaultAlerts has already applied the switch, and its fallback ignores it.
-                hapticManager.play(
-                    GuidanceHaptic.VISION_UNRELIABLE,
-                    amplitude = maxOf(GuidanceHaptic.amplitudeFor(priority), GuidanceHaptic.amplitudeFor(EventPriority.HIGH)),
-                )
-            }
+            // No switch here: VisionFaultAlerts has applied it, and its fallback ignores it. The motor's
+            // arbitration still applies: an obstacle rhythm of equal or higher priority is not cut short.
+            override fun vibrate(priority: EventPriority): Boolean = hapticManager.tryPlay(
+                GuidanceHaptic.VISION_UNRELIABLE,
+                priority = priority,
+                amplitude = maxOf(GuidanceHaptic.amplitudeFor(priority), GuidanceHaptic.amplitudeFor(EventPriority.HIGH)),
+            )
         },
     )
     private var releaseJob: Job? = null
@@ -415,7 +415,7 @@ class SceneAnalysisViewModel(
         val text = textResolver.resolve(SceneEventText(messageKey = notice.messageKey))
         if (state.isScreenReaderActive) {
             screenReaderAnnouncer.announce(text)
-            return VisionFaultAlerts.Offer.SPOKEN
+            return VisionFaultAlerts.Offer.PUBLISHED
         }
         val accepted = speechManager.speak(
             Announcement(

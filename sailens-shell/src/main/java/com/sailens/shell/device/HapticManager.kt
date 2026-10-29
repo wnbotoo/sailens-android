@@ -2,6 +2,7 @@ package com.sailens.shell.device
 
 import android.content.Context
 import android.os.SystemClock
+import com.sailens.guidance.model.common.EventPriority
 import com.sailens.guidance.model.scene.SceneEvent
 import com.sailens.output.HapticPlayer
 
@@ -32,6 +33,19 @@ class HapticManager(context: Context) {
         val haptic = GuidanceHaptic.forEvent(event)
         if (!arbiter.tryClaim(event.priority.value, haptic.durationMs)) return false
         player.play(timings = haptic.timings, amplitude = GuidanceHaptic.amplitudeFor(event))
+        return true
+    }
+
+    /**
+     * Plays [haptic] at [priority] under the same rule as [trigger]: unless a pattern of equal or higher
+     * priority is still playing. For alerts whose switches the caller has already applied (det-first D5:
+     * the vision-fault alerts), which must not cut an obstacle rhythm short either.
+     *
+     * @return whether it was played; when not, the caller offers it again.
+     */
+    fun tryPlay(haptic: GuidanceHaptic, priority: EventPriority, amplitude: Int): Boolean {
+        if (!arbiter.tryClaim(priority.value, haptic.durationMs)) return false
+        player.play(timings = haptic.timings, amplitude = amplitude)
         return true
     }
 

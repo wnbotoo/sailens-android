@@ -6,6 +6,7 @@ import com.sailens.guidance.model.common.EventCategory
 import com.sailens.guidance.model.common.EventPriority
 import com.sailens.guidance.model.scene.SceneEvent
 import com.sailens.guidance.model.scene.SceneEventMessageKeys
+import java.util.UUID
 
 /**
  * Tells the user, without their eyes, that Guidance cannot see (det-first plan D5; design in
@@ -18,19 +19,27 @@ import com.sailens.guidance.model.scene.SceneEventMessageKeys
  * wait forever behind obstacle prompts. This class owns all of their speech and vibration instead:
  *
  * - **entering**: the state's notice is spoken and, with fault vibration on, the vision-unreliable rhythm
- *   plays at once;
- * - **every cycle** ([Fault.periodMs]) one notice heard out is wanted; a covered lens also vibrates each
+ *   plays;
+ * - **every cycle** ([Fault.periodMs]) the state wants to be told once; a covered lens also vibrates each
  *   cycle;
- * - **heard out** means the engine finished playing it ([onSpoken]); the screen reader has no such
- *   callback, so publishing to it counts;
- * - **the fallback**: if a cycle's notice has not been heard out by [Fault.deadlineMs] — dropped, cut
- *   off, expired, never confirmed, engine not ready, waiting for a description — the rhythm plays once
- *   **whatever the switches say**, and again at every later cycle while that holds. Speech that cannot
- *   get through must never leave the state silent;
+ * - **told** means: own speech finished playing a notice ([onSpoken]); or the screen reader took one
+ *   (it reports no completion, so this is acceptance, not evidence it was heard); or, with speech off,
+ *   the rhythm played — with speech off the rhythm is the notice, and fault vibration counts as on
+ *   whatever the switch says (Q11a);
+ * - **the fallback**: if the user has not been told within [Fault.deadlineMs] — notice dropped, cut off,
+ *   expired, never confirmed, engine not ready, waiting for a description — the rhythm plays **whatever
+ *   the switches say**, and again in every later cycle while that holds;
  * - **recovering**: one best-effort notice that it is over.
  *
- * With speech off there is nothing to hear out: each cycle's rhythm is the notice itself, and fault
- * vibration counts as on whatever the switch says (Q11a).
+ * The time since the user was last told is a debt per track (frame quality, floor) that no change of
+ * state pays: switching between a covered lens and darkness, or recovering and failing again, keeps it.
+ * Only being told, or the fallback playing, clears it. Otherwise a state that keeps changing could put
+ * the fallback off for ever.
+ *
+ * Every rhythm goes through the motor's arbitration at the state's priority ([Outputs.vibrate]): it never
+ * cuts a rhythm of equal or higher priority, so an obstacle rhythm already playing is felt whole. A
+ * rhythm refused for that is still owed, and offered again on the next frame. "Whatever the switches
+ * say" is about the switches, not about the motor.
  *
  * Hysteresis: frame quality is already debounced upstream; on top of it, clear has to last
  * [Timing.recoveryHoldMs] before it counts, so a hand waving over the lens does not alternate "covered"
@@ -39,10 +48,14 @@ import com.sailens.guidance.model.scene.SceneEventMessageKeys
  *
  * Pure and driven by frames ([update]) and completion callbacks ([onSpoken]), so every rule is testable
  * on the JVM. Without frames nothing happens here; the stall detector owns that failure.
+ *
+ * @param noticeIdPrefix distinct per instance: the speech engine is shared, so a late completion of an
+ *   earlier instance's notice must never match this one's.
  */
 internal class VisionFaultAlerts(
     private val outputs: Outputs,
     private val timing: Timing = Timing(),
+    private val noticeIdPrefix: String = "$NOTICE_ID_PREFIX${UUID.randomUUID()}_",
 ) {
     /**
      * The three states and how each is said. Periods and priorities are the cooldowns and event
@@ -79,9 +92,10 @@ internal class VisionFaultAlerts(
         /** A refused offer is made again no sooner than this (a refusal is recorded too). */
         val retryIntervalMs: Long = 500,
         /**
-         * Accepted attempts per cycle: the first, and one resend once the deadline has passed without it
-         * being heard out. Before the deadline an accepted notice may still be playing, so it is not
-         * offered again; and a notice cut off again and again is not repeated as endless half sentences.
+         * Accepted attempts per cycle: the first, and one resend once the first has had its whole
+         * deadline window without being heard out. Within that window it may still be playing, so it is
+         * not offered again; and a notice cut off again and again is not repeated as endless half
+         * sentences.
          */
         val maxAcceptedAttemptsPerCycle: Int = 2,
         /** A recovery notice not taken within this is dropped. */
@@ -95,18 +109,26 @@ internal class VisionFaultAlerts(
         /** Nothing took it: equal or higher speech in progress, engine not ready, waiting for a description. */
         REFUSED,
 
-        /** Own TTS started it; heard out only once [onSpoken] says so. */
+        /** Own TTS started it; it counts as told only once [onSpoken] says it finished playing. */
         ACCEPTED,
 
-        /** The screen reader took it. It reports no completion, so taking it is as far as can be known. */
-        SPOKEN,
+        /**
+         * The screen reader took it. It reports no completion, so this is as far as can be known; it is
+         * not evidence the user heard it, and the fallback's guarantee does not extend to it.
+         */
+        PUBLISHED,
     }
 
     interface Outputs {
         fun speak(notice: Notice): Offer
 
-        /** Plays the vision-unreliable rhythm, at [priority]'s strength, whatever the switches say. */
-        fun vibrate(priority: EventPriority)
+        /**
+         * Plays the vision-unreliable rhythm at [priority]'s strength, unless a rhythm of equal or higher
+         * priority is still playing. Switches are not consulted here: the caller has applied them.
+         *
+         * @return whether it played; when not, it is offered again on a later frame.
+         */
+        fun vibrate(priority: EventPriority): Boolean
     }
 
     /**
@@ -115,12 +137,21 @@ internal class VisionFaultAlerts(
      */
     data class Settings(val speechEnabled: Boolean, val faultHapticsEnabled: Boolean)
 
-    private class Track(val fault: Fault) {
+    /** Since when the user has not been told about a track's state; null when they have, or it is clear. */
+    private class Debt {
+        var sinceMs: Long? = null
+    }
+
+    private class Track(val fault: Fault, val debt: Debt) {
         var cycleStartMs = 0L
-        var heardOut = false
+        var told = false
         var acceptedAttempts = 0
-        var fallbackPlayed = false
+        var lastAcceptedAtMs: Long? = null
         var lastOfferAtMs: Long? = null
+        var fallbackRequested = false
+
+        /** A rhythm this cycle owes the user (entering, each cycle, the fallback), not played yet. */
+        var vibrationOwed = false
 
         /** This cycle's attempts that may be playing: a late completion of an older one does not count. */
         val attemptIds = mutableSetOf<String>()
@@ -130,11 +161,14 @@ internal class VisionFaultAlerts(
         var lastOfferAtMs: Long? = null
     }
 
+    private val frameDebt = Debt()
+    private val groundDebt = Debt()
     private var frame: Track? = null
 
     /** When frame quality last turned clear while [frame] still holds; null while it is faulty. */
     private var frameClearSinceMs: Long? = null
     private var ground: Track? = null
+
     /** Recovery notices not said yet, oldest first: the lens and the floor can both recover in one frame. */
     private val recoveries = ArrayDeque<Recovery>()
     private var nextNoticeId = 0L
@@ -153,7 +187,7 @@ internal class VisionFaultAlerts(
     /** The engine finished playing the notice [id] (the screen reader never reports this). */
     fun onSpoken(id: String) {
         for (track in listOfNotNull(frame, ground)) {
-            if (id in track.attemptIds) track.heardOut = true
+            if (id in track.attemptIds) told(track)
         }
     }
 
@@ -161,6 +195,8 @@ internal class VisionFaultAlerts(
         frame = null
         frameClearSinceMs = null
         ground = null
+        frameDebt.sinceMs = null
+        groundDebt.sinceMs = null
         recoveries.clear()
     }
 
@@ -172,8 +208,9 @@ internal class VisionFaultAlerts(
             if (current?.fault == fault) return
             // A frame fault makes every recovery notice stale, the floor's included.
             recoveries.clear()
-            // From one frame fault to the other: the new notice, but no entry rhythm and no recovery.
-            frame = Track(fault).also { startCycle(it, now, settings, entering = current == null) }
+            // From one frame fault to the other: the new notice, but no entry rhythm and no recovery. The
+            // debt carries over: changing kind does not count as telling.
+            frame = Track(fault, frameDebt).also { startCycle(it, now, settings, entering = current == null) }
             return
         }
         if (current == null) return
@@ -190,7 +227,7 @@ internal class VisionFaultAlerts(
             if (current != null) return
             // The floor failing again makes its own recovery stale, not the lens'.
             recoveries.removeAll { !it.ofFrameQuality }
-            ground = Track(Fault.GROUND_UNRECOGNIZED).also { startCycle(it, now, settings, entering = true) }
+            ground = Track(Fault.GROUND_UNRECOGNIZED, groundDebt).also { startCycle(it, now, settings, entering = true) }
         } else if (current != null) {
             ground = null
             recoveries.addLast(Recovery(current.fault.recoveryKey, now + timing.recoveryNoticeTtlMs, ofFrameQuality = false))
@@ -199,45 +236,61 @@ internal class VisionFaultAlerts(
 
     private fun startCycle(track: Track, now: Long, settings: Settings, entering: Boolean) {
         track.cycleStartMs = now
-        track.heardOut = false
+        track.told = false
         track.acceptedAttempts = 0
-        track.fallbackPlayed = false
+        track.lastAcceptedAtMs = null
         track.lastOfferAtMs = null
+        track.fallbackRequested = false
         track.attemptIds.clear()
+        // Kept if the user was never told about an earlier cycle, an earlier kind or an earlier episode.
+        if (track.debt.sinceMs == null) track.debt.sinceMs = now
         // With speech off the rhythm is the notice: every cycle, and the switch cannot turn it off.
-        val vibrates = if (!settings.speechEnabled) {
+        track.vibrationOwed = if (!settings.speechEnabled) {
             true
         } else {
             settings.faultHapticsEnabled && (entering || track.fault.vibratesEachCycle)
         }
-        if (vibrates) outputs.vibrate(track.fault.priority)
     }
 
     private fun drive(track: Track, now: Long, settings: Settings) {
         if (now - track.cycleStartMs >= track.fault.periodMs) startCycle(track, now, settings, entering = false)
-        if (!settings.speechEnabled) return
+        if (settings.speechEnabled) offerNotice(track, now)
 
-        val pastDeadline = now - track.cycleStartMs >= track.fault.deadlineMs
-        // Not yet taken: offered until it is. Taken: it may still be playing, so the resend waits for
-        // the deadline.
-        val mayOffer = track.acceptedAttempts == 0 || pastDeadline
-        if (!track.heardOut && mayOffer && track.acceptedAttempts < timing.maxAcceptedAttemptsPerCycle &&
-            retryDue(track.lastOfferAtMs, now)
-        ) {
-            track.lastOfferAtMs = now
-            val notice = Notice(newNoticeId(), track.fault.messageKey, track.fault.priority, now + track.fault.deadlineMs)
-            // Known before speaking, so a completion reported at once still counts.
-            track.attemptIds += notice.id
-            when (outputs.speak(notice)) {
-                Offer.REFUSED -> track.attemptIds -= notice.id
-                Offer.ACCEPTED -> track.acceptedAttempts++
-                Offer.SPOKEN -> track.heardOut = true
+        val untoldSince = track.debt.sinceMs
+        if (!track.told && !track.fallbackRequested && untoldSince != null && now - untoldSince >= track.fault.deadlineMs) {
+            track.fallbackRequested = true
+            track.vibrationOwed = true
+        }
+        if (track.vibrationOwed && outputs.vibrate(track.fault.priority)) {
+            track.vibrationOwed = false
+            // The rhythm tells the user when it is the fallback, or the notice itself with speech off.
+            if (track.fallbackRequested || !settings.speechEnabled) told(track)
+        }
+    }
+
+    private fun offerNotice(track: Track, now: Long) {
+        if (track.told || track.acceptedAttempts >= timing.maxAcceptedAttemptsPerCycle) return
+        // Taken once already: it may still be playing until its own deadline window is over.
+        val lastAccepted = track.lastAcceptedAtMs
+        if (lastAccepted != null && now - lastAccepted < track.fault.deadlineMs) return
+        if (!retryDue(track.lastOfferAtMs, now)) return
+        track.lastOfferAtMs = now
+        val notice = Notice(newNoticeId(), track.fault.messageKey, track.fault.priority, now + track.fault.deadlineMs)
+        // Known before speaking, so a completion reported at once still counts.
+        track.attemptIds += notice.id
+        when (outputs.speak(notice)) {
+            Offer.REFUSED -> track.attemptIds -= notice.id
+            Offer.ACCEPTED -> {
+                track.acceptedAttempts++
+                track.lastAcceptedAtMs = now
             }
+            Offer.PUBLISHED -> told(track)
         }
-        if (!track.heardOut && !track.fallbackPlayed && pastDeadline) {
-            track.fallbackPlayed = true
-            outputs.vibrate(track.fault.priority)
-        }
+    }
+
+    private fun told(track: Track) {
+        track.told = true
+        track.debt.sinceMs = null
     }
 
     /** The oldest recovery not said yet, one offer per frame; best effort, not tracked to completion. */
@@ -254,7 +307,7 @@ internal class VisionFaultAlerts(
     private fun retryDue(lastOfferAtMs: Long?, now: Long): Boolean =
         lastOfferAtMs == null || now - lastOfferAtMs >= timing.retryIntervalMs
 
-    private fun newNoticeId(): String = "$NOTICE_ID_PREFIX${nextNoticeId++}"
+    private fun newNoticeId(): String = "$noticeIdPrefix${nextNoticeId++}"
 
     companion object {
         /** Notice ids, distinct from event ids (UUIDs) and system notices in the speech lifecycle record. */

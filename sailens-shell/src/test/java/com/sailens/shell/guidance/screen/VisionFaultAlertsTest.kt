@@ -4,6 +4,7 @@ import com.sailens.guidance.model.analysis.FrameQuality
 import com.sailens.guidance.model.analysis.VisionFaults
 import com.sailens.guidance.model.common.EventPriority
 import com.sailens.guidance.model.scene.SceneEventMessageKeys
+import com.sailens.shell.device.HapticArbiter
 import com.sailens.shell.guidance.screen.VisionFaultAlerts.Offer
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -22,18 +23,25 @@ class VisionFaultAlertsTest {
     /** What the spoken channel does with an offer; by default own TTS accepts it. */
     private var answer: (VisionFaultAlerts.Notice) -> Offer = { Offer.ACCEPTED }
 
-    private val alerts = VisionFaultAlerts(
+    /** Whether the motor takes a rhythm; by default nothing else is playing. [vibrations] lists those played. */
+    private var motor: (EventPriority) -> Boolean = { true }
+
+    private fun alertsWith(outputsLog: MutableList<Pair<Long, VisionFaultAlerts.Notice>>) = VisionFaultAlerts(
         outputs = object : VisionFaultAlerts.Outputs {
             override fun speak(notice: VisionFaultAlerts.Notice): Offer {
-                offers += now to notice
+                outputsLog += now to notice
                 return answer(notice)
             }
 
-            override fun vibrate(priority: EventPriority) {
+            override fun vibrate(priority: EventPriority): Boolean {
+                if (!motor(priority)) return false
                 vibrations += now to priority
+                return true
             }
         },
     )
+
+    private val alerts = alertsWith(offers)
 
     private var settings = VisionFaultAlerts.Settings(speechEnabled = true, faultHapticsEnabled = true)
 
@@ -165,7 +173,7 @@ class VisionFaultAlertsTest {
     @Test
     fun `the screen reader taking the notice counts as heard out`() {
         settings = settings.copy(faultHapticsEnabled = false)
-        answer = { Offer.SPOKEN }
+        answer = { Offer.PUBLISHED }
         frames(15_000, COVERED)
         assertEquals(emptyList<Any>(), vibrations)
         assertEquals(listOf(0L, 8_000L), spoken(SceneEventMessageKeys.CAMERA_BLOCKED).map { it.first })
@@ -226,7 +234,112 @@ class VisionFaultAlertsTest {
         assertEquals(listOf(10_000L), vibrations.map { it.first })
     }
 
+    // ---- Review round 1 ------------------------------------------------------------------------
+
+    @Test
+    fun `covered and dark taking turns cannot put the fallback off, whether the notice is accepted or refused`() {
+        // P1-1: each change of kind used to restart the deadline. Speech never gets through, switch off.
+        for (refuse in listOf(false, true)) {
+            alerts.reset()
+            vibrations.clear()
+            now = 0
+            answer = { if (refuse) Offer.REFUSED else Offer.ACCEPTED }
+            settings = settings.copy(faultHapticsEnabled = false)
+            while (now < 60_000) frames(now + 4_000, if ((now / 4_000) % 2 == 0L) DARK else COVERED)
+
+            val at = vibrations.map { it.first }
+            assertTrue("refuse=$refuse: first fallback by the first deadline, got $at", at.first() <= 6_000)
+            assertTrue("refuse=$refuse: gaps $at", at.zipWithNext().all { (a, b) -> b - a <= 9_000 })
+            assertTrue("refuse=$refuse: $at", at.size >= 6)
+        }
+    }
+
+    @Test
+    fun `failing and recovering again and again cannot put the fallback off either`() {
+        // Each episode is shorter than the deadline; the debt survives the recovery between them.
+        answer = { Offer.ACCEPTED }
+        settings = settings.copy(faultHapticsEnabled = false)
+        repeat(4) {
+            frames(now + 4_000, COVERED)
+            frames(now + 2_500, VisionFaults.NONE)
+        }
+        assertTrue("got ${vibrations.map { it.first }}", vibrations.isNotEmpty())
+        assertTrue("by the second episode at the latest", vibrations.first().first <= 6_500 + 4_000)
+
+        alerts.reset()
+        vibrations.clear()
+        repeat(4) {
+            frames(now + 8_000, FLOOR)
+            frames(now + 500, VisionFaults.NONE)
+        }
+        assertTrue("the floor too: ${vibrations.map { it.first }}", vibrations.isNotEmpty())
+    }
+
+    @Test
+    fun `a notice heard out clears the debt, so a change of kind starts a new deadline`() {
+        settings = settings.copy(faultHapticsEnabled = false)
+        answer = { notice ->
+            if (notice.messageKey == SceneEventMessageKeys.CAMERA_BLOCKED) alerts.onSpoken(notice.id)
+            Offer.ACCEPTED
+        }
+        frames(3_000, COVERED)
+        frames(10_000, DARK)
+        assertEquals("dark's own deadline, 6 s after the change", listOf(9_000L), vibrations.map { it.first })
+    }
+
+    @Test
+    fun `a fault rhythm never cuts an obstacle rhythm of equal or higher priority, and is played once it ends`() {
+        // P1-2, with the real motor arbiter: in one frame a CRITICAL obstacle rhythm is accepted, then the
+        // floor enters (LOW).
+        val arbiter = HapticArbiter(clock = { now })
+        motor = { priority -> arbiter.tryClaim(priority.value, VISION_UNRELIABLE_MS) }
+        assertTrue(arbiter.tryClaim(EventPriority.CRITICAL.value, 300))
+        frames(1_000, FLOOR)
+        assertEquals("entry rhythm after the obstacle rhythm, not over it", listOf(300L), vibrations.map { it.first })
+
+        // The fallback too: refused while a higher rhythm plays, then played, still regardless of the switch.
+        alerts.reset()
+        vibrations.clear()
+        settings = settings.copy(faultHapticsEnabled = false)
+        val start = now
+        frames(start + 9_900, FLOOR)
+        assertTrue(arbiter.tryClaim(EventPriority.HIGH.value, 400))
+        frames(start + 11_000, FLOOR)
+        assertEquals(listOf(start + 10_300), vibrations.map { it.first })
+    }
+
+    @Test
+    fun `with speech off a rhythm the motor refused is still owed`() {
+        settings = VisionFaultAlerts.Settings(speechEnabled = false, faultHapticsEnabled = true)
+        val busyUntil = 700L
+        motor = { now >= busyUntil }
+        frames(1_000, DARK)
+        assertEquals(listOf(700L), vibrations.map { it.first })
+    }
+
+    @Test
+    fun `notice ids differ between instances, so a late completion of another instance's notice counts for nothing`() {
+        // P2-4: the speech engine is shared; a new screen's alerts must not take an old one's completion.
+        val otherOffers = mutableListOf<Pair<Long, VisionFaultAlerts.Notice>>()
+        val other = alertsWith(otherOffers)
+        other.update(0, COVERED, settings)
+        alerts.update(0, COVERED, settings)
+        val mine = offers.single().second.id
+        val theirs = otherOffers.single().second.id
+        assertTrue("$mine vs $theirs", mine != theirs)
+
+        settings = settings.copy(faultHapticsEnabled = false)
+        alerts.onSpoken(theirs)
+        vibrations.clear()
+        now = 100
+        frames(5_100, COVERED)
+        assertEquals("still untold: the fallback comes", listOf(5_000L), vibrations.map { it.first })
+    }
+
     private companion object {
+        /** VISION_UNRELIABLE's length: long, gap, short, gap, long. */
+        const val VISION_UNRELIABLE_MS = 350L + 90 + 60 + 90 + 350
+
         val COVERED = VisionFaults(frameQuality = FrameQuality.OBSTRUCTED)
         val DARK = VisionFaults(frameQuality = FrameQuality.TOO_DARK)
         val FLOOR = VisionFaults(groundUnrecognized = true)
