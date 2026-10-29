@@ -38,8 +38,11 @@ class CooldownManager(
      */
     private val maxScaledCooldownMs: Long = 8_000L,
 ) {
-    /** 最近一个滑窗内实际播出去的事件时间戳，用于判定"事件风暴"。 */
-    private val recentEmissions = ArrayDeque<Long>()
+    /**
+     * 最近一个滑窗内记录过的事件（时间戳 + 写入者），用于判定"事件风暴"。撤回只删写入者自己那条，
+     * 见 [revoke]。
+     */
+    private val recentEmissions = ArrayDeque<Emission>()
     private var isStationary = false
     val cooldowns: Map<EventCategory, Long> = mapOf(
         EventCategory.BLOCKED to 5000,
@@ -65,23 +68,45 @@ class CooldownManager(
         "sensor_quality_obstructed" to 8000,
     )
 
-    /** 每个冷却 key 上最后一次放行的事件：时间戳 + 当时的优先级 + 写下它的事件。 */
+    /** 每个冷却 key 上最后一次放行的事件：时间戳 + 当时（继承后）的优先级 + 写下它的事件。 */
     private data class CooldownRecord(
         val timestampMs: Long,
         val priority: EventPriority,
         val eventId: UUID,
     )
 
+    /**
+     * 一次 [recordEvent]：写入者、时间、优先级，以及它写的每个 key 和那个 key 的基础冷却（继承窗口按写入的
+     * 事件取，和写入时的规则一致）。
+     */
+    private class Write(
+        val eventId: UUID,
+        val timestampMs: Long,
+        val priority: EventPriority,
+        val baseCooldowns: Map<String, Long>,
+    ) {
+        /** 送达方说它送到了（[confirm]）。之后再也撤不回来。 */
+        var confirmed = false
+    }
+
+    private class Emission(val timestampMs: Long, val eventId: UUID)
+
+    // 撤回不再是"恢复写入前的快照"：快照只在撤回的恰好是最后一次写入时才对。A、B 先后写同一个 key、
+    // B 继承了 A 的优先级，先撤 A 再撤 B，快照会把 A 的记录恢复回来——两条都没送达，key 上却留着 A
+    // （det 优先方案 D3a-1）。所以记录拆成两段：
+    //
+    // - [confirmedRecords]：已确认的那段前缀按记录规则完整折叠的结果。继承链可以任意长，所以必须是
+    //   完整折叠，不能按窗口裁掉旧写入再重放。
+    // - [openWrites]：还没并进去的写入，按写入顺序；可能有已确认、但排在待定写入之后的。
+    //
+    // 当前记录 = 把 openWrites 按顺序折叠到 confirmedRecords 上。撤回删掉自己那次写入再重新折叠，于是
+    // 结果和"那次写入从没发生过"一样。
+
+    private val confirmedRecords = mutableMapOf<String, CooldownRecord>()
+    private val openWrites = ArrayDeque<Write>()
+
+    /** 当前记录：[openWrites] 按顺序折叠到 [confirmedRecords] 上。缓存，撤回时重算。 */
     private val lastEventRecords = mutableMapOf<String, CooldownRecord>()
-
-    /** 撤销一次记录所需的全部信息：被覆盖前的旧记录（null = 原本没有）和那次放行的时间戳。 */
-    private data class RecordUndo(
-        val previous: Map<String, CooldownRecord?>,
-        val emittedAtMs: Long,
-    )
-
-    /** 最近几次记录的撤销信息。送达方的回执总是紧跟在决策之后，保留少量即可。 */
-    private val undoLog = LinkedHashMap<UUID, RecordUndo>()
 
     /** 已完成的 [decide] 次数；撤销记下它，回放据此把撤销放回两次决策之间的原位。 */
     private var decisions = 0L
@@ -137,46 +162,48 @@ class CooldownManager(
     }
 
     /**
-     * 记录一条**真正送达用户**的事件。只能由送达方调用：没播出去的事件（同帧的次要事件、被更高
-     * 优先级语音挡下的事件）一旦被记录，就会在自己的冷却期里被静音，而用户从没听到过它。
+     * 暂记一条要送达用户的事件。只能为送达方要送的那一条调用：没播出去的事件（同帧的次要事件、被更高
+     * 优先级语音挡下的事件）一旦被记录，就会在自己的冷却期里被静音，而用户从没听到过它。送达方随后
+     * 用 [confirm] 或 [revoke] 给出结果。
      */
     @Synchronized
     fun recordEvent(event: SceneEvent, now: Long) {
-        val previous = mutableMapOf<String, CooldownRecord?>()
-        event.allCooldownKeys().forEach { key ->
-            val existing = lastEventRecords[key]
-            previous[key] = existing
-            val withinBaseWindow = existing != null &&
-                now - existing.timestampMs < event.baseCooldownFor(key)
-            lastEventRecords[key] = CooldownRecord(
-                timestampMs = now,
-                // 记住这个 key 上出现过的最高优先级，直到基础冷却自然到期。否则
-                // CRITICAL → HIGH → CRITICAL 的抖动会让每个 CRITICAL 都被算成"升级"。
-                priority = existing
-                    ?.takeIf {
-                        withinBaseWindow && it.priority.value > event.priority.value
-                    }
-                    ?.priority
-                    ?: event.priority,
-                eventId = event.id,
-            )
-        }
-        recentEmissions.addLast(now)
+        val write = Write(
+            eventId = event.id,
+            timestampMs = now,
+            priority = event.priority,
+            baseCooldowns = event.allCooldownKeys().associateWith { key -> event.baseCooldownFor(key) },
+        )
+        lastEventRecords.fold(write)
+        openWrites.addLast(write)
+        recentEmissions.addLast(Emission(now, event.id))
         trimEmissionWindow(now)
-        undoLog[event.id] = RecordUndo(previous = previous, emittedAtMs = now)
-        while (undoLog.size > MAX_UNDO_ENTRIES) {
-            undoLog.remove(undoLog.keys.first())
+        // 送达方的回执总是紧跟在决策之后，保留少量即可。更旧的写入不再能撤回，和从前一样。
+        while (openWrites.size > MAX_OPEN_WRITES) {
+            openWrites.first().confirmed = true
+            advanceConfirmedPrefix()
         }
+    }
+
+    /**
+     * [eventId] 的记录已送达用户（至少一个通道接收了它）：从此不能再撤回。不改变任何记录——当前记录本来
+     * 就算着它——只决定之后的撤回能不能生效。未知或已撤回的 id 是空操作。
+     */
+    @Synchronized
+    fun confirm(eventId: UUID) {
+        openWrites.firstOrNull { it.eventId == eventId }?.confirmed = true
+        advanceConfirmedPrefix()
     }
 
     /**
      * 撤销 [recordEvent] 对 [eventId] 的记录：这条事件最终没有送达用户（例如更高优先级的播报
      * 还在念）。撤销后它下一帧还能被重新生成、重新放行，而不是在冷却期里被静音。
      *
-     * 只恢复仍然由这条事件写着的 key：撤销之前如果已有别的事件改写了同一个 key，那条更新的记录
-     * 保持不动。未知 id（太旧或从未记录）是空操作。
+     * 撤销后的记录和"这次写入从没发生过"一样，无论之后有没有别的事件写过同一个 key：后来的写入从它
+     * 继承来的优先级也一起拿掉。已确认、太旧或从未记录的 id 是空操作。
+     *
+     * @return 撤销生效时已完成的决策次数（见 [decide]）。
      */
-    /** @return 撤销生效时已完成的决策次数（见 [decide]）。 */
     @Synchronized
     fun revoke(eventId: UUID): Long {
         val decisionsBefore = decisions
@@ -185,17 +212,61 @@ class CooldownManager(
     }
 
     private fun revokeRecord(eventId: UUID) {
-        val undo = undoLog.remove(eventId) ?: return
-        undo.previous.forEach { (key, previousRecord) ->
-            if (lastEventRecords[key]?.eventId != eventId) return@forEach
-            if (previousRecord == null) {
-                lastEventRecords.remove(key)
-            } else {
-                lastEventRecords[key] = previousRecord
-            }
-        }
-        recentEmissions.lastIndexOf(undo.emittedAtMs).takeIf { it >= 0 }?.let(recentEmissions::removeAt)
+        val index = openWrites.indexOfFirst { it.eventId == eventId }
+        if (index < 0 || openWrites[index].confirmed) return
+        openWrites.removeAt(index)
+        recentEmissions.indexOfLast { it.eventId == eventId }.takeIf { it >= 0 }?.let(recentEmissions::removeAt)
+        lastEventRecords.clear()
+        lastEventRecords.putAll(confirmedRecords)
+        openWrites.forEach { lastEventRecords.fold(it) }
+        advanceConfirmedPrefix()
     }
+
+    /**
+     * 把开头连续已确认的写入并进 [confirmedRecords]。只推进连续的前缀：后面的写入先确认时，不能跨过前面
+     * 仍待定的那条——那条撤回后，后面的要重新折叠。当前记录不变：折叠是按顺序的。
+     */
+    private fun advanceConfirmedPrefix() {
+        while (openWrites.firstOrNull()?.confirmed == true) {
+            confirmedRecords.fold(openWrites.removeFirst())
+        }
+    }
+
+    /** 记录规则：把 [write] 写到它的每个 key 上。 */
+    private fun MutableMap<String, CooldownRecord>.fold(write: Write) {
+        write.baseCooldowns.forEach { (key, baseCooldown) ->
+            val existing = this[key]
+            val withinBaseWindow = existing != null &&
+                write.timestampMs - existing.timestampMs < baseCooldown
+            this[key] = CooldownRecord(
+                timestampMs = write.timestampMs,
+                // 记住这个 key 上出现过的最高优先级，直到基础冷却自然到期。否则
+                // CRITICAL → HIGH → CRITICAL 的抖动会让每个 CRITICAL 都被算成"升级"。
+                priority = existing
+                    ?.takeIf {
+                        withinBaseWindow && it.priority.value > write.priority.value
+                    }
+                    ?.priority
+                    ?: write.priority,
+                eventId = write.eventId,
+            )
+        }
+    }
+
+    /**
+     * The whole state, for the equivalence tests (det-first plan D3a-1): each key's current record as
+     * (time, priority, writer), and the storm window's entries in order. Changes nothing.
+     */
+    @Synchronized
+    internal fun state(): State = State(
+        records = lastEventRecords.mapValues { (_, r) -> Triple(r.timestampMs, r.priority, r.eventId) },
+        emissions = recentEmissions.map { it.timestampMs },
+    )
+
+    internal data class State(
+        val records: Map<String, Triple<Long, EventPriority, UUID>>,
+        val emissions: List<Long>,
+    )
 
     /**
      * A read-only copy of the records, for measurement (det-first plan D1.6): taken just before a
@@ -207,7 +278,7 @@ class CooldownManager(
     internal fun snapshot(now: Long, stationary: Boolean): Snapshot {
         var scale = 1.0f
         if (stationary) scale *= stationaryCooldownScale
-        if (recentEmissions.count { now - it <= stormWindowMs } >= stormEventThreshold) scale *= stormCooldownScale
+        if (recentEmissions.count { now - it.timestampMs <= stormWindowMs } >= stormEventThreshold) scale *= stormCooldownScale
         return Snapshot(now, scale.coerceAtMost(maxCooldownScale), lastEventRecords.mapValues { (_, r) -> r.timestampMs to r.priority })
     }
 
@@ -246,8 +317,9 @@ class CooldownManager(
     @Synchronized
     fun reset() {
         lastEventRecords.clear()
+        confirmedRecords.clear()
+        openWrites.clear()
         recentEmissions.clear()
-        undoLog.clear()
         isStationary = false
         decisions = 0
     }
@@ -268,7 +340,7 @@ class CooldownManager(
     }
 
     private fun trimEmissionWindow(now: Long) {
-        while (recentEmissions.isNotEmpty() && now - recentEmissions.first() > stormWindowMs) {
+        while (recentEmissions.isNotEmpty() && now - recentEmissions.first().timestampMs > stormWindowMs) {
             recentEmissions.removeFirst()
         }
     }
@@ -301,6 +373,6 @@ class CooldownManager(
 
     private companion object {
         const val DEFAULT_COOLDOWN_MS = 3000L
-        const val MAX_UNDO_ENTRIES = 16
+        const val MAX_OPEN_WRITES = 16
     }
 }

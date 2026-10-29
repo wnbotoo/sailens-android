@@ -27,8 +27,8 @@ internal data class GuidanceDeliveryResult(val channels: List<String>) {
  * them actually accepted it.
  *
  * "Accepted by at least one" is what the cooldown is allowed to count (DecideEventsUseCase records
- * the prompt provisionally; an empty result revokes that record, so the prompt is offered again next
- * frame). The answer therefore has to be honest:
+ * the prompt provisionally; a non-empty result confirms that record, an empty one revokes it, so the
+ * prompt is offered again next frame). The answer therefore has to be honest:
  *
  * - **Screen reader active**: it is the spoken channel and always accepts. Vibration accompanies,
  *   and is listed only if the motor took it.
@@ -110,8 +110,9 @@ internal val GUIDANCE_PREEMPTS_DESCRIPTION_AT: EventPriority = EventPriority.HIG
  * Offers the frame's primary Guidance prompt, and keeps the cooldown honest either way.
  *
  * DecideEventsUseCase has already recorded the prompt in the cooldown, provisionally. Only a prompt
- * that reached the user may keep that record, so every path that does not deliver revokes it and the
- * prompt is offered again on a later frame while its condition still holds:
+ * that reached the user may keep that record: a delivered prompt confirms it ([confirm]; from then on
+ * it cannot be taken back), and every path that does not deliver revokes it, so the prompt is offered
+ * again on a later frame while its condition still holds:
  *
  * 1. A description holds the floor and the prompt is not urgent ([guidanceWaitsForDescription]):
  *    wait. The description is left alone and nothing is delivered.
@@ -119,6 +120,8 @@ internal val GUIDANCE_PREEMPTS_DESCRIPTION_AT: EventPriority = EventPriority.HIG
  *    spoken, so no clause of it can be left in front of the prompt or behind it.
  * 3. No enabled output channel accepted it (see [deliverGuidanceEvent]: speech outranked or still
  *    starting, the motor refusing, ...): not delivered, revoked as [PromptRevokeReasons.OUTPUT_REFUSED].
+ *
+ * Exactly one of [confirm] and [revoke] is called.
  *
  * @param revoke called with the reason, one of [PromptRevokeReasons], so the trace can say why.
  * @return the channels that accepted it; empty when it was not delivered.
@@ -128,6 +131,7 @@ internal inline fun offerGuidancePrompt(
     descriptionHoldsTheFloor: Boolean,
     preemptDescription: () -> Unit,
     deliver: () -> GuidanceDeliveryResult,
+    confirm: () -> Unit,
     revoke: (reason: String) -> Unit,
 ): GuidanceDeliveryResult {
     if (guidanceWaitsForDescription(priority, descriptionHoldsTheFloor)) {
@@ -136,7 +140,9 @@ internal inline fun offerGuidancePrompt(
     }
     preemptDescription()
     val result = deliver()
-    if (!result.delivered) {
+    if (result.delivered) {
+        confirm()
+    } else {
         revoke(PromptRevokeReasons.OUTPUT_REFUSED)
     }
     return result
@@ -157,6 +163,7 @@ internal data class GuidanceOutputSettings(
  * candidates; this is where that record is made.
  *
  * @param now wall-clock milliseconds, the clock of the frame trace's `pipelineCompletedAt`.
+ * @param confirm makes the provisional cooldown record final.
  * @param revoke takes back the provisional cooldown record.
  * @return which channels took the prompt; none when it was not delivered.
  */
@@ -168,6 +175,7 @@ internal inline fun offerAndTraceGuidancePrompt(
     now: () -> Long,
     preemptDescription: () -> Unit,
     deliver: () -> GuidanceDeliveryResult,
+    confirm: () -> Unit,
     revoke: () -> Unit,
     record: (PromptOutcomeTrace) -> Unit,
 ): GuidanceDeliveryResult {
@@ -177,6 +185,7 @@ internal inline fun offerAndTraceGuidancePrompt(
         descriptionHoldsTheFloor = descriptionHoldsTheFloor,
         preemptDescription = preemptDescription,
         deliver = deliver,
+        confirm = confirm,
         revoke = { reason ->
             revokeReason = reason
             revoke()

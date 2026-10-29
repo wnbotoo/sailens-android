@@ -9,6 +9,7 @@ import com.sailens.guidance.model.scene.SceneEvent
 import com.sailens.guidance.model.scene.SceneResult
 import com.sailens.core.log.LogService
 import com.sailens.guidance.service.TraceService
+import com.sailens.guidance.usecase.decision.ConfirmDeliveredEventUseCase
 import com.sailens.guidance.usecase.decision.RevokeUndeliveredEventUseCase
 import com.sailens.guidance.usecase.scene.StartSceneAnalysisUseCase
 import com.sailens.shell.app.GuidanceStartGate
@@ -84,6 +85,8 @@ class SceneAnalysisViewModel(
     private val accessibilityStatusProvider: AccessibilityStatusProvider,
     private val textResolver: SceneEventTextResolver,
     private val announcements: GuidanceAnnouncements,
+    /** Tells Guidance a decided event reached the user, so its cooldown record can no longer be taken back. */
+    private val confirmDeliveredEvent: ConfirmDeliveredEventUseCase,
     /** Tells Guidance a decided event never reached the user, so its cooldown does not mute it. */
     private val revokeUndeliveredEvent: RevokeUndeliveredEventUseCase,
     private val noticeText: GuidanceNoticeText,
@@ -379,8 +382,8 @@ class SceneAnalysisViewModel(
 
         logger.debug(TAG, "Scene events generated, ${primaryEvent.messageKey}", mapOf("count" to events.size))
 
-        // 等描述 / 打断描述 / 送达 / 没送达就撤销冷却，并为这条提示写一条 prompt_outcome（实际送达的
-        // 通道或撤回原因）——整条规则在 offerAndTraceGuidancePrompt 里，有单测。协调器是整个 shell
+        // 等描述 / 打断描述 / 送达就确认冷却、没送达就撤销冷却，并为这条提示写一条 prompt_outcome（实际
+        // 送达的通道或撤回原因）——整条规则在 offerAndTraceGuidancePrompt 里，有单测。协调器是整个 shell
         // 共用的那一个，所以打断的就是用户正在听的那一段描述，不管它在哪个屏幕上。
         val delivery = offerAndTraceGuidancePrompt(
             event = primaryEvent,
@@ -394,6 +397,7 @@ class SceneAnalysisViewModel(
             now = Timestamp::now,
             preemptDescription = { sceneDescriptionCoordinator.preemptForGuidance(primaryEvent.messageKey) },
             deliver = { deliver(primaryEvent, state) },
+            confirm = { confirmDeliveredEvent(primaryEvent) },
             revoke = { revokeUndeliveredEvent(primaryEvent) },
             record = traceService::recordPromptOutcome,
         )
