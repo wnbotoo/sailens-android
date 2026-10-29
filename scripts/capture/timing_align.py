@@ -209,7 +209,7 @@ def analyse(directory, max_lag_ms=300.0, diagnose_camera_clock=False):
         "modelArtifacts": capture.manifest.get("modelArtifacts", {}),
         "timestampSource": source,
         "cameraComparable": camera_comparable,
-        # The clock whose offset M0 may record as the frame-to-gyro alignment.
+        # The clock whose offset may be recorded as the frame-to-gyro alignment.
         "authoritativeClock": "camera" if camera_comparable else "received",
         "frames": len(capture.frames),
         "frameIntervalMedianMs": round(float(np.median(frame_dt)), 2) if len(frame_dt) else None,

@@ -30,6 +30,7 @@ import sys
 import tokenize
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import unquote
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -47,23 +48,34 @@ DOCS = frozenset({
     "trace_replay_workflow",
 })
 
-# (rule, pattern). Applied to comment text and to Markdown.
+# ASCII word boundaries: Python's Unicode \b sees no boundary between a CJK character and a letter, so
+# "按M3a方案" would slip through \b.
+_A = r"(?<![A-Za-z0-9_])"
+_Z = r"(?![A-Za-z0-9_])"
+
+# (rule, pattern). Applied to comment text and to Markdown. Ids are matched as families (any milestone
+# Mn with an optional letter, any plan item Dn), not as the list of ids used so far.
 MARKER_RULES = [
-    ("milestone id", re.compile(r"\bM(?:0[ab]|1b|2[ab]|3[oab]|5[ab]|1[01]|[1-9])\b")),
-    ("plan id", re.compile(r"\bD[1-5](?:\.\d+(?:-\d+)?|[a-c](?:-\d+)?)?\b")),
-    ("plan name", re.compile(r"(?i:\bdet-first\b)|det\s*优先|\bplan v\d")),
-    ("PR number", re.compile(r"\bPR[ -]?#?\d+\b|\bPR-(?:\d[a-z]?|D\d)\b|\(#\d+\)|\bpull/\d+\b")),
-    ("review round", re.compile(
-        r"(?i:\breview(?:ed)?\s+round\b|\breview\s+finding\b|\bround\s+\d+\s*[,:;)])|\bGPT\b"
-        r"|第\s*[0-9一二三四五六七八九十]+\s*轮"
+    ("milestone id", re.compile(_A + r"M(?:0|[1-9]\d?)[a-z]?" + _Z)),
+    ("plan id", re.compile(_A + r"D[1-9]\d?(?:\.\d+(?:-\d+)?|[a-c](?:-\d+)?)?" + _Z)),
+    ("plan name", re.compile(_A + r"(?i:det-first)" + _Z + r"|det\s*优先|" + _A + r"plan v\d")),
+    ("PR number", re.compile(
+        _A + r"PR[ -]?#?\d+" + _Z + "|" + _A + r"PR-(?:\d[a-z]?|D\d)" + _Z + r"|\(#\d+\)|" + _A + r"pull/\d+"
     )),
-    ("review finding id", re.compile(r"\bP[0-2]-\d\b")),
+    # A model name alone is not review history; only review wording is.
+    ("review round", re.compile(
+        r"(?i:" + _A + r"review(?:ed)?\s+round" + _Z + "|" + _A + r"review\s+finding|" + _A + r"round\s+\d+\s*[,:;)]"
+        + "|" + _A + r"GPT[- ]?review)|GPT\s*评审|第\s*[0-9一二三四五六七八九十]+\s*轮\s*(?:评审|审)"
+    )),
+    ("review finding id", re.compile(_A + r"P[0-3]-\d+" + _Z)),
     # Not inside a file name: experiment records are named after the month they were made in.
-    ("date", re.compile(r"(?<![\w/.-])20\d\d-(?:0[1-9]|1[0-2])(?:-(?:0[1-9]|[12]\d|3[01]))?(?![\w-]|\.\w)")),
+    ("date", re.compile(
+        r"(?<![A-Za-z0-9_/.-])20\d\d-(?:0[1-9]|1[0-2])(?:-(?:0[1-9]|[12]\d|3[01]))?(?![A-Za-z0-9_-]|\.[A-Za-z0-9])"
+    )),
 ]
 # Comments only: Markdown uses "#1" for list items and anchors.
 COMMENT_ONLY_RULES = [
-    ("PR number", re.compile(r"(?<![\w&#/])#\d{1,4}\b")),
+    ("PR number", re.compile(r"(?<![A-Za-z0-9_&#/])#\d{1,4}" + _Z)),
 ]
 
 # Path prefixes exempt from the marker rules (never from the link and docs rules).
@@ -80,9 +92,10 @@ EXEMPT = {
 # Not checked at all: its strings are deliberate violations and links to documents that do not exist.
 TEST_DATA = {"scripts/test_verify_no_process_history.py"}
 
-C_LIKE = {".kt", ".kts", ".java", ".c", ".cc", ".cpp", ".h", ".hpp", ".gradle"}
-NESTED_BLOCK_COMMENTS = {".kt", ".kts"}
-TEMPLATE_STRINGS = {".kt", ".kts"}
+KOTLIN = {".kt", ".kts", ".gradle"}
+JAVA = {".java"}
+C_FAMILY = {".c", ".cc", ".cpp", ".h", ".hpp"}
+C_LIKE = KOTLIN | JAVA | C_FAMILY
 HASH_COMMENTS = {".pro", ".toml", ".properties", ".yml", ".yaml", ".cmake", ".sh", ".gitignore", ".gitattributes",
                  ".editorconfig"}
 HASH_COMMENT_NAMES = {"CMakeLists.txt", ".gitignore", ".gitattributes", ".editorconfig"}
@@ -90,8 +103,11 @@ TEXT_FOR_LINKS = C_LIKE | HASH_COMMENTS | {".py", ".xml", ".md", ".txt", ".json"
 
 DOC_MENTION = re.compile(r"(?<![\w.-])docs/([\w./-]+?\.md)\b")
 SECTION_REF = re.compile(r"(?<![\w.-])((?:docs/)?(?:experiments/)?[\w-]+(?:\.zh-CN)?\.md)`?\)?\s*§\s*(\d+(?:\.\d+)*)")
-MD_LINK = re.compile(r"\]\(([^)\s]+)\)")
-HEADING_NUMBER = re.compile(r"^#{1,6}\s+(\d+(?:\.\d+)*)\.?\s", re.MULTILINE)
+# A full URL names someone else's file, never this repository's.
+URL = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://\S+")
+MD_FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+MD_REFERENCE_DEFINITION = re.compile(r"^ {0,3}\[[^\]]+\]:\s*(?:<([^>]*)>|(\S+))")
+HEADING_NUMBER = re.compile(r"^#{1,6}\s+(\d+(?:\.\d+)*)\.?\s")
 
 
 @dataclass(frozen=True)
@@ -107,9 +123,22 @@ class Finding:
 
 # ---- comment extraction: each yields (line number, comment text of that line) -------------------
 
-def c_like_comments(text: str, nested: bool, templates: bool) -> list[tuple[int, str]]:
-    """Comments of a C-family file. Strings (with Kotlin's raw strings and `${...}` templates) are
-    skipped, so a `//` inside a string is not a comment."""
+CPP_RAW_STRING = re.compile(r'(?:u8|u|U|L)?R"([^()\\\s"]{0,16})\(')
+
+
+def _starts_number(text: str, i: int) -> bool:
+    """Whether the token ending just before `i` is a number literal, as in C++14's `1'000`."""
+    j = i
+    while j > 0 and (text[j - 1].isalnum() or text[j - 1] in "_'."):
+        j -= 1
+    return j < i and text[j].isdigit()
+
+
+def c_like_comments(text: str, lang: str) -> list[tuple[int, str]]:
+    """Comments of a Kotlin, Java or C/C++ file. Literals are skipped, so a `//` inside one is not a
+    comment: Kotlin raw strings with `${...}` templates and backticked names, Java text blocks, C++
+    raw strings and C++14 digit separators."""
+    kotlin, java, cpp = lang == "kotlin", lang == "java", lang == "c"
     out: list[tuple[int, str]] = []
     modes: list[list] = [["code", 0]]  # ["code", template brace depth] | ["str"] | ["raw"] | ["char"]
     i, n, line = 0, len(text), 1
@@ -126,7 +155,7 @@ def c_like_comments(text: str, nested: bool, templates: bool) -> list[tuple[int,
             if text.startswith("/*", i):
                 depth, j, start, start_line = 1, i + 2, i + 2, line
                 while j < n and depth:
-                    if nested and text.startswith("/*", j):
+                    if kotlin and text.startswith("/*", j):  # Kotlin block comments nest
                         depth, j = depth + 1, j + 2
                     elif text.startswith("*/", j):
                         depth, j = depth - 1, j + 2
@@ -138,17 +167,27 @@ def c_like_comments(text: str, nested: bool, templates: bool) -> list[tuple[int,
                 line += body.count("\n")
                 i = j
                 continue
-            if templates and text.startswith('"""', i):
+            if (kotlin or java) and text.startswith('"""', i):
                 modes.append(["raw"])
                 i += 3
                 continue
-            if templates and ch == "`":  # a backticked name may hold quotes and apostrophes
+            if cpp and (i == 0 or not (text[i - 1].isalnum() or text[i - 1] == "_")):
+                raw = CPP_RAW_STRING.match(text, i)
+                if raw:
+                    close = text.find(")" + raw.group(1) + '"', raw.end())
+                    end = n if close < 0 else close + len(raw.group(1)) + 2
+                    line += text.count("\n", i, end)
+                    i = end
+                    continue
+            if kotlin and ch == "`":  # a backticked name may hold quotes and apostrophes
                 end = text.find("`", i + 1)
                 if end > 0 and "\n" not in text[i:end]:
                     i = end + 1
                     continue
             if ch == '"':
                 modes.append(["str"])
+            elif ch == "'" and cpp and _starts_number(text, i):
+                pass  # a digit separator, not a character literal
             elif ch == "'":
                 modes.append(["char"])
             elif ch == "{" and len(modes) > 1:
@@ -169,7 +208,7 @@ def c_like_comments(text: str, nested: bool, templates: bool) -> list[tuple[int,
                     line += 1
                 i += 2
                 continue
-            if templates and mode[0] == "str" and text.startswith("${", i):
+            if kotlin and mode[0] == "str" and text.startswith("${", i):
                 modes.append(["code", 0])
                 i += 2
                 continue
@@ -179,14 +218,19 @@ def c_like_comments(text: str, nested: bool, templates: bool) -> list[tuple[int,
                 modes.pop()
             i += 1
             continue
-        # raw string
+        # Kotlin raw string or Java text block
+        if java and ch == "\\":  # text blocks process escapes; \""" is not the end
+            if i + 1 < n and text[i + 1] == "\n":
+                line += 1
+            i += 2
+            continue
         if text.startswith('"""', i):
             while text.startswith('""""', i):  # extra quotes belong to the content
                 i += 1
             modes.pop()
             i += 3
             continue
-        if text.startswith("${", i):
+        if kotlin and text.startswith("${", i):
             modes.append(["code", 0])
             i += 2
             continue
@@ -246,7 +290,7 @@ def comments_of(path: str, text: str) -> list[tuple[int, str]] | None:
     name = Path(path).name
     suffix = Path(path).suffix
     if suffix in C_LIKE:
-        return c_like_comments(text, suffix in NESTED_BLOCK_COMMENTS, suffix in TEMPLATE_STRINGS)
+        return c_like_comments(text, "kotlin" if suffix in KOTLIN else "java" if suffix in JAVA else "c")
     if suffix == ".py":
         return python_comments(text)
     if suffix == ".xml":
@@ -283,16 +327,82 @@ def marker_findings(path: str, text: str) -> list[Finding]:
     return out
 
 
+def markdown_prose_lines(text: str) -> list[tuple[int, str]]:
+    """The lines of a Markdown file outside fenced code blocks, with their numbers."""
+    out, fence = [], None
+    for number, line in enumerate(text.split("\n"), start=1):
+        match = MD_FENCE.match(line)
+        if fence is None and match:
+            fence = match.group(1)
+        elif fence is not None and match and match.group(1)[0] == fence[0] and len(match.group(1)) >= len(fence):
+            fence = None
+        elif fence is None:
+            out.append((number, line))
+    return out
+
+
+def markdown_link_targets(line: str) -> list[str]:
+    """Destinations of the inline links (`[x](dest "title")`, `[x](<dest>)`, balanced parentheses) and
+    of a reference definition (`[x]: dest`) on one line of prose. Inline code is not a link."""
+    s = re.sub(r"`[^`]*`", lambda m: " " * len(m.group(0)), line)
+    targets = []
+    definition = MD_REFERENCE_DEFINITION.match(s)
+    if definition:
+        targets.append(definition.group(1) if definition.group(1) is not None else definition.group(2))
+    i = 0
+    while True:
+        j = s.find("](", i)
+        if j < 0:
+            return targets
+        k = j + 2
+        while k < len(s) and s[k] in " \t":
+            k += 1
+        if k < len(s) and s[k] == "<":
+            end = s.find(">", k)
+            if end < 0:
+                i = k
+                continue
+            targets.append(s[k + 1:end])
+            i = end + 1
+            continue
+        start, depth = k, 0
+        while k < len(s):
+            c = s[k]
+            if c == "\\":
+                k += 2
+                continue
+            if c == "(":
+                depth += 1
+            elif c == ")":
+                if depth == 0:
+                    break
+                depth -= 1
+            elif c.isspace() and depth == 0:
+                break
+            k += 1
+        if k > start:
+            targets.append(s[start:k])
+        i = k
+
+
 def headings(doc: Path, cache: dict[Path, set[str]]) -> set[str]:
+    """The section numbers of a document's ATX headings, code blocks excluded."""
     if doc not in cache:
-        cache[doc] = set(HEADING_NUMBER.findall(doc.read_text(encoding="utf-8"))) if doc.is_file() else set()
+        found: set[str] = set()
+        if doc.is_file():
+            for _, line in markdown_prose_lines(doc.read_text(encoding="utf-8")):
+                match = HEADING_NUMBER.match(line)
+                if match:
+                    found.add(match.group(1))
+        cache[doc] = found
     return cache[doc]
 
 
 def link_findings(root: Path, path: str, text: str, cache: dict[Path, set[str]]) -> list[Finding]:
     out = []
     here = (root / path).parent
-    for number, content in enumerate(text.split("\n"), start=1):
+    for number, raw in enumerate(text.split("\n"), start=1):
+        content = URL.sub(" ", raw)
         for match in DOC_MENTION.finditer(content):
             if not (root / "docs" / match.group(1)).is_file():
                 out.append(Finding(path, number, "missing document", f"docs/{match.group(1)}"))
@@ -304,13 +414,14 @@ def link_findings(root: Path, path: str, text: str, cache: dict[Path, set[str]])
                 out.append(Finding(path, number, "missing document", name))
             elif section not in headings(doc, cache):
                 out.append(Finding(path, number, "missing section", f"{name} §{section}"))
-        if path.endswith(".md"):
-            for match in MD_LINK.finditer(content):
-                target = match.group(1).split("#", 1)[0]
-                if not target or re.match(r"^[a-z][a-z0-9+.-]*:", target):
+    if path.endswith(".md"):
+        for number, line in markdown_prose_lines(text):
+            for target in markdown_link_targets(line):
+                local = unquote(target.split("#", 1)[0])
+                if not local or re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", local):
                     continue
-                if not (here / target).exists():
-                    out.append(Finding(path, number, "broken link", match.group(1)))
+                if not (here / local).exists():
+                    out.append(Finding(path, number, "broken link", target))
     return out
 
 

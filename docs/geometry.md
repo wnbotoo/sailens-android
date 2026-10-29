@@ -72,8 +72,10 @@ recorded capture, so old captures stay usable.
     more than 100 ms from the frame.
 - **`MotionTracker`** (pure, fed game-rotation-vector samples): the camera heading and the yaw rate.
   Within about 10° of vertical the heading is carried over (degraded) and no rate is claimed across
-  that stretch. It keeps the last 128 samples and answers for the frame's time, interpolating between
-  the samples either side; no sample within 200 ms on either side makes the state unavailable.
+  that stretch. It keeps the last 128 samples and answers for the frame's time: with measured
+  samples on both sides it interpolates between them; otherwise it takes the earlier sample's heading
+  and rate, or, with no earlier sample, the later one's heading and no rate. The state is
+  unavailable only when the nearest sample on either side is more than 200 ms away.
   **Rotation only**: translation is unknown (§8).
 - **`AndroidOrientationSource`**: `TYPE_GRAVITY` and `TYPE_GAME_ROTATION_VECTOR` at
   `SENSOR_DELAY_GAME`, on a thread of their own. Started and stopped by the Guidance session itself
@@ -198,8 +200,10 @@ reproduces the device exactly, which a test checks) or `ALL_DELIVERED` (no revok
 - A capture is complete only if its manifest says so, it lost no frames, the reader warned of
   nothing, and the records read match the manifest's count. Anything else is evaluated as far as it
   goes, labelled, and kept out of the pass. An empty evaluation fails.
-- It counts prompts the user would have **heard**: the device made the identical offer and did not
-  revoke it. Other prompts have unknown delivery and are counted apart. A prompt changes only if what
+- It counts a prompt as **heard** when the device made the identical offer and did not revoke it.
+  That is a delivery proxy, not proof the prompt was played to the end: a prompt delivered by
+  vibration or the status card alone, or speech that started and was then cut off, counts too (the
+  report keeps the word "heard"). Other prompts have unknown delivery and are counted apart. A prompt changes only if what
   is spoken changes: the key, the priority, the NEAR prefix or the direction suffix
   (`SceneEventStringsTest` checks that no event string has a placeholder).
 
@@ -244,9 +248,10 @@ turned into a ray.
    frame; a residual relative to `d` itself lets a large b hide a 15 cm curb or a 1.5 m drop, while
    the depth ratio is unchanged by any a and b.
 4. **The ground is the plane under the user.** Samples are ordered nearest first and grouped into 20
-   bins; a candidate is scored by the unbroken run of bins it explains from the nearest outward,
-   stopping at the first bin it explains less than half of; a tie goes to the candidate matching less
-   outside the run. The refit uses only the run's inliers, and the run must span at least 25% in
+   bins. A candidate's run is the unbroken sequence of bins, from the nearest outward, in each of
+   which it explains at least half of the samples; it ends at the first bin where it explains fewer.
+   The candidate is scored by its inliers within that run (not by the number of bins), and a tie goes
+   to the candidate with fewer inliers outside the run. The refit uses only the run's inliers, and the run must span at least 25% in
    depth, else the result is `NO_SUPPORT`. Ranked by total inliers instead, the floor of a drop being
    approached becomes "the ground" once it fills more of the view. Selection and refit are
    deliberately redundant: each alone handles the approach.
@@ -260,8 +265,8 @@ turned into a ray.
    it.
 7. **Labels** above / below ground by signed depth ratio (3× the threshold); metric height of a pixel
    above ground `h − Z · q` with `Z = A·h / (d − t)` (`GroundObservation.heightAboveGroundM`).
-8. **Gravity agreement**: a free 3-parameter plane on the inliers must lean within 10° and ±33% of
-   what gravity predicts. **Confidence** is the product of inlier ratio (0.2 → 0.6), agreement (×0.5
+8. **Gravity agreement**: a free 3-parameter plane on the inliers must lean within 10° of the
+   direction gravity predicts, with a slope 0.75–1.33 times the predicted one. **Confidence** is the product of inlier ratio (0.2 → 0.6), agreement (×0.5
    when it fails) and the stability of ground coverage over the last 3 fits.
 
 **Validity**: `VALID`, `TOO_FEW_SAMPLES`, `DEGENERATE_VIEW` (camera pointing straight down),
@@ -296,9 +301,9 @@ world on the JVM, deterministically.
   `geometry=<quality>/<pitch>`, rounded to 4 decimals. `ScenarioGoldenTest` fails on the first
   differing line. `<name>.m3a.golden.txt` is the same scenario with the ground-contact distance on (a
   1.3 m chest preset), with each obstacle's distance evidence (`GroundContactScenarioTest`); with the
-  distance off the plain goldens are unchanged. After an intended change, regenerate and commit the
-  diff with the change:
-  `gradlew :sailens-guidance:testDebugUnitTest --tests "*ScenarioGoldenTest*" -PupdateGoldens`.
+  distance off the plain goldens are unchanged. After an intended change, regenerate both kinds and
+  commit the diff with the change:
+  `gradlew :sailens-guidance:testDebugUnitTest --tests "*ScenarioGoldenTest*" --tests "*GroundContactScenarioTest*" -PupdateGoldens`.
 - **The goldens pin behaviour; they do not endorse it.** A person standing still 3 m away is MEDIUM
   or FAR depending only on pitch and phone height; an indoor floor read as building gives a CRITICAL
   "blocked" before "ground unrecognized"; a 15 cm curb down to the road is invisible; walking to a

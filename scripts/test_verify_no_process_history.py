@@ -90,6 +90,41 @@ class MarkerRulesTest(RepoTest):
         self.assertEqual([(1, "milestone id"), (6, "review round"), (7, "review finding id")],
                          [(f.line, f.rule) for f in self.findings() if f.path == "src/A.kt"])
 
+    def test_cpp_digit_separators_and_raw_strings(self):
+        self.write("src/a.cpp", "\n".join([
+            "int n = 1'000; /* M3a */",
+            "int h = 0xFF'FF; // P1-2",
+            "char c = '/'; // D5",
+            'auto s = R"(// M3a inside a raw string)";',
+            'auto t = u8R"x(text // M3o )" still raw)x"; // PR #9',
+            "auto u = LR\"(\n// M0b in a multi-line raw string\n)\";",
+        ]))
+        self.assertEqual([(1, "milestone id"), (2, "review finding id"), (3, "plan id"), (5, "PR number")],
+                         [(f.line, f.rule) for f in self.findings() if f.path == "src/a.cpp"])
+
+    def test_java_text_blocks_are_strings(self):
+        self.write("src/A.java", "\n".join([
+            'String s = """',
+            "    // M3a inside a text block, \\\"\"\" escaped quotes too",
+            '    """; // P1-2',
+        ]))
+        self.assertEqual([(3, "review finding id")],
+                         [(f.line, f.rule) for f in self.findings() if f.path == "src/A.java"])
+
+    def test_ids_next_to_chinese_and_ids_not_used_yet_are_found(self):
+        self.write("src/A.kt", "\n".join([
+            "// 按M3a方案处理",
+            "// M4a: next milestone",
+            "// 于2026-10-11 决定",
+            "// 见D7.2",
+        ]))
+        self.assertEqual(["milestone id", "milestone id", "date", "plan id"], self.rules("src/A.kt"))
+
+    def test_a_model_name_is_not_review_history(self):
+        self.write("src/A.kt", "// The VLM can be backed by GPT.\n// A 0xD5 mask, 3D boxes, an M-estimator.\n"
+                               "// GPT review asked for this.\n// 第 2 轮评审\n")
+        self.assertEqual([3, 4], [f.line for f in self.findings() if f.path == "src/A.kt"])
+
     def test_a_multi_line_kdoc_reports_the_right_line(self):
         self.write("src/A.kt", "/**\n * Fine.\n * Then M3a.\n */\nclass A\n")
         self.assertEqual([3], [f.line for f in self.findings() if f.path == "src/A.kt"])
@@ -139,6 +174,32 @@ class LinkRulesTest(RepoTest):
         self.write("docs/models.md", "# Models\n\n## 1. Contract\n\n[ok](models.zh-CN.md) [web](https://x.org/a.md) "
                                      "[gone](roadmap.md) [anchor](#1-contract)\n")
         self.assertEqual(["broken link"], self.rules("docs/models.md"))
+
+    def test_a_docs_path_inside_an_external_url_is_not_this_repository(self):
+        self.write("src/A.kt", "// see https://example.com/repo/blob/main/docs/api.md and docs/models.md §1\n")
+        self.assertEqual([], self.rules("src/A.kt"))
+
+    def test_links_with_titles_references_and_parentheses_follow_markdown(self):
+        self.write("docs/file_(1).md", "x\n")
+        self.write("docs/file_(1).zh-CN.md", "x\n")
+        self.write("README.md", "\n".join([
+            '[titled](gone-a.md "a title")',
+            "[ok](docs/file_(1).md) [angle](<docs/file_(1).md>) [spaced](docs/file_%281%29.md)",
+            "[by reference][ref]",
+            "",
+            "[ref]: gone-b.md",
+            "`[not a link](gone-c.md)`",
+            "```",
+            "[in a code block](gone-d.md)",
+            "```",
+        ]))
+        self.assertEqual([(1, "broken link"), (5, "broken link")],
+                         [(f.line, f.rule) for f in self.findings() if f.path == "README.md"])
+
+    def test_a_heading_inside_a_code_block_is_not_a_section(self):
+        self.write("docs/models.md", "# Models\n\n## 1. Contract\n\n```\n## 9. Example\n```\n")
+        self.write("src/A.kt", "// models.md §1 holds, models.md §9 does not\n")
+        self.assertEqual(["missing section"], self.rules("src/A.kt"))
 
 
 class DocsSetTest(RepoTest):
