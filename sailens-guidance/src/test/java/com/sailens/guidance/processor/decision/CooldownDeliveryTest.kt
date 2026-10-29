@@ -170,7 +170,7 @@ class CooldownDeliveryTest {
         DirectionZone.entries.forEach { zone ->
             assertTrue(SceneEventMessageKeys.all.contains(SceneEventMessageKeys.obstacle(SceneEventMessageKeys.zonePart(zone), null)))
         }
-        assertEquals(42, SceneEventMessageKeys.all.size)
+        assertEquals(45, SceneEventMessageKeys.all.size)
     }
 
     private object StillSensors : DeviceSensorRepository {

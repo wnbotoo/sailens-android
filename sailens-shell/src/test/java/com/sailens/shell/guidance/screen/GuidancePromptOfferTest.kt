@@ -1,12 +1,14 @@
 package com.sailens.shell.guidance.screen
 
 import com.sailens.guidance.model.analysis.FrameQuality
+import com.sailens.guidance.model.analysis.GroundRecognition
 import com.sailens.guidance.model.analysis.RoadSafetyState
 import com.sailens.guidance.model.analysis.SceneElements
 import com.sailens.guidance.model.analysis.SceneSnapshot
 import com.sailens.guidance.model.analysis.WalkPathConnectivity
 import com.sailens.guidance.model.common.EventPriority
 import com.sailens.guidance.model.common.Severity
+import com.sailens.guidance.model.trace.PromptDeliveryChannels
 import com.sailens.guidance.model.trace.PromptDeliveryChannels.HAPTICS
 import com.sailens.guidance.model.trace.PromptDeliveryChannels.SPEECH
 import com.sailens.guidance.model.trace.PromptOutcomeTrace
@@ -110,11 +112,32 @@ class GuidancePromptOfferTest {
 
     @Test
     fun `an urgent prompt preempts the description and is delivered at once`() {
-        val dark = snapshot(frameQuality = FrameQuality.TOO_DARK)
+        val blocked = snapshot(blocked = true)
 
-        assertEquals(true, frame(dark, describing = true))
-        assertEquals(listOf("preempt", "deliver:event_low_light", "confirm"), calls)
+        assertEquals(true, frame(blocked, describing = true))
+        assertEquals(listOf("preempt", "deliver:event_blocked", "confirm"), calls)
         assertEquals(listOf(SPEECH, HAPTICS), outcomes.single().deliveredVia)
+    }
+
+    @Test
+    fun `the states the vision-fault alerts tell are not spoken here, but confirmed and traced as theirs`() {
+        // det-first plan D5: VisionFaultAlerts says these; offering the event too would say it twice.
+        for ((name, state) in listOf(
+            "covered" to snapshot(frameQuality = FrameQuality.OBSTRUCTED),
+            "dark" to snapshot(frameQuality = FrameQuality.TOO_DARK, trafficLight = true),
+            "floor" to snapshot(groundRecognition = GroundRecognition.UNRECOGNIZED),
+        )) {
+            cooldown.reset()
+            calls.clear()
+            outcomes.clear()
+            // A description holding the floor makes no difference: the alerts apply their own rule.
+            assertEquals(name, true, frame(state, describing = true))
+            assertEquals(name, listOf("confirm"), calls)
+            assertEquals(name, listOf(PromptDeliveryChannels.VISION_ALERTS), outcomes.single().deliveredVia)
+            // Confirmed: the cooldown throttles the event as before.
+            now += 100
+            assertEquals(name, null, frame(state, describing = false))
+        }
     }
 
     @Test
@@ -169,32 +192,36 @@ class GuidancePromptOfferTest {
     private fun snapshot(
         trafficLight: Boolean = false,
         frameQuality: FrameQuality = FrameQuality.OK,
+        blocked: Boolean = false,
+        groundRecognition: GroundRecognition = GroundRecognition.RECOGNIZED,
     ) = SceneSnapshot(
         timestamp = now,
         obstacles = emptyList(),
         bottomCoverage = 1f,
+        // Blocked: a hard block (severe, certain, nothing reaches far), so a CRITICAL "path blocked".
         connectivity = WalkPathConnectivity(
-            isBlocked = false,
+            isBlocked = blocked,
             isNarrowing = false,
             suggestedBias = null,
-            blockageConfidence = 0f,
+            blockageConfidence = if (blocked) 0.9f else 0f,
             narrowingConfidence = 0f,
-            blockageSeverity = Severity.NONE,
+            blockageSeverity = if (blocked) Severity.SEVERE else Severity.NONE,
             narrowingSeverity = Severity.NONE,
-            verticalReachRatio = 1f,
+            verticalReachRatio = if (blocked) 0.2f else 1f,
             validLayers = 3,
             totalLayers = 3,
-            widthRetentionAvg = 1f,
-            widthRetentionP25 = 1f,
+            widthRetentionAvg = if (blocked) 0.1f else 1f,
+            widthRetentionP25 = if (blocked) 0.1f else 1f,
             widthSlope = 0f,
-            floodReachRatio = 1f,
-            floodWidthRetentionP25 = 1f,
-            floodVisitedRatio = 1f,
+            floodReachRatio = if (blocked) 0.05f else 1f,
+            floodWidthRetentionP25 = if (blocked) 0.1f else 1f,
+            floodVisitedRatio = if (blocked) 0.05f else 1f,
         ),
         sceneElements = SceneElements(hasTrafficLight = trafficLight),
         roadSafety = RoadSafetyState(false, false, 0f, false, false, 0f),
         groundTypeChange = null,
         frameQuality = frameQuality,
+        groundRecognition = groundRecognition,
     )
 
     private object StillSensors : DeviceSensorRepository {

@@ -495,6 +495,24 @@ class EventGeneratorTest {
         )
     }
 
+    @Test
+    fun `vision faults name exactly the states the generator makes state events for, switches included`() {
+        // det-first plan D5: the shell alerts on these; they must never disagree with the events.
+        for (config in listOf(AnalysisConfig(), AnalysisConfig(enableSensorQualityEvents = false))) {
+            val generator = EventGenerator(config)
+            for (quality in FrameQuality.entries) {
+                for (ground in GroundRecognition.entries) {
+                    val snapshot = snapshot(frameQuality = quality, groundRecognition = ground)
+                    val categories = generator.generate(snapshot, now = 1_000L).map { it.category }.toSet()
+                    val faults = generator.visionFaults(snapshot)
+                    assertEquals("$quality / $ground", EventCategory.SENSOR_QUALITY in categories, faults.frameQuality != FrameQuality.OK)
+                    if (faults.frameQuality != FrameQuality.OK) assertEquals(quality, faults.frameQuality)
+                    assertEquals("$quality / $ground", EventCategory.GROUND_UNRECOGNIZED in categories, faults.groundUnrecognized)
+                }
+            }
+        }
+    }
+
     private fun snapshot(obstacle: DetectedObstacle): SceneSnapshot {
         return snapshot(obstacles = listOf(obstacle))
     }

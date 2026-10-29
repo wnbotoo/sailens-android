@@ -64,9 +64,14 @@
     <string name="settings_speech_rate_sample">Person ahead, keep left</string>
     <string name="btn_preview_speech_rate">Preview speech rate</string>
     <string name="label_feedback_speech">Voice alerts</string>
-    <string name="label_feedback_haptics">Vibration alerts</string>
+    <string name="label_feedback_haptics">Navigation vibration</string>
     <string name="settings_feedback_speech_supporting">Speak guidance and urgent risks during navigation.</string>
-    <string name="settings_feedback_haptics_supporting">Convey direction through vibration. With voice off, vibration is the only channel.</string>
+    <string name="settings_feedback_haptics_supporting">Convey obstacle direction and path alerts through vibration. With voice off, vibration is the only channel.</string>
+    <!-- det-first D5: the vibration for "Guidance cannot see". The fallback, voice-broken and
+         guidance-interrupted alerts ignore it, and the text says so: not a hidden exception. -->
+    <string name="label_feedback_fault_haptics">Fault alert vibration</string>
+    <string name="settings_feedback_fault_haptics_supporting">Vibrates (long, short, long) when the camera is covered, it is too dark, or the ground is not recognized. If the spoken alert cannot get through in time, it vibrates anyway. Voice-broken and guidance-interrupted alerts always vibrate.</string>
+    <string name="settings_feedback_fault_haptics_locked">Voice alerts are off, so vibration is the only way to tell you the camera is covered, it is too dark, or the ground is not recognized. It cannot be turned off.</string>
 
     <!-- Haptic vocabulary -->
     <string name="settings_section_haptic_vocabulary">What the vibrations mean</string>
@@ -324,6 +329,10 @@
          style alerts are paused. The wording must say the way ahead is unknown, not that it is
          clear. Obstacle alerts continue. -->
     <string name="event_ground_unrecognized">Can\'t see the ground, can\'t tell if the way ahead is clear</string>
+    <!-- det-first D5: said once when each of the three states above is over. -->
+    <string name="event_camera_restored">Camera is clear again</string>
+    <string name="event_light_restored">Light is back to normal</string>
+    <string name="event_ground_recognized">Ground recognized again, path alerts are back</string>
     <!-- Camera permission rationale. The copy lives here, not in sailens-camera: it is product
          voice, and capture must not depend on the shell. -->
     <string name="permission_camera_title">Camera access needed</string>

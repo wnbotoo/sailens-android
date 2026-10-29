@@ -231,7 +231,14 @@ object PromptDeliveryChannels {
     /** Speech and haptics are both off; the status card is the channel the user chose. */
     const val STATUS_CARD = "status_card"
 
-    val all: Set<String> = setOf(SPEECH, SCREEN_READER, HAPTICS, STATUS_CARD)
+    /**
+     * A covered lens, low light or an unrecognised floor (det-first plan D5): the shell's vision-fault
+     * alerts say these states with their own cadence and fallback, so the event itself is not spoken.
+     * Taken over, not heard: whether the user heard the alert is tracked there.
+     */
+    const val VISION_ALERTS = "vision_alerts"
+
+    val all: Set<String> = setOf(SPEECH, SCREEN_READER, HAPTICS, STATUS_CARD, VISION_ALERTS)
 }
 
 data class SessionTraceSummary(

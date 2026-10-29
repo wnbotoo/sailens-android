@@ -84,6 +84,21 @@ fun SettingsScreen(
                     onCheckedChange = viewModel::setHapticsEnabled,
                 )
                 SettingsGroupDivider()
+                // Locked on while voice is off (Q11a): shown on and not switchable, with the reason.
+                ToggleRow(
+                    label = stringResource(R.string.label_feedback_fault_haptics),
+                    supportingText = stringResource(
+                        if (state.feedbackSettings.faultHapticsLocked) {
+                            R.string.settings_feedback_fault_haptics_locked
+                        } else {
+                            R.string.settings_feedback_fault_haptics_supporting
+                        }
+                    ),
+                    checked = state.feedbackSettings.faultHapticsInEffect,
+                    onCheckedChange = viewModel::setFaultHapticsEnabled,
+                    enabled = !state.feedbackSettings.faultHapticsLocked,
+                )
+                SettingsGroupDivider()
                 SpeechRateRow(
                     rate = state.feedbackSettings.speechRate,
                     enabled = state.feedbackSettings.speechEnabled,

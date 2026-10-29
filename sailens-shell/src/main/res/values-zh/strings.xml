@@ -64,9 +64,13 @@
     <string name="settings_speech_rate_sample">前方有人，靠左</string>
     <string name="btn_preview_speech_rate">试听当前语速</string>
     <string name="label_feedback_speech">语音提醒</string>
-    <string name="label_feedback_haptics">震动提醒</string>
+    <string name="label_feedback_haptics">导航提示震动</string>
     <string name="settings_feedback_speech_supporting">开启后，在辅助过程中播报前方风险和行走提示。</string>
-    <string name="settings_feedback_haptics_supporting">开启后用震动传达方位。关闭语音后，震动就是唯一的提示通道。</string>
+    <string name="settings_feedback_haptics_supporting">开启后用震动传达障碍物方位和路况提示。关闭语音后，震动就是唯一的提示通道。</string>
+    <!-- det 优先 D5："看不清"的震动。兜底、语音失效、辅助中断都不看它，文案里明说，不是隐藏例外。 -->
+    <string name="label_feedback_fault_haptics">故障告警震动</string>
+    <string name="settings_feedback_fault_haptics_supporting">镜头被遮挡、光线不足或识别不到地面时震动（长-短-长）。语音告警没能及时说出来时，无论这里怎么设置都会震动；语音失效和辅助中断的震动始终开启。</string>
+    <string name="settings_feedback_fault_haptics_locked">语音提醒已关闭，镜头被遮挡、光线不足或识别不到地面时只能靠震动告诉你，所以不能关。</string>
 
     <!-- 震动词汇表 -->
     <string name="settings_section_haptic_vocabulary">震动含义</string>
@@ -316,6 +320,10 @@
     <!-- 模型认不出脚下的地面（室内地板、镜头抬得太高——或者正前方就是墙，它分不清），"前方不通"
          一类提示已暂停。措辞必须说"不知道能不能走"，不能让人听成"能走"。障碍物提示照常。 -->
     <string name="event_ground_unrecognized">识别不到地面，无法判断前方能否通行</string>
+    <!-- det 优先 D5：上面三种状态各自结束时说一次。 -->
+    <string name="event_camera_restored">镜头恢复正常</string>
+    <string name="event_light_restored">光线恢复正常</string>
+    <string name="event_ground_recognized">已识别到地面，恢复通行判断</string>
     <string name="permission_camera_title">需要相机权限</string>
     <string name="permission_camera_rationale">Sailens 通过相机识别前方道路并为你导览。画面只在本机处理，不会上传。</string>
     <string name="permission_confirm">允许</string>

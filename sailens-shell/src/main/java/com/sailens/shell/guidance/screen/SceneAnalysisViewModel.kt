@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import android.graphics.Bitmap
 import android.os.SystemClock
 import com.sailens.camera.FrameSource
+import com.sailens.guidance.model.common.EventPriority
 import com.sailens.guidance.model.scene.SceneEvent
 import com.sailens.guidance.model.scene.SceneResult
 import com.sailens.core.log.LogService
@@ -17,11 +18,13 @@ import com.sailens.guidance.usecase.scene.StopSceneAnalysisUseCase
 import com.sailens.guidance.util.Timestamp
 import com.sailens.shell.diagnostics.GuidanceDiagnosticsStore
 import com.sailens.output.AccessibilityStatusProvider
+import com.sailens.output.Announcement
 import com.sailens.shell.device.GuidanceHaptic
 import com.sailens.shell.device.HapticManager
 import com.sailens.shell.device.GuidanceAnnouncements
 import com.sailens.shell.device.GuidanceNotice
 import com.sailens.shell.device.GuidanceNoticeText
+import com.sailens.shell.device.SceneEventText
 import com.sailens.shell.device.SceneEventTextResolver
 import com.sailens.shell.device.ScreenReaderAnnouncer
 import com.sailens.shell.device.SharedEngineOwner
@@ -116,6 +119,21 @@ class SceneAnalysisViewModel(
     private var stallWatchJob: Job? = null
     private val stallDetector = GuidanceStallDetector()
     private val speechUnavailableAlert = SpeechUnavailableAlert()
+
+    /** Everything said and felt about a covered lens, low light and an unrecognised floor; see [VisionFaultAlerts]. */
+    private val visionFaultAlerts = VisionFaultAlerts(
+        outputs = object : VisionFaultAlerts.Outputs {
+            override fun speak(notice: VisionFaultAlerts.Notice): VisionFaultAlerts.Offer = speakVisionNotice(notice)
+
+            override fun vibrate(priority: EventPriority) {
+                // Unconditionally: VisionFaultAlerts has already applied the switch, and its fallback ignores it.
+                hapticManager.play(
+                    GuidanceHaptic.VISION_UNRELIABLE,
+                    amplitude = maxOf(GuidanceHaptic.amplitudeFor(priority), GuidanceHaptic.amplitudeFor(EventPriority.HIGH)),
+                )
+            }
+        },
+    )
     private var releaseJob: Job? = null
     private var overlayRenderJob: Job? = null
     /**
@@ -318,6 +336,7 @@ class SceneAnalysisViewModel(
             }.catch { e ->
                 logger.error(TAG, "Error in scene analysis", e)
                 stopStallWatch()
+                visionFaultAlerts.reset()
                 speechManager.stop()
                 hapticManager.cancel()
                 latestSceneResult = null
@@ -369,8 +388,46 @@ class SceneAnalysisViewModel(
                     )
                 }
                 onSceneEvents(events, result.sequenceNumber)
+                // After the frame's prompt: offered before it, a floor notice just begun would be cut
+                // off by a higher prompt in the same frame.
+                visionFaultAlerts.update(clock(), result.visionFaults, visionFaultSettings())
             }
         }
+    }
+
+    private fun visionFaultSettings() = VisionFaultAlerts.Settings(
+        speechEnabled = _uiState.value.isSpeechEnabled,
+        faultHapticsEnabled = guidanceSettingsStore.settings.value.faultHapticsInEffect,
+    )
+
+    /**
+     * Says one [VisionFaultAlerts] notice the way a navigation prompt of its priority is said: it waits
+     * for or cuts off a description by the same rule ([guidanceWaitsForDescription]), goes to the screen
+     * reader when one is active, and otherwise to own speech, which reports when it was heard out.
+     */
+    private fun speakVisionNotice(notice: VisionFaultAlerts.Notice): VisionFaultAlerts.Offer {
+        val state = _uiState.value
+        if (!state.isSpeechEnabled) return VisionFaultAlerts.Offer.REFUSED
+        if (guidanceWaitsForDescription(notice.priority, sceneDescriptionCoordinator.holdsTheFloor)) {
+            return VisionFaultAlerts.Offer.REFUSED
+        }
+        sceneDescriptionCoordinator.preemptForGuidance(notice.messageKey)
+        val text = textResolver.resolve(SceneEventText(messageKey = notice.messageKey))
+        if (state.isScreenReaderActive) {
+            screenReaderAnnouncer.announce(text)
+            return VisionFaultAlerts.Offer.SPOKEN
+        }
+        val accepted = speechManager.speak(
+            Announcement(
+                id = notice.id,
+                key = notice.messageKey,
+                text = text,
+                priority = notice.priority.value,
+                expiresAtMs = notice.expiresAtMs,
+            ),
+            onSpoken = { visionFaultAlerts.onSpoken(notice.id) },
+        )
+        return if (accepted) VisionFaultAlerts.Offer.ACCEPTED else VisionFaultAlerts.Offer.REFUSED
     }
 
     private fun onSceneEvents(events: List<SceneEvent>, sequenceNumber: Long) {
@@ -553,6 +610,8 @@ class SceneAnalysisViewModel(
 
     private fun stopSceneAnalysis() {
         stopStallWatch()
+        // Stopped on purpose: no recovery is said for what was still faulty.
+        visionFaultAlerts.reset()
         runs.stop()
         overlayRenderRequestId++
         overlayRenderJob?.cancel()
@@ -582,6 +641,7 @@ class SceneAnalysisViewModel(
 
     override fun onCleared() {
         stopStallWatch()
+        visionFaultAlerts.reset()
         overlayRenderJob?.cancel()
         overlayRenderJob = null
         hapticManager.cancel()
