@@ -1,6 +1,7 @@
 package com.sailens.guidance.model.scene
 
 import com.sailens.guidance.geometry.CameraGeometry
+import com.sailens.guidance.model.analysis.VisionFaults
 import com.sailens.guidance.motion.MotionState
 import com.sailens.core.mask.BinaryMask
 import com.sailens.guidance.model.perception.ObstacleDetection
@@ -21,4 +22,6 @@ data class SceneResult(
     /** M3o: the camera's geometry and the phone's rotation for this frame. Nothing decides on them yet. */
     val cameraGeometry: CameraGeometry? = null,
     val motion: MotionState? = null,
+    /** det-first plan D5: what Guidance cannot judge in this frame; the shell tells the user. */
+    val visionFaults: VisionFaults = VisionFaults.NONE,
 )

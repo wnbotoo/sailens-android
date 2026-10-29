@@ -1,6 +1,7 @@
 package com.sailens.guidance.usecase.decision
 
 import com.sailens.guidance.model.analysis.SceneSnapshot
+import com.sailens.guidance.model.analysis.VisionFaults
 import com.sailens.guidance.model.scene.SceneEvent
 import com.sailens.guidance.processor.decision.CooldownManager
 import com.sailens.guidance.processor.decision.EventConflictResolver
@@ -29,6 +30,12 @@ class DecideEventsUseCase(
     private val clock: () -> Long,
     private val regressionRecorder: RegressionRecorder = RegressionRecorder.None,
 ) {
+    /**
+     * Which of the states Guidance must tell the user about hold in [snapshot] (det-first plan D5), by
+     * the generator's own test. Decides nothing and changes nothing.
+     */
+    fun visionFaults(snapshot: SceneSnapshot): VisionFaults = eventGenerator.visionFaults(snapshot)
+
     operator fun invoke(snapshot: SceneSnapshot): List<SceneEvent> {
         val now = clock()
         val stationary = deviceSensorRepository.isStationary.value

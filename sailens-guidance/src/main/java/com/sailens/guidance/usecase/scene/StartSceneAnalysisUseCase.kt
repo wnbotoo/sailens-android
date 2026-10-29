@@ -435,6 +435,7 @@ class StartSceneAnalysisUseCase(
                         events = events,
                         cameraGeometry = geometry,
                         motion = motion,
+                        visionFaults = decideEventsUseCase.visionFaults(sceneSnapshot),
                     ),
                     frameTrace = frameTrace,
                 )

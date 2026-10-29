@@ -76,6 +76,9 @@ public class SpeechManager(
     private val ledger = UtteranceLedger()
     private var nextResubmitId = 0L
 
+    /** Callers of [speak] waiting to hear their announcement was heard out. Main thread only. */
+    private val spokenCallbacks = SpokenCallbacks(requeueSuffix = REQUEUE_UTTERANCE_ID_SUFFIX)
+
     /**
      * Measurement only (det-first plan D1.3): reports what became of each submission to whoever
      * [setLifecycleObserver] names. Nothing here reads it back.
@@ -234,14 +237,18 @@ public class SpeechManager(
      *   冷却，结果是一句从没说出口的话被静音一个冷却周期。拒收让调用方下一帧重新给出最新的那句。
      *
      *   只有在主线程调用时返回值才可靠；从其它线程调用会被投递到主线程，并乐观地返回 true。
+     * @param onSpoken called once, on the main thread, if the engine reports that some submission of
+     *   this announcement finished playing (`onDone`) — a hand-back after [withdraw] included. Never
+     *   called when it is refused, cut off or dropped: a caller that needs to know it was heard waits
+     *   for this, with its own deadline. See [SpokenCallbacks].
      */
-    public fun speak(announcement: Announcement): Boolean {
-        if (Looper.myLooper() == Looper.getMainLooper()) return speakOnMain(announcement)
-        mainHandler.post { speakOnMain(announcement) }
+    public fun speak(announcement: Announcement, onSpoken: (() -> Unit)? = null): Boolean {
+        if (Looper.myLooper() == Looper.getMainLooper()) return speakOnMain(announcement, onSpoken)
+        mainHandler.post { speakOnMain(announcement, onSpoken) }
         return true
     }
 
-    private fun speakOnMain(announcement: Announcement): Boolean {
+    private fun speakOnMain(announcement: Announcement, onSpoken: (() -> Unit)?): Boolean {
         if (announcement.isExpired(SystemClock.elapsedRealtime())) {
             logger.debug(
                 TAG,
@@ -265,10 +272,10 @@ public class SpeechManager(
             return false
         }
 
-        return speakReadyAnnouncement(announcement)
+        return speakReadyAnnouncement(announcement, onSpoken)
     }
 
-    private fun speakReadyAnnouncement(announcement: Announcement): Boolean {
+    private fun speakReadyAnnouncement(announcement: Announcement, onSpoken: (() -> Unit)?): Boolean {
         if (!_isReady) {
             announcement.refused(UtteranceReasons.ENGINE_NOT_READY)
             return false
@@ -335,6 +342,9 @@ public class SpeechManager(
             return false
         } else {
             lifecycle.submitted(utteranceId)
+            // On the main thread, before any onDone of it can be handled: the engine's callback is
+            // posted here too, behind this.
+            onSpoken?.let { spokenCallbacks.register(utteranceId, it) }
             onSubmitAccepted()
             lifecycle.removed(ledger.flushAndAdd(entry), UtteranceEventKind.SUPERSEDED, reason = null)
             logger.debug(
@@ -574,6 +584,7 @@ public class SpeechManager(
         initFailureCount = 0
         nextInitRetryAtMs = 0L
         onReadyCallbacks.clear()
+        spokenCallbacks.clear()
         initAttempt++
         health.reset()
         setState(SpeechEngineState.IDLE)
@@ -798,6 +809,9 @@ public class SpeechManager(
             override fun onDone(utteranceId: String?) {
                 lifecycle.engineCallback(UtteranceEventKind.DONE, utteranceId, generation, SystemClock.elapsedRealtimeNanos())
                 logger.debug(TAG, "TTS utterance completed", mapOf("utteranceId" to (utteranceId ?: "unknown")))
+                // Posted before the ledger forgets it: once a caller can get a new offer accepted, it
+                // already knows the old one was heard.
+                runOnMain { spokenCallbacks.done(utteranceId) }
                 onUtteranceFinished(utteranceId)
             }
 

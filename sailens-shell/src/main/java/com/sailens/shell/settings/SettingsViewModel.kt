@@ -60,6 +60,10 @@ class SettingsViewModel(
         guidanceSettingsStore.setHapticsEnabled(enabled)
     }
 
+    fun setFaultHapticsEnabled(enabled: Boolean) {
+        guidanceSettingsStore.setFaultHapticsEnabled(enabled)
+    }
+
     fun setSpeechRate(rate: Float) {
         guidanceSettingsStore.setSpeechRate(rate)
     }

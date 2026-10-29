@@ -3,7 +3,8 @@ package com.sailens.guidance.model.scene
 import com.sailens.guidance.model.common.DirectionZone
 
 /**
- * Every [SceneEvent.messageKey] Guidance can emit, in one place.
+ * Every [SceneEvent.messageKey] Guidance can emit, in one place, and the recovery notices the shell
+ * says when a state of [com.sailens.guidance.model.analysis.VisionFaults] ends (det-first plan D5).
  *
  * The keys are Guidance's vocabulary; the words are the shell's (string resources). The two meet
  * at a key, and a key the shell cannot resolve is spoken as the raw key -- "event_obstacle_center"
@@ -28,6 +29,15 @@ object SceneEventMessageKeys {
     const val GROUND_TO_INDOOR = "event_ground_to_indoor"
     const val GROUND_CHANGE = "event_ground_change"
     const val GROUND_UNRECOGNIZED = "event_ground_unrecognized"
+
+    /** The lens is no longer covered (the end of [CAMERA_BLOCKED]). */
+    const val CAMERA_RESTORED = "event_camera_restored"
+
+    /** There is enough light again (the end of [LOW_LIGHT]). */
+    const val LIGHT_RESTORED = "event_light_restored"
+
+    /** The floor is recognised again and path prompts are back (the end of [GROUND_UNRECOGNIZED]). */
+    const val GROUND_RECOGNIZED = "event_ground_recognized"
 
     private const val OBSTACLE_PREFIX = "event_obstacle_"
 
@@ -66,7 +76,7 @@ object SceneEventMessageKeys {
                 CAMERA_BLOCKED, LOW_LIGHT, BLOCKED, PATH_COMPLEX, NARROWING, INTERSECTION,
                 TRAFFIC_LIGHT, ROAD_WARNING, ROAD_WARNING_VEHICLE, GROUND_TO_ROAD,
                 GROUND_TO_TERRAIN, GROUND_TO_SIDEWALK, GROUND_TO_INDOOR, GROUND_CHANGE,
-                GROUND_UNRECOGNIZED,
+                GROUND_UNRECOGNIZED, CAMERA_RESTORED, LIGHT_RESTORED, GROUND_RECOGNIZED,
             )
         )
         val zoneParts = DirectionZone.entries.map(::zonePart) + MERGED_ZONE_PARTS

@@ -6,6 +6,7 @@ import com.sailens.guidance.model.analysis.GroundRecognition
 import com.sailens.guidance.model.analysis.GroundTypeChange
 import com.sailens.guidance.model.analysis.RoadSafetyState
 import com.sailens.guidance.model.analysis.SceneSnapshot
+import com.sailens.guidance.model.analysis.VisionFaults
 import com.sailens.guidance.model.common.DirectionZone
 import com.sailens.guidance.model.common.DistanceLevel
 import com.sailens.guidance.model.common.EventCategory
@@ -52,13 +53,24 @@ class EventGenerator(
         )
     }
 
+    /**
+     * The states [generate] makes the SENSOR_QUALITY and GROUND_UNRECOGNIZED events for, by the same
+     * test, so what the shell alerts on (det-first plan D5) and what Guidance generates events for are
+     * one thing.
+     */
+    fun visionFaults(snapshot: SceneSnapshot): VisionFaults = VisionFaults(
+        frameQuality = if (config.enableSensorQualityEvents) snapshot.frameQuality else FrameQuality.OK,
+        groundUnrecognized = snapshot.groundRecognition == GroundRecognition.UNRECOGNIZED,
+    )
+
     fun generate(snapshot: SceneSnapshot, now: Long): List<SceneEvent> {
         val events = mutableListOf<SceneEvent>()
+        val faults = visionFaults(snapshot)
 
         // 0. 输入质量。镜头被挡/环境过暗时，下面所有基于画面的判断都不可信，
         //    但这条事件仍然照常生成——由 EventConflictResolver 负责让它压掉其余全部事件。
-        if (config.enableSensorQualityEvents && snapshot.frameQuality != FrameQuality.OK) {
-            events.add(createSensorQualityEvent(snapshot.frameQuality, now))
+        if (faults.frameQuality != FrameQuality.OK) {
+            events.add(createSensorQualityEvent(faults.frameQuality, now))
         }
 
         // 1. 连通性事件的前提是底部是模型认得的地面。**确认**认不出后（持续一段时间，而不是一帧），
@@ -67,7 +79,7 @@ class EventGenerator(
         //    确认之前一律照常播：sem 分不清不认识的地板和贴脸的墙，见 GroundRecognitionAnalyzer。
         //    障碍物检测不依赖地面，始终照常。
         val pathJudgementReliable = !snapshot.groundRecognition.pausesPathPrompts
-        if (snapshot.groundRecognition == GroundRecognition.UNRECOGNIZED) {
+        if (faults.groundUnrecognized) {
             events.add(createGroundUnrecognizedEvent(now))
         }
 

@@ -14,8 +14,13 @@ import com.sailens.guidance.model.trace.PromptRevokeReasons
 internal data class GuidanceDeliveryResult(val channels: List<String>) {
     val delivered: Boolean get() = channels.isNotEmpty()
 
-    /** Heard or felt, so worth replaying: anything but the status card alone. */
-    val reachedUser: Boolean get() = channels.any { it != PromptDeliveryChannels.STATUS_CARD }
+    /**
+     * Heard or felt, so worth replaying: anything but the status card alone. A hand-over to the
+     * vision-fault alerts is not either: it confirms the cooldown, but is no evidence the user got
+     * anything, so it must not replace the prompt a replay repeats.
+     */
+    val reachedUser: Boolean
+        get() = channels.any { it != PromptDeliveryChannels.STATUS_CARD && it != PromptDeliveryChannels.VISION_ALERTS }
 
     companion object {
         val NOT_DELIVERED = GuidanceDeliveryResult(emptyList())
@@ -123,17 +128,27 @@ internal val GUIDANCE_PREEMPTS_DESCRIPTION_AT: EventPriority = EventPriority.HIG
  *
  * Exactly one of [confirm] and [revoke] is called.
  *
+ * A covered lens, low light or an unrecognised floor ([toldByVisionFaultAlerts]) is not offered at all:
+ * [VisionFaultAlerts] says these states, with their own cadence, compensation and fallback, and
+ * speaking the event as well would say it twice on entry. Its record is confirmed, so the cooldown
+ * keeps throttling the event as before, and it is traced as [PromptDeliveryChannels.VISION_ALERTS].
+ *
  * @param revoke called with the reason, one of [PromptRevokeReasons], so the trace can say why.
  * @return the channels that accepted it; empty when it was not delivered.
  */
 internal inline fun offerGuidancePrompt(
     priority: EventPriority,
     descriptionHoldsTheFloor: Boolean,
+    toldByVisionFaultAlerts: Boolean,
     preemptDescription: () -> Unit,
     deliver: () -> GuidanceDeliveryResult,
     confirm: () -> Unit,
     revoke: (reason: String) -> Unit,
 ): GuidanceDeliveryResult {
+    if (toldByVisionFaultAlerts) {
+        confirm()
+        return GuidanceDeliveryResult(listOf(PromptDeliveryChannels.VISION_ALERTS))
+    }
     if (guidanceWaitsForDescription(priority, descriptionHoldsTheFloor)) {
         revoke(PromptRevokeReasons.WAITING_FOR_DESCRIPTION)
         return GuidanceDeliveryResult.NOT_DELIVERED
@@ -183,6 +198,7 @@ internal inline fun offerAndTraceGuidancePrompt(
     val result = offerGuidancePrompt(
         priority = event.priority,
         descriptionHoldsTheFloor = descriptionHoldsTheFloor,
+        toldByVisionFaultAlerts = event.isToldByVisionFaultAlerts(),
         preemptDescription = preemptDescription,
         deliver = deliver,
         confirm = confirm,
