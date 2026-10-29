@@ -16,6 +16,7 @@ import com.sailens.guidance.processor.decision.EventConflictResolver
 import com.sailens.guidance.processor.decision.EventGenerator
 import com.sailens.guidance.processor.decision.EventMerger
 import com.sailens.guidance.repository.DeviceSensorRepository
+import com.sailens.guidance.usecase.decision.ConfirmDeliveredEventUseCase
 import com.sailens.guidance.usecase.decision.DecideEventsUseCase
 import com.sailens.guidance.usecase.decision.RevokeUndeliveredEventUseCase
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -42,6 +43,7 @@ class GuidancePromptOfferTest {
         deviceSensorRepository = StillSensors,
         clock = { now },
     )
+    private val confirm = ConfirmDeliveredEventUseCase(cooldown)
     private val revoke = RevokeUndeliveredEventUseCase(cooldown)
 
     private val calls = mutableListOf<String>()
@@ -65,6 +67,7 @@ class GuidancePromptOfferTest {
             now = { WALL_CLOCK_BASE + now },
             preemptDescription = { calls += "preempt" },
             deliver = { calls += "deliver:${primary.messageKey}"; delivery },
+            confirm = { calls += "confirm"; confirm(primary) },
             revoke = { calls += "revoke"; revoke(primary) },
             record = { outcomes += it },
         ).delivered
@@ -84,7 +87,7 @@ class GuidancePromptOfferTest {
 
         now += 100
         assertEquals(true, frame(trafficLight, describing = false))
-        assertEquals(listOf("revoke", "revoke", "preempt", "deliver:event_traffic_light"), calls)
+        assertEquals(listOf("revoke", "revoke", "preempt", "deliver:event_traffic_light", "confirm"), calls)
 
         // Delivered for real now, so the cooldown holds it: no prompt offered, nothing recorded.
         now += 100
@@ -110,7 +113,7 @@ class GuidancePromptOfferTest {
         val dark = snapshot(frameQuality = FrameQuality.TOO_DARK)
 
         assertEquals(true, frame(dark, describing = true))
-        assertEquals(listOf("preempt", "deliver:event_low_light"), calls)
+        assertEquals(listOf("preempt", "deliver:event_low_light", "confirm"), calls)
         assertEquals(listOf(SPEECH, HAPTICS), outcomes.single().deliveredVia)
     }
 
@@ -127,6 +130,30 @@ class GuidancePromptOfferTest {
 
         assertEquals(PromptRevokeReasons.OUTPUT_REFUSED, outcomes[0].revokeReason)
         assertEquals(listOf(SPEECH, HAPTICS), outcomes[1].deliveredVia)
+    }
+
+    @Test
+    fun `a delivered prompt is confirmed exactly once, and nothing can take its record back afterwards`() {
+        val trafficLight = snapshot(trafficLight = true)
+        val primary = decide(trafficLight).single()
+        offerAndTraceGuidancePrompt(
+            event = primary,
+            sourceSequenceNumber = 1,
+            outputs = outputs,
+            descriptionHoldsTheFloor = false,
+            now = { WALL_CLOCK_BASE + now },
+            preemptDescription = {},
+            deliver = { GuidanceDeliveryResult(listOf(SPEECH)) },
+            confirm = { calls += "confirm"; confirm(primary) },
+            revoke = { calls += "revoke"; revoke(primary) },
+            record = { outcomes += it },
+        )
+        assertEquals(listOf("confirm"), calls)
+
+        // A stray revoke after delivery (there is none in the shell, but nothing may depend on that).
+        revoke(primary)
+        now += 100
+        assertEquals("the delivered prompt still holds its cooldown", emptyList<Any>(), decide(trafficLight))
     }
 
     @Test

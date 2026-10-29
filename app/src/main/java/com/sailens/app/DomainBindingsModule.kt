@@ -23,6 +23,7 @@ import com.sailens.guidance.processor.perception.PerceptionProfileManager
 import com.sailens.guidance.processor.perception.SegmentationAnalysisProcessor
 import com.sailens.guidance.processor.perception.SegmentationAnalyzer
 import com.sailens.guidance.usecase.decision.DecideEventsUseCase
+import com.sailens.guidance.usecase.decision.ConfirmDeliveredEventUseCase
 import com.sailens.guidance.usecase.decision.RevokeUndeliveredEventUseCase
 import com.sailens.guidance.usecase.perception.AnalyzeSceneUseCase
 import com.sailens.guidance.usecase.perception.ProcessFrameUseCase
@@ -128,6 +129,7 @@ val domainBindingsModule = module {
             regressionRecorder = regressionRecorder(),
         )
     }
+    factory { ConfirmDeliveredEventUseCase(cooldownManager = get()) }
     factory { RevokeUndeliveredEventUseCase(cooldownManager = get(), regressionRecorder = regressionRecorder()) }
     factory {
         StartSceneAnalysisUseCase(

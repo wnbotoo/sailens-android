@@ -13,8 +13,9 @@ import com.sailens.guidance.trace.regression.RegressionRecorder
  * 决策事件用例
  *
  * 返回按优先级排序的事件，**第一条是本帧要送达的那条**。冷却只记这一条：同帧的其余事件用户
- * 听不到，记进冷却就等于把它们静音一个冷却周期。送达方如果最终没能把第一条送出去（例如更高
- * 优先级的播报还在念），用 [RevokeUndeliveredEventUseCase] 撤销这次记录。
+ * 听不到，记进冷却就等于把它们静音一个冷却周期。这条记录是暂记：送达方送到了就用
+ * [ConfirmDeliveredEventUseCase] 确认，没能送出去（例如更高优先级的播报还在念）就用
+ * [RevokeUndeliveredEventUseCase] 撤销。
  *
  * @param clock 单调时钟（生产环境是 `SystemClock.elapsedRealtime()`）。冷却和过期都靠时间差，
  *   墙钟回拨会让差值变负、把提示压到时钟追回来为止。
@@ -58,6 +59,18 @@ class DecideEventsUseCase(
 
             prioritized
         }
+    }
+}
+
+/**
+ * 送达方的回执：[DecideEventsUseCase] 选出的那条事件至少有一个通道接收了。它的冷却记录从此不能
+ * 再撤回。不改变任何冷却判断，所以不进 M0b 录制：回放只按录下的撤回复现（见 [CooldownManager.confirm]）。
+ */
+class ConfirmDeliveredEventUseCase(
+    private val cooldownManager: CooldownManager,
+) {
+    operator fun invoke(event: SceneEvent) {
+        cooldownManager.confirm(event.id)
     }
 }
 

@@ -129,6 +129,7 @@ val shellModule = module {
             accessibilityStatusProvider = get(),
             textResolver = get(),
             announcements = get(),
+            confirmDeliveredEvent = get(),
             revokeUndeliveredEvent = get(),
             noticeText = get(),
             startGate = getOrNull(),
