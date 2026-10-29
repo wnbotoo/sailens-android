@@ -215,9 +215,11 @@ Two tracks:
   description first; the floor (LOW) waits for it, while its deadline runs and the fallback vibration comes when it passes.
 - **Retries**: refused (equal or higher speech in progress, engine not ready, waiting for a description) — offered again on
   later frames, at most every 500 ms (a refusal leaves a record in PR-0's lifecycle recording too and must not flood it).
-  **At most 2 accepted attempts per cycle**: one that was cut off gets a second chance, but in a busy mall the user does
-  not hear half a sentence again and again. A state never has more than one notice being spoken (equal priority cannot
-  interrupt itself).
+  **Once accepted, it is not offered again before the deadline**: it may still be playing, and offering it again would
+  only be refused by itself (equal priority cannot interrupt) or say it twice. Not heard out by the deadline, it is resent
+  once. So **at most 2 accepted attempts per cycle** (the first and one resend after the deadline): a notice that was cut
+  off gets a second chance, but in a busy mall the user does not hear half a sentence again and again. A state never has
+  more than one notice being spoken.
 - **TalkBack**: with speech on and the screen reader active, the notice is published to the screen reader and counts as
   heard out (the screen reader has no completion callback; this matches PR-1a's acceptance). See 2.11.
 - **Speech off**: nothing is said; see 2.7.
@@ -236,7 +238,8 @@ Two tracks:
 - **Compensation**: when the deadline D passes and this cycle's notice has not been heard out — for any reason (dropped,
   cut off, expired, no completion callback, engine not ready, waiting for a description):
   1. **one fallback vibration, whatever the switches say** (neither navigation nor fault vibration is consulted);
-  2. keep trying to say it (within the 2 attempts per cycle).
+  2. one resend (a notice never taken yet keeps being offered every 500 ms until it is; at most 2 accepted attempts per
+     cycle).
   Every later cycle does the same: deadline passed and not heard out — another fallback. So while the notice cannot be
   said, the fallback vibration keeps coming at the state's cycle (8 / 15 / 60 s) until the notice is heard out or the
   state recovers. An engine that stays READY while the notice is cut off again and again, or never reports completion,
@@ -275,8 +278,10 @@ off; there is no separate fallback, and no cycle buzzes twice.
 - LOW priority, best effort: accepted within 5 s of the recovery counts as said; not said by then, it is dropped. No
   completion tracking, no compensation, no vibration (a missed "recovered" leaves the user thinking it is still broken,
   which is the safe side).
-- Said only on a real recovery: frame quality back to OK and held for 2 s; OBSTRUCTED↔TOO_DARK says none. Entering any new
-  fault drops a recovery notice not yet said.
+- Said only on a real recovery: frame quality back to OK and held for 2 s; OBSTRUCTED↔TOO_DARK says none. The lens and the
+  floor can recover in the same frame, so unsaid recovery notices queue and are said in order (at most one offered per
+  frame). Dropped: all of them when frame quality fails again (the picture cannot be trusted, so "ground recognized" no
+  longer holds either); only the floor's own when the floor fails again (the lens really did recover).
 - With speech off there is no recovery notice (only the periodic vibration stops). A known limit (2.11).
 
 ### 2.9 Other alarms
@@ -296,7 +301,9 @@ off; there is no separate fallback, and no cycle buzzes twice.
   repository reader and writer change together.
 - The M0b schema is unchanged. D5's notices appear in PR-0's lifecycle recording under logical ids `vision_notice_<n>`,
   like system notices: speech that is not a navigation prompt. Future evaluation must count them as other speech holding
-  the speaker (PR-1b's design will say so).
+  the speaker (PR-1b's design will say so). A D5 notice published to the screen reader leaves no
+  `screen_reader_published` record the way a navigation prompt does (that record is triggered by `prompt_outcome`);
+  screen-reader sessions are already marked "completion undeterminable", and the gap is only noted here.
 
 ### 2.11 Known limits
 
@@ -316,8 +323,9 @@ off; there is no separate fallback, and no cycle buzzes twice.
 
 1. Covered lens: vibration and the CRITICAL notice at once; heard out, no fallback; said and vibrated again after 8 s. Too
    dark vibrates only on entry.
-2. **Engine READY but the notice never completes** (accepted, no `onSpoken`): fallback at the deadline (also with fault
-   vibration off); at most 2 accepted attempts per cycle; a fallback at each later cycle's deadline until heard out.
+2. **Engine READY but the notice never completes** (accepted, no `onSpoken`): not offered again before the deadline;
+   fallback at the deadline (also with fault vibration off) and one resend; at most 2 accepted attempts per cycle; a
+   fallback at each later cycle's deadline until heard out.
 3. **The notice cut off by higher prompts again and again** (floor: accepted, cut off, refused from then on): fallback at the
    deadline, at most 2 accepted attempts.
 4. **The state recovers during the fallback**: no more fallbacks or retries; the recovery notice offered once; a late
@@ -327,7 +335,7 @@ off; there is no separate fallback, and no cycle buzzes twice.
 6. Speech off: nothing said; one vibration per cycle (fault vibration locked); never two in one cycle.
 7. TalkBack: published is heard out; no fallback.
 8. The floor track frozen during a frame-quality fault; after recovery the floor enters or recovers from its current state.
-9. A new fault drops an unsaid recovery notice.
+9. A frame fault drops every unsaid recovery notice; when the lens and the floor recover in one frame, both are said.
 10. Retries at most every 500 ms.
 11. Fault vibration off and the notice heard out in time: no vibration at all.
 12. Floor waiting for a description within D: the description is not cut; the fallback comes at the deadline.
