@@ -144,7 +144,7 @@ det:  postprocessBackend = "native_bbox_nms_float_handle"
 > 🔴 **模型在 GPU 上运行不报错，不代表它在 GPU 上算对了。** 和类别顺序一样，输出看不出任何异常；
 > 被误导的是看不见画面的用户。在加速器上使用一个模型之前，先确认它给出的答案和 CPU 一样。
 
-2026-10-11，本仓库一直用来开发的那两份 sem 和 det 导出（onnx2tf、float16、NHWC）在 SM8850 和
+本仓库一直用来开发的那两份 sem 和 det 导出（onnx2tf、float16、NHWC）在 SM8850 和
 SM8450 的 LiteRT GPU 加速器上运行没有任何报错，但答案是错的：室内地板和浅色铺装被判成 `building`，
 CPU 每帧都以 92% 检出的办公椅从未被检出。强制 FP32、LiteRT 2.3.0、缩放方式、zero-copy 读取都已排除。
 同一批模型的另一种导出（Ultralytics v0.6.6，litert-torch，NCHW）在同样的 GPU 上是对的。原因在于

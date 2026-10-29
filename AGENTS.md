@@ -30,7 +30,6 @@ pipeline that turns the scene ahead into speech and haptics. This file is the re
 
 ## Big picture
 - Modules (`settings.gradle.kts`): nine `sailens-*` libraries plus `:app`. Nothing else.
-  The migration in `docs/architecture.md` §11 replaced the old layer-first split (`:domain`, `:presentation`, `:ux`, `:camera`).
 - Direction: dependencies point downward and never come back up. `:sailens-core` has none.
 - Kotlin explicit API mode is on in `:sailens-core`, `:sailens-camera`, `:sailens-vlm`, `:sailens-output` and `:sailens-describe`: a declaration without a visibility modifier does not compile there. The other four library modules are not gated yet (`docs/architecture.md` §4.3) — narrowing their surface comes first.
   `sailens-guidance` and `sailens-describe` never depend on each other, and nothing shared depends on either.
@@ -44,14 +43,14 @@ pipeline that turns the scene ahead into speech and haptics. This file is the re
 - `:sailens-describe` — Describe product logic: prompt policy, snapshot freshness, request scheduling.
 - `:sailens-shell` — reusable presentation and composition: `SailensRoot()`, navigation, design system, Guidance UI, the Describe screen, settings, diagnostics, about, trace replay UI, the Guidance haptic vocabulary (`GuidanceHaptic`), `SceneEvent`→`Announcement` mapping, camera-permission policy UI, `FileLogService`, and the capability model (`app/`).
 - `:app` — the thin host: `MainApplication`, `MainActivity`, Koin wiring, runtime profile, and the edition spec (`SailensEdition.kt`) that says what this build offers and promises.
-- Capability model (§5.2): *configured* (a null spec), *expected* (`CapabilityExpectations`), *available* (`PipelinePreflight` + the edition's own check — cheap and static: it reads the model's TFLite metadata tables but never compiles a model or opens a delegate), *runtime state*. Zero pipelines is legal; A ships no weights and lands there. The four combinations route to four different start destinations; Describe-only never lands on the guidance screen.
+- Capability model (§5.2): *configured* (a null spec), *expected* (`CapabilityExpectations`), *available* (`PipelinePreflight` + the edition's own check — cheap and static: it reads the model's TFLite metadata tables but never compiles a model or opens a delegate), *runtime state*. Zero pipelines is legal; this repository's reference host ships no weights and lands there. The four combinations route to four different start destinations; Describe-only never lands on the guidance screen.
 
 ## Runtime flow to preserve
 - `ImageAnalysis` outputs `YUV_420_888` frames -> `ImageFrameAnalyzer` -> `FrameSource.frames` (a one-frame mailbox per subscriber; a newer frame replaces a waiting one). The analyzer converts a frame only on demand, and demand is either a stream subscriber that is due a frame (`frames(minIntervalMs)` samples) or an open `FrameLease`, so `FrameSnapshotProvider` works with Guidance stopped. Stream frames come from a buffer pool and are lent: the subscriber returns each with `releaseFrame` (Guidance does so once the frame is processed); snapshots are detached from the pool and owned by the caller.
 - `StartSceneAnalysisUseCase` initializes `PerceptionRepository`; in `DEFAULT` profile it also initializes the realtime obstacle (detection) provider.
 - `StartSceneAnalysisUseCase` starts a trace session, maps each frame to `PerceptionResult`, `SceneResult`, and `FrameTrace`, then records runtime backend fields.
 - `ProcessFrameUseCase` runs semantic segmentation, can reuse cached semantic analysis between scheduled runs, then runs obstacle detection extraction/tracking (det only; no instance-segmentation refinement).
-- Obstacle distance (`DepthRepository`): today's level from the box bottom (`DistanceLevel.fromNormalizedY`), plus the M3a ground-contact estimate from the frame's `CameraGeometry`, which `StartSceneAnalysisUseCase` resolves *before* `ProcessFrameUseCase`. The estimate is always traced and decides only when `PerceptionConfig.groundContact.enabled` and the phone height is a preset or calibration. Then it can only make a level nearer, never farther (`DistanceFusion`); keep it that way.
+- Obstacle distance (`DepthRepository`): today's level from the box bottom (`DistanceLevel.fromNormalizedY`), plus the ground-contact estimate (`docs/geometry.md` §5) from the frame's `CameraGeometry`, which `StartSceneAnalysisUseCase` resolves *before* `ProcessFrameUseCase`. The estimate is always traced and decides only when `PerceptionConfig.groundContact.enabled` and the phone height is a preset or calibration. Then it can only make a level nearer, never farther (`DistanceFusion`); keep it that way.
 - The perception profile decides which models run: `BASIC` = sem only (obstacles from the semantic mask), `DEFAULT` = sem + det (`DETECTION_MODEL`). There is no seg/refinement provider.
 - `AnalyzeSceneUseCase` runs `ObstacleOcclusionAnalyzer` (carves corridor-overlapping tracked det-box ground-contact bands out of the sem passable mask — det∩sem cross-validation) then computes connectivity + road safety + ground transition + scene elements.
 - `DecideEventsUseCase` order is fixed: `EventGenerator -> EventConflictResolver -> EventMerger -> CooldownManager`.
@@ -60,7 +59,7 @@ pipeline that turns the scene ahead into speech and haptics. This file is the re
 ## Project-specific conventions
 - Check `app/SailensRuntimeProfile.kt`, `app/DomainBindingsModule.kt`, `app/SailensEdition.kt`, `sailens-shell/di/ShellModule.kt` and `sailens-guidance/di/GuidanceModule.kt` first; DI is explicit constructor injection via Koin.
 - Constructor defaults in `PerceptionConfig` are conservative (`BASIC`, obstacle provider type `NONE`), but the app's runtime profile overrides them to sem + realtime det mode.
-- There is one runtime profile, `standard`: every model, the VLM included, targets the GPU. The old `ultra` tier (VLM on NPU) was never selected and was removed; add a profile back only when a second hardware path exists.
+- There is one runtime profile, `standard`: every model, the VLM included, targets the GPU. Add a second profile only when a second hardware path exists.
 - Treat `SailensRuntimeProfile.kt` as the source of truth for runtime backend targets and cadence; physical model files are resolved by `ModelCatalog` / `ModelSourceResolver` from `(ModelType, actual accelerator)`.
 - Runtime hardware label comes from `DeviceHardwareProfileProvider` (`Build.SOC_MANUFACTURER` + `Build.SOC_MODEL`, with board/model fallback), not a hardcoded SoC string.
 - ML backend reporting is carried by `MlRuntimeInfo` through outputs, scene debug info, trace JSON, trace replay, and UI.
@@ -73,6 +72,7 @@ pipeline that turns the scene ahead into speech and haptics. This file is the re
 - The semantic mask covers the camera frame only (letterbox padding cropped by `SemanticContentRegion`), so mask pixels and detection boxes share one coordinate space. Ratio thresholds are fractions of the camera frame.
 - `BinaryMask` is `BitSet`-based and used in hot loops; avoid allocation-heavy patterns in analysis code.
 - The semantic class map (`SegmentationMask`) comes from a pool and is owned by a `SegmentationMaskLease`. `ProcessFrameUseCase`'s cached analysis is its only holder beyond the frame, and closes the lease when a newer analysis replaces it; after that the array carries a later run. So never keep `analysis.segmentation` past the frame being processed: `SceneResult.segmentationMask` is a copy, made only when the caller asks (`semanticMaskSnapshot`).
+- Comments say what the code does now and why. No milestone or plan ids, PR numbers, review rounds, or dates kept as history: those belong in the commit message and the PR description. A measured fact keeps its conditions (device, model export, library version), not the day it was measured. When a comment's reason came from a review, keep the reason and drop the review.
 
 ## Integrations and assets
 - CameraX (`camera-core/camera2/camera-lifecycle/camera-compose`) in `:sailens-camera`.
@@ -80,10 +80,10 @@ pipeline that turns the scene ahead into speech and haptics. This file is the re
 - LiteRT model execution with native YUV preprocessing (`native_yuv`), OpenCV fallback (`opencv_fallback`), and same-frame preprocessing cache hits (`shared_native_yuv` / `shared_quantized_native_yuv`).
 - Semantic postprocess can use native fused score/stat extraction (`native_score`) or fallback argmax paths.
 - Obstacle detection postprocess supports raw attribute-major tensors (`[1, 4+classCount, N]`) and end-to-end tensors (`[1, N, 6]`); layout is auto-resolved from the output tensor shape. The realtime path decodes straight from the output buffer handle (zero-copy) when available.
-- No weights ship here. `ModelCatalog` resolves `sem` -> `app/src/main/assets/sem.tflite` and `det` -> `app/src/main/assets/det.tflite`; both are git-ignored, so a local working copy can hold weights that never reach a commit. Absent weights are not an error here: static preflight finds no model and, because A promises nothing, the app opens on the zero-pipeline screen. That is expected, not a bug to "fix" by committing a model. (A distribution that declares Guidance required, such as the official Sailens app, turns the same absence into a fatal configuration state instead.)
+- No weights ship here. `ModelCatalog` resolves `sem` -> `app/src/main/assets/sem.tflite` and `det` -> `app/src/main/assets/det.tflite`; both are git-ignored, so a local working copy can hold weights that never reach a commit. Absent weights are not an error here: static preflight finds no model and, because this host promises nothing, the app opens on the zero-pipeline screen. That is expected, not a bug to "fix" by committing a model. (A distribution that declares Guidance required, such as the official Sailens app, turns the same absence into a fatal configuration state instead.)
 - Shape, layout, dtype, and quantization are auto-resolved from the selected TFLite metadata and are not runtime profile fields, so swapping a conforming model needs no code change. To use separate GPU/NPU model files, update `ModelCatalog` / `ModelSourceResolver`, then set `acceleratorBackend` in `SailensRuntimeProfile.kt`. See `docs/models.md`.
 - Class channel order is validated only by *count* and by the declared `TaxonomyId` (`NavigationSemanticsBinding`), never by meaning: a wrong-order model passes that check, runs silently and mislabels the scene for a user who cannot see it. Treat it as a safety property (`docs/models.md`).
-- Running on an accelerator is not computing correctly there: on 2026-10-11 the onnx2tf NHWC exports ran on the LiteRT GPU with no error and answered wrongly (floors as `building`, an obvious chair never detected) on SM8850 and SM8450, while other exports of the same weights were correct. After changing a model file, the LiteRT version or the target device, run the debug **Model consistency check** (accelerator vs CPU on live frames; `docs/models.md`). Same kind of safety property as the class order.
+- Running on an accelerator is not computing correctly there: onnx2tf NHWC exports have run on the LiteRT GPU with no error and answered wrongly (floors as `building`, an obvious chair never detected) on SM8850 and SM8450, while other exports of the same weights were correct. After changing a model file, the LiteRT version or the target device, run the debug **Model consistency check** (accelerator vs CPU on live frames; `docs/models.md`). Same kind of safety property as the class order.
 - `FileLogService` writes JSONL logs under app internal `files/logs/`.
 - `FileTraceService` writes trace JSONL sessions under app internal `files/traces/`; `FileTraceReplayService` reads them back.
 
@@ -96,6 +96,7 @@ pipeline that turns the scene ahead into speech and haptics. This file is the re
 .\gradlew.bat --no-daemon :sailens-guidance:test
 .\gradlew.bat --no-daemon :app:testDebugUnitTest
 .\gradlew.bat --no-daemon :app:tasks
+python scripts/verify-no-process-history.py
 ```
 
 ## Change guardrails
@@ -109,3 +110,4 @@ pipeline that turns the scene ahead into speech and haptics. This file is the re
 - If you change backend reporting fields, update `MlRuntimeInfo`, trace encoding/parsing/reporting, live debug UI, and trace replay UI together.
 - Keep start/stop lifecycle symmetry: components with `reset()` should remain wired through `StopSceneAnalysisUseCase`.
 - Present a plan and get agreement before starting a refactor.
+- `docs/` holds reference material that describes the code as it is: contracts, formats, workflows, and reproducible experiment records under `docs/experiments/`. Plans, roadmaps, review designs, operating manuals and status notes do not go into this repository. `scripts/verify-no-process-history.py` (CI) checks comments and docs for process history, that every `docs/…md` a file mentions exists (and its `§N`, when given), and that a new top-level doc is listed there with its Chinese twin.

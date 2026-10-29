@@ -98,4 +98,4 @@ ProcessFrameUseCase 逐帧读取 activeConfig
    目标是减少误报（抠错非障碍的可行走像素）而非压制真提醒。
 2. **动态降级**：按 thermal state / 电量 / 推理延迟 / 丢帧率自动降挡（DEFAULT→BASIC），带切换冷却。
 3. **imgsz 调优**：输入尺寸是当前推理耗时的下一个杠杆（见 [`models.zh-CN.md`](models.zh-CN.md)）。
-4. **0.2 模型交付**：VLM（NPU）+ 模型下载器，见 [`vlm-asr-assistant-plan.zh-CN.md`](vlm-asr-assistant-plan.zh-CN.md)。
+4. **0.2 模型交付**：VLM（NPU）+ 模型下载器。

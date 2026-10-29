@@ -472,9 +472,6 @@ sem/det chain (seconds, not per frame). The VLM does not use `CompiledModel`/`ru
 tokenization, image encoding, and autoregressive decoding), so it has its own runtime — but it
 **reuses the same accelerator selection policy** (`AcceleratorSelector`).
 
-App-side trigger policy, ASR choice, shortcut entry points, and further code organization are in
-[vlm-asr-assistant-plan.md](vlm-asr-assistant-plan.md).
-
 ### Architecture (skeleton landed, compiles)
 
 ```

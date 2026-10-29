@@ -169,7 +169,7 @@ uint8 outputs or multi-tensor outputs fall back to the Kotlin decode path.
 > class order, nothing in the output looks broken; a user who cannot see the scene is the one
 > misled. Before using a model on an accelerator, check that it gives the CPU's answer.
 
-On 2026-10-11 the sem and det exports this repository had been developed against (onnx2tf, float16,
+The sem and det exports this repository had been developed against (onnx2tf, float16,
 NHWC) ran on the LiteRT GPU accelerator on SM8850 and SM8450 with no error, and answered wrongly:
 indoor floors and pale paving came out as `building`, and an office chair the CPU detected at 92% on
 every frame was never detected. Forcing FP32, LiteRT 2.3.0, the resize filter and the zero-copy read

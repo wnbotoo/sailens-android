@@ -120,5 +120,4 @@ ProcessFrameUseCase reads activeConfig per frame
 2. **Dynamic downgrade**: drop DEFAULT→BASIC automatically on thermal state / battery / inference
    latency / frame-drop rate, with a switch cooldown.
 3. **imgsz tuning**: input size is the next lever on inference time (see [`models.md`](models.md)).
-4. **0.2 model delivery**: VLM (NPU) + model downloader, see
-   [`vlm-asr-assistant-plan.md`](vlm-asr-assistant-plan.md).
+4. **0.2 model delivery**: VLM (NPU) + model downloader.

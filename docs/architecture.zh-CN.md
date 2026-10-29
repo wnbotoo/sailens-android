@@ -363,8 +363,7 @@ interface FrameSnapshotProvider {
 这些数组只是不再复用而已。落后的订阅者没来得及取的帧，由帧源自己归还。snapshot 则从池里摘出来，
 Describe 拿到的是一张普通的帧，请求要多久就可以留多久。
 
-Describe 必须拒绝过旧 snapshot，绝不能静默描述几秒前的旧画面。这与已有 VLM/ASR
-assistant plan 的安全意图保持一致。
+Describe 必须拒绝过旧 snapshot，绝不能静默描述几秒前的旧画面。
 
 snapshot 请求同样有时间上限：它开出需求、等一张满足新鲜度的帧，等不到就放弃而不是一直挂着
 ——用户已经按下按钮，"我看不到"也比沉默好。
@@ -841,7 +840,7 @@ dlsym 外面那层 `std::call_once` 是嫌疑但未证实。cache 是另一回�
 无论恢复哪一条，都会改变检测后处理和帧预算，属于产品决策，不在本次重构范围内。因此这几条
 应当视为"待恢复的目标"，而不是"已保住的性质"。
 
-**根因与修复（2026-09 发布前 review）。**zero-copy 这对红线其实有三个独立的错，任何一个都足以
+**根因与修复。**zero-copy 这对红线其实有三个独立的错，任何一个都足以
 让 handle 路径永远不跑（它们互相遮蔽，所以从没暴露）：
 
 1. `dlsym(RTLD_DEFAULT, ...)` 找不到符号：targetSdk ≥ 23 时 bionic 的 RTLD_DEFAULT 跳过以
