@@ -10,8 +10,8 @@ import java.util.UUID
 
 /**
  * Tells the user, without their eyes, that Guidance cannot see: a covered lens, too little light, a floor
- * the model does not recognise. "No prompt" and "nothing ahead" feel the same to someone who cannot see the screen, so each
- * of these states must reach them, and keep reaching them while it lasts.
+ * the model does not recognise. "No prompt" and "nothing ahead" feel the same to someone who cannot see
+ * the screen, so each of these states must reach them, and keep reaching them while it lasts.
  *
  * As ordinary navigation events they could not: a refused prompt left no vibration, vibration obeyed the
  * navigation switch, and only the frame's first event was ever offered, so the floor state (LOW) could
@@ -60,11 +60,12 @@ import java.util.UUID
  *   fault vibration is on.
  * - The debt never expires: a short fault the user was never told about makes the next one, however
  *   much later, fall back at once. Any expiry could be got round by failing, recovering and failing again.
- * - A fault rhythm makes navigation rhythms wait. It holds the motor for the length of its long-short-long
- *   rhythm (under a second), and a new navigation rhythm is refused meanwhile. With speech on only the buzz that accompanies a prompt is
- *   lost; a prompt delivered by vibration alone waits for the next frame, its delay being what is left
- *   of the hold plus the time to that frame (about 3.4 s with frames up to 2.5 s apart, polling and
- *   scheduling on top). That is the price of a fault rhythm navigation rhythms can neither starve nor cut.
+ * - A fault rhythm makes navigation rhythms wait. It holds the motor for the length of its
+ *   long-short-long rhythm (under a second), and a new navigation rhythm is refused meanwhile. With
+ *   speech on only the buzz that accompanies a prompt is lost; a prompt delivered by vibration alone
+ *   waits for the next frame, its delay being what is left of the hold plus the time to that frame
+ *   (about 3.4 s with frames up to 2.5 s apart, polling and scheduling on top). That is the price of a
+ *   fault rhythm navigation rhythms can neither starve nor cut.
  * - With speech off there is no recovery notice: the periodic vibration stopping is the only sign.
  * - With speech off fault vibration is locked on, so Guidance cannot be made completely silent.
  * - The deadlines, [Timing.recoveryHoldMs] and [Timing.retryIntervalMs] are not calibrated on a phone.

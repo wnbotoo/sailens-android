@@ -97,8 +97,9 @@ data class GroundObservation(
  *   ground prediction is too flat to tell ground from far structure.
  * @param minInlierRatio below this, there is no ground in view.
  * @param sampleFromRow the fit samples only the image below this fraction of its height. Near
- *   ground dominates there; far ground is where a small step or a gentle slope differs from the plane by less than the threshold, and would bend the fit if it were sampled.
- *   The labels still cover the whole image.
+ *   ground dominates there; far ground is where a small step or a gentle slope differs from the
+ *   plane by less than the threshold, and would bend the fit if it were sampled. The labels still
+ *   cover the whole image.
  */
 class GroundFitter(
     private val inlierThreshold: Float = 0.04f,

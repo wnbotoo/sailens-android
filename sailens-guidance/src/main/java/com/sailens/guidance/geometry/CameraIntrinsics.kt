@@ -39,8 +39,8 @@ data class CameraIntrinsics(
 }
 
 /**
- * Resolves [CameraIntrinsics] from the raw facts (docs/geometry.md §2): calibration when reported, else an estimate
- * from focal length and sensor size; mapped into the buffer through the frame's
+ * Resolves [CameraIntrinsics] from the raw facts (docs/geometry.md §2): calibration when reported,
+ * else an estimate from focal length and sensor size; mapped into the buffer through the frame's
  * `sensorToBufferTransform`, then rotated upright. Null when neither source is usable.
  *
  * Coordinates: the transform takes **sensor coordinates** -- the system in which Camera2 gives the

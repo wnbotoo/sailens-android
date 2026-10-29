@@ -16,7 +16,10 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** The ground-contact distance's per-obstacle trace fields: filled from the tracked obstacles, and readable from a trace line. */
+/**
+ * The ground-contact distance's per-obstacle trace fields: filled from the tracked obstacles, and
+ * readable from a trace line.
+ */
 class ObstacleDistanceTraceTest {
 
     private val base = FrameTrace(

@@ -12,8 +12,8 @@ import java.io.File
 import java.util.Locale
 
 /**
- * The ground-contact distance's offline evaluation ([GroundContactEvaluation]) on real model-regression captures. Skipped
- * unless a path is given -- captures contain faces and places and never enter the repository or CI:
+ * The ground-contact distance's offline evaluation ([GroundContactEvaluation]) on real
+ * model-regression captures. Skipped unless a path is given -- captures contain faces and places and never enter the repository or CI:
  *
  * ```
  * gradlew :sailens-guidance:testDebugUnitTest --tests "*GroundContactCaptureEvaluationTest*" -PreplayCapture=<dir> [-Pm3aPhoneHeight=1.15]
