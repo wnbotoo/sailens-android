@@ -7,10 +7,13 @@ is opened: the `SpeakerModel` calibration thresholds (D1.4-2) and the D2–D4 su
 This note proposes both, plus the questions the user has to decide. **It uses the calibration/baseline
 set (C) only**; no tool that shows results has opened S.
 
-> **Status: proposal, revision 5 (after review round 4), not frozen.** Freezing takes all three: the user decides every item of
-> section 5 (done 2026-10-28, every recommendation accepted); the GPT review has no findings;
-> the freezing commit is written into the "threshold freeze" line of the local assignment file
-> `detfirst-d18\assignment.csv`. Until that line is filled in, S may not be used for any metric.
+> **Status: frozen (2026-10-29); the freezing commit is `5418a35` (revision 5).** All three things freezing takes are done: the
+> user decided every item of section 5 (2026-10-28, every recommendation accepted); the GPT review has no findings (round 5: Go,
+> no P0–P2 findings); the freezing commit is in the "threshold freeze" line of the local assignment file
+> `detfirst-d18\assignment.csv`. The files section 3.4 lists are as they stand at that commit; any later change to one goes
+> through R6. S still may not be opened: under R7 / Q14, PR-1b / PR-2 / PR-3's code and parameters must all be frozen first and
+> the assignment file's "parameter freeze" line filled in, and PR-1b's closed loop and its full rehearsal on C must be done
+> before that.
 
 ## 1. Data and conventions
 
