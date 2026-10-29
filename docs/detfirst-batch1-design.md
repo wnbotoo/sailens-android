@@ -214,7 +214,9 @@ later — there is a fault then, it just buzzes before D.
   - A rhythm of equal or higher priority still playing is **not cut**: the motor is **reserved** instead. The fault
     rhythm starts the moment that rhythm ends, ahead of any rhythm asked for after it (every claim first checks for a
     due reservation), triggered by a main-thread timer — **not by the next frame**.
-  - Once started **nothing cuts it** (it holds the motor as alarms do), so it is always felt whole.
+  - Once started **no ordinary navigation claim cuts it** (it holds the motor as alarms do), so no navigation rhythm cuts
+    it short. The unconditional `play()` — the alarms (guidance interrupted, voice broken) and the settings preview — can
+    still take the motor from it (a note from round 4).
   - A strictly lower rhythm playing is interrupted at once, as today's rule says.
   - **Latest delivery**: what is left of the rhythm playing, plus the strictly higher rhythms that interrupt it meanwhile
     (at most one per priority level, and alarms) — whatever the frame rate. In the review's sequence (a frame every 2 s,
@@ -225,10 +227,12 @@ later — there is a fault then, it just buzzes before D.
     - with speech on, the prompt is still spoken, only without its accompanying buzz;
     - a prompt delivered by vibration alone (speech off) is revoked under PR-1a's rule and **waits for the next frame**,
       so its delay is what is left of the fault rhythm plus the time to the next frame. At usual frame rates that is one
-      frame more, about 0.1 s; the frame interval can reach the stall threshold of 2.5 s (beyond it the stall alarm takes
-      over), about 3.4 s at worst;
+      frame more, about 0.1 s. **With frame intervals of at most 2.5 s, an estimated 3.4 s** (940 ms + 2.5 s). This is not a
+      hard bound (round 4, P2): 2.5 s is the stall detector's timeout, checked only every 500 ms, and it does not limit
+      the frame interval; polling and scheduling add to it (the review's probe reached 3.74 s with no stall alarm);
     - only when a fault rhythm is owed: with speech off, every 60 s for the floor, 15 s for darkness, 8 s for a covered
-      lens. Bringing this delay under 940 ms too would need the prompt's re-offer scheduled on its own; not in this batch.
+      lens. Bringing this delay under 940 ms too would need the prompt's re-offer scheduled on its own. **The user accepted
+      this delay for this batch on 2026-10-29; scheduling the re-offer on its own is left to batch 2, PR-1b** (see 2.11).
   - One reservation at a time. A track that is not the active one (ended, frozen, or in its recovery hold) has its
     reservation cancelled at once; what it owes stays, and is reserved again when it is active again.
   - "Whatever the switches say" is about the switches, not the motor.
@@ -376,10 +380,12 @@ free.
   for own TTS only. For screen-reader users the non-speech guarantee is the entry vibration (while fault vibration is on).
 - **The debt never expires**: a short fault the user was never told about makes the next fault, however much later, fall
   back at once (2.3). Deliberately: any expiry could be got round by a fail–recover–fail rhythm.
-- **A fault rhythm makes navigation rhythms wait**: it holds the motor for at most 940 ms, and a new navigation rhythm is
-  refused meanwhile. With speech on only the accompanying buzz is lost; a prompt delivered by vibration alone waits for
-  the next frame, its delay being what is left of the hold plus the time to the next frame, about 3.4 s at worst (2.4).
-  This is the price of a fault rhythm that can neither be starved nor cut short.
+- **A fault rhythm makes navigation rhythms wait** (accepted by the user on 2026-10-29, left to batch 2, PR-1b): it holds
+  the motor for at most 940 ms, and a new navigation rhythm is refused meanwhile. With speech on only the accompanying
+  buzz is lost; a prompt delivered by vibration alone waits for the next frame, its delay being what is left of the hold
+  plus the time to the next frame — an estimated 3.4 s with frame intervals of at most 2.5 s, with polling and
+  scheduling on top (2.4). This is the price of a fault rhythm that can neither be starved nor cut short by navigation
+  rhythms. PR-1b schedules the prompt's re-offer on its own instead of waiting for a frame.
 - **Speech off**: no recovery notice; the periodic vibration stopping is the only sign.
 - **Screen only** (speech off, both vibrations wanted off): fault vibration is locked on, so complete silence is not
   possible (the choice made in Q11a).
@@ -515,3 +521,14 @@ re-entry, or the stop path's order. All three accepted.
 | P1-1 | Turning navigation vibration off went through the global `cancel()`, cutting a fault rhythm that had started; its debt was cleared, so nothing re-asked, and the next try was 60 s later | New `cancelNavigation`: stops the motor only when a navigation rhythm plays; a started fault rhythm or alarm plays to its end, and a reservation is kept; the global `cancel` is for stopping Guidance only (2.7). Sequence 24, 1 `HapticArbiterTest` case |
 | P2-2 | On the frame showing recovery, the navigation prompt asked for the motor first and started a stale floor reservation, refusing a CRITICAL obstacle rhythm | Each frame in two steps: `observe` before the navigation prompt (read the states, withdraw stale reservations), `act` after it (speak, ask for the motor) (2.2). Sequence 25 |
 | P2-3 | 940 ms bounds the motor's protection, not a navigation prompt's delay (a vibration-only prompt waits for the next frame) | Wording corrected: delay = what is left of the hold + time to the next frame, about 3.4 s at worst; with speech on only the accompanying buzz is lost; keeping it under 940 ms needs the re-offer scheduled on its own, not in this batch (2.4, 2.11) |
+
+### Round 4 (GPT, 2026-10-29; reviewed #35 `8132e5d → 0781565`)
+
+Verdict: **design Go, PR-1a Go, PR-D5 Go**. Round 3's three fixes confirmed; no new blocking code issue. Protecting the
+alarms together with started fault rhythms is reasonable; `observe → onSceneEvents → act` fixes the stale reservation on
+the recovery frame.
+
+| # | Finding | Handling |
+|---|---|---|
+| P2 (documentation, non-blocking) | "About 3.4 s at worst" is not a hard bound: 2.5 s is the stall detector's timeout, checked every 500 ms, and does not limit the frame interval (the probe reached 3.74 s with no stall alarm) | Now a conditional budget: "an estimated 3.4 s with frame intervals of at most 2.5 s, with polling and scheduling on top" (2.4, 2.11). The frame-driven re-offer stays in this batch; the user accepted this delay on 2026-10-29, and scheduling it on its own is left to batch 2, PR-1b |
+| Note | "Cannot be cut" means by ordinary navigation claims; the unconditional `play()` of the alarms and the settings preview can still take the motor | Stated in 2.4 |
