@@ -64,8 +64,8 @@ class StartSceneAnalysisUseCase(
     private val traceRuntimeConfig: TraceRuntimeConfig,
     private val pipelineBudget: PipelinePerformanceBudget,
     private val regressionRecorder: RegressionRecorder = RegressionRecorder.None,
-    // M3o geometry. The defaults leave it unavailable, which is legal: every distance then stays at
-    // today's image-position estimate (M3a).
+    // Camera geometry. The defaults leave it unavailable, which is legal: every distance then stays
+    // at today's image-position estimate.
     private val orientationSource: OrientationSource = NoOrientationSource,
     private val cameraFactsSource: CameraFactsSource = CameraFactsSource { null },
     private val phoneGeometry: () -> PhoneGeometrySettings = { PhoneGeometrySettings.DEFAULT },
@@ -171,8 +171,8 @@ class StartSceneAnalysisUseCase(
                 val recording = regressionRecorder.isRecording
                 if (recording) regressionRecorder.beginFrame(frame)
 
-                // M3o: where the camera points. Resolved before the frame is processed because the
-                // ground-contact distance (M3a) reads it; it is a sample lookup and a little maths.
+                // Where the camera points. Resolved before the frame is processed because the
+                // ground-contact distance reads it; it is a sample lookup and a little maths.
                 val geometry = cameraGeometryResolver.resolve(
                     cameraFactsSource.current(),
                     FrameFacts.of(frame),
@@ -222,7 +222,7 @@ class StartSceneAnalysisUseCase(
                 if (recording) regressionRecorder.endFrame(frame, events, null)
                 val decideCompletedAt = Timestamp.now()
 
-                // M3o motion, for the record. Read after the decision so it cannot slow the prompt;
+                // Motion, for the record. Read after the decision so it cannot slow the prompt;
                 // nothing above depends on it.
                 val motion = orientationSource.motionState(
                     geometry.frameTimeNanos ?: frame.receivedElapsedRealtimeNanos,

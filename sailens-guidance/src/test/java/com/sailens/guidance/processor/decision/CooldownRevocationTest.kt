@@ -11,7 +11,8 @@ import java.util.UUID
 import kotlin.random.Random
 
 /**
- * det-first plan D3a-1: the cooldown's revocation is replaced, its meaning is not.
+ * The cooldown's revocation re-folds the remaining writes instead of restoring snapshots; its meaning
+ * is unchanged.
  *
  * 1. Wherever today's snapshot revocation was right — each revocation takes back the last write that
  *    can still be revoked, before the next write — the new implementation is bit-for-bit today's

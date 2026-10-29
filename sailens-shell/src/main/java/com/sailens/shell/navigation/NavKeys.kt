@@ -25,7 +25,7 @@ data object OssLicensesKey : NavKey
 @Serializable
 data object TraceSessionsKey : NavKey
 
-/** Debug-only destination (field capture, M0a); release registers no entry for it. */
+/** Debug-only destination (field capture); release registers no entry for it. */
 @Serializable
 data object FieldCaptureKey : NavKey
 
@@ -33,11 +33,11 @@ data object FieldCaptureKey : NavKey
 @Serializable
 data object ModelConsistencyKey : NavKey
 
-/** Debug-only destination (M3a ground-contact distance and phone height); release registers no entry. */
+/** Debug-only destination (ground-contact distance and phone height); release registers no entry. */
 @Serializable
 data object GroundContactKey : NavKey
 
-/** Debug-only destination (det-first D1.7 speech durations); release registers no entry. */
+/** Debug-only destination (speech durations); release registers no entry. */
 @Serializable
 data object TtsDurationKey : NavKey
 

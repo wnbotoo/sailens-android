@@ -17,7 +17,7 @@ import com.sailens.guidance.trace.capture.SemanticRunRecord
 import com.sailens.guidance.trace.capture.SemanticRuns
 
 /**
- * Turns the [RegressionRecorder] hooks of one frame into its [RegressionFrameRecord] (M0b). Shared by
+ * Turns the [RegressionRecorder] hooks of one frame into its [RegressionFrameRecord]. Shared by
  * the capture (debug shell) and the round-trip tests, so what is tested is what is recorded.
  *
  * Thread-safe: the model hooks arrive from the model dispatchers while the pipeline awaits them.

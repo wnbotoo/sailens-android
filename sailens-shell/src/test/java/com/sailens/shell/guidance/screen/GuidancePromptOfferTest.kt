@@ -121,7 +121,7 @@ class GuidancePromptOfferTest {
 
     @Test
     fun `the states the vision-fault alerts tell are not spoken here, but confirmed and traced as theirs`() {
-        // det-first plan D5: VisionFaultAlerts says these; offering the event too would say it twice.
+        // VisionFaultAlerts says these; offering the event too would say it twice.
         for ((name, state) in listOf(
             "covered" to snapshot(frameQuality = FrameQuality.OBSTRUCTED),
             "dark" to snapshot(frameQuality = FrameQuality.TOO_DARK, trafficLight = true),
@@ -142,7 +142,7 @@ class GuidancePromptOfferTest {
 
     @Test
     fun `a hand-over to the vision-fault alerts is not something the user got, so it is not replayed`() {
-        // Review round 1, P2-3: it confirms the cooldown but must not replace the replay history.
+        // It confirms the cooldown but must not replace the replay history.
         val handedOver = GuidanceDeliveryResult(listOf(PromptDeliveryChannels.VISION_ALERTS))
         assertTrue(handedOver.delivered)
         assertEquals(false, handedOver.reachedUser)

@@ -16,7 +16,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** M3a's per-obstacle trace fields: filled from the tracked obstacles, and readable from a trace line. */
+/** The ground-contact distance's per-obstacle trace fields: filled from the tracked obstacles, and readable from a trace line. */
 class ObstacleDistanceTraceTest {
 
     private val base = FrameTrace(
@@ -44,7 +44,7 @@ class ObstacleDistanceTraceTest {
         assertTrue(trace.groundContactEnabled)
         val (first, second) = trace.obstacleDistances
         assertEquals(ObstacleDistanceTrace("person", "center", "valid", 1.1f.toDouble(), 1.3f.toDouble(), 1.6f.toDouble(), "medium", "near", "near"), first)
-        // A track with no estimate (made before M3a, or by a path that computes none) reads as today's.
+        // A track with no estimate (an older trace, or a path that computes none) reads as today's.
         assertEquals(ObstacleDistanceTrace("person", "center", "none", levelToday = "far", levelUsed = "far"), second)
     }
 

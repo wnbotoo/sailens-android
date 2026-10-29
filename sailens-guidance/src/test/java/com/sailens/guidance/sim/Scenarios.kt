@@ -14,11 +14,11 @@ data class ScenarioFrame(
     val lensCovered: Boolean = false,
 )
 
-/** The M0a raw facts a capture of one scenario frame would hold. */
+/** The raw facts a capture of one scenario frame would hold. */
 data class ScenarioFacts(val camera: CaptureCameraRecord, val frame: FrameRecord, val gravity: List<SensorRecord>)
 
 /**
- * A scripted walk through a synthetic world (M2a). [frames] are [stepMs] apart; [description] says
+ * A scripted walk through a synthetic world. [frames] are [stepMs] apart; [description] says
  * what the scenario exercises and heads its golden file.
  */
 data class Scenario(
@@ -52,19 +52,19 @@ data class Scenario(
 }
 
 /**
- * The M2a scenarios. Each pins what today's Guidance does with a geometry it gets wrong or must
- * keep getting right; the goldens record that behaviour, they do not endorse it. M3o and later
- * milestones change these goldens on purpose, and the diff is the review.
+ * The simulator scenarios. Each pins what Guidance does with a geometry it gets wrong or must keep
+ * getting right; the goldens record that behaviour, they do not endorse it. A change that improves
+ * it changes these goldens on purpose, and the diff is what gets reviewed.
  */
 object Scenarios {
-    /** Camera height and pitch of the default carry (roadmap: 1.3 m, chest height). */
+    /** Camera height and pitch of the default carry (1.3 m, chest height). */
     private const val HEIGHT = 1.3f
     private const val PITCH = 25f
 
     private val person = DetectedAs(cocoId = 0, label = "person", category = ObstacleCategory.PERSON)
     private val car = DetectedAs(cocoId = 2, label = "car", category = ObstacleCategory.VEHICLE)
 
-    /** The pitch most field recordings were held at (median 14-19 degrees, 2026-10). */
+    /** The pitch most field recordings were held at (median 14-19 degrees per recording). */
     private const val FIELD_PITCH = 17f
 
     /** Road on the left, a 3 m sidewalk ahead, verge on the right. */

@@ -56,11 +56,11 @@ enum class OrientationQuality {
 }
 
 /**
- * Rotation-only motion (§3, M3o): translation is unknown here.
+ * Rotation-only motion (docs/geometry.md §3): translation is unknown here.
  *
  * @param headingRad the camera's horizontal heading in the game-rotation-vector world frame, whose
  *   zero is arbitrary per session. It is where the **phone** points, not where the user walks.
- *   Increases when the phone turns right (§2's yaw sign).
+ *   Increases when the phone turns right.
  * @param yawRateRadPerS rate of change of [headingRad], same sign.
  */
 data class MotionState(
@@ -102,7 +102,7 @@ class MotionTracker(
         val horizontal = sqrt(forward.x * forward.x + forward.y * forward.y)
         val sample = if (horizontal < MIN_HORIZONTAL) {
             // Pointing (nearly) straight up or down: the projected axis is noise. Keep the last
-            // heading rather than inventing one (§2, degenerate case), and claim no rate.
+            // heading rather than inventing one, and claim no rate.
             previous?.let { Sample(timestampNanos, it.headingRad, measured = false, yawRateRadPerS = 0.0) } ?: return
         } else {
             // atan2(east, north): clockwise seen from above, so turning right increases it.

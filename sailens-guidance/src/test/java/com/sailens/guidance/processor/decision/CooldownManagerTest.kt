@@ -13,7 +13,7 @@ class CooldownManagerTest {
 
     @Test
     fun `a revoke reports how many decisions came before it, and reset starts the count again`() {
-        // M0b replay puts each revoke back between the same two decisions.
+        // Replay puts each revoke back between the same two decisions.
         val event = obstacleEvent(messageKey = "event_obstacle_left", dedupeKey = "obstacle_LEFT", zone = DirectionZone.LEFT)
         assertEquals(0L, cooldownManager.revoke(event.id))
         cooldownManager.decide { recordEvent(event, now = 10_000) }

@@ -61,8 +61,9 @@ val domainBindingsModule = module {
     // 设置页选择的挡位经由 manager 在下一次导航会话开始时生效
     single {
         PerceptionProfileManager(initialConfig = get()).apply {
-            // M3a's ground-contact distance stays off in release until its enable gate is met; in a
-            // debug build the diagnostics screen's switch, remembered across restarts, applies.
+            // The ground-contact distance stays off in release: no way of carrying the phone has been
+            // validated for it in the field. In a debug build the diagnostics screen's switch,
+            // remembered across restarts, applies.
             if (BuildConfig.DEBUG) selectGroundContact(get<PhoneGeometryStore>().choice.value.groundContactEnabled)
         }
     }
@@ -194,5 +195,5 @@ val domainBindingsModule = module {
     factory { LoadLatestTraceReplayReportUseCase(get(), get()) }
 }
 
-/** The model-regression recorder (M0b) the debug shell binds; release binds none and records nothing. */
+/** The model-regression recorder the debug shell binds; release binds none and records nothing. */
 private fun Scope.regressionRecorder(): RegressionRecorder = getOrNull<RegressionRecorder>() ?: RegressionRecorder.None

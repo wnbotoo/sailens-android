@@ -43,8 +43,8 @@ class HapticManager(context: Context) {
     }
 
     /**
-     * Plays [haptic] for an alert that must be felt whole and must not wait for ever (det-first D5: the
-     * vision-fault alerts, whose switches the caller has already applied). It does not cut a pattern of
+     * Plays [haptic] for an alert that must be felt whole and must not wait for ever (the vision-fault
+     * alerts, whose switches the caller has already applied). It does not cut a pattern of
      * equal or higher priority that is still playing: it reserves the motor instead, and starts the moment
      * that pattern ends, ahead of any rhythm asked for after it -- on the main thread, with or without new
      * frames. Once started nothing cuts it. One reservation at a time: a newer one replaces it.

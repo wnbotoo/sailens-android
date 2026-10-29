@@ -81,7 +81,7 @@ data class FrameTrace(
     val obstaclePreprocessBackend: String = "unknown",
     val obstaclePostprocessBackend: String = "unknown",
     /**
-     * M3o camera geometry for this frame: "ok" / "degraded" / "unavailable"; "none" in traces
+     * Camera geometry for this frame: "ok" / "degraded" / "unavailable"; "none" in traces
      * written before it existed. Issues are [com.sailens.guidance.geometry.GeometryIssue] names,
      * lower case. Nothing decides on these yet; they are here so recordings show what the
      * geometry would have been.
@@ -106,14 +106,14 @@ data class FrameTrace(
     /** The phone height the geometry assumed, metres, and where it came from ("default_seed" / "preset" / "calibrated" / "none"). */
     val phoneHeightM: Double? = null,
     val heightSource: String = "none",
-    /** Whether the ground-contact distance (M3a) was allowed to change levels in this session. */
+    /** Whether the ground-contact distance was allowed to change levels in this session. */
     val groundContactEnabled: Boolean = false,
-    /** M3a: per tracked obstacle, today's level, the ground-contact estimate and the level used. */
+    /** Per tracked obstacle, today's level, the ground-contact estimate and the level used. */
     val obstacleDistances: List<ObstacleDistanceTrace> = emptyList(),
 )
 
 /**
- * One tracked obstacle's distance evidence (M3a). Levels are `DistanceLevel` names, lower case;
+ * One tracked obstacle's distance evidence. Levels are `DistanceLevel` names, lower case;
  * [levelNew] is the level of [lowerBoundM], null without an interval. [upperBoundM] is null when
  * unbounded or without an interval. [contactValidity] is a `ContactValidity` name, lower case.
  */
@@ -232,7 +232,7 @@ object PromptDeliveryChannels {
     const val STATUS_CARD = "status_card"
 
     /**
-     * A covered lens, low light or an unrecognised floor (det-first plan D5): the shell's vision-fault
+     * A covered lens, low light or an unrecognised floor: the shell's vision-fault
      * alerts say these states with their own cadence and fallback, so the event itself is not spoken.
      * Taken over, not heard: whether the user heard the alert is tracked there.
      */

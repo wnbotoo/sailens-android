@@ -328,7 +328,7 @@ class RegressionCaptureTest {
         assertTrue(session.manifest.complete)
     }
 
-    // ---- the speech lifecycle (det-first plan D1.3) ----------------------------------------------
+    // ---- the speech lifecycle --------------------------------------------------------------------
 
     @Test
     fun `the session's lifecycle events are recorded beside its frames and read back without warnings`() = runBlocking {

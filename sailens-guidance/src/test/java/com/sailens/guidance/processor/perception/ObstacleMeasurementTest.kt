@@ -18,12 +18,12 @@ import org.junit.Test
 import java.util.UUID
 
 /**
- * det-first plan D1.5-2: a tracked obstacle says which frame last measured it. Running detection on a
+ * A tracked obstacle says which frame last measured it. Running detection on a
  * frame does not make every track's evidence fresh: a track the detection missed keeps its old box
  * and distance under the current time, and so does every predicted frame. Only the measurement's
  * frame sequence, compared with the frame's own, tells -- never times, which two updates can share.
  *
- * And D1.1-3: the id source changes nothing but the ids.
+ * And the track id source changes nothing but the ids.
  */
 class ObstacleMeasurementTest {
 

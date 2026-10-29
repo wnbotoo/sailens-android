@@ -68,7 +68,7 @@ class FrameQualityAnalyzerTest {
 
     @Test
     fun `measure then classify then debounce is the same path as analyze`() {
-        // M0b replays from recorded measurements; that path must give the same verdicts.
+        // Replay continues from recorded measurements; that path must give the same verdicts.
         val frames = listOf(texturedFrame(130), flatFrame(3), flatFrame(3), texturedFrame(18), flatFrame(210), texturedFrame(130))
         val direct = FrameQualityAnalyzer(debounceFrames = 2)
         val replayed = FrameQualityAnalyzer(debounceFrames = 2)

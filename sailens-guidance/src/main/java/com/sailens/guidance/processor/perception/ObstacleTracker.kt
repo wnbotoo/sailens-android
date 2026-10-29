@@ -17,7 +17,7 @@ import java.util.UUID
  * 障碍物跟踪器
  *
  * @param trackIds where a new track's id comes from: random in production; numbered by birth in a
- *   replay, so that two replays of one capture can pair their tracks (det-first plan D1.1).
+ *   replay, so that two replays of one capture can pair their tracks.
  */
 class ObstacleTracker(
     private val config: PerceptionConfig,

@@ -1,4 +1,4 @@
-"""Storage rate, cadence and loss accounting for Sailens field captures (M0a).
+"""Storage rate, cadence and loss accounting for Sailens field captures.
 
     python capture_stats.py <capture dir or folder of captures> [--json]
 

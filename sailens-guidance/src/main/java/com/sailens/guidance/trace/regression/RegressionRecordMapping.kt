@@ -192,7 +192,7 @@ fun DetectionItem.toObstacleDetection(): ObstacleDetection = ObstacleDetection(
  *
  * Runs on Guidance's thread for every recorded frame, so the words go to CRC32 in one call: fed a
  * word at a time it made about 3,600 native calls per class-map-sized mask, 3–7 ms each on an
- * SM8850 -- the bulk of the recording's cost (M0b ABAB, 2026-10-13). The bytes are the same.
+ * SM8850 -- the bulk of the recording's cost (recording off/on, alternated). The bytes are the same.
  *
  * @param scratch reused word buffer; pass one to avoid a per-call allocation in a per-frame path.
  */

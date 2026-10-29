@@ -9,9 +9,8 @@ import com.sailens.guidance.model.scene.SceneEventMessageKeys
 import java.util.UUID
 
 /**
- * Tells the user, without their eyes, that Guidance cannot see (det-first plan D5; design in
- * docs/detfirst-batch1-design, section 2): a covered lens, too little light, a floor the model does not
- * recognise. "No prompt" and "nothing ahead" feel the same to someone who cannot see the screen, so each
+ * Tells the user, without their eyes, that Guidance cannot see: a covered lens, too little light, a floor
+ * the model does not recognise. "No prompt" and "nothing ahead" feel the same to someone who cannot see the screen, so each
  * of these states must reach them, and keep reaching them while it lasts.
  *
  * As ordinary navigation events they could not: a refused prompt left no vibration, vibration obeyed the
@@ -27,7 +26,8 @@ import java.util.UUID
  *   heard, within [Timing.maxAcceptedAttemptsPerCycle];
  * - **told** means heard, or a rhythm that stands for the notice played: the fallback, or, with speech
  *   off, the cycle's rhythm (with speech off the rhythm is the notice, and fault vibration counts as on
- *   whatever the switch says, Q11a). Being told by a rhythm does not stop the speech retries;
+ *   whatever the switch says: otherwise a user with speech off could not be told at all). Being told by
+ *   a rhythm does not stop the speech retries;
  * - **the fallback**: if the user has not been told within [Fault.deadlineMs] — notice dropped, cut off,
  *   expired, never confirmed, engine not ready, waiting for a description — the rhythm plays **whatever
  *   the switches say**, and again in every later cycle while that holds. A notice heard before it plays
@@ -53,6 +53,25 @@ import java.util.UUID
  * the motor's), so every rule is testable on the JVM. Without frames no new state is seen here; the stall
  * detector owns that failure.
  *
+ * Known limits, each accepted on purpose:
+ *
+ * - With the screen reader, a published notice counts as told: acceptance, not evidence it was heard.
+ *   For screen-reader users the guarantee that does not rest on speech is the entry vibration, while
+ *   fault vibration is on.
+ * - The debt never expires: a short fault the user was never told about makes the next one, however
+ *   much later, fall back at once. Any expiry could be got round by failing, recovering and failing again.
+ * - A fault rhythm makes navigation rhythms wait. It holds the motor for the length of its long-short-long
+ *   rhythm (under a second), and a new navigation rhythm is refused meanwhile. With speech on only the buzz that accompanies a prompt is
+ *   lost; a prompt delivered by vibration alone waits for the next frame, its delay being what is left
+ *   of the hold plus the time to that frame (about 3.4 s with frames up to 2.5 s apart, polling and
+ *   scheduling on top). That is the price of a fault rhythm navigation rhythms can neither starve nor cut.
+ * - With speech off there is no recovery notice: the periodic vibration stopping is the only sign.
+ * - With speech off fault vibration is locked on, so Guidance cannot be made completely silent.
+ * - The deadlines, [Timing.recoveryHoldMs] and [Timing.retryIntervalMs] are not calibrated on a phone.
+ * - Among people indoors the floor notice is often cut off by obstacle prompts; the user then feels a
+ *   fallback every cycle and may hear half a sentence. Its priority stays LOW: raising it would suppress
+ *   obstacle prompts.
+ *
  * @param noticeIdPrefix distinct per instance: the speech engine is shared, so a late completion of an
  *   earlier instance's notice must never match this one's.
  */
@@ -64,7 +83,8 @@ internal class VisionFaultAlerts(
     /**
      * The three states and how each is said. Periods and priorities are the cooldowns and event
      * priorities they had as navigation events. The deadlines leave room for the prompt still being
-     * spoken plus this sentence at rate 1.30 (D1.7: 1.18 / 1.06 / 3.41 s in Chinese) with more than
+     * spoken plus this sentence at rate 1.30 (measured with the debug speech-duration tool: 1.18 /
+     * 1.06 / 3.41 s in Chinese) with more than
      * that to spare; they are not calibrated on a phone.
      */
     enum class Fault(

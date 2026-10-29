@@ -14,7 +14,7 @@
 // kernels lock the buffer and read it in place, which is what keeps outputReadTimeMs at
 // approximately 0 (architecture.md §6.5, §12.3).
 //
-// Three things have to be right for that, and until 2026-09 none of them was:
+// Three things have to be right for that, and each one is easy to get wrong silently:
 //
 // 1. Finding the symbols. libLiteRt.so is loaded by the Kotlin layer through System.loadLibrary,
 //    i.e. RTLD_LOCAL, and this library deliberately does not link against it. For apps targeting

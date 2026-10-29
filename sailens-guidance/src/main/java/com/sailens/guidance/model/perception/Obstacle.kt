@@ -19,7 +19,7 @@ data class RawObstacle(
     val distance: DistanceLevel,
     val confidence: Float,
     val areaRatio: Float,
-    /** The evidence behind [distance] (M3a); null where no estimate was made. */
+    /** The evidence behind [distance]; null where no estimate was made. */
     val distanceEstimate: DistanceEstimate? = null,
 )
 
@@ -38,7 +38,7 @@ data class DetectedObstacle(
     val stableFrames: Int,
     val areaRatio: Float,
     val timestamp: Long,
-    /** The evidence behind [distance] at the detection that last updated this track (M3a). */
+    /** The evidence behind [distance] at the detection that last updated this track. */
     val distanceEstimate: DistanceEstimate? = null,
     /** The frame whose detection last updated this track; null where the tracker was not told. */
     val measurement: ObstacleMeasurement? = null,
@@ -54,7 +54,7 @@ data class DetectedObstacle(
 }
 
 /**
- * The frame whose detection last updated a track (det-first plan D1.5).
+ * The frame whose detection last updated a track.
  *
  * A track the latest detection run did not match keeps reporting its last box, distance and
  * estimate, stamped with the current time; so does every predicted frame. Only this says whether

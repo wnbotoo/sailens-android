@@ -16,7 +16,7 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 /**
- * M3o's per-frame trace fields: filled from the geometry, and readable from a trace line -- including
+ * The camera geometry's per-frame trace fields: filled from the geometry, and readable from a trace line -- including
  * lines written before they existed. (org.json is a stub on the JVM, so the encoder's half is
  * exercised on device; the field names here are the ones it writes.)
  */

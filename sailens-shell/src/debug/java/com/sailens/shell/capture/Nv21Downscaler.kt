@@ -7,7 +7,7 @@ internal class Nv21Image(val width: Int, val height: Int, val bytes: ByteArray)
 
 /**
  * Copies a frame into a downscaled NV21 image, nearest-neighbour. Field evidence only needs to be
- * recognisable for labelling and geometry; exact pixels are M0b's job.
+ * recognisable for labelling and geometry; exact pixels are the model-regression record's job.
  *
  * Works on any YUV_420_888 layout (padded rows, pixel stride 1 or 2). Output dimensions keep the
  * aspect ratio, fit [maxLongSide], and are even, as NV21 requires.

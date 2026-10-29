@@ -26,7 +26,7 @@ class SceneEventStringsTest {
 
     /**
      * No event message has a format placeholder, so `SceneEvent.messageParams` is never spoken: what a
-     * user hears is the message, the NEAR prefix and the direction suffix. The M3a capture evaluation
+     * user hears is the message, the NEAR prefix and the direction suffix. The ground-contact capture evaluation
      * relies on this to tell a reworded prompt from changed metadata; a placeholder added here must
      * be reflected there.
      */

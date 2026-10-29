@@ -80,7 +80,7 @@ public class SpeechManager(
     private val spokenCallbacks = SpokenCallbacks(requeueSuffix = REQUEUE_UTTERANCE_ID_SUFFIX)
 
     /**
-     * Measurement only (det-first plan D1.3): reports what became of each submission to whoever
+     * Measurement only: reports what became of each submission to whoever
      * [setLifecycleObserver] names. Nothing here reads it back.
      */
     private val lifecycle = UtteranceLifecycle(SystemClock::elapsedRealtimeNanos)

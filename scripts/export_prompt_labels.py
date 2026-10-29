@@ -8,8 +8,7 @@ Usage:
 One row per `prompt_outcome` record (the one prompt a frame offered), joined to its `frame`
 record by sequence number. By default only delivered prompts are listed: a revoked prompt was
 never heard, so it cannot be a false alarm. The `label` and `note` columns are left empty for
-the person labelling; the field-recording manual (docs/field-recording-manual.md) defines the
-label values.
+the person labelling; docs/field-capture.md §10 defines the label values.
 
 A prompt whose offering frame has no frame record (a damaged trace) is marked in `note` and makes
 the run exit with 1.
@@ -28,7 +27,7 @@ from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "capture"))
-from sailens_capture import refuse_sealed  # noqa: E402  (det-first D1.8 sealed set)
+from sailens_capture import refuse_sealed  # noqa: E402  (the sealed acceptance set)
 
 COLUMNS = [
     "segment",

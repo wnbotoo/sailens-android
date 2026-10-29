@@ -11,7 +11,7 @@ import kotlin.math.atan2
 val CameraGeometry.rollDegrees: Float?
     get() = gravityInCamera?.let { Math.toDegrees(atan2(it.x.toDouble(), it.y.toDouble())).toFloat() }
 
-/** [this] frame's trace with the M3o geometry and motion fields filled in. */
+/** [this] frame's trace with the camera geometry and motion fields filled in. */
 fun FrameTrace.withGeometry(geometry: CameraGeometry, motion: MotionState): FrameTrace {
     val oriented = motion.orientationQuality != OrientationQuality.UNAVAILABLE
     return copy(
@@ -39,7 +39,7 @@ fun FrameTrace.withGeometry(geometry: CameraGeometry, motion: MotionState): Fram
     )
 }
 
-/** [this] frame's trace with each tracked obstacle's distance evidence (M3a). */
+/** [this] frame's trace with each tracked obstacle's distance evidence. */
 fun FrameTrace.withObstacleDistances(obstacles: List<DetectedObstacle>, groundContactEnabled: Boolean): FrameTrace = copy(
     groundContactEnabled = groundContactEnabled,
     obstacleDistances = obstacles.map { obstacle ->

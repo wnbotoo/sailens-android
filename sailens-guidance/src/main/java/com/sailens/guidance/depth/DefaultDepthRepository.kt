@@ -5,7 +5,7 @@ import com.sailens.guidance.model.common.ObstacleCategory
 import com.sailens.guidance.repository.DepthRepository
 
 /**
- * Today's level from the box's image position, and the ground-contact estimate (M3a) beside it.
+ * Today's level from the box's image position, and the ground-contact estimate beside it.
  * The contact may make the level nearer, never farther ([DistanceFusion]); off by default, it is
  * still computed so the trace shows it.
  */

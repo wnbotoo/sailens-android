@@ -39,8 +39,8 @@ class GuidanceDeliveryTest {
 
     @Test
     fun `an engine that fails while speaking leaves the prompt to vibration`() {
-        // 2026-10-28: the engine counted as ready but every speak() failed, and the prompt was
-        // dropped without trying the motor: nothing was heard or felt.
+        // An engine that counts as ready while every speak() fails must not drop the prompt without
+        // trying the motor: then nothing is heard or felt.
         assertEquals(listOf(HAPTICS), deliver(haptics = true, speakAccepts = false, readyAfterSpeak = false))
         assertEquals(listOf("speak", "vibrate"), calls) // and the failed engine is not asked again
     }

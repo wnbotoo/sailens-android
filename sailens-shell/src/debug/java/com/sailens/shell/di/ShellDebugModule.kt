@@ -46,7 +46,7 @@ import java.io.File
 import java.util.concurrent.Executors
 
 /**
- * Debug-only DI: the trace-replay ViewModel, field capture (M0a) and the model consistency check exist
+ * Debug-only DI: the trace-replay ViewModel, field capture and the model consistency check exist
  * only in the debug variant.
  */
 val shellDebugModule: Module = module {
@@ -61,7 +61,7 @@ val shellDebugModule: Module = module {
     }
 
     single { FieldCaptureSettingsStore(androidContext()) }
-    // The model-regression record (M0b). Guidance's DI finds it as its RegressionRecorder.
+    // The model-regression record. Guidance's DI finds it as its RegressionRecorder.
     single {
         val profiles = get<PerceptionProfileManager>()
         val analysis = get<AnalysisConfig>()
@@ -75,7 +75,7 @@ val shellDebugModule: Module = module {
                     perceptionConfig = CaptureSchema.json.encodeToJsonElement(PerceptionConfig.serializer(), profiles.activeConfig),
                     analysisConfig = CaptureSchema.json.encodeToJsonElement(AnalysisConfig.serializer(), analysis),
                     taxonomyId = semantics.taxonomyId.value,
-                    // Today's level is the box position; the M3a ground contact beside it is governed
+                    // Today's level is the box position; the ground contact beside it is governed
                     // by perceptionConfig.groundContact, recorded above.
                     depthSource = "position",
                 )
@@ -85,7 +85,7 @@ val shellDebugModule: Module = module {
             log = get(),
             writerDispatcher = Executors.newSingleThreadExecutor { runnable -> Thread(runnable, "regression-capture") }
                 .asCoroutineDispatcher(),
-            // The speech lifecycle (det-first plan D1.3), recorded beside the decisions.
+            // The speech lifecycle, recorded beside the decisions.
             speechSessions = SpeechManagerLifecycleSessions(speech),
         ).also { capture -> speech.setLifecycleObserver(UtteranceLifecycleRecording(capture)) }
     }

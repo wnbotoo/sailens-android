@@ -28,18 +28,18 @@ import java.util.Locale
 import kotlin.math.abs
 
 /**
- * M3a's evaluation of one model-regression capture: local captures through
+ * The ground-contact distance's evaluation of one model-regression capture: local captures through
  * [GroundContactCaptureEvaluationTest], synthetic ones in CI through `RegressionReplayRoundTripTest`.
  *
  * Each capture is replayed through the real decision path, three ways:
  * - **exact**: the recorded config and the recorded geometry, untouched. It must reproduce the
  *   device over every frame the record allows.
- * - **baseline**: M3a explicitly off, the recorded thresholds kept, the evaluation's phone height;
- *   once per [CounterfactualDelivery] assumption. When the recording itself had M3a off, the
+ * - **baseline**: the distance explicitly off, the recorded thresholds kept, the evaluation's phone
+ *   height; once per [CounterfactualDelivery] assumption. When the recording itself had it off, the
  *   `UNCHANGED_AS_RECORDED` baseline must equal the device (checked).
- * - **treatment**: the same with M3a explicitly on.
+ * - **treatment**: the same with the distance explicitly on.
  *
- * M3a's effect is treatment against baseline *under the same assumption*. A prompt counts as heard
+ * The distance's effect is treatment against baseline *under the same assumption*. A prompt counts as heard
  * only if the device made the identical offer and delivered it; any other prompt's delivery is
  * unknown and counted apart. A prompt's change is judged on what is spoken -- key, priority, the
  * NEAR prefix, the direction suffix -- not on event metadata (no event string has a placeholder;
@@ -56,7 +56,7 @@ import kotlin.math.abs
  */
 internal class GroundContactEvaluation(private val phone: PhoneGeometrySettings) {
 
-    /** Whether M3a on decided anything differently from M3a off, under one assumption. */
+    /** Whether the distance on decided anything differently from it off, under one assumption. */
     data class Change(val decisionsDiffer: Boolean)
 
     class Result(
@@ -124,7 +124,7 @@ internal class GroundContactEvaluation(private val phone: PhoneGeometrySettings)
         if (!exactReport.exact) problems += "$id exact: not exact (approximate frames ${exactReport.approximateFrames.size})"
         base.forEach { (delivery, result) -> check("off/${delivery.name.lowercase()}", result.second) }
         on.forEach { (delivery, result) -> check("on/${delivery.name.lowercase()}", result.second) }
-        // Recorded with M3a off, the baseline taking each revoke where the event is unchanged is the
+        // Recorded with the distance off, the baseline taking each revoke where the event is unchanged is the
         // device itself. (Recorded with it on, the device is no baseline: nothing to compare.)
         if (!recordedConfig.groundContact.enabled) {
             val asRecorded = base.getValue(CounterfactualDelivery.UNCHANGED_AS_RECORDED).first
@@ -182,7 +182,7 @@ internal class GroundContactEvaluation(private val phone: PhoneGeometrySettings)
             val facts = FrameFacts(record.width, record.height, record.rotationDegrees, record.sensorTimestampNanos, 0, transform)
             resolver.resolve(camera, facts, ::nearest, phone)
         }
-        // Without recorded geometry the capture predates M3a, so the phone settings decided nothing on
+        // Without recorded geometry the capture predates the distance, so the phone settings decided nothing on
         // the device: the exact run may use the evaluation's.
         return GeometrySource.Available("resolved from the sensor log (camera realtime clock)", exact = resolve, evaluation = resolve)
     }

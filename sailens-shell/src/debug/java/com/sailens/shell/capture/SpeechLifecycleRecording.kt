@@ -8,7 +8,7 @@ import com.sailens.output.UtteranceLifecycleObserver
 
 /**
  * Carries the speech engine's lifecycle (sailens-output, which knows nothing of Guidance) into the
- * model-regression record (det-first plan D1.3). Debug only: release never observes the lifecycle.
+ * model-regression record. Debug only: release never observes the lifecycle.
  */
 internal class SpeechManagerLifecycleSessions(private val speech: SpeechManager) : SpeechLifecycleSessions {
     override fun begin(sessionId: String) = speech.beginLifecycleSession(sessionId)

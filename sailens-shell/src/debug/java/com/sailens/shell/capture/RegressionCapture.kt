@@ -60,7 +60,7 @@ internal data class RegressionCaptureConfig(
 )
 
 /**
- * Begins and ends the speech side's lifecycle sessions (det-first plan D1.3) with the record's own:
+ * Begins and ends the speech side's lifecycle sessions with the record's own:
  * what the speech engine reports is attributed to the session its utterance was submitted in.
  */
 internal interface SpeechLifecycleSessions {
@@ -77,7 +77,7 @@ internal interface SpeechLifecycleSessions {
 }
 
 /**
- * Records the model-regression part of a `model_regression` capture (M0b): one
+ * Records the model-regression part of a `model_regression` capture (docs/field-capture.md §7): one
  * [RegressionFrameRecord] per processed frame into `regression.jsonl`, class maps into
  * `classmaps.bin`, revocations, the speech lifecycle ([RegressionUtteranceRecord]) when
  * [speechSessions] is wired, and full-resolution frames around delivered prompts and markers.

@@ -28,8 +28,8 @@ import kotlin.math.tan
 import kotlin.random.Random
 
 /**
- * The ground-contact maths and validity checks of M3a (§8) on a synthetic pinhole camera: the
- * class-map intrinsics of the M2a scenarios, a known pitch and phone height, and boxes projected
+ * The ground-contact maths and validity checks (docs/geometry.md §5) on a synthetic pinhole camera:
+ * the class-map intrinsics of the simulator scenarios, a known pitch and phone height, and boxes projected
  * from known ground points.
  */
 class GroundContactDistanceTest {
@@ -187,7 +187,7 @@ class GroundContactDistanceTest {
 
     @Test
     fun `a cut box reads farther at its point, yet its lower bound can be nearer than the truth`() {
-        // Review round 3: what holds is the fusion's guarantee (never farther than today's level),
+        // What holds is the fusion's guarantee (never farther than today's level),
         // not "never nearer than the truth".
         val e = estimate(box(1.6, 25.0, heightM = 1.2, objectHeightM = 0.9, visibleFromM = 0.05), geometry(25.0, heightM = 1.2f))
         assertEquals(ContactValidity.VALID, e.validity)
@@ -199,7 +199,7 @@ class GroundContactDistanceTest {
 
     @Test
     fun `the height check allows the same gravity error as the distance interval`() {
-        // Review round 1, P2: camera at 1 m, a 0.7 m object 6 m ahead, 25 degrees down, gravity off
+        // Camera at 1 m, a 0.7 m object 6 m ahead, 25 degrees down, gravity off
         // by just under the 2 degree tolerance. The interval still holds the truth, so the contact
         // must not be thrown out as implausible either.
         val b = box(6.0, 25.0, heightM = 1.0, objectHeightM = 0.7)
@@ -235,7 +235,7 @@ class GroundContactDistanceTest {
 
     @Test
     fun `a box is implausible only if no allowed gravity and height make it fit`() {
-        // Review round 2, P2: the rejection must hold for every gravity in the tolerance cone --
+        // The rejection must hold for every gravity in the tolerance cone --
         // the rim and the interior -- and every allowed phone height. Searched by sampling: any
         // sample that fits while the estimator rejected the box is a counterexample.
         val ranges = mapOf(ObstacleCategory.PERSON to 0.7..2.4, ObstacleCategory.BICYCLE to 0.6..2.2, ObstacleCategory.VEHICLE to 0.9..4.5)
@@ -243,7 +243,8 @@ class GroundContactDistanceTest {
         val delta = Math.toRadians(config.gravityToleranceDeg.toDouble())
         val random = Random(20261021)
         data class Case(val pitch: Double, val roll: Double, val h: Float, val box: NormalizedRect, val category: ObstacleCategory)
-        val reviewCases = listOf(
+        // Two boxes that fit, but only at the edge of what the tolerances allow.
+        val knownFits = listOf(
             Case(25.0, 17.0, 1.0f, NormalizedRect(0.59f, 0.3890047f, 0.1f, 0.2609953f), ObstacleCategory.PERSON),
             Case(81.09889, 0.0, 1.0f, NormalizedRect(0.45f, 0.594f, 0.1f, 0.006f), ObstacleCategory.PERSON),
         )
@@ -257,7 +258,7 @@ class GroundContactDistanceTest {
             )
         }
         var rejected = 0
-        for (case in reviewCases + randomCases) {
+        for (case in knownFits + randomCases) {
             val geometry = geometry(case.pitch, heightM = case.h, rollDeg = case.roll)
             val e = estimate(case.box, geometry, case.category, config = config)
             if (e.validity != ContactValidity.IMPLAUSIBLE_BOX) continue
@@ -275,7 +276,7 @@ class GroundContactDistanceTest {
                 }
             }
         }
-        // Review round 3: a bottom ray within the tolerance of straight down (H reaches h there).
+        // A bottom ray within the tolerance of straight down (H reaches h there).
         val pole = Case(81.09889, 0.0, 0.78262f, NormalizedRect(0.45f, 0.594f, 0.1f, 0.006f), ObstacleCategory.VEHICLE)
         val poleEstimate = estimate(pole.box, geometry(pole.pitch, heightM = pole.h), pole.category, config = config)
         assertTrue("$pole: ${poleEstimate.validity}", poleEstimate.validity != ContactValidity.IMPLAUSIBLE_BOX)
@@ -286,8 +287,8 @@ class GroundContactDistanceTest {
         val edge = Case(81.09889, 0.0, (0.9 / 1.15 * (1 + 5e-7)).toFloat(), NormalizedRect(0.45f, 0.23f, 0.1f, 0.37f), ObstacleCategory.VEHICLE)
         val edgeEstimate = estimate(edge.box, geometry(edge.pitch, heightM = edge.h), edge.category, config = config)
         assertTrue("$edge: ${edgeEstimate.validity}", edgeEstimate.validity != ContactValidity.IMPLAUSIBLE_BOX)
-        // The two review cases fit within the tolerances, so they must not be rejected.
-        for (case in reviewCases) {
+        // The known fits are within the tolerances, so they must not be rejected.
+        for (case in knownFits) {
             val e = estimate(case.box, geometry(case.pitch, heightM = case.h, rollDeg = case.roll), case.category, config = config)
             assertTrue("$case: ${e.validity}", e.validity != ContactValidity.IMPLAUSIBLE_BOX)
         }

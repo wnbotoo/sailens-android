@@ -15,7 +15,7 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * The debug TTS-duration tool (det-first plan D1.7): measures every Guidance sentence in one
+ * The debug TTS-duration tool: measures every Guidance sentence in one
  * language at the user's speech rate and writes the table under [outputDir], numbers and the
  * sentences only, for `docs/experiments/`.
  */

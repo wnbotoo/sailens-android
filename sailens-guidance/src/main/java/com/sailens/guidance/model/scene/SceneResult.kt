@@ -19,9 +19,9 @@ data class SceneResult(
     val obstacleDetections: List<ObstacleDetection> = emptyList(),
     val debugInfo: SceneDebugInfo? = null,
     val events: List<SceneEvent>,
-    /** M3o: the camera's geometry and the phone's rotation for this frame. Nothing decides on them yet. */
+    /** The camera's geometry and the phone's rotation for this frame. Nothing decides on them yet. */
     val cameraGeometry: CameraGeometry? = null,
     val motion: MotionState? = null,
-    /** det-first plan D5: what Guidance cannot judge in this frame; the shell tells the user. */
+    /** What Guidance cannot judge in this frame; the shell tells the user. */
     val visionFaults: VisionFaults = VisionFaults.NONE,
 )

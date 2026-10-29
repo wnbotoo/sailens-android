@@ -42,8 +42,8 @@ class FrameQualityAnalyzer(
     /**
      * 当帧的测量值：亮度均值、亮度标准差和清晰度。帧无法采样时为 null（此时判定为 OK）。
      *
-     * 测量与判定分开，是为了 M0b 模型回归记录：记录测量值，回放时从这里继续，阈值改了也能在录像
-     * 上重新判定。
+     * 测量与判定分开，是为了模型回归记录：记录测量值，回放时从这里继续，阈值改了也能在录像上
+     * 重新判定。
      */
     fun measure(frame: ImageFrame): FrameQualityMeasurement? = sampleLuma(frame)
 
@@ -66,7 +66,7 @@ class FrameQualityAnalyzer(
      */
     fun analyze(frame: ImageFrame): FrameQuality = analyzeDetailed(frame).stabilized
 
-    /** 与 [analyze] 相同，同时给出测量值和未去抖判定（供 M0b 记录）。 */
+    /** 与 [analyze] 相同，同时给出测量值和未去抖判定（供模型回归记录）。 */
     fun analyzeDetailed(frame: ImageFrame): FrameQualityResult = analyzeMeasured(measure(frame))
 
     /** 从已有的测量值继续：判定再去抖。回放用；与 [analyze] 走同一条路。 */

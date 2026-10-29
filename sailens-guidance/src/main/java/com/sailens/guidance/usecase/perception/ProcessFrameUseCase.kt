@@ -103,7 +103,7 @@ class ProcessFrameUseCase(
     }
 
     /**
-     * @param geometry the frame's camera geometry (M3o), for the ground-contact distance (M3a). Null
+     * @param geometry the frame's camera geometry, for the ground-contact distance. Null
      *   leaves every distance at today's image-position estimate.
      */
     suspend operator fun invoke(frame: ImageFrame, geometry: CameraGeometry? = null): Result<PerceptionResult> = coroutineScope {

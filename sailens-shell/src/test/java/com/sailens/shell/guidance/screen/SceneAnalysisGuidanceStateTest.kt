@@ -69,8 +69,8 @@ class SceneAnalysisGuidanceStateTest {
 
     @Test
     fun `an outage that began under the screen reader is announced when own speech is back`() {
-        // Review round 1: a failure under the screen reader raised no alert, and switching the
-        // screen reader off left the engine state where it was, so no change ever alerted.
+        // A failure under the screen reader raises no alert, and switching the screen reader off leaves
+        // the engine state where it was: the alert must still come once own speech is back.
         assertFalse(alertDue(SpeechEngineState.READY, screenReader = true))
         assertFalse(alertDue(SpeechEngineState.UNAVAILABLE, screenReader = true))
 

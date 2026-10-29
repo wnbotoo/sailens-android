@@ -10,7 +10,8 @@ data class Vec3(val x: Float, val y: Float, val z: Float) {
 }
 
 /**
- * Converts Android device-frame gravity into the camera frame of the upright analysis image (§2):
+ * Converts Android device-frame gravity into the camera frame of the upright analysis image
+ * (docs/geometry.md §1):
  * x right, y down, z forward. Back camera only.
  */
 object GravityInCamera {
@@ -44,7 +45,7 @@ object GravityInCamera {
     private fun dot(a: Vec3, b: Vec3) = a.x * b.x + a.y * b.y + a.z * b.z
 }
 
-/** Which clock the frame time was taken from (§2). */
+/** Which clock the frame time was taken from (docs/geometry.md §1). */
 enum class TimeBasis {
     /** The camera timestamp, which shares the sensors' elapsed-realtime base. */
     CAMERA_REALTIME,
@@ -87,7 +88,7 @@ sealed interface GeometryQuality {
 }
 
 /**
- * The camera's geometry for one frame (§3, M3o). [gravityInCamera] and [intrinsics] are null exactly
+ * The camera's geometry for one frame (docs/geometry.md §3). [gravityInCamera] and [intrinsics] are null exactly
  * when the quality is [GeometryQuality.Unavailable] for that reason.
  */
 data class CameraGeometry(

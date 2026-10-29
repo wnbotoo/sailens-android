@@ -12,7 +12,7 @@ import com.sailens.guidance.trace.capture.RegressionUtteranceRecord
 import java.util.UUID
 
 /**
- * Observes the decision path for the model-regression record (M0b). Every hook is an observation:
+ * Observes the decision path for the model-regression record. Every hook is an observation:
  * it must not change, delay or fail the path it watches. The capture side (debug only) implements
  * it; everywhere else it is [None], and callers check [isRecording] before doing any work for it.
  *
@@ -26,7 +26,7 @@ interface RegressionRecorder {
 
     fun beginFrame(frame: ImageFrame) {}
 
-    /** The camera geometry the frame was processed with (M3o), which the ground-contact distance reads. */
+    /** The camera geometry the frame was processed with, which the ground-contact distance reads. */
     fun onGeometry(geometry: CameraGeometry) {}
 
     /** A value one of the injected clocks returned ([com.sailens.guidance.trace.capture.RegressionClocks]). */
@@ -56,8 +56,8 @@ interface RegressionRecorder {
     fun onRevoke(eventId: UUID, decisionsBefore: Long) {}
 
     /**
-     * A speech-lifecycle event of an utterance submitted in the session [sessionId] (det-first plan
-     * D1.3). Comes from any thread, the speech engine's included; must not block. Recorded only into
+     * A speech-lifecycle event of an utterance submitted in the session [sessionId]. Comes from any
+     * thread, the speech engine's included; must not block. Recorded only into
      * that very session: a late event of an ended session is not written into the next one.
      */
     fun onUtterance(sessionId: String?, record: RegressionUtteranceRecord) {}

@@ -53,8 +53,8 @@ import kotlinx.coroutines.runBlocking
 import java.util.UUID
 
 /**
- * Replays a model-regression record through the real decision path on the JVM (M0b exit: "replaying
- * a record reproduces the recorded events exactly").
+ * Replays a model-regression record through the real decision path on the JVM: replaying a record
+ * reproduces the recorded events exactly.
  *
  * Real code: `ProcessFrameUseCase`, `AnalyzeSceneUseCase` and every processor in it, the
  * frame-quality debouncing, `DecideEventsUseCase` with its generator, resolver, merger and cooldown.

@@ -5,8 +5,8 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
 /**
- * Field capture format (M0a, docs/local-navigation-implementation.md §4), with the model-regression
- * record of M0b (§4, "M0b") in the same directory.
+ * Field capture format (docs/field-capture.md §2), with the model-regression record
+ * (docs/field-capture.md §7) in the same directory.
  *
  * One directory per Guidance session, named after the trace session id:
  *
@@ -78,7 +78,7 @@ object CaptureSchema {
 
 /**
  * Capture modes. The manifest stores the mode as an open string so that a mode added in a later
- * minor version (M0b's `model_regression`) is carried through by an older reader instead of making
+ * minor version (as `model_regression` was) is carried through by an older reader instead of making
  * the whole manifest unreadable.
  */
 object CaptureModes {
@@ -92,7 +92,7 @@ object CaptureModes {
     const val TIMING_SYNC: String = "timing_sync"
 
     /**
-     * Field evidence plus the model-regression record (M0b): every processed frame's model outputs,
+     * Field evidence plus the model-regression record: every processed frame's model outputs,
      * clock readings and decisions, so the decision path can be replayed exactly on the JVM; and
      * full-resolution frames around delivered prompts and markers.
      */

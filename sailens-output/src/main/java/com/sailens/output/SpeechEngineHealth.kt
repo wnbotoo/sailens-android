@@ -4,9 +4,9 @@ package com.sailens.output
  * Whether a TTS engine that once came up is still speaking, and what [SpeechManager] reports
  * meanwhile.
  *
- * An engine can stop working long after it was initialized: on 2026-10-28 an app process that had
- * run for about 30 hours got `TextToSpeech.ERROR` from every `speak()` (448 in a row), while the
- * engine still counted as ready. Nothing was said, nothing was reported, and the user walked on
+ * An engine can stop working long after it was initialized: in an app process that had run for
+ * about 30 hours, every `speak()` returned `TextToSpeech.ERROR` (448 in a row) while the engine
+ * still counted as ready. Nothing was said, nothing was reported, and the user walked on
  * believing the way was clear. `speak()` fails that way when the engine service is no longer
  * connected; the remedy is a new engine instance.
  *

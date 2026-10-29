@@ -10,7 +10,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 
 /**
- * What the user said about carrying the phone (M3a), and whether the ground-contact distance is
+ * What the user said about carrying the phone, and whether the ground-contact distance is
  * switched on.
  *
  * @param bodyHeightCm optional; only used together with a [placement].
@@ -28,7 +28,7 @@ data class PhoneGeometryChoice(
 
 /**
  * Persists [PhoneGeometryChoice]. Guidance reads [current] once per frame, so it is a plain value
- * read; the only writer is the debug "ground-contact distance" screen until M3a's enable gate is met.
+ * read; the only writer is the debug "ground-contact distance" screen, so release reads the seed.
  */
 class PhoneGeometryStore internal constructor(private val persistence: Persistence) {
 

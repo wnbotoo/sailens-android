@@ -35,7 +35,7 @@ class CameraIntrinsicsResolverTest {
         FrameFacts(1280, 720, rotation, 0L, 0L, transform)
 
     @Test
-    fun `every M2a scenario resolves to the simulator's class-map intrinsics`() {
+    fun `every simulator scenario resolves to the simulator's class-map intrinsics`() {
         for (scenario in Scenarios.all) {
             val facts = scenario.facts(0)
             val intrinsics = checkNotNull(CameraIntrinsicsResolver.resolve(facts.camera.toCameraFacts(), FrameFacts.of(facts.frame)))

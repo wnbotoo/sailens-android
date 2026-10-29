@@ -10,7 +10,7 @@ import org.junit.Test
 import kotlin.random.Random
 
 /**
- * det-first plan D1.6 reads the cooldown through [CooldownManager.snapshot]. It must say exactly
+ * The prompt-policy evaluation reads the cooldown through [CooldownManager.snapshot]. It must say exactly
  * what [CooldownManager.filter] decides at the same moment, and change nothing.
  */
 class CooldownSnapshotTest {

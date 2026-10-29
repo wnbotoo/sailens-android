@@ -64,7 +64,7 @@ import kotlin.random.Random
 
 /**
  * Runs a [Scenario] through the real Guidance pipeline (`StartSceneAnalysisUseCase` and everything
- * below it) with fakes only at the model boundary (M2a, implementation doc §6). Deterministic: a
+ * below it) with fakes only at the model boundary (docs/geometry.md §7). Deterministic: a
  * fake clock that advances by the scenario's step, seeded camera noise, no threads of its own.
  *
  * Wired as `DomainBindingsModule` wires the app, with two substitutions, both because the native
@@ -75,8 +75,9 @@ import kotlin.random.Random
  * - semantic stats are computed by the Kotlin extractor from the class map, where the device gets
  *   them from the fused native postprocess.
  *
- * Today's Guidance decides on no pose; the scenario's pose shapes what the models report (the class
- * map and boxes move with pitch and height). M3o's geometry is fed the scenario's own raw facts
+ * With the ground-contact distance off, Guidance decides on no pose; the scenario's pose shapes what
+ * the models report (the class map and boxes move with pitch and height). The camera geometry is fed
+ * the scenario's own raw facts
  * ([Scenario.facts]) -- camera record, sensor-to-buffer transform, gravity -- exactly as the app
  * feeds it a live camera, and its pitch is part of the golden line.
  */
@@ -87,7 +88,7 @@ class GuidanceSimulator(
         profile = PerceptionProfile.DEFAULT,
         realtimeObstacleProviderType = ObstacleProviderType.DETECTION_MODEL,
     ),
-    /** The phone settings the user would have set (M3a); the scenario's pose is the truth they approximate. */
+    /** The phone settings the user would have set; the scenario's pose is the truth they approximate. */
     private val phoneGeometry: () -> PhoneGeometrySettings = { PhoneGeometrySettings.DEFAULT },
 ) {
     private val semantics = CityscapesNavigationSemantics
@@ -191,7 +192,7 @@ class GuidanceSimulator(
 
     /**
      * The analysis frame as the camera would deliver it: the scenario camera's buffer size, rotation,
-     * timestamps and sensor-to-buffer transform (what M3o reads), and luma for the frame-quality
+     * timestamps and sensor-to-buffer transform (what the camera geometry reads), and luma for the frame-quality
      * check -- textured, or flat when the lens is covered. Only the luma the check samples is filled.
      */
     private fun cameraFrame(scenario: Scenario, index: Int, covered: Boolean): ImageFrame {
@@ -221,7 +222,7 @@ class GuidanceSimulator(
          * One golden line per frame: what Guidance decided and the analysis behind it. Floats are
          * rounded to 4 decimals, so a last-bit difference between JVMs does not look like a change
          * of behaviour. [distances] adds each event's distance (what decides the "near" wording) and
-         * each obstacle's distance evidence (M3a): today's level, the contact's validity and interval
+         * each obstacle's distance evidence: today's level, the contact's validity and interval
          * (metres, 2 decimals).
          */
         fun goldenLine(result: SceneResult, distances: Boolean = false): String {

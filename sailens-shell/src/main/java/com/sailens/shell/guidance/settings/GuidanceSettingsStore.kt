@@ -17,7 +17,7 @@ data class GuidanceFeedbackSettings(
      */
     val speechRate: Float = SpeechManager.DEFAULT_SPEECH_RATE,
     /**
-     * 故障告警震动（det 优先 D5）：镜头遮挡、过暗、认不出地面时的震动。这是用户自己的选择；
+     * 故障告警震动：镜头遮挡、过暗、认不出地面时的震动。这是用户自己的选择；
      * 实际生效的是 [faultHapticsInEffect]。
      */
     val faultHapticsEnabled: Boolean = true,

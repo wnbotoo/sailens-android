@@ -1,7 +1,7 @@
 package com.sailens.guidance.model.analysis
 
 /**
- * What Guidance cannot judge in this frame and must tell the user about (det-first plan D5): exactly the
+ * What Guidance cannot judge in this frame and must tell the user about: exactly the
  * states it generates the SENSOR_QUALITY and GROUND_UNRECOGNIZED events for, before any cooldown.
  *
  * Those events are throttled by the cooldown and offered only when they are the frame's first, so the

@@ -123,7 +123,7 @@ internal data class TimingSyncConfig(
 )
 
 /**
- * Field capture for one Guidance session at a time (M0a, implementation §4), in one of two modes:
+ * Field capture for one Guidance session at a time (docs/field-capture.md), in one of two modes:
  * [CaptureModes.FIELD_EVIDENCE] (reduced JPEG frames for the whole session) or
  * [CaptureModes.TIMING_SYNC] (a short burst of raw luma at camera rate).
  *
@@ -157,7 +157,7 @@ internal class FieldCaptureController(
     private val exporter: CaptureExporter? = null,
     /** Heavy session management (listing, ZIP export): never on the writer thread. */
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
-    /** The model-regression part of a `model_regression` capture (M0b); null records none. */
+    /** The model-regression part of a `model_regression` capture; null records none. */
     private val regression: RegressionCapture? = null,
     private val sessionLabels: () -> SessionLabels = { SessionLabels() },
     private val freeBytes: () -> Long = { root.usableSpace },

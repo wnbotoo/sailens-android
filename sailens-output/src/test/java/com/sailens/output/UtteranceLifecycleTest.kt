@@ -8,7 +8,7 @@ import java.util.Collections
 import java.util.concurrent.CountDownLatch
 
 /**
- * The attempt bookkeeping behind the speech lifecycle (det-first plan D1.3), in the orders the
+ * The attempt bookkeeping behind the speech lifecycle, in the orders the
  * engine and the main thread can actually interleave.
  *
  * What is under test is attribution: every event names the logical utterance, the engine generation

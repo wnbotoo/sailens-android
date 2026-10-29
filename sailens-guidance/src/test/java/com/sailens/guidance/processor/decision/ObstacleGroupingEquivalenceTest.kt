@@ -18,7 +18,7 @@ import org.junit.Test
 import kotlin.random.Random
 
 /**
- * det-first plan D1.1-2: the obstacle grouping moved out of `createObstacleEvents` into the pure
+ * The obstacle grouping moved out of `createObstacleEvents` into the pure
  * [EventGenerator.announcedObstacleGroups], which production still calls. Its events must be the
  * ones the code before the move made, bit for bit (ids aside: they are random).
  *

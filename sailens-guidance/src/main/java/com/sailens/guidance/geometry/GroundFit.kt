@@ -34,14 +34,14 @@ enum class GroundFitValidity {
     SUPPORT_SWITCH,
 
     /**
-     * Disparity falls toward the bottom of the image: the model outputs depth, not disparity (§9).
+     * Disparity falls toward the bottom of the image: the model outputs depth, not disparity.
      * Static preflight cannot see this; the output is refused rather than read upside down.
      */
     INVERSE_OUTPUT,
 }
 
 /**
- * The ground seen in one depth frame (§3, M3b), in analysis-image coordinates on a grid of the
+ * The ground seen in one depth frame (docs/geometry.md §6), in analysis-image coordinates on a grid of the
  * caller's choosing (the class map's, so it composes with sem). Cells the depth model did not see
  * are in no mask: unknown, never ground.
  *
@@ -81,7 +81,7 @@ data class GroundObservation(
 }
 
 /**
- * Gravity-constrained ground fit on a disparity map (§9): sample the lower image below the horizon,
+ * Gravity-constrained ground fit on a disparity map: sample the lower image below the horizon,
  * RANSAC the line `d = A·q + t`, refit on the inliers, then label a grid. Deterministic (seeded).
  * Not thread-safe: one per pipeline. It keeps a little history -- coverage for stability, the last
  * below-ground region for the support-switch guard -- so [reset] between sessions.
@@ -96,9 +96,8 @@ data class GroundObservation(
  * @param minQ samples closer to the horizon than this (radians, roughly) are not used: their
  *   ground prediction is too flat to tell ground from far structure.
  * @param minInlierRatio below this, there is no ground in view.
- * @param sampleFromRow the fit samples only the image below this fraction of its height (§9: "the
- *   lower part"). Near ground dominates there; far ground is where a small step or a gentle slope
- *   differs from the plane by less than the threshold, and would bend the fit if it were sampled.
+ * @param sampleFromRow the fit samples only the image below this fraction of its height. Near
+ *   ground dominates there; far ground is where a small step or a gentle slope differs from the plane by less than the threshold, and would bend the fit if it were sampled.
  *   The labels still cover the whole image.
  */
 class GroundFitter(
@@ -286,9 +285,9 @@ class GroundFitter(
                 val switched = !holdingSwitch && flipped >= SWITCH_FLIP_FRACTION * previousCount
                 // Held until a fit again sees a level below its ground: two levels together, the
                 // near one under the user. Nothing else releases it -- not time: a user standing at
-                // the edge gives any number of identical frames, and none of them shows a step down
-                // (review finding). Rotation-only motion cannot show one either; a translation
-                // estimate (M5b) could, later. A new session starts clear ([reset]).
+                // the edge gives any number of identical frames, and none of them shows a step down.
+                // Rotation-only motion cannot show one either; only a translation estimate could.
+                // A new session starts clear ([reset]).
                 val twoLevelsAgain = below.countTrue() >= MIN_BELOW_CELLS_FRACTION * gridWidth * gridHeight
                 if (switched || (holdingSwitch && !twoLevelsAgain)) {
                     holdingSwitch = true

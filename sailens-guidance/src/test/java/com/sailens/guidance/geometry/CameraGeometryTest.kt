@@ -124,7 +124,7 @@ class CameraGeometryTest {
         assertTrue(GeometryIssue.NO_SENSOR_ORIENTATION in quality.issues)
     }
 
-    /** M3o resolves every simulated frame back to the scenario's own truth: pitch and intrinsics. */
+    /** Every simulated frame resolves back to the scenario's own truth: pitch and intrinsics. */
     @Test
     fun `scenario raw facts resolve to the scenario's pose`() {
         for (scenario in Scenarios.all) {

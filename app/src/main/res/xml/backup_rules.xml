@@ -5,6 +5,6 @@
 -->
 <full-backup-content>
     <!-- Field captures contain camera frames of people and places; they leave the device only when
-         the user exports them (local-navigation-implementation §4). -->
+         the user exports them (docs/field-capture.md §1). -->
     <exclude domain="file" path="captures/" />
 </full-backup-content>

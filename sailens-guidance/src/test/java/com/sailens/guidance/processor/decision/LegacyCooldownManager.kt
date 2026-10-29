@@ -6,9 +6,9 @@ import com.sailens.guidance.model.scene.SceneEvent
 import java.util.UUID
 
 /*
- * The cooldown as it was at a669901, before det-first plan D3a-1 replaced its revocation: a verbatim
- * copy (only the class name changed, and state() added at the end), kept as the reference the new
- * implementation is proven equal to (CooldownRevocationEquivalenceTest). Do not "fix" it.
+ * The cooldown as it was at a669901, before its revocation was replaced: the code copied verbatim
+ * (only the class name changed, and state() added at the end; comments follow today's rules), kept
+ * as the reference the new implementation is proven equal to (CooldownRevocationTest). Do not "fix" it.
  */
 
 /**
@@ -95,7 +95,7 @@ class LegacyCooldownManager(
     /**
      * 一次决策里对冷却的全部操作（设静止、过滤、记录）作为一个整体执行：送达方的撤销来自另一个
      * 线程，只能落在两次决策之间，不会插进一次决策的过滤和记录之间。这样撤销的位置是确定的，
-     * M0b 回放才能精确复现。
+     * 模型回归记录的回放才能精确复现。
      */
     @Synchronized
     fun <T> decide(block: LegacyCooldownManager.() -> T): T {
@@ -204,7 +204,7 @@ class LegacyCooldownManager(
     }
 
     /**
-     * A read-only copy of the records, for measurement (det-first plan D1.6): taken just before a
+     * A read-only copy of the records, for measurement: taken just before a
      * decision with that decision's [now] and motion state, it says which keys hold an event back and
      * at what recorded priority. Changes nothing -- not even the emission window, which is counted,
      * not trimmed.

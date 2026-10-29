@@ -1,7 +1,7 @@
-# Field capture tools (M0a)
+# Field capture tools
 
 PC-side tools for the debug build's field captures
-([implementation §4](../../docs/local-navigation-implementation.md)). They read an exported
+([`docs/field-capture.md`](../../docs/field-capture.md)). They read an exported
 capture ZIP (unpacked) or a directory pulled with `adb`, and never modify it.
 
 ```bash

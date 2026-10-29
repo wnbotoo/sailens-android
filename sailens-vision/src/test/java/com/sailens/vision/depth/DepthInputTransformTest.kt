@@ -68,7 +68,7 @@ class DepthInputTransformTest {
     }
 
     /**
-     * Fractional padding (review finding on #25): 960x1280 padded into 518x518 leaves 64.75 tensor
+     * Fractional padding: 960x1280 padded into 518x518 leaves 64.75 tensor
      * pixels each side, so the first content pixel is not where the padding ends.
      */
     @Test
@@ -87,7 +87,7 @@ class DepthInputTransformTest {
     }
 
     /**
-     * Half-pixel padding (review finding on #25): 640x1280 into 518x518 pads 129.5 each side, so
+     * Half-pixel padding: 640x1280 into 518x518 pads 129.5 each side, so
      * pixel 388's centre sits exactly on the open right end of the content and is padding.
      */
     @Test

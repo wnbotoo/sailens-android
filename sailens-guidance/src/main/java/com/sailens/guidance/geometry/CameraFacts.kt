@@ -5,7 +5,7 @@ import com.sailens.guidance.trace.capture.CaptureCameraRecord
 import com.sailens.guidance.trace.capture.FrameRecord
 
 /*
- * The raw facts M3o resolves (local-navigation-implementation §3, §7), in the form both sources
+ * The raw facts the camera geometry is resolved from (docs/geometry.md §2), in the form both sources
  * share: a live camera binding and a recorded capture. Resolving a recording takes exactly the same
  * path as resolving the live camera, so old captures stay usable.
  */

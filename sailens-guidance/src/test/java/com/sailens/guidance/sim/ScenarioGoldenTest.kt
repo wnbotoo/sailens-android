@@ -6,8 +6,8 @@ import org.junit.Test
 import java.io.File
 
 /**
- * Every M2a scenario, run through the real pipeline, must produce its golden output line for line
- * (implementation doc §6). A change in Guidance behaviour shows up here as a diff to review; when it
+ * Every simulator scenario, run through the real pipeline, must produce its golden output line for
+ * line (docs/geometry.md §7). A change in Guidance behaviour shows up here as a diff to review; when it
  * is intended, regenerate and commit the goldens with the change:
  *
  * ```

@@ -42,7 +42,7 @@ public class BinaryMask private constructor(
         val wordCount = (width * height + Long.SIZE_BITS - 1) / Long.SIZE_BITS
         val target = if (reusable.size >= wordCount) reusable else LongArray(wordCount)
         // BitSet 的内部字就是这里要的打包格式；整块复制。逐位 nextSetBit 在 360×640 的掩码上要走
-        // 十万次左右，SM8850 上每次调用 1–3 ms，而它在每帧的 native 连通性路径上（M0b ABAB 实测）。
+        // 十万次左右，SM8850 上每次调用 1–3 ms（录制开/关交替对比实测），而它在每帧的 native 连通性路径上。
         // toLongArray 只到最后一个非零字，余下的补零。代价是每次一个约 29 KB 的临时数组。
         val words = bits.toLongArray()
         val copied = minOf(words.size, wordCount)

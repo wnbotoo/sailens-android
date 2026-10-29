@@ -94,7 +94,7 @@ import java.util.concurrent.atomic.AtomicLong
 import kotlin.random.Random
 
 /**
- * M0b exit criterion (3), in CI: a synthetic Guidance session through the real
+ * In CI: a synthetic Guidance session through the real
  * `StartSceneAnalysisUseCase` decides the same with recording on and off, and its record replays
  * exactly through [RegressionReplay]. This is also what keeps the replay harness's per-frame order
  * in step with the production pipeline.
@@ -233,8 +233,8 @@ class RegressionReplayRoundTripTest {
 
     /**
      * The phone tilting between 26 and 38 degrees down over a few seconds, as gravity samples at
-     * any time asked; the camera is the M2a scenarios' (its buffer mapping is assumed for these
-     * small frames). With it, the ground-contact distance (M3a) has something to work on.
+     * any time asked; the camera is the simulator scenarios' (its buffer mapping is assumed for these
+     * small frames). With it, the ground-contact distance has something to work on.
      */
     private val tiltingPhone = object : OrientationSource {
         private val noRotation = MotionTracker()
@@ -574,12 +574,12 @@ class RegressionReplayRoundTripTest {
         assertTrue(recorded.text, recorded.text.contains("births identical in the exact and all_delivered runs: yes"))
     }
 
-    /** The phone settings the M3a sessions here ran with, so the evaluation's exact run matches. */
+    /** The phone settings the ground-contact sessions here ran with, so the evaluation's exact run matches. */
     private val evaluation = GroundContactEvaluation(PhoneGeometrySettings(1.3f, HeightSource.PRESET, Placement.HANDHELD_CHEST))
 
     @Test
-    fun `the evaluation of a capture recorded with M3a on compares against M3a really off`() {
-        // Review round 2, P1: built from the recorded config alone, the "off" baseline stayed on.
+    fun `the evaluation of a capture recorded with the ground contact on compares against it really off`() {
+        // Built from the recorded config alone, the "off" baseline would stay on.
         val result = withTempDir { dir -> evaluation.evaluate(writeCapture(runSession(record = true, groundContact = true), dir))!! }
         assertTrue(result.recordedOn)
         assertEquals(emptyList<String>(), result.problems)
@@ -591,7 +591,7 @@ class RegressionReplayRoundTripTest {
     }
 
     @Test
-    fun `the evaluation of a capture recorded with M3a off has the device as its off baseline`() {
+    fun `the evaluation of a capture recorded with the ground contact off has the device as its off baseline`() {
         val result = withTempDir { dir -> evaluation.evaluate(writeCapture(runSession(record = true), dir))!! }
         assertTrue(!result.recordedOn)
         assertEquals(emptyList<String>(), result.problems)
@@ -600,7 +600,7 @@ class RegressionReplayRoundTripTest {
 
     @Test
     fun `a truncated or unfinished capture is evaluated but never counted complete`() {
-        // Review round 2, P2: the records read must not vouch for themselves.
+        // The records read must not vouch for themselves.
         val session = runSession(record = true)
         val truncated = withTempDir { dir -> evaluation.evaluate(writeCapture(session, dir, frames = session.recorder!!.frames.take(5)))!! }
         assertEquals(emptyList<String>(), truncated.problems)

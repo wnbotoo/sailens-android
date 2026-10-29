@@ -31,7 +31,7 @@ class DecideEventsUseCase(
     private val regressionRecorder: RegressionRecorder = RegressionRecorder.None,
 ) {
     /**
-     * Which of the states Guidance must tell the user about hold in [snapshot] (det-first plan D5), by
+     * Which of the states Guidance must tell the user about hold in [snapshot], by
      * the generator's own test. Decides nothing and changes nothing.
      */
     fun visionFaults(snapshot: SceneSnapshot): VisionFaults = eventGenerator.visionFaults(snapshot)
@@ -71,7 +71,7 @@ class DecideEventsUseCase(
 
 /**
  * 送达方的回执：[DecideEventsUseCase] 选出的那条事件至少有一个通道接收了。它的冷却记录从此不能
- * 再撤回。不改变任何冷却判断，所以不进 M0b 录制：回放只按录下的撤回复现（见 [CooldownManager.confirm]）。
+ * 再撤回。不改变任何冷却判断，所以不进模型回归记录：回放只按录下的撤回复现（见 [CooldownManager.confirm]）。
  */
 class ConfirmDeliveredEventUseCase(
     private val cooldownManager: CooldownManager,

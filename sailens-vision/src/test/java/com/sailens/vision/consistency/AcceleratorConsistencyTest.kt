@@ -47,7 +47,7 @@ class AcceleratorConsistencyTest {
     @Test
     fun `a shaken phone is inconclusive, a replaced region fails`() {
         fun frames(vararg a: Float) = a.map { ClassMapAgreement(it, 100, emptyList()) }
-        // Measured 2026-10-11 on SM8850: the correct v0.6.6 export with the phone shaking...
+        // Measured on SM8850: the correct v0.6.6 export with the phone shaking...
         assertEquals(
             ConsistencyVerdict.INCONCLUSIVE,
             judgeSemantic(frames(0.867f, 0.956f, 0.861f, 0.865f, 0.967f, 0.964f, 0.96f, 0.96f)).verdict,
@@ -110,7 +110,7 @@ class AcceleratorConsistencyTest {
 
     @Test
     fun `detection verdict is pooled over frames`() {
-        // The 2026-10-11 failure: the CPU sees the chair on every frame, the GPU never.
+        // The broken GPU export: the CPU sees the chair on every frame, the GPU never.
         val blind = List(8) { DetectionAgreement(1, 0, 0, 0) }
         assertEquals(ConsistencyVerdict.FAIL, judgeDetection(blind).verdict)
         assertEquals(0f, judgeDetection(blind).recall!!, 0f)
