@@ -37,20 +37,22 @@ class PairedBranchRunTest {
         return run.finish()
     }
 
-    private fun local(
+    private fun sampled(
         deadlineMs: Long,
         frames: List<Long>,
         baseline: Map<Long, SpeakerModel.Offer>,
         arm: Map<Long, SpeakerModel.Offer>,
         credited: String,
-        differences: java.util.TreeSet<Long>,
+        differences: Set<Long>,
     ): PairedBranchRun.Result {
-        val run = LocalPairedRun(
+        val run = SampledPairedRun(
             ClosedLoopSpeakerBranches(heldAfterDone = false, frameSkewMs = 0),
             listOf(BranchLoadMeasure.Target(target, emptySet(), deadlineMs)),
             emptyList(),
-            differences,
-            lookBackMs = 8_000,
+            differs = { it in differences },
+            differsNear = { t -> differences.any { it in (t - 8_000)..t } },
+            samples = 32,
+            frameSkewMs = 0,
         )
         for (t in frames) {
             run.onFrame(
@@ -59,16 +61,25 @@ class PairedBranchRunTest {
                 { arm[t]?.let { o -> decision(o, if (o.id == credited) listOf(target) else emptyList()) } },
             )
         }
-        return run.finish()
+        run.finish()
+        return run.result(32)
     }
 
     @Test
-    fun `judged alone, a stage kept before its look-back stays kept, and an arm that changes nothing scores nothing`() {
-        val p = offer(0, "p", 3, 1_000)
-        val frames = (0L..40_000L step 1_000L).toList()
-        val result = local(30_000, frames, mapOf(0L to p), mapOf(0L to p), "p", sortedSetOf())
-        assertEquals(setOf(target), result.kept)
+    fun `by samples, an arm that changes nothing scores nothing, and a stage lost in both is not a regression`() {
+        val a = offer(0, "a", 2, 1_010)
+        val p = offer(1_000, "p", 2, 1_000)
+        val offers = mapOf(0L to a, 1_000L to p)
+        val result = sampled(2_500, listOf(0L, 1_000L, 2_000L, 3_000L), offers, offers, "p", emptySet())
         assertEquals(emptySet<StageKey>(), result.regressions)
+        assertTrue("A runs long in some sample, in both arms", target in result.armLostAnyBranch)
+    }
+
+    @Test
+    fun `by samples, an arm that drops the prompt is a regression`() {
+        val p = offer(0, "p", 3, 1_000)
+        val result = sampled(1_500, listOf(0L, 1_000L, 2_000L), mapOf(0L to p), emptyMap(), "p", setOf(0L))
+        assertEquals(setOf(target), result.regressions)
     }
 
     @Test
@@ -90,7 +101,7 @@ class PairedBranchRunTest {
         val frames = listOf(0L, 1_010L, 2_020L, 3_200L, 4_000L)
         val result = run(3_600, frames, mapOf(0L to a, 2_020L to p), mapOf(0L to a, 1_010L to b, 2_020L to p), "p", differences = setOf(1_010L))
         assertEquals(setOf(target), result.regressions)
-        assertEquals("judged alone from a nominal start, as well", setOf(target), local(3_600, frames, mapOf(0L to a, 2_020L to p), mapOf(0L to a, 1_010L to b, 2_020L to p), "p", sortedSetOf(1_010L)).regressions)
+        assertEquals("by samples, as well", setOf(target), sampled(3_600, frames, mapOf(0L to a, 2_020L to p), mapOf(0L to a, 1_010L to b, 2_020L to p), "p", setOf(1_010L)).regressions)
     }
 
     @Test

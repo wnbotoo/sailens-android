@@ -18,8 +18,8 @@ import com.sailens.guidance.processor.decision.CooldownManager
  *
  * @param inWindow a frame within the look-back before a difference frame, where branches open.
  * @param differsNear a difference frame within the look-back before this deadline.
- * Over a whole session the joint count still grows without bound where the policies differ often, so
- * [LocalPairedRun] uses this one stage at a time, from a nominal start shortly before its deadline.
+ * Over a whole session the joint count still grows without bound where the policies differ often. This
+ * class is the exact reference; [SampledPairedRun] is what scales.
  *
  * @param liveCooldown what of a cooldown state can still affect a decision at the time given.
  */
@@ -31,10 +31,6 @@ internal class PairedBranchRun(
     private val differsNear: (Long) -> Boolean,
     private val liveCooldown: (CooldownManager.Canonical, Long) -> CooldownManager.Canonical = { state, _ -> state },
     private val maxBranches: Int = 64,
-    /** Follow each arm's nominal path alone and close no stage: the path a stage's own run starts from. */
-    private val nominalOnly: Boolean = false,
-    private val creditsOf: HashMap<String, List<StageKey>> = HashMap(),
-    private val nominalEnd: HashMap<String, Long> = HashMap(),
 ) {
     class Decision(val offer: SpeakerModel.Offer, val credits: List<StageKey>, val onAccepted: (CooldownManager) -> Unit, val onRefused: (CooldownManager) -> Unit)
 
@@ -89,6 +85,8 @@ internal class PairedBranchRun(
     }
 
     private var now = 0L
+    private val creditsOf = HashMap<String, List<StageKey>>()
+    private val nominalEnd = HashMap<String, Long>()
     private val pending = targets.associateBy { it.key }.toMutableMap()
     private val all = pending.keys.toSet()
     private val pendingQueued = ArrayDeque(queued.sortedBy { it.atMs })
@@ -124,7 +122,7 @@ internal class PairedBranchRun(
         }
         val next = LinkedHashMap<Joint, Joint>()
         for (joint in settled) {
-            val onlyNominal = nominalOnly || (joint.coupled && !window)
+            val onlyNominal = joint.coupled && !window
             val bases = decided(joint.base, baseline, t)
             val arms = decided(joint.arm, arm, t)
             val pairs = if (joint.coupled && bases.size == arms.size && bases.firstOrNull()?.second == arms.firstOrNull()?.second) {
@@ -160,11 +158,6 @@ internal class PairedBranchRun(
 
     private fun settle(joint: Joint, t: Long, window: Boolean): List<Joint> {
         val baseSteps = kernel.settle(joint.base.speaker, t)
-        if (nominalOnly) {
-            val base = nominalOf(baseSteps, joint.base.speaker, t)
-            val arm = nominalOf(kernel.settle(joint.arm.speaker, t), joint.arm.speaker, t)
-            return listOf(Joint(joint.base.apply(base), joint.arm.apply(arm), joint.deviated))
-        }
         if (joint.coupled) {
             val steps = if (window) baseSteps else listOf(nominalOf(baseSteps, joint.base.speaker, t))
             return steps.map { s ->
@@ -225,7 +218,6 @@ internal class PairedBranchRun(
     }
 
     private fun resolve(t: Long) {
-        if (nominalOnly) return
         val closed = mutableSetOf<StageKey>()
         for (target in pending.values) {
             val key = target.key
@@ -248,36 +240,8 @@ internal class PairedBranchRun(
         branches = branches.map { Joint(it.base.without(closed), it.arm.without(closed), it.deviated) }.distinct()
     }
 
-    /** The two arms' speakers and live cooldowns are equal on the nominal path, whatever each has spoken of a stage so far. */
-    val nominalStatesEqual: Boolean
-        get() {
-            val j = branches.single()
-            return j.base.speaker == j.arm.speaker &&
-                liveCooldown(j.base.cooldown.canonicalState(), now) == liveCooldown(j.arm.cooldown.canonicalState(), now)
-        }
-
-    /** Whether each arm has spoken this stage in time on the nominal path. */
-    fun nominalKept(key: StageKey): Pair<Boolean, Boolean> = branches.single().let { (key in it.base.kept) to (key in it.arm.kept) }
-
-    val settledAllTargets: Boolean get() = pending.isEmpty() || capHit
-
-    /** A run of [target] alone, starting from where this nominal run stands. */
-    fun forkFor(target: BranchLoadMeasure.Target, limit: Int, inWindow: (Long) -> Boolean): PairedBranchRun {
-        val run = PairedBranchRun(kernel, listOf(target), pendingQueued.toList(), inWindow, { true }, liveCooldown, limit, false, creditsOf, nominalEnd)
-        val j = branches.single()
-        run.now = now
-        run.branches = listOf(
-            run.Joint(
-                run.Arm(j.base.speaker, j.base.cooldown, j.base.kept.filterKeys { it == target.key }),
-                run.Arm(j.arm.speaker, j.arm.cooldown, j.arm.kept.filterKeys { it == target.key }),
-                emptyMap(),
-            ),
-        )
-        return run
-    }
-
     fun finish(): Result {
-        if (!capHit && !nominalOnly) {
+        if (!capHit) {
             now = Long.MAX_VALUE
             branches = branches.flatMap { settle(it, Long.MAX_VALUE, window = true) }.distinct()
             resolve(Long.MAX_VALUE)

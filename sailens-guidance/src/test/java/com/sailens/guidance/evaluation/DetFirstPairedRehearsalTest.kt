@@ -113,7 +113,7 @@ class DetFirstPairedRehearsalTest {
         }
     }
 
-    private class ArmResult(val paired: PairedBranchRun.Result, val differenceFrames: Int, val legacy: ProtectedStages.Reproduction, val forks: Int? = null)
+    private class ArmResult(val paired: PairedBranchRun.Result, val differenceFrames: Int, val legacy: ProtectedStages.Reproduction)
 
     @Test
     fun `the paired reading of M5 on recorded captures`() {
@@ -148,7 +148,6 @@ class DetFirstPairedRehearsalTest {
                     "  highest branches ${paired.maxOf { it.maxBranches }}, captures at the limit ${paired.count { it.capHit }} of ${paired.size}; " +
                         "difference frames ${rows.sumOf { it.differenceFrames }}, frames in a window ${paired.sumOf { it.framesInWindow }} of $frames (${String.format(Locale.ROOT, "%.1f", 100.0 * paired.sumOf { it.framesInWindow } / frames)}%)",
                 )
-                rows.mapNotNull { it.forks }.takeIf { it.isNotEmpty() }?.let { appendLine("  stages judged with branches ${it.sum()} of $p; the rest had the same inputs and states in both arms") }
                 appendLine(
                     "  kept ${paired.sumOf { it.kept.size }}, regressions ${paired.sumOf { it.regressions.size }}, both lost near a difference ${paired.sumOf { it.bothLostNearDifference.size }}, " +
                         "not kept with the same inputs ${paired.sumOf { it.sameInputs.size }}, undeterminable past the limit ${paired.sumOf { it.undeterminable.size }}",
@@ -170,6 +169,11 @@ class DetFirstPairedRehearsalTest {
                 val found = settled.sumOf { (it.getValue(full).paired.regressions intersect it.getValue(name).paired.regressions).size }
                 val extra = settled.sumOf { (it.getValue(name).paired.regressions - it.getValue(full).paired.regressions).size }
                 appendLine("  against the whole-session run on the ${settled.size} captures it settled: its regressions $exact, found here $found, here only $extra")
+                if (name.endsWith("another seed")) {
+                    val first = name.removeSuffix(", another seed")
+                    val both = results.sumOf { (it.getValue(first).paired.regressions intersect it.getValue(name).paired.regressions).size }
+                    appendLine("  regressions in both seeds $both, this seed ${paired.sumOf { it.regressions.size }}, the first seed ${results.sumOf { it.getValue(first).paired.regressions.size }}")
+                }
             }
         }
         File(out, "detfirst-paired.txt").writeText(report)
@@ -209,7 +213,8 @@ class DetFirstPairedRehearsalTest {
         }
         val production = ClosedLoopSpeakerBranches(epsilon, heldAfterDone = true, frameSkewMs = 50)
         val runs = LinkedHashMap<String, Pair<StandIn, PairedBranchRun>>()
-        val locals = LinkedHashMap<String, Pair<StandIn, LocalPairedRun>>()
+        val sampled = LinkedHashMap<StandIn, SampledPairedRun>()
+        val otherSeed = LinkedHashMap<StandIn, SampledPairedRun>()
         for (arm in arms) {
             val times = differences.getValue(arm)
             runs["${arm.name} | $FULL"] = arm to PairedBranchRun(
@@ -219,10 +224,21 @@ class DetFirstPairedRehearsalTest {
                 liveCooldown = ::liveCooldown,
                 maxBranches = 4_096,
             )
-            for (lookBack in LOCAL_LOOK_BACKS_MS) {
-                locals["${arm.name} | each stage alone, ${lookBack / 1000} s before its deadline, limit 64"] =
-                    arm to LocalPairedRun(production, targets, inputs.queued, times, lookBack)
-            }
+            sampled[arm] = SampledPairedRun(
+                production, targets, inputs.queued,
+                differs = { t -> t in times },
+                differsNear = { t -> times.subSet(t - LOOK_BACK_MS, t + 1).isNotEmpty() },
+                samples = SAMPLES.max(),
+                frameSkewMs = ClosedLoopSpeakerBranches.FRAME_SKEW_MS,
+            )
+            otherSeed[arm] = SampledPairedRun(
+                production, targets, inputs.queued,
+                differs = { t -> t in times },
+                differsNear = { t -> times.subSet(t - LOOK_BACK_MS, t + 1).isNotEmpty() },
+                samples = SAMPLES.max(),
+                frameSkewMs = ClosedLoopSpeakerBranches.FRAME_SKEW_MS,
+                seed = OTHER_SEED,
+            )
         }
 
         val merger = EventMerger()
@@ -268,11 +284,16 @@ class DetFirstPairedRehearsalTest {
                 )
             }
             for ((arm, run) in runs.values) run.onFrame(t, { today(it, null) }, { today(it, arm) })
-            for ((arm, run) in locals.values) run.onFrame(t, { today(it, null) }, { today(it, arm) })
+            for ((arm, run) in sampled) run.onFrame(t, { today(it, null) }, { today(it, arm) })
+            for ((arm, run) in otherSeed) run.onFrame(t, { today(it, null) }, { today(it, arm) })
         }
         val legacyResult = ProtectedStages.Reproduction.of(device, legacy.finish(births))
         return runs.mapValues { (_, value) -> ArmResult(value.second.finish(), differences.getValue(value.first).size, legacyResult) } +
-            locals.mapValues { (_, value) -> ArmResult(value.second.finish(), differences.getValue(value.first).size, legacyResult, value.second.forks) }
+            sampled.onEach { it.value.finish() }.entries.flatMap { (arm, run) ->
+                SAMPLES.map { n -> "${arm.name} | $n samples" to ArmResult(run.result(n), differences.getValue(arm).size, legacyResult) }
+            } + otherSeed.onEach { it.value.finish() }.entries.map { (arm, run) ->
+                "${arm.name} | ${SAMPLES.max()} samples, another seed" to ArmResult(run.result(SAMPLES.max()), differences.getValue(arm).size, legacyResult)
+            }
     }
 
     private companion object {
@@ -282,6 +303,8 @@ class DetFirstPairedRehearsalTest {
         const val EARLY_BOTTOM_Y = 0.45f
 
         const val FULL = "whole session, limit 4096"
-        val LOCAL_LOOK_BACKS_MS = listOf(8_000L, 12_000L)
+        /** 0 is the nominal run alone. */
+        val SAMPLES = listOf(0, 8, 16, 32)
+        const val OTHER_SEED = 0x7E57C0DEL
     }
 }
