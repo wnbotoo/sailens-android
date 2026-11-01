@@ -12,6 +12,30 @@ import com.sailens.guidance.usecase.decision.DecideEventsUseCase
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
+private const val STORM_WINDOW_MS = 20_000L
+
+private fun longestCooldownMs(key: String): Long = when {
+    key.startsWith("obstacle_") || key == "blocked" || key == "path_complex" -> 8_000
+    key.startsWith("road_warning") || key.startsWith("traffic_light") -> 12_000
+    key.startsWith("sensor_quality") -> 15_000
+    else -> 60_000
+}
+
+/**
+ * What of a cooldown state can still affect a decision at [now]: without records past the longest
+ * cooldown their key can have under any event and scale (threshold note §3.3's bound) and emissions out
+ * of the storm window. Two states that differ only there behave the same.
+ */
+internal fun liveCooldown(state: CooldownManager.Canonical, now: Long): CooldownManager.Canonical {
+    fun live(records: Map<String, Pair<Long, com.sailens.guidance.model.common.EventPriority>>) =
+        records.filter { (key, record) -> now - record.first < longestCooldownMs(key) }
+    return state.copy(
+        records = live(state.records),
+        confirmed = live(state.confirmed),
+        emissions = state.emissions.filter { now - it <= STORM_WINDOW_MS },
+    )
+}
+
 /**
  * R10's closed loop for today's policy on the legacy output path: each branch carries its own cooldown,
  * a refused offer is revoked there and comes again on a later frame, and two branches merge only when
@@ -60,28 +84,9 @@ internal class ClosedLoopBranchMeasure(
         override fun hashCode() = identity.hashCode()
     }
 
-    /**
-     * With [ignoreDeadRecords], a record past the longest cooldown its key can have under any event and
-     * scale (threshold note §3.3's bound) and an emission out of the storm window are left out: neither
-     * can affect a later decision, so two states that differ only there behave the same.
-     */
     private fun canonical(cooldown: CooldownManager): CooldownManager.Canonical {
         val state = cooldown.canonicalState()
-        if (!ignoreDeadRecords) return state
-        fun live(records: Map<String, Pair<Long, com.sailens.guidance.model.common.EventPriority>>) =
-            records.filter { (key, record) -> now - record.first < longestCooldownMs(key) }
-        return state.copy(
-            records = live(state.records),
-            confirmed = live(state.confirmed),
-            emissions = state.emissions.filter { now - it <= STORM_WINDOW_MS },
-        )
-    }
-
-    private fun longestCooldownMs(key: String): Long = when {
-        key.startsWith("obstacle_") || key == "blocked" || key == "path_complex" -> 8_000
-        key.startsWith("road_warning") || key.startsWith("traffic_light") -> 12_000
-        key.startsWith("sensor_quality") -> 15_000
-        else -> 60_000
+        return if (ignoreDeadRecords) liveCooldown(state, now) else state
     }
 
     private var branches = listOf(Branch(kernel.start(), CooldownManager(), emptyMap()))
@@ -192,10 +197,6 @@ internal class ClosedLoopBranchMeasure(
         if (closed.isEmpty()) return
         closed.forEach(pending::remove)
         branches = branches.map { b -> Branch(b.speaker, b.cooldown, b.kept - closed) }.distinct()
-    }
-
-    private companion object {
-        const val STORM_WINDOW_MS = 20_000L
     }
 
     fun finish(): Result {
