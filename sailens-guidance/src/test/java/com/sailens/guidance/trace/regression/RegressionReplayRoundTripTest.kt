@@ -414,6 +414,33 @@ class RegressionReplayRoundTripTest {
     }
 
     @Test
+    fun `the scenes of a run that does not decide are those the decisions were made on`() {
+        val session = runSession(record = true)
+        val recorder = session.recorder!!
+        val decided = mutableListOf<RegressionReplay.FrameOutcome>()
+        RegressionReplay(session.activeConfig, analysisConfig, semantics).replay(
+            frames = recorder.frames,
+            revokes = recorder.revokes,
+            classMap = { recorder.classMaps[it.seq] },
+            onFrame = { _, outcome -> decided += outcome },
+            trackIds = com.sailens.guidance.evaluation.BirthOrderTrackIds(),
+        )
+        val scenes = mutableListOf<RegressionReplay.SceneFrame>()
+        val report = RegressionReplay(session.activeConfig, analysisConfig, semantics).replayScenes(
+            frames = recorder.frames,
+            classMap = { recorder.classMaps[it.seq] },
+            trackIds = com.sailens.guidance.evaluation.BirthOrderTrackIds(),
+            onScene = { scenes += it },
+        )
+        assertNull(report.firstMismatch?.toString(), report.firstMismatch)
+        assertEquals(recorder.frames.count { it.failure == null }, scenes.size)
+        assertEquals(decided.map { it.decidedAt }, scenes.map { it.decidedAt })
+        assertEquals(decided.map { it.obstacles.map { o -> o.id to o.distance } }, scenes.map { it.obstacles.map { o -> o.id to o.distance } })
+        assertEquals(decided.map { it.snapshot!!.connectivity }, scenes.map { it.snapshot.connectivity })
+        assertEquals(decided.map { it.snapshot!!.frameQuality }, scenes.map { it.snapshot.frameQuality })
+    }
+
+    @Test
     fun `with the ground contact on, the recorded geometry replays exactly and is what makes it exact`() {
         val plain = runSession(record = false, groundContact = true)
         val recorded = runSession(record = true, groundContact = true)

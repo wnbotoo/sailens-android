@@ -268,6 +268,44 @@ class CooldownManager(
         val emissions: List<Long>,
     )
 
+    /** An independent copy, for an evaluation that follows several possible futures of one session. */
+    @Synchronized
+    internal fun copy(): CooldownManager {
+        val copy = CooldownManager(stationaryCooldownScale, stormWindowMs, stormEventThreshold, stormCooldownScale, maxCooldownScale, maxScaledCooldownMs)
+        copy.recentEmissions.addAll(recentEmissions)
+        copy.isStationary = isStationary
+        copy.confirmedRecords.putAll(confirmedRecords)
+        openWrites.mapTo(copy.openWrites) { w ->
+            Write(w.eventId, w.timestampMs, w.priority, w.baseCooldowns).also { it.confirmed = w.confirmed }
+        }
+        copy.lastEventRecords.putAll(lastEventRecords)
+        copy.decisions = decisions
+        return copy
+    }
+
+    /**
+     * Everything that decides this cooldown's future, with the opaque event ids left out: a decision
+     * writes at most once, so a write's time identifies it. Two equal values behave the same from here on.
+     */
+    @Synchronized
+    internal fun canonicalState(): Canonical = Canonical(
+        records = lastEventRecords.mapValues { (_, r) -> r.timestampMs to r.priority },
+        confirmed = confirmedRecords.mapValues { (_, r) -> r.timestampMs to r.priority },
+        openWrites = openWrites.map { Canonical.OpenWrite(it.timestampMs, it.priority, it.baseCooldowns, it.confirmed) },
+        emissions = recentEmissions.map { it.timestampMs },
+        stationary = isStationary,
+    )
+
+    internal data class Canonical(
+        val records: Map<String, Pair<Long, EventPriority>>,
+        val confirmed: Map<String, Pair<Long, EventPriority>>,
+        val openWrites: List<OpenWrite>,
+        val emissions: List<Long>,
+        val stationary: Boolean,
+    ) {
+        data class OpenWrite(val timestampMs: Long, val priority: EventPriority, val baseCooldowns: Map<String, Long>, val confirmed: Boolean)
+    }
+
     /**
      * A read-only copy of the records, for measurement: taken just before a
      * decision with that decision's [now] and motion state, it says which keys hold an event back and
