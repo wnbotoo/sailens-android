@@ -89,6 +89,9 @@ internal object ProtectedStages {
             return M5Count(regressions.size, regressions.count { it.frontCritical }, undeterminable.size, undeterminable.count { it.frontCritical })
         }
 
+        /** When the nominal model first spoke each stage of P to the end, in ns; null if it never did. */
+        fun modelCompletionNs(): Map<StageKey, Long?> = p.associate { it.key to it.modelNs }
+
         val reproducedAll = p.count(::reproduced)
         val frontP = p.filter { it.frontCritical }
         val reproducedFront = frontP.count(::reproduced)

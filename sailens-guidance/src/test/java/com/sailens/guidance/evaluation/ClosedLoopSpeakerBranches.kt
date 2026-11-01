@@ -81,15 +81,21 @@ internal class ClosedLoopSpeakerBranches(
         }
     }
 
-    private fun expand(speaker: Speaker, t: Long, outcomes: List<Outcome>): List<Step> {
+    /**
+     * The same split at a moment that is no frame, with nothing compared there and no skew: a stage's
+     * deadline, so that a sentence ending around it has both outcomes. Results stay for the next frame.
+     */
+    fun splitAt(speaker: Speaker, t: Long): List<Step> = expand(speaker, t, emptyList(), skewMs = 0)
+
+    private fun expand(speaker: Speaker, t: Long, outcomes: List<Outcome>, skewMs: Long = frameSkewMs): List<Step> {
         val front = speaker.queue.firstOrNull() ?: return listOf(Step(speaker, outcomes))
         val rest = speaker.copy(queue = speaker.queue.drop(1))
         return when {
             // Live iff its end is after t, as SpeakerModel.advance has it, at any frame skew.
-            front.endHi <= t -> expand(rest, t, outcomes + Spoken(front.id, front.endHi))
-            front.endLo > t + frameSkewMs -> listOf(Step(speaker, outcomes))
+            front.endHi <= t -> expand(rest, t, outcomes + Spoken(front.id, front.endHi), skewMs)
+            front.endLo > t + skewMs -> listOf(Step(speaker, outcomes))
             else -> {
-                val done = expand(rest, t, outcomes + Spoken(front.id, minOf(front.endHi, t + frameSkewMs)))
+                val done = expand(rest, t, outcomes + Spoken(front.id, minOf(front.endHi, t + skewMs)), skewMs)
                 val live = speaker.copy(queue = listOf(front.copy(endLo = maxOf(front.endLo, t + 1))) + speaker.queue.drop(1))
                 done + Step(live, outcomes)
             }

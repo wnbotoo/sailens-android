@@ -28,7 +28,7 @@ private fun longestCooldownMs(key: String): Long = when {
  */
 internal fun liveCooldown(state: CooldownManager.Canonical, now: Long): CooldownManager.Canonical {
     fun live(records: Map<String, Pair<Long, com.sailens.guidance.model.common.EventPriority>>) =
-        records.filter { (key, record) -> now - record.first < longestCooldownMs(key) }
+        records.filter { (key, record) -> now - record.first <= longestCooldownMs(key) }
     return state.copy(
         records = live(state.records),
         confirmed = live(state.confirmed),
