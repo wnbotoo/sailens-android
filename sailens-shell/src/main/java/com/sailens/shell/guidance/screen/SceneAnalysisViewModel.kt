@@ -5,8 +5,9 @@ import androidx.lifecycle.viewModelScope
 import android.graphics.Bitmap
 import android.os.SystemClock
 import com.sailens.camera.FrameSource
+import com.sailens.guidance.delivery.GuidanceOutputSettings
+import com.sailens.guidance.delivery.VisionFaultAlerts
 import com.sailens.guidance.model.common.EventPriority
-import com.sailens.guidance.model.scene.SceneEvent
 import com.sailens.guidance.model.scene.SceneResult
 import com.sailens.core.log.LogService
 import com.sailens.guidance.service.TraceService
@@ -15,10 +16,8 @@ import com.sailens.guidance.usecase.decision.RevokeUndeliveredEventUseCase
 import com.sailens.guidance.usecase.scene.StartSceneAnalysisUseCase
 import com.sailens.shell.app.GuidanceStartGate
 import com.sailens.guidance.usecase.scene.StopSceneAnalysisUseCase
-import com.sailens.guidance.util.Timestamp
 import com.sailens.shell.diagnostics.GuidanceDiagnosticsStore
 import com.sailens.output.AccessibilityStatusProvider
-import com.sailens.output.Announcement
 import com.sailens.shell.device.GuidanceHaptic
 import com.sailens.shell.device.HapticManager
 import com.sailens.shell.device.GuidanceAnnouncements
@@ -120,22 +119,51 @@ class SceneAnalysisViewModel(
     private val stallDetector = GuidanceStallDetector()
     private val speechUnavailableAlert = SpeechUnavailableAlert()
 
-    /** Everything said and felt about a covered lens, low light and an unrecognised floor; see [VisionFaultAlerts]. */
-    private val visionFaultAlerts = VisionFaultAlerts(
-        outputs = object : VisionFaultAlerts.Outputs {
-            override fun speak(notice: VisionFaultAlerts.Notice): VisionFaultAlerts.Offer = speakVisionNotice(notice)
-
-            // No switch here: VisionFaultAlerts has applied it, and its fallback ignores it. The motor still
-            // decides when: an obstacle rhythm of equal or higher priority is not cut short, only waited for.
-            override fun vibrate(priority: EventPriority, onPlayed: () -> Unit) = hapticManager.playOrReserve(
+    /** Takes each frame's decisions to the user; see [com.sailens.guidance.delivery.GuidanceOutputProtocol]. */
+    private val guidanceOutput = GuidanceOutputWiring(
+        speakOwn = { announcement, onSpoken -> speechManager.speak(announcement, onSpoken) },
+        speechReady = { speechManager.isReady },
+        stopSpeech = { speechManager.stop() },
+        announcementFor = announcements::announcementFor,
+        eventText = { event -> textResolver.resolve(event.toSceneEventText()) },
+        noticeText = { messageKey -> textResolver.resolve(SceneEventText(messageKey = messageKey)) },
+        // 屏幕阅读器接管时走 shell 唯一的播报出口：描述屏在最上面时，这个屏幕的界面根本没有被
+        // 组合，自己收的话这句会被静默丢掉。语速/音量/语言跟随用户在 TalkBack 里的既有设置。
+        announceToScreenReader = screenReaderAnnouncer::announce,
+        vibrateEvent = hapticManager::trigger,
+        playOrReserveVisionFault = { priority, onPlayed ->
+            hapticManager.playOrReserve(
                 GuidanceHaptic.VISION_UNRELIABLE,
                 priority = priority,
                 amplitude = maxOf(GuidanceHaptic.amplitudeFor(priority), GuidanceHaptic.amplitudeFor(EventPriority.HIGH)),
                 onPlayed = onPlayed,
             )
-
-            override fun cancelVibration() = hapticManager.cancelReservation()
         },
+        cancelVisionFaultReservation = hapticManager::cancelReservation,
+        cancelHaptics = hapticManager::cancel,
+        // 协调器是整个 shell 共用的那一个，所以打断的就是用户正在听的那一段描述，不管它在哪个屏幕上。
+        descriptionHoldsTheFloor = { sceneDescriptionCoordinator.holdsTheFloor },
+        preemptDescription = sceneDescriptionCoordinator::preemptForGuidance,
+        confirmDelivered = { event -> confirmDeliveredEvent(event) },
+        revokeUndelivered = { event -> revokeUndeliveredEvent(event) },
+        outputSettings = {
+            val state = _uiState.value
+            GuidanceOutputSettings(
+                speechEnabled = state.isSpeechEnabled,
+                screenReaderActive = state.isScreenReaderActive,
+                hapticsEnabled = state.isHapticsEnabled,
+            )
+        },
+        visionFaultSettings = {
+            VisionFaultAlerts.Settings(
+                speechEnabled = _uiState.value.isSpeechEnabled,
+                faultHapticsEnabled = guidanceSettingsStore.settings.value.faultHapticsInEffect,
+            )
+        },
+        logger = logger,
+        recordOutcome = traceService::recordPromptOutcome,
+        onReachedUser = { event -> _uiState.update { it.copy(lastAnnouncedEvent = event) } },
+        clock = clock,
     )
     private var releaseJob: Job? = null
     private var overlayRenderJob: Job? = null
@@ -274,7 +302,7 @@ class SceneAnalysisViewModel(
         }
         checkSpeechUnavailable()
         // An owed vision-fault rhythm whose switch was just turned off is dropped now, not at the next frame.
-        visionFaultAlerts.settingsChanged(visionFaultSettings())
+        guidanceOutput.protocol.settingsChanged()
     }
 
     fun setOverlayMode(overlayMode: SceneOverlayMode) {
@@ -342,9 +370,7 @@ class SceneAnalysisViewModel(
             }.catch { e ->
                 logger.error(TAG, "Error in scene analysis", e)
                 stopStallWatch()
-                visionFaultAlerts.reset()
-                speechManager.stop()
-                hapticManager.cancel()
+                guidanceOutput.stop()
                 latestSceneResult = null
                 // 卡片对盲人不存在：这条失效必须出声/出震，而不只是把状态改成错误。
                 alertGuidanceUnavailable(GuidanceNotice.FAILED)
@@ -393,106 +419,10 @@ class SceneAnalysisViewModel(
                         )
                     )
                 }
-                // The frame's vision faults first, so a rhythm reserved for a state that has just ended is
-                // withdrawn before the prompt's own rhythm asks for the motor; what is said and felt about
-                // them only after the prompt, so a higher prompt in the same frame does not cut off a floor
-                // notice just begun.
-                val alertsNow = clock()
-                visionFaultAlerts.observe(alertsNow, result.visionFaults, visionFaultSettings())
-                onSceneEvents(events, result.sequenceNumber)
-                visionFaultAlerts.act(alertsNow, visionFaultSettings())
+                guidanceOutput.protocol.onFrame(events, result.sequenceNumber, result.visionFaults)
             }
         }
     }
-
-    private fun visionFaultSettings() = VisionFaultAlerts.Settings(
-        speechEnabled = _uiState.value.isSpeechEnabled,
-        faultHapticsEnabled = guidanceSettingsStore.settings.value.faultHapticsInEffect,
-    )
-
-    /**
-     * Says one [VisionFaultAlerts] notice the way a navigation prompt of its priority is said: it waits
-     * for or cuts off a description by the same rule ([guidanceWaitsForDescription]), goes to the screen
-     * reader when one is active, and otherwise to own speech, which reports when it was heard out.
-     */
-    private fun speakVisionNotice(notice: VisionFaultAlerts.Notice): VisionFaultAlerts.Offer {
-        val state = _uiState.value
-        if (!state.isSpeechEnabled) return VisionFaultAlerts.Offer.REFUSED
-        if (guidanceWaitsForDescription(notice.priority, sceneDescriptionCoordinator.holdsTheFloor)) {
-            return VisionFaultAlerts.Offer.REFUSED
-        }
-        sceneDescriptionCoordinator.preemptForGuidance(notice.messageKey)
-        val text = textResolver.resolve(SceneEventText(messageKey = notice.messageKey))
-        if (state.isScreenReaderActive) {
-            screenReaderAnnouncer.announce(text)
-            return VisionFaultAlerts.Offer.PUBLISHED
-        }
-        val accepted = speechManager.speak(
-            Announcement(
-                id = notice.id,
-                key = notice.messageKey,
-                text = text,
-                priority = notice.priority.value,
-                expiresAtMs = notice.expiresAtMs,
-            ),
-            onSpoken = { visionFaultAlerts.onSpoken(notice.id) },
-        )
-        return if (accepted) VisionFaultAlerts.Offer.ACCEPTED else VisionFaultAlerts.Offer.REFUSED
-    }
-
-    private fun onSceneEvents(events: List<SceneEvent>, sequenceNumber: Long) {
-        if (events.isEmpty()) return
-        // Guidance 为这一条（且只为这一条）记了冷却，见 DecideEventsUseCase。
-        val primaryEvent = events.first()
-
-        val state = _uiState.value
-
-        logger.debug(TAG, "Scene events generated, ${primaryEvent.messageKey}", mapOf("count" to events.size))
-
-        // 等描述 / 打断描述 / 送达就确认冷却、没送达就撤销冷却，并为这条提示写一条 prompt_outcome（实际
-        // 送达的通道或撤回原因）——整条规则在 offerAndTraceGuidancePrompt 里，有单测。协调器是整个 shell
-        // 共用的那一个，所以打断的就是用户正在听的那一段描述，不管它在哪个屏幕上。
-        val delivery = offerAndTraceGuidancePrompt(
-            event = primaryEvent,
-            sourceSequenceNumber = sequenceNumber,
-            outputs = GuidanceOutputSettings(
-                speechEnabled = state.isSpeechEnabled,
-                screenReaderActive = state.isScreenReaderActive,
-                hapticsEnabled = state.isHapticsEnabled,
-            ),
-            descriptionHoldsTheFloor = sceneDescriptionCoordinator.holdsTheFloor,
-            now = Timestamp::now,
-            preemptDescription = { sceneDescriptionCoordinator.preemptForGuidance(primaryEvent.messageKey) },
-            deliver = { deliver(primaryEvent, state) },
-            confirm = { confirmDeliveredEvent(primaryEvent) },
-            revoke = { revokeUndeliveredEvent(primaryEvent) },
-            record = traceService::recordPromptOutcome,
-        )
-        // Replay history follows what the user actually heard or felt, not the state read before the
-        // offer: the first prompt an engine speaks after an outage still had "unavailable" there.
-        if (delivery.reachedUser) {
-            _uiState.update { it.copy(lastAnnouncedEvent = primaryEvent) }
-        }
-    }
-
-    /**
-     * 把 [event] 送到用户可感知的通道，见 [deliverGuidanceEvent]。
-     *
-     * @return 真正接收了它的通道；为空表示没送达。
-     */
-    private fun deliver(event: SceneEvent, state: SceneAnalysisUiState): GuidanceDeliveryResult = deliverGuidanceEvent(
-        speechEnabled = state.isSpeechEnabled,
-        screenReaderActive = state.isScreenReaderActive,
-        speechEngineReady = { speechManager.isReady },
-        hapticsEnabled = state.isHapticsEnabled,
-        // 屏幕阅读器接管时走 shell 唯一的播报出口：描述屏在最上面时，这个屏幕的界面根本没有被
-        // 组合，自己收的话这句会被静默丢掉。语速/音量/语言跟随用户在 TalkBack 里的既有设置。
-        announceToScreenReader = {
-            screenReaderAnnouncer.announce(textResolver.resolve(event.toSceneEventText()))
-        },
-        speak = { speechManager.speak(announcements.announcementFor(event)) },
-        vibrate = { hapticManager.trigger(event) },
-    )
 
     /**
      * Guidance 在运行中失效：分析出错而停止，或长时间没有产出结果。
@@ -621,14 +551,13 @@ class SceneAnalysisViewModel(
     private fun stopSceneAnalysis() {
         stopStallWatch()
         // Stopped on purpose: no recovery is said for what was still faulty.
-        visionFaultAlerts.reset()
-        runs.stop()
-        overlayRenderRequestId++
-        overlayRenderJob?.cancel()
-        overlayRenderJob = null
-        latestSceneResult = null
-        speechManager.stop()
-        hapticManager.cancel()
+        guidanceOutput.stop {
+            runs.stop()
+            overlayRenderRequestId++
+            overlayRenderJob?.cancel()
+            overlayRenderJob = null
+            latestSceneResult = null
+        }
         _uiState.update {
             it.copy(
                 isRunning = false,
@@ -651,7 +580,7 @@ class SceneAnalysisViewModel(
 
     override fun onCleared() {
         stopStallWatch()
-        visionFaultAlerts.reset()
+        guidanceOutput.protocol.reset()
         overlayRenderJob?.cancel()
         overlayRenderJob = null
         hapticManager.cancel()

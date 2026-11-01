@@ -104,9 +104,9 @@ Kotlin class 可能编译完全成功，却只在第一次调用 native 方法�
 | sailens-vision | segmentation/detection runner、数据集 taxonomy、默认后处理器 |
 | sailens-vlm | VLM engine contract：frame + 完整 prompt → streamed text；不放产品 prompt policy |
 | sailens-output | TTS、audio focus、读屏检测、haptic primitive、speech routing mechanism、clause buffering |
-| sailens-guidance | 导航逻辑：NavigationSemantics、fused semantic kernel、连通性、安全分析、事件、cooldown、tracking、depth、sensor、trace/replay |
+| sailens-guidance | 导航逻辑：NavigationSemantics、fused semantic kernel、连通性、安全分析、事件、cooldown、tracking、depth、sensor、trace/replay、送达协议（所有输出都经端口，端口只用 Guidance 自己的类型） |
 | sailens-describe | Describe 产品逻辑：prompt policy、snapshot freshness、请求调度、use case/controller |
-| sailens-shell | 可复用 Sailens presentation/composition：root Compose、navigation、settings、design system、Guidance UI、未来 Describe UI、diagnostics/about、DI 聚合 |
+| sailens-shell | 可复用 Sailens presentation/composition：root Compose、navigation、settings、design system、Guidance UI、未来 Describe UI、diagnostics/about、DI 聚合、送达端口的 Android 实现 |
 | app | A 的薄 Android host：Application、MainActivity、manifest/window ownership、身份和 edition config |
 
 目标中**没有独立 sailens-ux 或 sailens-guidance-ui Gradle module**。它们的逻辑边界继续作为
@@ -473,6 +473,11 @@ sailens-output 提供共享 output mechanism：
 “Guidance safety alert 永远高于 Describe information”属于 sailens-shell / edition composition
 的产品策略。Guidance 产生 typed event/urgency；Describe 产生 information result；shell
 再把它们映射到 output priority。
+
+一帧的决策怎么送出去是 Guidance 自己的逻辑，放在 sailens-guidance（`GuidanceOutputProtocol`、
+`VisionFaultAlerts`），这样评估跑的就是上线的代码。它经端口使用语音、马达、读屏和描述，端口只用
+Guidance 自己的类型，不依赖 sailens-output。策略留在端口后面、在 shell 里
+（`GuidanceOutputWiring`）：协议只问“这个紧急程度的提示要不要等描述”，交出去的是事件，不是优先级数字。
 
 抢占不等于冲一次语音队列。冲队列只清掉已经排进去的子句，VLM 还在往下解码，描述会接在告警
 后面继续念——用户听到的是一句没头没尾的景物描述跟在“前方有台阶”之后，而他看不到屏幕，

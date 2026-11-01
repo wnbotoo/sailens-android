@@ -1,11 +1,12 @@
 package com.sailens.shell.guidance.screen
 
+import com.sailens.guidance.delivery.VisionFaultAlerts
+import com.sailens.guidance.delivery.VisionFaultAlerts.Offer
 import com.sailens.guidance.model.analysis.FrameQuality
 import com.sailens.guidance.model.analysis.VisionFaults
 import com.sailens.guidance.model.common.EventPriority
 import com.sailens.guidance.model.scene.SceneEventMessageKeys
 import com.sailens.shell.device.HapticArbiter
-import com.sailens.shell.guidance.screen.VisionFaultAlerts.Offer
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
