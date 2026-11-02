@@ -176,6 +176,8 @@ internal class ClosedLoopRun(
                 override fun settleFrame(): Long = clock()
                 override fun speak(event: SceneEvent, atMs: Long?, onOutcome: ((SpeechOutcome) -> Unit)?): Boolean = speech.offer(event)
                 override fun speakNotice(notice: VisionFaultAlerts.Notice, atMs: Long?, onSpoken: () -> Unit): Boolean = speech.offerNotice(notice, onSpoken)
+                override fun speakModeNotice(id: String, messageKey: String, atMs: Long, expiresAtMs: Long, onOutcome: (SpeechOutcome) -> Unit): Boolean =
+                    error("the nominal run has no path-complex switch")
             },
             screenReader = object : GuidanceScreenReaderPort {
                 override fun announce(event: SceneEvent) = error("no screen reader in a closed-loop run")

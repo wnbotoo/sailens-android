@@ -4,7 +4,9 @@ import com.sailens.camera.CameraRuntimeConfig
 import com.sailens.runtime.ModelAcceleratorBackend
 import com.sailens.vision.detection.DetectionModelConfig
 import com.sailens.vision.semantic.SemanticModelConfig
+import com.sailens.BuildConfig
 import com.sailens.guidance.config.AnalysisConfig
+import com.sailens.guidance.config.DetFirstConfig
 import com.sailens.guidance.config.PerceptionConfig
 import com.sailens.guidance.config.PipelinePerformanceBudget
 import com.sailens.guidance.config.TraceRuntimeConfig
@@ -77,7 +79,7 @@ data class SailensRuntimeProfile(
                     targetHardwareProfile = targetHardwareProfile,
                     realtimeObstacleProviderType = ObstacleProviderType.DETECTION_MODEL,
                 ),
-                analysis = AnalysisConfig(),
+                analysis = AnalysisConfig(detFirst = if (BuildConfig.DET_FIRST_LAUNCH) DetFirstConfig.LAUNCH else DetFirstConfig()),
                 pipelineBudget = PipelinePerformanceBudget(),
                 trace = TraceRuntimeConfig(enabled = enableDiagnostics),
                 sceneOverlay = SceneOverlayConfig.forDiagnostics(enableDiagnostics),

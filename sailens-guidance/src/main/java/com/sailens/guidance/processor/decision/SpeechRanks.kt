@@ -29,6 +29,13 @@ val SceneEvent.speechBand: EventPriority get() = if (isMetricOnly) EventPriority
 
 /** Which sentences go first within a priority band. With [DetFirstConfig.speechRank] off, every rank is 0. */
 object SpeechRanks {
+    /**
+     * The sentence saying path-complex prompts are off, whatever [DetFirstConfig.speechRank] says: below anything
+     * in a higher band, which cuts it off, and above any MEDIUM obstacle prompt, which does not. So both ways round
+     * it stands the same with the ranks on and off.
+     */
+    val MODE_NOTICE_SCALE: Int = SpeechScale.of(EventPriority.MEDIUM, SpeechScale.MAX_RANK)
+
     private const val INPUT_QUALITY = 7
     private const val STALLED = 6
     private const val OBSTACLE_SAYING_NEAR = 5

@@ -44,6 +44,7 @@ DOCS = frozenset({
     "distribution-model",
     "field-capture",
     "geometry",
+    "guidance-operating-envelope",
     "models",
     "npu-litert-qnn",
     "perception-profiles",

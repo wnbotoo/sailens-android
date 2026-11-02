@@ -37,6 +37,14 @@ interface GuidanceSpeechPort {
      * @param onSpoken called when the engine finished playing it, and not otherwise.
      */
     fun speakNotice(notice: VisionFaultAlerts.Notice, atMs: Long?, onSpoken: () -> Unit): Boolean
+
+    /**
+     * Offers the sentence saying which prompts this run gives ([ModeNotice]), on the same terms, at its own place
+     * on the scale.
+     *
+     * @param id unique to this offer.
+     */
+    fun speakModeNotice(id: String, messageKey: String, atMs: Long, expiresAtMs: Long, onOutcome: (SpeechOutcome) -> Unit): Boolean
 }
 
 /** What became of a prompt the speech port took. */

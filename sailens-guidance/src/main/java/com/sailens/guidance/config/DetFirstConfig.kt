@@ -3,7 +3,7 @@ package com.sailens.guidance.config
 import kotlinx.serialization.Serializable
 
 /**
- * The det-first switches. All off is today's policy: given the same delivery results, every frame decides
+ * Policy switches for a detection-led Guidance. All off is today's policy: given the same delivery results, every frame decides
  * the same events and leaves the same cooldown. A capture records this as part of its analysis config;
  * one recorded before it existed reads as all off.
  *
@@ -15,6 +15,7 @@ import kotlinx.serialization.Serializable
  *   prompt must stand behind every prompt today's rules admit.
  * @param nearMeters the NEAR a prompt says goes out to this far by measured distance. Needs [metricGate]. It changes
  *   what is said of what is admitted, never what is admitted.
+ * @param pathComplexOff PATH_COMPLEX is no longer made; a hard block still is. Each run says so once, heard to the end.
  */
 @Serializable
 data class DetFirstConfig(
@@ -24,10 +25,24 @@ data class DetFirstConfig(
     val keepBlockedWithObstacle: Boolean = false,
     val metricGate: MetricGateConfig? = null,
     val nearMeters: Float? = null,
+    val pathComplexOff: Boolean = false,
 ) {
     init {
         require(metricGate == null || speechRank) { "metricGate needs speechRank" }
         require(nearMeters == null || metricGate != null) { "nearMeters needs metricGate" }
+    }
+
+    companion object {
+        /** The combination that is meant to ship. Off by default; a switch alone is for diagnosis. */
+        val LAUNCH: DetFirstConfig = DetFirstConfig(
+            proximityEscalation = true,
+            speechRank = true,
+            retryInterrupted = true,
+            keepBlockedWithObstacle = true,
+            metricGate = MetricGateConfig(),
+            nearMeters = 2.0f,
+            pathComplexOff = true,
+        )
     }
 }
 
