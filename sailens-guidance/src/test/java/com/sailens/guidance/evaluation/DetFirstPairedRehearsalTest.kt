@@ -469,7 +469,7 @@ class DetFirstPairedRehearsalTest {
         const val PRESET_HEIGHT_M = 1.15f
         const val OTHER_C = "other C captures"
         const val M1_THRESHOLD_M = 2.0f
-        val NOMINAL_ONLY = System.getProperty("sailens.replay.singleSwitches") in setOf("nominal", "launch")
+        val NOMINAL_ONLY = System.getProperty("sailens.replay.singleSwitches") in setOf("nominal", "launch", "without")
         val MAX_BRANCHES = if (NOMINAL_ONLY) 1 else 1_000_000
         const val MAX_BRANCH_FRAMES = 500_000_000L
 
@@ -481,6 +481,16 @@ class DetFirstPairedRehearsalTest {
         /** For diagnosis: each switch alone, with what it needs. */
         val SINGLE_SWITCHES: List<Pair<String, DetFirstConfig>> = if (System.getProperty("sailens.replay.singleSwitches") in setOf(null, "launch")) {
             emptyList()
+        } else if (System.getProperty("sailens.replay.singleSwitches") == "without") {
+            val launch = DetFirstConfig.LAUNCH
+            listOf(
+                "launch without proximityEscalation" to launch.copy(proximityEscalation = false),
+                "launch without retryInterrupted" to launch.copy(retryInterrupted = false),
+                "launch without keepBlockedWithObstacle" to launch.copy(keepBlockedWithObstacle = false),
+                "launch without nearMeters" to launch.copy(nearMeters = null),
+                "launch without pathComplexOff" to launch.copy(pathComplexOff = false),
+                "launch without metricGate" to launch.copy(metricGate = null, nearMeters = null),
+            )
         } else {
             listOf(
                 "proximityEscalation" to DetFirstConfig(proximityEscalation = true),
