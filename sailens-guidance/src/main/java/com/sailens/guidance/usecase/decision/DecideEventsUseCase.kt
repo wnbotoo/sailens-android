@@ -120,12 +120,13 @@ class ReportCutPromptUseCase(
     }
 }
 
-/** 送达方的回执：判为被打断之后，引擎又说它其实念完了。不收回打断做过的事，只留下记录。 */
+/** 送达方的回执：判为被打断之后，引擎又说它其实念完了。不收回打断做过的事，只把这条写入算成听完。 */
 class ReportHeardAfterCutUseCase(
     private val cooldownManager: CooldownManager,
     private val regressionRecorder: RegressionRecorder = RegressionRecorder.None,
 ) {
     operator fun invoke(event: SceneEvent) {
+        cooldownManager.reportHeardAfterCut(event.id)
         if (regressionRecorder.isRecording) regressionRecorder.onHeardAfterCut(event.id, cooldownManager.decisionsSoFar())
     }
 }

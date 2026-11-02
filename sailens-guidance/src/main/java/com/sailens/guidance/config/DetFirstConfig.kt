@@ -11,6 +11,10 @@ import kotlinx.serialization.Serializable
  * @param speechRank a prompt's standing within its priority band ([com.sailens.guidance.processor.decision.SpeechRanks]).
  * @param retryInterrupted a prompt is confirmed once heard, and one cut off is offered again.
  * @param keepBlockedWithObstacle a blocked path no longer drops a detected obstacle ahead.
+ * @param metricGate a detected obstacle is also announced by its measured distance. Needs [speechRank]: such a
+ *   prompt must stand behind every prompt today's rules admit.
+ * @param nearMeters the NEAR a prompt says goes out to this far by measured distance. Needs [metricGate]. It changes
+ *   what is said of what is admitted, never what is admitted.
  */
 @Serializable
 data class DetFirstConfig(
@@ -18,4 +22,29 @@ data class DetFirstConfig(
     val speechRank: Boolean = false,
     val retryInterrupted: Boolean = false,
     val keepBlockedWithObstacle: Boolean = false,
+    val metricGate: MetricGateConfig? = null,
+    val nearMeters: Float? = null,
+) {
+    init {
+        require(metricGate == null || speechRank) { "metricGate needs speechRank" }
+        require(nearMeters == null || metricGate != null) { "nearMeters needs metricGate" }
+    }
+}
+
+/**
+ * How near, by the lower bound of its measured distance, a detected obstacle has to be to be announced when
+ * today's image-position gates do not yet admit it.
+ *
+ * @param roadsideStaticM for [com.sailens.guidance.processor.decision.EventGenerator]'s roadside classes, wherever they stand.
+ * @param metricOnlyRepeatMs how long a hazard said this way stays said, before scaling. Scaled, it is capped at 8 s.
+ */
+@Serializable
+data class MetricGateConfig(
+    val vehicleAheadM: Float = 5.0f,
+    val vehicleSideM: Float = 2.5f,
+    val personAheadM: Float = 4.0f,
+    val personSideM: Float = 3.0f,
+    val staticM: Float = 2.5f,
+    val roadsideStaticM: Float = 2.0f,
+    val metricOnlyRepeatMs: Long = 6_000,
 )

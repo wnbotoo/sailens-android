@@ -91,7 +91,7 @@ val domainBindingsModule = module {
     single { EventMerger() }
     single {
         val detFirst = get<AnalysisConfig>().detFirst
-        CooldownManager(proximityEscalation = detFirst.proximityEscalation, retryInterrupted = detFirst.retryInterrupted)
+        CooldownManager(proximityEscalation = detFirst.proximityEscalation, retryInterrupted = detFirst.retryInterrupted, metricOnlyRepeatMs = detFirst.metricGate?.metricOnlyRepeatMs ?: 6_000L)
     }
 
     // Use cases — new instance per resolution.

@@ -21,8 +21,11 @@ object SpeechScale {
         return band.value * FACTOR + rank
     }
 
-    fun of(event: SceneEvent): Int = of(event.priority, event.rank)
+    fun of(event: SceneEvent): Int = of(event.speechBand, event.rank)
 }
+
+/** The band a sentence competes in: its priority, except that a metric-only prompt is always MEDIUM. Cooldown and credit still use its priority. */
+val SceneEvent.speechBand: EventPriority get() = if (isMetricOnly) EventPriority.MEDIUM else priority
 
 /** Which sentences go first within a priority band. With [DetFirstConfig.speechRank] off, every rank is 0. */
 object SpeechRanks {
@@ -30,11 +33,16 @@ object SpeechRanks {
     private const val STALLED = 6
     private const val OBSTACLE_SAYING_NEAR = 5
     private const val OBSTACLE_OR_BLOCKED = 4
+    private const val METRIC_ONLY = 3
 
     fun of(event: SceneEvent, config: DetFirstConfig): Int = if (!config.speechRank) 0 else when (event.category) {
         EventCategory.SENSOR_QUALITY -> INPUT_QUALITY
         EventCategory.BLOCKED -> OBSTACLE_OR_BLOCKED
-        EventCategory.OBSTACLE -> if (saysNearOfADetectedHazard(event)) OBSTACLE_SAYING_NEAR else OBSTACLE_OR_BLOCKED
+        EventCategory.OBSTACLE -> when {
+            event.isMetricOnly -> METRIC_ONLY
+            saysNearOfADetectedHazard(event) -> OBSTACLE_SAYING_NEAR
+            else -> OBSTACLE_OR_BLOCKED
+        }
         else -> 0
     }
 

@@ -6,6 +6,9 @@ import com.sailens.guidance.model.common.ObstacleCategory
 import com.sailens.guidance.model.perception.ObstacleSource
 import java.util.UUID
 
+/** Which gate let a zone's obstacles in. A zone with any admitted [TODAY] is made of those alone. */
+enum class Admission { TODAY, METRIC_ONLY }
+
 /**
  * What one zone contributed to an obstacle event: which hazards the prompt can speak for. A merged event
  * has one per zone, in the order of its cooldown groups.
@@ -25,6 +28,7 @@ data class EventComponent(
     val primaryTrackId: UUID,
     val cooldownKeys: Set<String>,
     val hazards: List<HazardRef>,
+    val admission: Admission = Admission.TODAY,
 )
 
 /**
