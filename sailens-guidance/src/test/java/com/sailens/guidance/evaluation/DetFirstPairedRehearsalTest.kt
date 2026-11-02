@@ -69,6 +69,8 @@ class DetFirstPairedRehearsalTest {
         val frozenLegacy: ProtectedStages.Reproduction,
         val samples: Map<String, List<LeadTime.Sample>>,
         val arms: Map<String, ArmResult>,
+        /** Each hazard's frames as the launch policy's gates see them: time, then what holds it, null when it is admitted. */
+        val gateFrames: Map<String, List<Pair<Long, String?>>>,
     )
 
     private data class Counted(val regressions: Int, val regressionsFront: Int, val undeterminable: Int, val undeterminableFront: Int, val fragile: Int, val fragileFront: Int, val same: Int) {
@@ -303,6 +305,7 @@ class DetFirstPairedRehearsalTest {
                     val known = lates.filterNot { it.isNaN() }.sorted()
                     appendLine(String.format(Locale.ROOT, "    %s: %d%s", label, lates.size, if (known.isEmpty()) "" else String.format(Locale.ROOT, "; past the deadline median %.2f s, max %.2f s", known[known.size / 2], known.last())))
                 }
+                if (name == LAUNCH) appendLine(whyNotBeforeCrossing(rows))
                 appendLine("  by capture:")
                 for ((r, a) in rows) {
                     val c = counted(a.full, r.production)
@@ -316,6 +319,53 @@ class DetFirstPairedRehearsalTest {
             }
             appendLine()
             appendLine(String.format(Locale.ROOT, "heap at the end: %.1f GB of %.1f GB", (Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()) / 1e9, Runtime.getRuntime().maxMemory() / 1e9))
+        }
+    }
+
+    /** For each hazard ahead with a bracketed crossing of 2.0 m: what kept its first prompt from ending before it. */
+    private fun whyNotBeforeCrossing(rows: List<Pair<CaptureResult, ArmResult>>): String = buildString {
+        appendLine("  why a first prompt ahead is not over before 2.0 m, with no error (a sentence is taken as $FIRST_SENTENCE_MS ms):")
+        val counts = java.util.TreeMap<String, Int>()
+        val secondsSeen = HashMap<String, MutableList<Double>>()
+        for ((r, a) in rows) {
+            for (lead in r.device.leads) {
+                if (lead.stage != Stage.FIRST || lead.thresholdM != M1_THRESHOLD_M) continue
+                val name = when (lead.hazardClass) {
+                    "person/front" -> "person"
+                    "vehicle/front" -> "vehicle"
+                    else -> continue
+                }
+                val key = StageKey(lead.hazard, Stage.FIRST)
+                val samples = r.samples[lead.hazard].orEmpty()
+                val completion = a.nominal.arm.completionMs(key)
+                val result = LeadTime.classify(samples, M1_THRESHOLD_M, completion?.let { it * 1_000_000 })
+                val crossing = result.crossing ?: continue
+                val crossAt = crossing.t1Nanos / 1_000_000
+                val frames = r.gateFrames[lead.hazard].orEmpty()
+                val latestStart = crossAt - FIRST_SENTENCE_MS
+                val firstSeen = frames.firstOrNull()?.first
+                val admitted = frames.firstOrNull { it.second == null }?.first
+                val heldAt = frames.lastOrNull { it.first <= latestStart }?.second
+                val sentences = a.nominalArm.offered.values.filter { key in a.nominalArm.credits[it.id].orEmpty() && it.atMs <= latestStart }
+                val why = when {
+                    result.outcome == LeadTime.Outcome.BEFORE -> "over before the crossing"
+                    firstSeen == null || firstSeen > latestStart -> "first tracked too late to say it"
+                    admitted == null -> "never admitted: $heldAt"
+                    admitted > latestStart -> "admitted too late, at the last moment held by: $heldAt"
+                    sentences.isEmpty() -> "admitted in time, not offered in time: the cooldown, or a higher prompt first"
+                    sentences.any { it.endAtMs != null } -> "said in time by the model's clock but over after t1"
+                    sentences.any { it.cutAtMs != null } -> "offered in time, then cut off"
+                    sentences.any { it.accepted } -> "offered in time, not over"
+                    else -> "offered in time, refused"
+                }
+                counts.merge("$name: $why", 1, Int::plus)
+                if (firstSeen != null) secondsSeen.getOrPut(name) { mutableListOf() } += (crossAt - firstSeen) / 1000.0
+            }
+        }
+        for ((label, n) in counts) appendLine("    $label: $n")
+        for ((name, seen) in secondsSeen) {
+            val sorted = seen.sorted()
+            appendLine(String.format(Locale.ROOT, "    %s: tracked before the crossing, s: p25 %.1f, median %.1f, p75 %.1f", name, sorted[sorted.size / 4], sorted[sorted.size / 2], sorted[sorted.size * 3 / 4]))
         }
     }
 
@@ -412,11 +462,18 @@ class DetFirstPairedRehearsalTest {
         val legacyFirst = PairedBranchRun(noError, emptyList(), inputs.queued, forever)
         val births = BirthOrderTrackIds()
         val samples = HashMap<String, MutableList<LeadTime.Sample>>()
+        val gateFrames = HashMap<String, MutableList<Pair<Long, String?>>>()
+        val launchGenerator = EventGenerator(analysis.copy(detFirst = DetFirstConfig.LAUNCH))
+        val launchGate = DetFirstConfig.LAUNCH.metricGate!!
         RegressionReplay(perception, analysis, semantics).replayScenes(session.regressionFrames, ::classMap, lost, geometry.evaluation, births) { scene ->
             val pitch = geometry.evaluation(scene.record)?.pitchDownDegrees
             legacy.onScene(scene, pitch)
             val t = scene.decidedAt
-            for (o in scene.snapshot.obstacles) LeadTime.freshSample(o, scene.record.seq, pitch)?.let { samples.getOrPut(o.id.toString()) { mutableListOf() } += it }
+            for (o in scene.snapshot.obstacles) {
+                LeadTime.freshSample(o, scene.record.seq, pitch)?.let { samples.getOrPut(o.id.toString()) { mutableListOf() } += it }
+                val hold = if (launchGenerator.passesTodaysGates(o)) null else launchGenerator.metricGateHold(o, launchGate)
+                gateFrames.getOrPut(o.id.toString()) { mutableListOf() } += scene.decidedAt to hold
+            }
             for (event in generator.generate(scene.snapshot, t)) {
                 if (event.category in StateEpisodes.TRACKLESS) episodes.observe(StateEpisodes.keyOf(event), t, scene.record.seq)
             }
@@ -462,6 +519,7 @@ class DetFirstPairedRehearsalTest {
             frozenLegacy,
             samples,
             runs.entries.associate { (arm, r) -> arm.name to ArmResult(r.nominal.finish(), r.full.finish(), r.nanos, r.nominalLog.first, r.nominalLog.second) },
+            gateFrames,
         )
     }
 
@@ -469,6 +527,7 @@ class DetFirstPairedRehearsalTest {
         const val PRESET_HEIGHT_M = 1.15f
         const val OTHER_C = "other C captures"
         const val M1_THRESHOLD_M = 2.0f
+        const val FIRST_SENTENCE_MS = 1_250L
         val NOMINAL_ONLY = System.getProperty("sailens.replay.singleSwitches") in setOf("nominal", "launch", "without")
         val MAX_BRANCHES = if (NOMINAL_ONLY) 1 else 1_000_000
         const val MAX_BRANCH_FRAMES = 500_000_000L
