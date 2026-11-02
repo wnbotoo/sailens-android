@@ -86,7 +86,7 @@ val domainBindingsModule = module {
     single { EventGenerator(config = get()) }
     single { EventConflictResolver(keepBlockedWithObstacle = get<AnalysisConfig>().detFirst.keepBlockedWithObstacle) }
     single { EventMerger() }
-    single { CooldownManager() }
+    single { CooldownManager(proximityEscalation = get<AnalysisConfig>().detFirst.proximityEscalation) }
 
     // Use cases — new instance per resolution.
     // ProcessFrameUseCase is the exception: it holds per-session frame state (cached semantic

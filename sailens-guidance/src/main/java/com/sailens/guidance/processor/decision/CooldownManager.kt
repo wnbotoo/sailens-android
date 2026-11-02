@@ -2,6 +2,7 @@ package com.sailens.guidance.processor.decision
 
 import com.sailens.guidance.model.common.EventCategory
 import com.sailens.guidance.model.common.EventPriority
+import com.sailens.guidance.model.perception.ObstacleSource
 import com.sailens.guidance.model.scene.SceneEvent
 import java.util.UUID
 
@@ -37,6 +38,11 @@ class CooldownManager(
      * 这里给最坏情况一个明确的天花板。基础冷却本身超过它的（红绿灯、道路警告）不受影响。
      */
     private val maxScaledCooldownMs: Long = 8_000L,
+    /**
+     * 按危险记升级：一个危险进入 NEAR、进入 CRITICAL 或自身优先级升高，只看**它自己**真正被说到的历史。
+     * 方位 key 上是谁的记录、别的危险的提示刷新了什么，都挡不住它。见 [escalates]。
+     */
+    private val proximityEscalation: Boolean = false,
 ) {
     /**
      * 最近一个滑窗内记录过的事件（时间戳 + 写入者），用于判定"事件风暴"。撤回只删写入者自己那条，
@@ -84,12 +90,22 @@ class CooldownManager(
         val timestampMs: Long,
         val priority: EventPriority,
         val baseCooldowns: Map<String, Long>,
+        /** 这次写入说到了哪个危险的什么，写入时固定。只有 [proximityEscalation] 开着才有。 */
+        val hazardCredits: Map<UUID, HazardCredit>,
     ) {
         /** 送达方说它送到了（[confirm]）。之后再也撤不回来。 */
         var confirmed = false
     }
 
     private class Emission(val timestampMs: Long, val eventId: UUID)
+
+    /** 一次写入对一个危险说出了什么：NEAR、CRITICAL，以及说到它（FIRST）时它自身的优先级。有歧义的不算。 */
+    internal data class HazardCredit(val near: Boolean, val critical: Boolean, val firstPriority: EventPriority?)
+
+    /** 一个危险最近一次被说到什么。[firstPriority] 在窗口内继承最高值，规则同 key 的折叠。 */
+    internal data class EscalationRecord(val nearAt: Long?, val criticalAt: Long?, val firstAt: Long?, val firstPriority: EventPriority?) {
+        val latestAt: Long get() = maxOf(nearAt ?: Long.MIN_VALUE, criticalAt ?: Long.MIN_VALUE, firstAt ?: Long.MIN_VALUE)
+    }
 
     // 撤回不再是"恢复写入前的快照"：快照只在撤回的恰好是最后一次写入时才对。A、B 先后写同一个 key、
     // B 继承了 A 的优先级，先撤 A 再撤 B，快照会把 A 的记录恢复回来——两条都没送达，key 上却留着 A。
@@ -107,6 +123,10 @@ class CooldownManager(
 
     /** 当前记录：[openWrites] 按顺序折叠到 [confirmedRecords] 上。缓存，撤回时重算。 */
     private val lastEventRecords = mutableMapOf<String, CooldownRecord>()
+
+    /** 和记录一样折叠：已确认前缀的摘要，以及加上 [openWrites] 之后的当前值。按插入顺序，决策不依赖 id 的先后。 */
+    private val confirmedEscalation = LinkedHashMap<UUID, EscalationRecord>()
+    private val currentEscalation = LinkedHashMap<UUID, EscalationRecord>()
 
     /** 已完成的 [decide] 次数；撤销记下它，回放据此把撤销放回两次决策之间的原位。 */
     private var decisions = 0L
@@ -144,8 +164,34 @@ class CooldownManager(
      */
     private fun SceneEvent.passesCooldown(now: Long, scale: Float): Boolean {
         val eventScale = if (isExemptFromScaling()) 1.0f else scale
-        return cooldownGroupsOrDefault().any { group -> passesGroup(group, now, eventScale) }
+        return cooldownGroupsOrDefault().any { group -> passesGroup(group, now, eventScale) } ||
+            (proximityEscalation && escalates(now))
     }
+
+    /**
+     * 这条候选本身会把一种升级说给它的某个 det 危险：进入 NEAR、进入 CRITICAL（窗口内没说过这个），或者
+     * 自身优先级高于窗口内说到它时的优先级。
+     *
+     * 前提是候选真的说得出这个升级。它被接收、写入后就记下了这个升级，窗口内不会再因同一种升级穿透；说不出的
+     * （有歧义）不穿透，也不留记录，所以一条没说出来的升级挡不住它后来真能说出来的那条。窗口不缩放：它等于
+     * 障碍物各 key 缩放后的最长冷却，过了它方位 key 本来就会放行。
+     */
+    private fun SceneEvent.escalates(now: Long): Boolean {
+        val detected = components.flatMap { it.hazards }.filter { it.source == ObstacleSource.DETECTION }
+        return PromptCredit.credits(this).any { credit ->
+            if (!credit.counts) return@any false
+            val hazard = detected.firstOrNull { it.trackId == credit.trackId } ?: return@any false
+            val record = currentEscalation[credit.trackId]
+            when (credit.stage) {
+                PromptCredit.Stage.NEAR -> !record?.nearAt.isWithinEscalationWindow(now)
+                PromptCredit.Stage.CRITICAL -> !record?.criticalAt.isWithinEscalationWindow(now)
+                PromptCredit.Stage.FIRST -> record?.firstAt.isWithinEscalationWindow(now) &&
+                    record?.firstPriority?.let { hazard.ownPriority > it } == true
+            }
+        }
+    }
+
+    private fun Long?.isWithinEscalationWindow(now: Long): Boolean = this != null && now - this < ESCALATION_WINDOW_MS
 
     private fun SceneEvent.passesGroup(group: Set<String>, now: Long, eventScale: Float): Boolean {
         return group.all { key ->
@@ -173,8 +219,10 @@ class CooldownManager(
             timestampMs = now,
             priority = event.priority,
             baseCooldowns = event.allCooldownKeys().associateWith { key -> event.baseCooldownFor(key) },
+            hazardCredits = if (proximityEscalation) event.hazardCredits() else emptyMap(),
         )
         lastEventRecords.fold(write)
+        currentEscalation.foldEscalation(write)
         openWrites.addLast(write)
         recentEmissions.addLast(Emission(now, event.id))
         trimEmissionWindow(now)
@@ -183,6 +231,21 @@ class CooldownManager(
             openWrites.first().confirmed = true
             advanceConfirmedPrefix()
         }
+    }
+
+    private fun SceneEvent.hazardCredits(): Map<UUID, HazardCredit> {
+        val credits = PromptCredit.credits(this).filter { it.counts }
+        val result = LinkedHashMap<UUID, HazardCredit>()
+        for (hazard in components.flatMap { it.hazards }) {
+            val own = credits.filter { it.trackId == hazard.trackId }
+            if (own.isEmpty()) continue
+            result[hazard.trackId] = HazardCredit(
+                near = own.any { it.stage == PromptCredit.Stage.NEAR },
+                critical = own.any { it.stage == PromptCredit.Stage.CRITICAL },
+                firstPriority = hazard.ownPriority.takeIf { own.any { it.stage == PromptCredit.Stage.FIRST } },
+            )
+        }
+        return result
     }
 
     /**
@@ -219,6 +282,9 @@ class CooldownManager(
         lastEventRecords.clear()
         lastEventRecords.putAll(confirmedRecords)
         openWrites.forEach { lastEventRecords.fold(it) }
+        currentEscalation.clear()
+        currentEscalation.putAll(confirmedEscalation)
+        openWrites.forEach { currentEscalation.foldEscalation(it) }
         advanceConfirmedPrefix()
     }
 
@@ -228,7 +294,9 @@ class CooldownManager(
      */
     private fun advanceConfirmedPrefix() {
         while (openWrites.firstOrNull()?.confirmed == true) {
-            confirmedRecords.fold(openWrites.removeFirst())
+            val write = openWrites.removeFirst()
+            confirmedRecords.fold(write)
+            confirmedEscalation.foldEscalation(write)
         }
     }
 
@@ -253,6 +321,27 @@ class CooldownManager(
         }
     }
 
+    /** 记录规则的另一半：把 [write] 说到的写到各危险上。窗口外的旧项不再有作用，顺手去掉，表不随会话变长。 */
+    private fun MutableMap<UUID, EscalationRecord>.foldEscalation(write: Write) {
+        if (write.hazardCredits.isEmpty()) return
+        val now = write.timestampMs
+        entries.removeAll { (_, record) -> now - record.latestAt >= ESCALATION_WINDOW_MS }
+        write.hazardCredits.forEach { (trackId, credit) ->
+            val old = this[trackId]
+            val inherited = old?.firstPriority?.takeIf { old.firstAt.isWithinEscalationWindow(now) }
+            this[trackId] = EscalationRecord(
+                nearAt = if (credit.near) now else old?.nearAt,
+                criticalAt = if (credit.critical) now else old?.criticalAt,
+                firstAt = if (credit.firstPriority != null) now else old?.firstAt,
+                firstPriority = when {
+                    credit.firstPriority == null -> old?.firstPriority
+                    inherited != null && inherited > credit.firstPriority -> inherited
+                    else -> credit.firstPriority
+                },
+            )
+        }
+    }
+
     /**
      * The whole state, for the equivalence tests: each key's current record as
      * (time, priority, writer), and the storm window's entries in order. Changes nothing.
@@ -271,14 +360,16 @@ class CooldownManager(
     /** An independent copy, for an evaluation that follows several possible futures of one session. */
     @Synchronized
     internal fun copy(): CooldownManager {
-        val copy = CooldownManager(stationaryCooldownScale, stormWindowMs, stormEventThreshold, stormCooldownScale, maxCooldownScale, maxScaledCooldownMs)
+        val copy = CooldownManager(stationaryCooldownScale, stormWindowMs, stormEventThreshold, stormCooldownScale, maxCooldownScale, maxScaledCooldownMs, proximityEscalation)
         copy.recentEmissions.addAll(recentEmissions)
         copy.isStationary = isStationary
         copy.confirmedRecords.putAll(confirmedRecords)
         openWrites.mapTo(copy.openWrites) { w ->
-            Write(w.eventId, w.timestampMs, w.priority, w.baseCooldowns).also { it.confirmed = w.confirmed }
+            Write(w.eventId, w.timestampMs, w.priority, w.baseCooldowns, w.hazardCredits).also { it.confirmed = w.confirmed }
         }
         copy.lastEventRecords.putAll(lastEventRecords)
+        copy.confirmedEscalation.putAll(confirmedEscalation)
+        copy.currentEscalation.putAll(currentEscalation)
         copy.decisions = decisions
         return copy
     }
@@ -291,9 +382,11 @@ class CooldownManager(
     internal fun canonicalState(): Canonical = Canonical(
         records = lastEventRecords.mapValues { (_, r) -> r.timestampMs to r.priority },
         confirmed = confirmedRecords.mapValues { (_, r) -> r.timestampMs to r.priority },
-        openWrites = openWrites.map { Canonical.OpenWrite(it.timestampMs, it.priority, it.baseCooldowns, it.confirmed) },
+        openWrites = openWrites.map { Canonical.OpenWrite(it.timestampMs, it.priority, it.baseCooldowns, it.confirmed, it.hazardCredits) },
         emissions = recentEmissions.map { it.timestampMs },
         stationary = isStationary,
+        confirmedEscalation = LinkedHashMap(confirmedEscalation),
+        escalation = LinkedHashMap(currentEscalation),
     )
 
     internal data class Canonical(
@@ -302,8 +395,16 @@ class CooldownManager(
         val openWrites: List<OpenWrite>,
         val emissions: List<Long>,
         val stationary: Boolean,
+        val confirmedEscalation: Map<UUID, EscalationRecord> = emptyMap(),
+        val escalation: Map<UUID, EscalationRecord> = emptyMap(),
     ) {
-        data class OpenWrite(val timestampMs: Long, val priority: EventPriority, val baseCooldowns: Map<String, Long>, val confirmed: Boolean)
+        data class OpenWrite(
+            val timestampMs: Long,
+            val priority: EventPriority,
+            val baseCooldowns: Map<String, Long>,
+            val confirmed: Boolean,
+            val hazardCredits: Map<UUID, HazardCredit> = emptyMap(),
+        )
     }
 
     /**
@@ -356,6 +457,8 @@ class CooldownManager(
     fun reset() {
         lastEventRecords.clear()
         confirmedRecords.clear()
+        confirmedEscalation.clear()
+        currentEscalation.clear()
         openWrites.clear()
         recentEmissions.clear()
         isStationary = false
@@ -412,5 +515,6 @@ class CooldownManager(
     private companion object {
         const val DEFAULT_COOLDOWN_MS = 3000L
         const val MAX_OPEN_WRITES = 16
+        const val ESCALATION_WINDOW_MS = 8_000L
     }
 }

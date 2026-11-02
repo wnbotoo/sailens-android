@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
 private const val STORM_WINDOW_MS = 20_000L
+private const val ESCALATION_WINDOW_MS = 8_000L
 
 private fun longestCooldownMs(key: String): Long = when {
     key.startsWith("obstacle_") || key == "blocked" || key == "path_complex" -> 8_000
@@ -36,6 +37,8 @@ internal fun liveCooldown(state: CooldownManager.Canonical, now: Long): Cooldown
         records = live(state.records),
         confirmed = if (state.openWrites.isEmpty()) live(state.confirmed) else state.confirmed,
         emissions = state.emissions.filter { now - it <= STORM_WINDOW_MS },
+        confirmedEscalation = if (state.openWrites.isEmpty()) state.confirmedEscalation.filterValues { now - it.latestAt < ESCALATION_WINDOW_MS } else state.confirmedEscalation,
+        escalation = state.escalation.filterValues { now - it.latestAt < ESCALATION_WINDOW_MS },
     )
 }
 
