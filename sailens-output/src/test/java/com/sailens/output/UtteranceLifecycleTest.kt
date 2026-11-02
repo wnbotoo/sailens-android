@@ -32,6 +32,20 @@ class UtteranceLifecycleTest {
     private fun only(kind: UtteranceEventKind) = events.single { it.kind == kind }
 
     @Test
+    fun `an outcome timeout is reported for its attempt and leaves it open`() {
+        lifecycle.beginSession("s")
+        submit(entry("a", logical = "event-a"))
+        lifecycle.outcomeTimedOut("a")
+        lifecycle.outcomeTimedOut("never submitted")
+        val timeout = only(UtteranceEventKind.OUTCOME_TIMEOUT)
+        assertEquals("a", timeout.attemptId)
+        assertEquals("event-a", timeout.logicalId)
+        assertEquals("outcome_timeout", timeout.kind.wireName)
+        lifecycle.endSession("s")
+        assertEquals("it still had no outcome of its own", "a", only(UtteranceEventKind.UNKNOWN_TERMINAL).attemptId)
+    }
+
+    @Test
     fun `nothing is tracked or reported without an observer`() {
         val silent = UtteranceLifecycle { 0L }
         silent.beginSession("s")
