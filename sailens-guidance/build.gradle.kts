@@ -62,8 +62,8 @@ android {
             // A capture path given means this run must actually replay, not reuse a cached result.
             project.findProperty("replaySingleSwitches")?.let { test.systemProperty("sailens.replay.singleSwitches", it.toString()) }
             if (project.hasProperty("replayCapture")) test.outputs.upToDateWhen { false }
-            // The paired M5 rehearsal holds hundreds of runs of a whole capture in memory.
-            if (project.hasProperty("replayCapture")) test.maxHeapSize = "6g"
+            // The paired M5 rehearsal holds up to a million branches of a capture in memory.
+            if (project.hasProperty("replayCapture")) test.maxHeapSize = project.findProperty("replayHeap")?.toString() ?: "6g"
             // Simulator scenario goldens: -PupdateGoldens rewrites them in the source tree.
             test.systemProperty("sailens.updateGoldens", project.hasProperty("updateGoldens").toString())
             test.systemProperty("sailens.goldens.dir", file("src/test/resources/scenarios").absolutePath)
