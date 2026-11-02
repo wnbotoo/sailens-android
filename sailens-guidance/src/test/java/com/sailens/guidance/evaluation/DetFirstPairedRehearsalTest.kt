@@ -29,10 +29,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Test
 import java.io.File
+import java.util.Locale
 import kotlin.math.abs
 
 /**
- * The paired reading of M5 ([PairedEvaluation], [PairedBranchRun]) against stand-in arms, on real captures.
+ * The paired reading of M5 ([PairedBranchRun]) against stand-in arms, on real captures.
  * None of the arms is a real policy: they exist to show what the reading does with no change, with a
  * change that adds sentences, and with changes that must be caught. Skipped unless a path is given, as
  * [DetFirstRehearsalTest]; the report goes to `sailens-guidance/build/replay/detfirst-paired.txt`.
@@ -106,33 +107,86 @@ class DetFirstPairedRehearsalTest {
         }
     }
 
-    private class ArmResult(
-        val evaluation: PairedEvaluation,
-        val otherSeed: PairedEvaluation?,
-        val reference: PairedBranchRun.Result,
+    private class ArmResult(val nominal: PairedBranchRun.Result, val full: PairedBranchRun.Result, val nanos: Long)
+
+    private class CaptureResult(
+        val id: String,
+        val legacy: ProtectedStages.Reproduction,
+        val device: PromptPolicyEvaluation.Result,
+        val deadlines: Map<StageKey, Long>,
+        /** First completion of each stage of P with no error, on the path the branch run itself takes. */
+        val nominalFirst: PairedBranchRun.Completions,
+        val samples: Map<String, List<LeadTime.Sample>>,
+        val arms: Map<String, ArmResult>,
     )
 
-    private class CaptureResult(val id: String, val legacy: ProtectedStages.Reproduction, val deadlines: Map<StageKey, Long>, val arms: Map<String, ArmResult>)
-
     private data class Counted(val regressions: Int, val regressionsFront: Int, val undeterminable: Int, val undeterminableFront: Int, val fragile: Int, val fragileFront: Int, val same: Int) {
+        val total get() = regressions + undeterminable
+        val totalFront get() = regressionsFront + undeterminableFront
+
         operator fun plus(o: Counted) = Counted(regressions + o.regressions, regressionsFront + o.regressionsFront, undeterminable + o.undeterminable, undeterminableFront + o.undeterminableFront, fragile + o.fragile, fragileFront + o.fragileFront, same + o.same)
 
-        override fun toString() = "counted ${regressions + undeterminable} (ahead ${regressionsFront + undeterminableFront}): regressions $regressions (ahead $regressionsFront), " +
+        override fun toString() = "counted $total (ahead $totalFront): regressions $regressions (ahead $regressionsFront), " +
             "undeterminable $undeterminable (ahead $undeterminableFront); reported only: fragile $fragile (ahead $fragileFront), same inputs $same"
     }
 
     private fun counted(result: PairedBranchRun.Result, legacy: ProtectedStages.Reproduction): Counted {
         val regressions = legacy.m5Of(result.regressions)
         val apart = legacy.m5Of(result.bothLostApart)
+        val stopped = legacy.m5Of(result.undeterminable)
         return Counted(
             regressions.regressions + regressions.undeterminable,
             regressions.regressionsFront + regressions.undeterminableFront,
-            apart.undeterminable,
-            apart.undeterminableFront,
+            apart.undeterminable + stopped.regressions + stopped.undeterminable,
+            apart.undeterminableFront + stopped.regressionsFront + stopped.undeterminableFront,
             apart.regressions,
             apart.regressionsFront,
             result.sameInputs.size,
         )
+    }
+
+    /** How one side of one arm does on the M1, M2 and B5 lines, over the reference queue (R9). */
+    private data class Lines(val spoken: Map<String, Int>, val of: Map<String, Int>) {
+        operator fun plus(o: Lines) = Lines(
+            (spoken.keys + o.spoken.keys).associateWith { (spoken[it] ?: 0) + (o.spoken[it] ?: 0) },
+            (of.keys + o.of.keys).associateWith { (of[it] ?: 0) + (o.of[it] ?: 0) },
+        )
+
+        fun render(): String = of.keys.sorted().joinToString("; ") { "$it ${spoken[it] ?: 0}/${of[it]}" }
+    }
+
+    private fun lines(r: CaptureResult, side: PairedBranchRun.Completions): Lines {
+        val spoken = HashMap<String, Int>()
+        val of = HashMap<String, Int>()
+        fun count(line: String, hit: Boolean) {
+            of.merge(line, 1, Int::plus)
+            if (hit) spoken.merge(line, 1, Int::plus)
+        }
+        for (row in r.device.stages) {
+            if (row.ambiguousOnly) continue
+            val key = StageKey(row.hazard, row.stage)
+            if (row.stage == Stage.NEAR && !row.trackless) {
+                count("B3 near all", key in side.everywhere)
+                if (row.hazardClass == "person/front") count("B1 near person", key in side.everywhere)
+                if (row.hazardClass == "vehicle/front") count("B2 near vehicle", key in side.everywhere)
+            }
+            if (row.stage == Stage.CRITICAL && row.hazardClass == "person/front") count("B5 critical person", key in side.everywhere)
+            if (row.stage == Stage.CRITICAL && row.hazardClass == "vehicle/front") count("B5 critical vehicle", key in side.everywhere)
+        }
+        for (lead in r.device.leads) {
+            if (lead.stage != Stage.FIRST || lead.thresholdM != M1_THRESHOLD_M) continue
+            val name = when (lead.hazardClass) {
+                "person/front" -> "person"
+                "vehicle/front" -> "vehicle"
+                else -> continue
+            }
+            val completion = side.completionMs(StageKey(lead.hazard, Stage.FIRST))
+            val outcome = LeadTime.classify(r.samples[lead.hazard].orEmpty(), M1_THRESHOLD_M, completion?.let { it * 1_000_000 }).outcome
+            if (outcome == LeadTime.Outcome.UNKNOWABLE) continue
+            count("C1-2 before, $name", outcome == LeadTime.Outcome.BEFORE)
+            count("C3 clearly missed, $name", outcome == LeadTime.Outcome.CLEARLY_MISSED)
+        }
+        return Lines(spoken, of)
     }
 
     @Test
@@ -167,12 +221,12 @@ class DetFirstPairedRehearsalTest {
         var disagree = 0
         var offByMoreThan1Ms = 0
         for (r in results) {
-            val nominal = r.arms.getValue(NoChange().name).evaluation.nominalBaseKept()
             for ((key, frozenNs) in r.legacy.modelCompletionNs()) {
                 val deadline = r.deadlines.getValue(key)
                 val frozenKept = frozenNs != null && frozenNs / 1_000_000 <= deadline
-                if (frozenKept != (key in nominal)) disagree++
-                if (frozenNs != null && key in nominal && abs(frozenNs / 1_000_000 - nominal.getValue(key)) > 1) offByMoreThan1Ms++
+                val nominal = r.nominalFirst.completionMs(key)
+                if (frozenKept != (nominal != null && nominal <= deadline)) disagree++
+                if (frozenNs != null && nominal != null && abs(frozenNs / 1_000_000 - nominal) > 1) offByMoreThan1Ms++
             }
         }
         return disagree to offByMoreThan1Ms
@@ -183,75 +237,59 @@ class DetFirstPairedRehearsalTest {
         val (disagree, off) = nominalAgainstFrozen(results)
         if (disagree != 0 || off != 0) add("the nominal path differs from the frozen nominal model: $disagree stages, $off beyond 1 ms")
         val limit = maxOf(2, results.sumOf { it.legacy.p.size } / 100)
-        fun total(name: String, of: (PairedEvaluation) -> PairedBranchRun.Result) =
-            results.map { counted(of(it.arms.getValue(name).evaluation), it.legacy) }.reduce(Counted::plus)
-        for (name in results.first().arms.keys) {
-            val cut = results.count { it.arms.getValue(name).evaluation.pairsCut }
-            if (cut > 0) add("$name: pairs cut on $cut captures, so they are not every pair")
-            val invented = results.filter { !it.arms.getValue(name).reference.capHit }.sumOf { r ->
-                val arm = r.arms.getValue(name)
-                (arm.evaluation.result(MAX_SAMPLES).regressions - arm.reference.regressions).size
+        fun total(name: String) = results.map { counted(it.arms.getValue(name).full, it.legacy) }.reduce(Counted::plus)
+        val noChange = NoChange().name
+        val unchanged = total(noChange)
+        if (unchanged.total + unchanged.fragile != 0) add("an arm that changes nothing scored: $unchanged")
+        for (r in results) {
+            val full = r.arms.getValue(noChange).full
+            if (full.capHit) add("${r.id}: an arm that changes nothing did not settle")
+            if (full.baseline.everywhere != full.arm.everywhere || full.baseline.latestEndMs != full.arm.latestEndMs) add("${r.id}: an arm that changes nothing answers its stages differently from the baseline")
+            if (r.arms.values.any { it.nominal.maxBranches != 1 }) add("${r.id}: with no error there is more than one branch")
+            for ((name, other) in r.arms) {
+                if (other.full.capHit) continue
+                if (other.full.baseline.everywhere != full.baseline.everywhere || other.full.baseline.latestEndMs != full.baseline.latestEndMs) add("${r.id}: the baseline answers its stages differently when paired with $name")
             }
-            if (invented > 0) add("$name: $invented regressions the exact reference does not have")
         }
-        val unchanged = total(NoChange().name) { it.result(MAX_SAMPLES) }
-        if (unchanged.regressions + unchanged.undeterminable + unchanged.fragile != 0) add("an arm that changes nothing scored: $unchanged")
         for (name in listOf(MutedVehicles().name, Chatter().name)) {
-            val caught = total(name) { it.result(MAX_SAMPLES) }
-            if (caught.regressions + caught.undeterminable <= limit) add("$name must be caught, but scored: $caught")
+            val caught = total(name)
+            if (caught.total <= limit) add("$name must be caught, but scored: $caught")
         }
     }
 
     private fun report(results: List<CaptureResult>): String {
         return buildString {
             val p = results.sumOf { it.legacy.p.size }
+            val limit = maxOf(2, p / 100)
             appendLine("Paired M5 over ${results.size} calibration captures, legacy output path, $PRESET_HEIGHT_M m; both arms decide for themselves on every frame")
-            appendLine("M5 limit: at most ${maxOf(2, p / 100)} of |P| = $p; ahead CRITICAL and blocked: 0")
+            appendLine("M5 limit: at most $limit of |P| = $p; ahead CRITICAL and blocked: 0. Stop at $MAX_BRANCHES branches or $MAX_BRANCH_FRAMES branch-frames.")
             appendLine()
-            appendLine("The nominal path against the frozen nominal model (the arm that changes nothing, baseline side; stages of P):")
+            appendLine("The path with no error against the frozen nominal model (stages of P):")
             val (disagree, offByMoreThan1Ms) = nominalAgainstFrozen(results)
             appendLine("  stages kept by one and not the other: $disagree; kept by both with first completion more than 1 ms apart: $offByMoreThan1Ms")
             for (name in results.first().arms.keys) {
                 appendLine()
                 appendLine(name)
-                val rows = results.map { it.arms.getValue(name) to it.legacy }
-                fun line(label: String, of: (PairedEvaluation) -> PairedBranchRun.Result) =
-                    appendLine("  $label: ${rows.map { (a, legacy) -> counted(of(a.evaluation), legacy) }.reduce(Counted::plus)}")
-                appendLine("  single faults run ${rows.sumOf { it.first.evaluation.faultsRun }}, pairs run ${rows.sumOf { it.first.evaluation.pairsRun }}, captures with pairs cut ${rows.count { it.first.evaluation.pairsCut }}, most alive at once ${rows.maxOf { it.first.evaluation.mostFaultsAtOnce }}")
-                line("nominal only") { it.result(0, withFaults = false) }
-                line("nominal and every single fault") { it.result(0, withPairs = false) }
-                line("and every pair") { it.result(0) }
-                for (n in SAMPLES) line("and $n samples") { it.result(n) }
-                line("$MAX_SAMPLES samples alone, no single faults") { it.result(MAX_SAMPLES, withFaults = false) }
-                val other = rows.mapNotNull { (a, legacy) -> a.otherSeed?.let { Triple(a, it, legacy) } }
-                if (other.isNotEmpty()) {
-                    appendLine("  another seed, $MAX_SAMPLES samples: ${other.map { (_, o, legacy) -> counted(o.result(MAX_SAMPLES), legacy) }.reduce(Counted::plus)}")
-                    val first = other.sumOf { (a, _, _) -> a.evaluation.result(MAX_SAMPLES, withPairs = false).regressions.size }
-                    val second = other.sumOf { (_, o, _) -> o.result(MAX_SAMPLES).regressions.size }
-                    val both = other.sumOf { (a, o, _) -> (a.evaluation.result(MAX_SAMPLES, withPairs = false).regressions intersect o.result(MAX_SAMPLES).regressions).size }
-                    appendLine("    regressions, first seed $first, this seed $second, in both $both")
+                val rows = results.map { it to it.arms.getValue(name) }
+                val settled = rows.count { !it.second.full.capHit }
+                appendLine("  settled $settled of ${rows.size}, highest branches ${rows.maxOf { it.second.full.maxBranches }}, branch-frames ${rows.sumOf { it.second.full.branchFrames }}, slowest capture ${rows.maxOf { it.second.nanos } / 1_000_000_000} s, all ${rows.sumOf { it.second.nanos } / 1_000_000_000} s")
+                appendLine("  no error:      ${rows.map { (r, a) -> counted(a.nominal, r.legacy) }.reduce(Counted::plus)}")
+                val full = rows.map { (r, a) -> counted(a.full, r.legacy) }.reduce(Counted::plus)
+                appendLine("  within epsilon: $full")
+                appendLine("  M5 ${if (full.total <= limit && full.totalFront == 0) "passes" else "fails"} (reading only: this arm is a stand-in)")
+                appendLine("  by capture:")
+                for ((r, a) in rows) {
+                    val c = counted(a.full, r.legacy)
+                    appendLine("    ${r.id.take(6)}: ${if (a.full.capHit) "stopped" else "settled"}, highest ${a.full.maxBranches}, branch-frames ${a.full.branchFrames}, ${a.nanos / 1_000_000_000} s; counted ${c.total} (ahead ${c.totalFront}), of those not settled ${a.full.undeterminable.size}")
                 }
-                val settled = rows.filter { !it.first.reference.capHit }
-                appendLine("  exact reference: settled ${settled.size} of ${rows.size} captures, highest branches ${rows.maxOf { it.first.reference.maxBranches }}")
-                fun against(label: String, of: (PairedEvaluation) -> PairedBranchRun.Result) {
-                    val exact = settled.sumOf { it.first.reference.regressions.size }
-                    val found = settled.sumOf { (a, _) -> (a.reference.regressions intersect of(a.evaluation).regressions).size }
-                    val invented = settled.sumOf { (a, _) -> (of(a.evaluation).regressions - a.reference.regressions).size }
-                    appendLine("    $label: of its $exact regressions found $found, not in it $invented")
-                }
-                against("nominal only") { it.result(0, withFaults = false) }
-                against("nominal and every single fault") { it.result(0, withPairs = false) }
-                against("and every pair") { it.result(0) }
-                against("and $MAX_SAMPLES samples") { it.result(MAX_SAMPLES) }
-                for ((a, legacy) in settled) {
-                    val missed = a.reference.regressions - a.evaluation.result(MAX_SAMPLES).regressions
-                    for (key in missed) {
-                        val front = legacy.m5Of(setOf(key)).let { it.regressionsFront + it.undeterminableFront } > 0
-                        val witness = a.reference.witnesses[key].orEmpty()
-                        appendLine("    missed: stage ${key.stage}, ahead CRITICAL or blocked $front, reference's witness has ${witness.size} choices; the last: ${witness.takeLast(8)}")
-                    }
-                }
+                appendLine("  every realization, baseline: ${rows.map { (r, a) -> lines(r, a.full.baseline) }.reduce(Lines::plus).render()}")
+                appendLine("  every realization, this arm: ${rows.map { (r, a) -> lines(r, a.full.arm) }.reduce(Lines::plus).render()}")
+                appendLine("  no error, baseline: ${rows.map { (r, a) -> lines(r, a.nominal.baseline) }.reduce(Lines::plus).render()}")
+                appendLine("  no error, this arm: ${rows.map { (r, a) -> lines(r, a.nominal.arm) }.reduce(Lines::plus).render()}")
+                appendLine("  stages not answered because the run stopped: baseline ${rows.sumOf { it.second.full.baseline.unresolved.size }}, this arm ${rows.sumOf { it.second.full.arm.unresolved.size }}")
             }
+            appendLine()
+            appendLine(String.format(Locale.ROOT, "heap at the end: %.1f GB of %.1f GB", (Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()) / 1e9, Runtime.getRuntime().maxMemory() / 1e9))
         }
     }
 
@@ -273,35 +311,39 @@ class DetFirstPairedRehearsalTest {
         val generator = EventGenerator(analysis)
 
         val arms = listOf(NoChange(), EarlyAhead(), MutedVehicles(), Chatter())
-        val frameTimes = mutableListOf<Long>()
         RegressionReplay(perception, analysis, semantics).replayScenes(session.regressionFrames, ::classMap, lost, geometry.evaluation, BirthOrderTrackIds()) { scene ->
-            frameTimes += scene.decidedAt
             arms.forEach { it.prepare(scene) }
         }
 
-        val targets = ProtectedStages.of(device).map { PairedEvaluation.Target(StageKey(it.hazard, it.stage), it.completedAtNanos!! / 1_000_000 + 500, it.appearedAt) }
+        val targets = ProtectedStages.of(device).map { PairedBranchRun.Target(StageKey(it.hazard, it.stage), it.completedAtNanos!! / 1_000_000 + 500, it.appearedAt) }
+        val watches = device.stages.filter { !it.ambiguousOnly && (it.stage != Stage.FIRST || !it.trackless) }.map { PairedBranchRun.Watch(StageKey(it.hazard, it.stage), it.endAt + WATCH_AFTER_LAST_SEEN_MS) }
         val wordings = HashMap<String, Wording>()
         val epsilon = { id: String ->
             val measuredWording = wordings[id]?.let { durations.of(it).first == OTHER_C } ?: (!id.startsWith("early") && !id.startsWith("chatter"))
             if (measuredWording) SpeakerModel.END_ERROR_BOUND_MS else 2 * SpeakerModel.END_ERROR_BOUND_MS
         }
-        val frames = frameTimes.toLongArray().also { it.sort() }
-        fun evaluation(seed: Long, pairing: Boolean) = PairedEvaluation(
-            epsilon, targets, inputs.queued, frames, MAX_SAMPLES,
-            heldAfterDone = true, frameSkewMs = ClosedLoopSpeakerBranches.FRAME_SKEW_MS, pairing = pairing, seed = seed,
-        )
-        val first = arms.associateWith { evaluation(FIRST_SEED, pairing = true) }
-        val second = arms.filter { it is EarlyAhead || it is Chatter }.associateWith { evaluation(OTHER_SEED, pairing = false) }
-        val references = arms.associateWith { PairedBranchRun(ClosedLoopSpeakerBranches(epsilon, heldAfterDone = true, frameSkewMs = ClosedLoopSpeakerBranches.FRAME_SKEW_MS), targets, inputs.queued) }
+        fun noError() = ClosedLoopSpeakerBranches({ 0 }, heldAfterDone = false, frameSkewMs = 0)
+        val nominalFirst = PairedBranchRun(noError(), emptyList(), inputs.queued, targets.map { PairedBranchRun.Watch(it.key, Long.MAX_VALUE) })
+        val nominals = arms.associateWith { PairedBranchRun(noError(), targets, inputs.queued, watches) }
+        val fulls = arms.associateWith {
+            PairedBranchRun(
+                ClosedLoopSpeakerBranches(epsilon, heldAfterDone = true, frameSkewMs = ClosedLoopSpeakerBranches.FRAME_SKEW_MS),
+                targets, inputs.queued, watches, maxBranches = MAX_BRANCHES, maxBranchFrames = MAX_BRANCH_FRAMES,
+            )
+        }
+        val spent = HashMap<StandIn, Long>()
 
         val merger = EventMerger()
         val resolver = EventConflictResolver()
         val episodes = StateEpisodes()
         val legacy = ClosedLoopRun(analysis, durations, inputs.queued, ClosedLoopRun.Protocol.LEGACY)
         val births = BirthOrderTrackIds()
+        val samples = HashMap<String, MutableList<LeadTime.Sample>>()
         RegressionReplay(perception, analysis, semantics).replayScenes(session.regressionFrames, ::classMap, lost, geometry.evaluation, births) { scene ->
-            legacy.onScene(scene, geometry.evaluation(scene.record)?.pitchDownDegrees)
+            val pitch = geometry.evaluation(scene.record)?.pitchDownDegrees
+            legacy.onScene(scene, pitch)
             val t = scene.decidedAt
+            for (o in scene.snapshot.obstacles) LeadTime.freshSample(o, scene.record.seq, pitch)?.let { samples.getOrPut(o.id.toString()) { mutableListOf() } += it }
             for (event in generator.generate(scene.snapshot, t)) {
                 if (event.category in StateEpisodes.TRACKLESS) episodes.observe(StateEpisodes.keyOf(event), t, scene.record.seq)
             }
@@ -335,17 +377,22 @@ class DetFirstPairedRehearsalTest {
                     onRefused = { it.revoke(primary.id) },
                 )
             }
-            for ((arm, run) in first) run.onFrame(t, { decide(it, null) }, { decide(it, arm) })
-            for ((arm, run) in second) run.onFrame(t, { decide(it, null) }, { decide(it, arm) })
-            for ((arm, run) in references) run.onFrame(t, { decide(it, null) }, { decide(it, arm) })
+            nominalFirst.onFrame(t, { decide(it, null) }, { decide(it, null) })
+            for ((arm, run) in nominals) run.onFrame(t, { decide(it, null) }, { decide(it, arm) })
+            for ((arm, run) in fulls) {
+                val before = System.nanoTime()
+                run.onFrame(t, { decide(it, null) }, { decide(it, arm) })
+                spent.merge(arm, System.nanoTime() - before, Long::plus)
+            }
         }
-        first.values.forEach { it.finish() }
-        second.values.forEach { it.finish() }
         return CaptureResult(
             result.id,
             ProtectedStages.Reproduction.of(device, legacy.finish(births)),
+            device,
             targets.associate { it.key to it.deadlineMs },
-            arms.associate { it.name to ArmResult(first.getValue(it), second[it], references.getValue(it).finish()) },
+            nominalFirst.finish().baseline,
+            samples,
+            arms.associate { it.name to ArmResult(nominals.getValue(it).finish(), fulls.getValue(it).finish(), spent[it] ?: 0) },
         )
     }
 
@@ -353,9 +400,11 @@ class DetFirstPairedRehearsalTest {
         const val PRESET_HEIGHT_M = 1.15f
         const val OTHER_C = "other C captures"
         const val EARLY_BOTTOM_Y = 0.45f
-        val SAMPLES = listOf(8, 16, 32, 64, 128, 256)
-        val MAX_SAMPLES = SAMPLES.max()
-        const val FIRST_SEED = 0x5A11E25L
-        const val OTHER_SEED = 0x7E57C0DEL
+        const val M1_THRESHOLD_M = 2.0f
+
+        /** Longer than any sentence on the speaker, offered on the last frame a hazard was seen. */
+        const val WATCH_AFTER_LAST_SEEN_MS = 5_000L
+        const val MAX_BRANCHES = 4_000_000
+        const val MAX_BRANCH_FRAMES = 2_000_000_000L
     }
 }

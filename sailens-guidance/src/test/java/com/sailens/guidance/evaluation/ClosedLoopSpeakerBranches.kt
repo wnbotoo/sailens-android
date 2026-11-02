@@ -43,7 +43,11 @@ internal class ClosedLoopSpeakerBranches(
 
     data class HeardAfterCut(override val id: String) : Outcome
 
-    /** A sentence on the speaker, ending somewhere in `[endLo, endHi]`. */
+    /**
+     * A sentence on the speaker, ending somewhere in `[endLo, endHi]`.
+     *
+     * @param startKnown it starts at [startAtMs] in every realization, rather than when what is ahead of it ends.
+     */
     data class Item(
         val id: String,
         val priority: Int?,
@@ -51,6 +55,7 @@ internal class ClosedLoopSpeakerBranches(
         val startAtMs: Long,
         val endLo: Long,
         val endHi: Long,
+        val startKnown: Boolean = true,
     )
 
     /** A result that reaches the caller only after the frame at [afterMs]. */
@@ -170,7 +175,7 @@ internal class ClosedLoopSpeakerBranches(
         val startHi = maxOf(t + startLatencyMs, last?.endHi ?: Long.MIN_VALUE)
         val expires = input.priority?.let { t + SpeakerModel.PROTECTED_NOTICE_MAX_MS }
         val epsilon = epsilonMs(input.id)
-        val item = Item(input.id, input.priority, expires, startLo, startLo + input.durationMs - epsilon, startHi + input.durationMs + epsilon)
+        val item = Item(input.id, input.priority, expires, startLo, startLo + input.durationMs - epsilon, startHi + input.durationMs + epsilon, startKnown = startLo == startHi)
         return Step(speaker.copy(queue = speaker.queue + item), listOf(Accepted(input.id, startLo)))
     }
 
