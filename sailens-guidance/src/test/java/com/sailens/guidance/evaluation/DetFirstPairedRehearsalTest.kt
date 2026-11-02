@@ -1,5 +1,6 @@
 package com.sailens.guidance.evaluation
 
+import com.sailens.core.geometry.NormalizedRect
 import com.sailens.guidance.config.AnalysisConfig
 import com.sailens.guidance.config.DetFirstConfig
 import com.sailens.guidance.config.MetricGateConfig
@@ -76,6 +77,9 @@ class DetFirstPairedRehearsalTest {
         /** Each hazard's frames as the launch policy's gates see them: time, then what holds it, null when it is admitted. */
         val gateFrames: Map<String, List<Pair<Long, String?>>>,
         val firstAt: Long,
+        /** For the label list: each frame's seq and time, and each track's box by seq. */
+        val frameTimes: List<Pair<Long, Long>>,
+        val trackBoxes: Map<String, List<Pair<Long, NormalizedRect>>>,
         val frames: Int,
         val minutes: Double,
         val stationaryMinutes: Double,
@@ -189,6 +193,7 @@ class DetFirstPairedRehearsalTest {
         }
         println(report(results))
         File(out, "detfirst-label-list.csv").writeText(labelList(results))
+        File(out, "detfirst-label-frames.csv").writeText(labelFrames(results))
         assertTrue(results.isNotEmpty())
         if (nominalOnly) return
         val failed = standingChecks(results)
@@ -450,11 +455,12 @@ class DetFirstPairedRehearsalTest {
     }
 
     /**
-     * The stages ahead a person must look at: never over, severely late or unknown, in the nominal run or any trace. Times
-     * are from the capture's first frame. It stays on this machine with the captures.
+     * The stages a person must look at: never over, severely late or unknown, in the nominal run or any trace, if they are
+     * ahead or the device finished them while the track lived. Times are from the capture's first frame. It stays on this
+     * machine with the captures.
      */
     private fun labelList(results: List<CaptureResult>): String = buildString {
-        appendLine("session,hazard,stage,class,appeared_s,track_ended_s,device_finished_s,readings")
+        appendLine("session,hazard,stage,class,ahead,track_lived,appeared_s,track_ended_s,device_finished_s,nearest_m,readings")
         for (r in results) {
             val rowOf = r.device.stages.associateBy { StageKey(it.hazard, it.stage) }
             val readings = LinkedHashMap<StageKey, MutableList<String>>()
@@ -462,13 +468,28 @@ class DetFirstPairedRehearsalTest {
             val aheadKeys = r.production.p.filter { it.frontCritical }.mapTo(HashSet()) { it.key }
             for ((name, run) in runs) {
                 for ((key, loss) in lossesIn(r, run)) {
-                    if (loss != Loss.BOUNDED_DELAY && key in aheadKeys) readings.getOrPut(key) { mutableListOf() } += "$name:$loss"
+                    val lived = r.deadlines.getValue(key) - 500 <= rowOf.getValue(key).endAt
+                    if (loss != Loss.BOUNDED_DELAY && (key in aheadKeys || lived)) readings.getOrPut(key) { mutableListOf() } += "$name:$loss"
                 }
             }
             for ((key, seen) in readings.entries.sortedBy { rowOf.getValue(it.key).appearedAt }) {
                 val row = rowOf.getValue(key)
                 fun s(ms: Long) = String.format(Locale.ROOT, "%.1f", (ms - r.firstAt) / 1000.0)
-                appendLine("${r.id},${key.hazard},${key.stage},${row.hazardClass},${s(row.appearedAt)},${s(row.endAt)},${s(r.deadlines.getValue(key) - 500)},${seen.joinToString(" ")}")
+                val nearest = r.samples[key.hazard].orEmpty().mapNotNull { it.validPointM }.minOrNull()?.let { String.format(Locale.ROOT, "%.1f", it) }.orEmpty()
+                appendLine("${r.id},${key.hazard},${key.stage},${row.hazardClass},${key in aheadKeys},${r.deadlines.getValue(key) - 500 <= row.endAt},${s(row.appearedAt)},${s(row.endAt)},${s(r.deadlines.getValue(key) - 500)},$nearest,${seen.joinToString(" ")}")
+            }
+        }
+    }
+
+    /** Where the frames of the label list are: each capture's times, and the boxes of the tracks on the list. */
+    private fun labelFrames(results: List<CaptureResult>): String = buildString {
+        appendLine("session,seq,t_s,hazard,x,y,w,h")
+        val listed = labelList(results).lineSequence().drop(1).filter { it.isNotBlank() }.map { it.split(',') }.map { it[0] to it[1] }.toSet()
+        for (r in results) {
+            for ((seq, t) in r.frameTimes) appendLine(String.format(Locale.ROOT, "%s,%d,%.3f,,,,,", r.id, seq, (t - r.firstAt) / 1000.0))
+            for ((hazard, boxes) in r.trackBoxes) {
+                if (r.id to hazard !in listed) continue
+                for ((seq, box) in boxes) appendLine(String.format(Locale.ROOT, "%s,%d,,%s,%.4f,%.4f,%.4f,%.4f", r.id, seq, hazard, box.x, box.y, box.width, box.height))
             }
         }
     }
@@ -661,6 +682,8 @@ class DetFirstPairedRehearsalTest {
         var lastAt = 0L
         var stationaryMs = 0L
         var frames = 0
+        val frameTimes = ArrayList<Pair<Long, Long>>()
+        val trackBoxes = HashMap<String, MutableList<Pair<Long, NormalizedRect>>>()
         val removed = HashMap<String, Pair<Int, MutableSet<String>>>()
         val conflictOf = mapOf(NO_CHANGE to (generator to EventConflictResolver()))
         val launchGenerator = EventGenerator(analysis.copy(detFirst = DetFirstConfig.LAUNCH))
@@ -670,6 +693,8 @@ class DetFirstPairedRehearsalTest {
             legacy.onScene(scene, pitch)
             val t = scene.decidedAt
             frames++
+            frameTimes += scene.record.seq to t
+            for (o in scene.snapshot.obstacles) trackBoxes.getOrPut(o.id.toString()) { mutableListOf() } += scene.record.seq to o.boundingBox
             if (firstAt == null) firstAt = t else if (scene.stationary) stationaryMs += t - lastAt
             lastAt = t
             for ((name, pair) in conflictOf + (LAUNCH to (launchGenerator to EventConflictResolver(DetFirstConfig.LAUNCH.keepBlockedWithObstacle)))) {
@@ -740,6 +765,8 @@ class DetFirstPairedRehearsalTest {
             runs.entries.associate { (arm, r) -> arm.name to ArmResult(r.nominal.finish(), r.full.finish(), r.nanos, r.nominalLog.first, r.nominalLog.second) },
             gateFrames,
             firstAt ?: 0L,
+            frameTimes,
+            trackBoxes,
             frames,
             ((lastAt - (firstAt ?: lastAt)) / 60_000.0),
             stationaryMs / 60_000.0,
