@@ -9,6 +9,7 @@ import com.sailens.guidance.delivery.GuidanceOutputSettings
 import com.sailens.guidance.delivery.GuidanceScreenReaderPort
 import com.sailens.guidance.delivery.GuidanceSettingsPort
 import com.sailens.guidance.delivery.GuidanceSpeechPort
+import com.sailens.guidance.delivery.MotorOffer
 import com.sailens.guidance.delivery.SpeechOutcome
 import com.sailens.guidance.delivery.VisionFaultAlerts
 import com.sailens.guidance.config.DetFirstConfig
@@ -18,6 +19,7 @@ import com.sailens.guidance.model.trace.PromptOutcomeTrace
 import com.sailens.guidance.processor.decision.SpeechRanks
 import com.sailens.guidance.processor.decision.SpeechScale
 import com.sailens.output.Announcement
+import com.sailens.shell.device.NavigationClaim
 import com.sailens.output.UtteranceOutcome
 
 /**
@@ -68,6 +70,7 @@ internal class GuidanceOutputWiring(
     noticeText: (messageKey: String) -> String,
     announceToScreenReader: (String) -> Unit,
     vibrateEvent: (SceneEvent) -> Boolean,
+    vibrateEventAlone: (SceneEvent, onQueuedResult: (played: Boolean) -> Unit) -> NavigationClaim,
     playOrReserveVisionFault: (EventPriority, onPlayed: () -> Unit) -> Unit,
     cancelVisionFaultReservation: () -> Unit,
     private val cancelHaptics: () -> Unit,
@@ -114,6 +117,13 @@ internal class GuidanceOutputWiring(
         },
         motor = object : GuidanceMotorPort {
             override fun vibrate(event: SceneEvent): Boolean = vibrateEvent(event)
+
+            override fun vibrateAlone(event: SceneEvent, onQueuedResult: (played: Boolean) -> Unit): MotorOffer =
+                when (vibrateEventAlone(event, onQueuedResult)) {
+                    NavigationClaim.STARTED -> MotorOffer.PLAYED
+                    NavigationClaim.QUEUED -> MotorOffer.QUEUED
+                    NavigationClaim.REFUSED -> MotorOffer.REFUSED
+                }
 
             override fun vibrateVisionFault(priority: EventPriority, onPlayed: () -> Unit) =
                 playOrReserveVisionFault(priority, onPlayed)

@@ -16,6 +16,11 @@ and what is in the way.
 Pre-release. The pipeline, UI, and runtime are implemented; on-device tuning is ongoing.
 Target devices are Snapdragon 8 Gen 1 and beyond class hardware.
 
+While Guidance runs on its screen, the display stays on. If the power button, another app or an
+incoming call sends Sailens to the background there, the camera stops delivering frames and Guidance
+gives no more prompts; the phone vibrates an alert whatever the vibration switch says, and with speech
+on it also says that Guidance was interrupted.
+
 ## Repository role
 
 This repository is **Sailens Android**: the Apache-2.0, model-neutral Android platform and

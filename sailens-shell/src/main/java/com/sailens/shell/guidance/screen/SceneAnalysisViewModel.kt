@@ -145,6 +145,7 @@ class SceneAnalysisViewModel(
         // 组合，自己收的话这句会被静默丢掉。语速/音量/语言跟随用户在 TalkBack 里的既有设置。
         announceToScreenReader = screenReaderAnnouncer::announce,
         vibrateEvent = hapticManager::trigger,
+        vibrateEventAlone = hapticManager::triggerOrQueue,
         playOrReserveVisionFault = { priority, onPlayed ->
             hapticManager.playOrReserve(
                 GuidanceHaptic.VISION_UNRELIABLE,

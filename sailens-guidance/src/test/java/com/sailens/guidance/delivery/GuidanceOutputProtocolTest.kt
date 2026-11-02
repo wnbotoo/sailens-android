@@ -41,6 +41,8 @@ class GuidanceOutputProtocolTest {
     private val spokenCallbacks = mutableMapOf<String, () -> Unit>()
     private var reservedRhythm: (() -> Unit)? = null
 
+    private var motorQueues = false
+    private var motorAnswer: ((Boolean) -> Unit)? = null
     private var settledFrames = 0
     private val frameTimes = mutableListOf<Long?>()
     private val revokeReasons = mutableListOf<String>()
@@ -83,6 +85,16 @@ class GuidanceOutputProtocolTest {
             override fun vibrate(event: SceneEvent): Boolean {
                 calls += "vibrate:${event.messageKey}"
                 return motorTakesPrompt
+            }
+
+            override fun vibrateAlone(event: SceneEvent, onQueuedResult: (played: Boolean) -> Unit): MotorOffer {
+                calls += "vibrate:${event.messageKey}"
+                motorAnswer = onQueuedResult
+                return when {
+                    motorQueues -> MotorOffer.QUEUED
+                    motorTakesPrompt -> MotorOffer.PLAYED
+                    else -> MotorOffer.REFUSED
+                }
             }
 
             override fun vibrateVisionFault(priority: EventPriority, onPlayed: () -> Unit) {
@@ -210,6 +222,43 @@ class GuidanceOutputProtocolTest {
         rhythmGoesWithIt = false
         on.onFrame(listOf(event()), 1, VisionFaults.NONE)
         assertEquals(listOf("vibrate:event_obstacle_center_person", "accepted", "confirm"), calls.filter { !it.startsWith("preempt") })
+    }
+
+    @Test
+    fun `a rhythm alone held off by a fault rhythm waits, with its receipts and its trace`() {
+        speechEnabled = false
+        motorQueues = true
+        protocol.onFrame(listOf(event()), 1, VisionFaults.NONE)
+        assertFalse("confirm" in calls)
+        assertFalse("revoke" in calls)
+        assertEquals(emptyList<PromptOutcomeTrace>(), outcomes)
+
+        motorAnswer!!(true)
+        assertEquals("confirm", calls.last())
+        assertEquals(listOf(PromptDeliveryChannels.HAPTICS), outcomes.single().deliveredVia)
+        assertEquals(1, reached.size)
+    }
+
+    @Test
+    fun `a rhythm that waited and never played is taken back as dropped`() {
+        speechEnabled = false
+        motorQueues = true
+        protocol.onFrame(listOf(event()), 1, VisionFaults.NONE)
+        motorAnswer!!(false)
+        assertEquals(listOf(PromptRevokeReasons.HAPTIC_DROPPED), revokeReasons)
+        assertEquals(PromptRevokeReasons.HAPTIC_DROPPED, outcomes.single().revokeReason)
+        assertEquals(emptyList<SceneEvent>(), reached)
+    }
+
+    @Test
+    fun `a rhythm waiting when Guidance stops reports nothing`() {
+        speechEnabled = false
+        motorQueues = true
+        protocol.onFrame(listOf(event()), 1, VisionFaults.NONE)
+        protocol.reset()
+        calls.clear()
+        motorAnswer!!(true)
+        assertEquals(emptyList<String>(), calls)
     }
 
     @Test

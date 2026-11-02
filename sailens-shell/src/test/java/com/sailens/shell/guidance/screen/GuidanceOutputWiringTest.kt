@@ -13,6 +13,7 @@ import com.sailens.guidance.model.trace.PromptDeliveryChannels
 import com.sailens.guidance.model.trace.PromptOutcomeTrace
 import com.sailens.guidance.processor.decision.SpeechScale
 import com.sailens.output.Announcement
+import com.sailens.shell.device.NavigationClaim
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -63,6 +64,10 @@ class GuidanceOutputWiringTest {
         vibrateEvent = {
             calls += "vibrate:${it.messageKey}"
             true
+        },
+        vibrateEventAlone = { event, _ ->
+            calls += "vibrate:${event.messageKey}"
+            NavigationClaim.STARTED
         },
         playOrReserveVisionFault = { priority, onPlayed ->
             calls += "faultRhythm:$priority"

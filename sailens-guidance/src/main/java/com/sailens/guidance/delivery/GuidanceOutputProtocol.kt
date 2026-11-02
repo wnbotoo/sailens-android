@@ -4,7 +4,9 @@ import com.sailens.core.log.LogService
 import com.sailens.guidance.model.analysis.VisionFaults
 import com.sailens.guidance.model.common.EventPriority
 import com.sailens.guidance.model.scene.SceneEvent
+import com.sailens.guidance.model.trace.PromptDeliveryChannels
 import com.sailens.guidance.model.trace.PromptOutcomeTrace
+import com.sailens.guidance.model.trace.PromptRevokeReasons
 import com.sailens.guidance.util.Timestamp
 
 private const val TAG = "GuidanceOutputProtocol"
@@ -122,8 +124,8 @@ class GuidanceOutputProtocol(
             preemptDescription = { description.preempt(primaryEvent.messageKey) },
             deliver = { deliver(primaryEvent, outputs, prompt) },
             confirm = { if (!prompt.awaitsOutcome) cooldown.confirm(primaryEvent) },
-            revoke = { reason -> cooldown.revoke(primaryEvent, reason) },
-            record = recordOutcome,
+            revoke = { reason -> if (!prompt.waitsForMotor) cooldown.revoke(primaryEvent, reason) },
+            record = { trace -> if (prompt.waitsForMotor) prompt.traceWhenMotorAnswers = trace else recordOutcome(trace) },
         )
         // Replay history follows what the user actually heard or felt, not the state read before the
         // offer: the first prompt an engine speaks after an outage still had "unavailable" there.
@@ -156,6 +158,11 @@ class GuidanceOutputProtocol(
         private var takenByVoice = false
         private var rhythmGoesWithIt = true
 
+        /** Vibration is its only channel and the motor is not free yet: its receipts and its trace wait. */
+        var waitsForMotor = false
+            private set
+        var traceWhenMotorAnswers: PromptOutcomeTrace? = null
+
         fun taken() {
             if (!retryInterrupted) return
             takenByVoice = true
@@ -174,9 +181,25 @@ class GuidanceOutputProtocol(
         /** Going with speech or the screen reader it can stay silent; on its own it is the channel, and always plays. */
         fun vibrate(): Boolean {
             if (takenByVoice) return rhythmGoesWithIt && motor.vibrate(event)
-            val played = motor.vibrate(event)
-            if (played && retryInterrupted) cooldown.accepted(event)
-            return played
+            val thisRun = run
+            val offer = motor.vibrateAlone(event) { played -> if (thisRun == run) motorAnswered(played) }
+            if (offer == MotorOffer.PLAYED && retryInterrupted) cooldown.accepted(event)
+            waitsForMotor = offer == MotorOffer.QUEUED
+            return offer == MotorOffer.PLAYED
+        }
+
+        private fun motorAnswered(played: Boolean) {
+            val at = wallClock()
+            val trace = traceWhenMotorAnswers
+            if (played) {
+                if (retryInterrupted) cooldown.accepted(event)
+                cooldown.confirm(event)
+                onReachedUser(event)
+                trace?.let { recordOutcome(it.copy(deliveredAt = at, revokedAt = null, revokeReason = null, deliveredVia = listOf(PromptDeliveryChannels.HAPTICS))) }
+            } else {
+                cooldown.revoke(event, PromptRevokeReasons.HAPTIC_DROPPED)
+                trace?.let { recordOutcome(it.copy(revokedAt = at, revokeReason = PromptRevokeReasons.HAPTIC_DROPPED)) }
+            }
         }
     }
 

@@ -10,6 +10,7 @@ import com.sailens.guidance.delivery.GuidanceOutputSettings
 import com.sailens.guidance.delivery.GuidanceScreenReaderPort
 import com.sailens.guidance.delivery.GuidanceSettingsPort
 import com.sailens.guidance.delivery.GuidanceSpeechPort
+import com.sailens.guidance.delivery.MotorOffer
 import com.sailens.guidance.delivery.SpeechOutcome
 import com.sailens.guidance.delivery.VisionFaultAlerts
 import com.sailens.guidance.model.analysis.VisionFaults
@@ -182,6 +183,7 @@ internal class ClosedLoopRun(
             },
             motor = object : GuidanceMotorPort {
                 override fun vibrate(event: SceneEvent): Boolean = true
+                override fun vibrateAlone(event: SceneEvent, onQueuedResult: (played: Boolean) -> Unit) = MotorOffer.PLAYED
                 override fun vibrateVisionFault(priority: EventPriority, onPlayed: () -> Unit) = onPlayed()
                 override fun cancelVisionFaultVibration() = Unit
             },

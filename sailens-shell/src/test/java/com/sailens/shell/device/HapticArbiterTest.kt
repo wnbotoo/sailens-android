@@ -134,4 +134,105 @@ class HapticArbiterTest {
         assertFalse(arbiter.startReservedIfFree())
         assertEquals(listOf(1_400L), started)
     }
+
+    private val played = mutableListOf<String>()
+    private val results = mutableMapOf<String, Boolean>()
+
+    private fun HapticArbiter.navigation(name: String, priority: Int, durationMs: Long = 100, expiresAtMs: Long = Long.MAX_VALUE) =
+        claimOrQueueNavigation(priority, durationMs, expiresAtMs, start = { played += name }, onQueuedResult = { results[name] = it })
+
+    @Test
+    fun `a rhythm alone waits for an alarm, and starts when the motor is free, with no frame`() {
+        var now = 0L
+        val arbiter = HapticArbiter { now }
+        arbiter.claimUnconditionally(940)
+        assertEquals(NavigationClaim.QUEUED, arbiter.navigation("n", 24))
+        assertEquals(940L, arbiter.reservationFreeAtMs())
+        assertTrue("not yet", !arbiter.startReservedIfFree(939))
+        now = 940
+        assertTrue(arbiter.startReservedIfFree(now))
+        assertEquals(listOf("n"), played)
+        assertEquals(true, results["n"])
+    }
+
+    @Test
+    fun `a lower rhythm cannot take the place of a higher one waiting, and the motor plays the higher`() {
+        var now = 0L
+        val arbiter = HapticArbiter { now }
+        arbiter.claimUnconditionally(940)
+        assertEquals(NavigationClaim.QUEUED, arbiter.navigation("critical", 28))
+        assertEquals(NavigationClaim.REFUSED, arbiter.navigation("low", 8))
+        now = 940
+        arbiter.startReservedIfFree(now)
+        assertEquals(listOf("critical"), played)
+    }
+
+    @Test
+    fun `an equal or higher rhythm takes the place, and the one it replaces did not play`() {
+        val arbiter = HapticArbiter { 0L }
+        arbiter.claimUnconditionally(940)
+        arbiter.navigation("a", 16)
+        assertEquals(NavigationClaim.QUEUED, arbiter.navigation("b", 16))
+        assertEquals(false, results["a"])
+        assertEquals(NavigationClaim.QUEUED, arbiter.navigation("c", 24))
+        assertEquals(false, results["b"])
+    }
+
+    @Test
+    fun `one that expired while waiting loses its place, and does not play`() {
+        var now = 0L
+        val arbiter = HapticArbiter { now }
+        arbiter.claimUnconditionally(940)
+        arbiter.navigation("old", 28, expiresAtMs = 500)
+        now = 600
+        assertEquals("the place is free", NavigationClaim.QUEUED, arbiter.navigation("new", 8))
+        assertEquals(false, results["old"])
+        now = 940
+        arbiter.startReservedIfFree(now)
+        assertEquals(listOf("new"), played)
+
+        val alone = HapticArbiter { now }
+        alone.claimUnconditionally(100)
+        alone.navigation("late", 28, expiresAtMs = now + 50)
+        assertTrue(!alone.startReservedIfFree(now + 200))
+        assertEquals(false, results["late"])
+    }
+
+    @Test
+    fun `a fault rhythm reserved goes first, and the rhythm waiting after it`() {
+        var now = 0L
+        val arbiter = HapticArbiter { now }
+        arbiter.claimUnconditionally(100)
+        arbiter.navigation("n", 24, durationMs = 50)
+        arbiter.claimOrReserve(28, 200) { played += "fault" }
+        now = 100
+        arbiter.startReservedIfFree(now)
+        assertEquals(listOf("fault"), played)
+        assertEquals(300L, arbiter.reservationFreeAtMs())
+        now = 300
+        arbiter.startReservedIfFree(now)
+        assertEquals(listOf("fault", "n"), played)
+    }
+
+    @Test
+    fun `held off by another navigation rhythm it is refused, as ever`() {
+        val arbiter = HapticArbiter { 0L }
+        assertEquals(NavigationClaim.STARTED, arbiter.navigation("a", 24))
+        assertEquals(NavigationClaim.REFUSED, arbiter.navigation("b", 24))
+        assertEquals(NavigationClaim.STARTED, arbiter.navigation("c", 28))
+    }
+
+    @Test
+    fun `navigation vibration off drops it, and a stop drops it without a word`() {
+        val arbiter = HapticArbiter { 0L }
+        arbiter.claimUnconditionally(940)
+        arbiter.navigation("a", 24)
+        arbiter.dropQueuedNavigation()
+        assertEquals(false, results["a"])
+
+        arbiter.navigation("b", 24)
+        arbiter.stop()
+        assertEquals(null, results["b"])
+        assertEquals(null, arbiter.reservationFreeAtMs())
+    }
 }

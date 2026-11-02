@@ -217,7 +217,10 @@ object PromptRevokeReasons {
     /** Taken by own speech, then cut off before it was heard; offered again later. */
     const val CUT = "cut"
 
-    val all: Set<String> = setOf(WAITING_FOR_DESCRIPTION, OUTPUT_REFUSED, CUT)
+    /** Vibration was its only channel, it waited for the motor, and it never played. */
+    const val HAPTIC_DROPPED = "haptic_dropped"
+
+    val all: Set<String> = setOf(WAITING_FOR_DESCRIPTION, OUTPUT_REFUSED, CUT, HAPTIC_DROPPED)
 }
 
 /** The closed set of [PromptOutcomeTrace.deliveredVia] values. */

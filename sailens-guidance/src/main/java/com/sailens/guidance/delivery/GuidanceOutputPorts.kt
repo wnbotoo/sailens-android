@@ -62,12 +62,22 @@ interface GuidanceMotorPort {
     /** Plays the navigation rhythm for [event] unless the motor refuses it; returns whether it played. */
     fun vibrate(event: SceneEvent): Boolean
 
+    /**
+     * Plays the rhythm for [event] when it is the prompt's only channel. Held off by an alarm or a fault
+     * rhythm it waits for the motor instead of being refused.
+     *
+     * @param onQueuedResult for [MotorOffer.QUEUED]: whether it played in the end. Not called after a stop.
+     */
+    fun vibrateAlone(event: SceneEvent, onQueuedResult: (played: Boolean) -> Unit): MotorOffer
+
     /** See [VisionFaultAlerts.Outputs.vibrate]. */
     fun vibrateVisionFault(priority: EventPriority, onPlayed: () -> Unit)
 
     /** See [VisionFaultAlerts.Outputs.cancelVibration]. */
     fun cancelVisionFaultVibration()
 }
+
+enum class MotorOffer { PLAYED, QUEUED, REFUSED }
 
 /**
  * The scene description holding the floor. Whether a prompt waits for it is product policy between
