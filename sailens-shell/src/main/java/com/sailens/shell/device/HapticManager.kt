@@ -42,9 +42,10 @@ class HapticManager(context: Context) {
      */
     fun trigger(event: SceneEvent): Boolean {
         val haptic = GuidanceHaptic.forEvent(event)
-        if (!arbiter.tryClaim(SpeechScale.of(event), haptic.durationMs)) return false
-        player.play(timings = haptic.timings, amplitude = GuidanceHaptic.amplitudeFor(event))
-        return true
+        val claimed = arbiter.tryClaim(SpeechScale.of(event), haptic.durationMs)
+        if (claimed) player.play(timings = haptic.timings, amplitude = GuidanceHaptic.amplitudeFor(event))
+        motorWait.reschedule()
+        return claimed
     }
 
     /**
@@ -100,6 +101,7 @@ class HapticManager(context: Context) {
     fun play(haptic: GuidanceHaptic, amplitude: Int = DEFAULT_AMPLITUDE) {
         arbiter.claimUnconditionally(haptic.durationMs)
         player.play(timings = haptic.timings, amplitude = amplitude)
+        motorWait.reschedule()
     }
 
     /**
@@ -130,8 +132,8 @@ private val GuidanceHaptic.durationMs: Long get() = timings.sum()
 
 /**
  * Keeps one timer running for as long as anything waits for the motor, so what waits starts with no new frame.
- * Starting one rhythm can leave another waiting behind it, so the timer is set again after every change, not only
- * when the motor turned out still busy. A claim that moves the motor's free time needs no call: the timer looks again.
+ * Starting one rhythm can leave another waiting behind it, and a claim can move the motor's free time earlier as well
+ * as later, so the timer is set again after every change, not only when the motor turned out still busy.
  */
 internal class MotorWait(
     private val arbiter: HapticArbiter,

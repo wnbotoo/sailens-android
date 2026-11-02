@@ -98,6 +98,30 @@ class PromptCountsTest {
         assertTrue(both.covers(20_000))
     }
 
+    private val nothing = UnmodeledFrom(emptyList(), emptyList())
+
+    @Test
+    fun `a stage comes to a kind of loss by when it ends`() {
+        assertNull(Loss.of(notKept = false, known = true, completionMs = 1_400, deadlineMs = 1_500, unmodeled = nothing))
+        assertEquals(Loss.BOUNDED_DELAY, Loss.of(true, true, 2_500, 1_500, nothing))
+        assertEquals(Loss.SEVERE_DELAY, Loss.of(true, true, 2_501, 1_500, nothing))
+        assertEquals(Loss.NEVER, Loss.of(true, true, null, 1_500, nothing))
+        assertEquals(Loss.UNKNOWN, Loss.of(true, known = false, completionMs = 1_600, deadlineMs = 1_500, unmodeled = nothing))
+    }
+
+    @Test
+    fun `something not modeled within the allowed window is not made up for by a later completion`() {
+        val from1800 = UnmodeledFrom(listOf(1_800L..1_900L), emptyList())
+        assertEquals(Loss.UNKNOWN, Loss.of(notKept = true, known = true, completionMs = 2_000, deadlineMs = 1_500, unmodeled = from1800))
+    }
+
+    @Test
+    fun `a stage kept before the first thing not modeled stays kept`() {
+        val from1800 = UnmodeledFrom(listOf(1_800L..1_900L), emptyList())
+        assertNull(Loss.of(notKept = false, known = true, completionMs = 1_400, deadlineMs = 1_500, unmodeled = from1800))
+        assertEquals(Loss.UNKNOWN, Loss.of(notKept = false, known = true, completionMs = 1_400, deadlineMs = 1_800, unmodeled = from1800))
+    }
+
     private companion object {
         const val MEDIUM = 2
         const val HIGH = 3

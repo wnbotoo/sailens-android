@@ -75,6 +75,7 @@ class DetFirstPairedRehearsalTest {
         val arms: Map<String, ArmResult>,
         /** Each hazard's frames as the launch policy's gates see them: time, then what holds it, null when it is admitted. */
         val gateFrames: Map<String, List<Pair<Long, String?>>>,
+        val firstAt: Long,
         val frames: Int,
         val minutes: Double,
         val stationaryMinutes: Double,
@@ -187,6 +188,7 @@ class DetFirstPairedRehearsalTest {
             File(out, "detfirst-paired.txt").writeText("${results.size} of ${evaluated.size} captures, ${(System.currentTimeMillis() - started) / 60_000} min\n" + report(results))
         }
         println(report(results))
+        File(out, "detfirst-label-list.csv").writeText(labelList(results))
         assertTrue(results.isNotEmpty())
         if (nominalOnly) return
         val failed = standingChecks(results)
@@ -329,9 +331,9 @@ class DetFirstPairedRehearsalTest {
                     val known = lates.filterNot { it.isNaN() }.sorted()
                     appendLine(String.format(Locale.ROOT, "    %s: %d%s", label, lates.size, if (known.isEmpty()) "" else String.format(Locale.ROOT, "; past the deadline median %.2f s, max %.2f s", known[known.size / 2], known.last())))
                 }
-                append(longerTolerance(rows))
-                if (name == LAUNCH) append(whatLossesAreWorth(rows))
-                if (name == LAUNCH) append(stressTraces(rows.map { it.first }))
+                appendLine("  losses with no error, count (ahead):")
+                append(lossLines(rows.map { (r, a) -> r to a.nominal }))
+                if (name == LAUNCH) append(stressTraces(rows.map { it.first }) { it.arms.getValue(LAUNCH).nominal })
                 if (name == LAUNCH) {
                     appendLine(whyNotBeforeCrossing(rows))
                     append(heardAheadInstead(rows))
@@ -389,130 +391,86 @@ class DetFirstPairedRehearsalTest {
         appendLine("    untimed offers (frames the device offered nothing on): ${captures.sumOf { it.untimedOffers.getValue(name) }}")
     }
 
-    /** M5 read with a longer tolerance past t_dev + 0.5 s, for choosing a revised one; not the frozen line. */
-    private fun longerTolerance(rows: List<Pair<CaptureResult, ArmResult>>): String = buildString {
-        appendLine("  M5 if a stage could end later than t_dev + 0.5 s by (no error | within epsilon):")
-        for (extra in listOf(0L, 250L, 500L, 1_000L, 1_500L, 2_000L)) {
-            fun over(pick: (ArmResult) -> PairedBranchRun.Result) = rows.map { (r, a) ->
-                val run = pick(a)
-                counted(run, r.production, unmodeledOf(r)) { key -> run.arm.completionMs(key)?.let { it <= r.deadlines.getValue(key) + extra } == true }
-            }.reduce(Counted::plus)
-            val noError = over { it.nominal }
-            val within = over { it.full }
-            appendLine("    +$extra ms: ${noError.total} (ahead ${noError.totalFront}) | ${within.total} (ahead ${within.totalFront})")
+    private fun lossesIn(r: CaptureResult, run: PairedBranchRun.Result): Map<StageKey, Loss> = buildMap {
+        for (stage in r.production.p) {
+            val key = stage.key
+            val notKept = key in run.regressions || key in run.bothLostApart || key in run.undeterminable
+            Loss.of(notKept, key !in run.undeterminable, run.arm.completionMs(key), r.deadlines.getValue(key), r.unmodeled)?.let { put(key, it) }
         }
+    }
+
+    private class Tally(val all: Int, val ahead: Int) {
+        override fun toString() = "$all ($ahead)"
     }
 
     /**
-     * The stages lost with no error, by what kind of loss each is: never said while the hazard lasted, said within a
-     * bounded delay, or so late it no longer helps. Each stage never said ahead gets a line of numbers.
+     * Each kind of loss over every protected stage, and over those the device finished while the track lived. That second
+     * group is a split for reading, not a judgement: a track ending does not mean the hazard has gone.
      */
-    private fun whatLossesAreWorth(rows: List<Pair<CaptureResult, ArmResult>>): String = buildString {
-        val kinds = java.util.TreeMap<String, Int>()
-        val neverAhead = ArrayList<String>()
-        fun afterItsEnd(r: CaptureResult, rowOf: Map<StageKey, PromptPolicyEvaluation.StageRow>, key: StageKey) = r.deadlines.getValue(key) - 500 > rowOf.getValue(key).endAt
-        for (extra in listOf(0L, 500L, 1_000L)) {
-            val live = rows.map { (r, a) ->
-                val rowOf = r.device.stages.associateBy { StageKey(it.hazard, it.stage) }
-                counted(a.nominal, r.production, unmodeledOf(r)) { key ->
-                    afterItsEnd(r, rowOf, key) || a.nominal.arm.completionMs(key)?.let { it <= r.deadlines.getValue(key) + extra } == true
-                }
-            }.reduce(Counted::plus)
-            appendLine("  stages the device finished saying while the hazard was still tracked, lost with +$extra ms: ${live.total} (ahead ${live.totalFront})")
-        }
-        var live = 0
-        var liveAhead = 0
-        var all = 0
-        var allAhead = 0
-        for ((r, _) in rows) {
-            val rowOf = r.device.stages.associateBy { StageKey(it.hazard, it.stage) }
-            for (stage in r.production.p) {
-                val row = rowOf.getValue(stage.key)
-                val ahead = row.hazardClass == "blocked" || (row.stage == Stage.CRITICAL && row.hazardClass in setOf("vehicle/front", "person/front"))
-                all++
-                if (ahead) allAhead++
-                if (!afterItsEnd(r, rowOf, stage.key)) {
-                    live++
-                    if (ahead) liveAhead++
+    private fun lossLines(rows: List<Pair<CaptureResult, PairedBranchRun.Result>>): String = buildString {
+        fun tally(kinds: Set<Loss>, liveOnly: Boolean): Tally {
+            var all = 0
+            var ahead = 0
+            for ((r, run) in rows) {
+                val aheadKeys = r.production.p.filter { it.frontCritical }.mapTo(HashSet()) { it.key }
+                val ends = r.device.stages.associate { StageKey(it.hazard, it.stage) to it.endAt }
+                for ((key, loss) in lossesIn(r, run)) {
+                    if (loss !in kinds) continue
+                    if (liveOnly && r.deadlines.getValue(key) - 500 > ends.getValue(key)) continue
+                    all++
+                    if (key in aheadKeys) ahead++
                 }
             }
+            return Tally(all, ahead)
         }
-        appendLine("  of P: the device finished while the hazard was tracked $live of $all, ahead $liveAhead of $allAhead")
-        for ((r, a) in rows) {
-            val rowOf = r.device.stages.associateBy { StageKey(it.hazard, it.stage) }
-            for (key in a.nominal.regressions) {
-                val row = rowOf.getValue(key)
-                val ahead = row.hazardClass == "blocked" || (row.stage == Stage.CRITICAL && row.hazardClass in setOf("vehicle/front", "person/front"))
-                val deadline = r.deadlines.getValue(key)
-                val completion = a.nominal.arm.completionMs(key)
-                val samples = r.samples[key.hazard].orEmpty()
-                val kind = when {
-                    completion == null -> "never said"
-                    completion > row.endAt -> "said after the hazard's last frame"
-                    else -> {
-                        val at = samples.lastOrNull { it.cameraNanos / 1_000_000 <= completion }?.validPointM
-                        val delay = when {
-                            completion <= deadline + 1_000 -> "within 1 s of the deadline"
-                            completion <= deadline + 2_000 -> "1 to 2 s past it"
-                            else -> "over 2 s past it"
-                        }
-                        val where = when {
-                            row.hazardClass == "blocked" -> "no distance"
-                            at == null -> "no fresh distance"
-                            at < USEFUL_WARNING_M -> "under ${USEFUL_WARNING_M} m left"
-                            else -> "${USEFUL_WARNING_M} m or more left"
-                        }
-                        "$delay, $where"
-                    }
-                }
-                kinds.merge("${if (ahead) "ahead" else "other"}: $kind", 1, Int::plus)
-                if (ahead && completion == null) {
-                    val after = (row.endAt - (deadline - 500)) / 1000.0
-                    val nearest = samples.mapNotNull { it.validPointM }.minOrNull()
-                    val spokenOf = a.nominalArm.offered.values.filter { o -> o.endAtMs != null && a.nominalArm.credits[o.id].orEmpty().any { it.hazard == key.hazard } }
-                    neverAhead += String.format(
-                        Locale.ROOT,
-                        "      %s %s: the stage ended %.1f s after the device finished it; nearest it ever came %s; other stages of it said before the deadline %d, after it %d",
-                        row.hazardClass,
-                        row.stage,
-                        after,
-                        nearest?.let { String.format(Locale.ROOT, "%.1f m", it) } ?: "not known",
-                        spokenOf.count { it.endAtMs!! <= deadline },
-                        spokenOf.count { it.endAtMs!! > deadline },
-                    )
-                }
-            }
+        for ((name, liveOnly) in listOf("every stage" to false, "device finished while the track lived" to true)) {
+            appendLine("      $name: never ${tally(setOf(Loss.NEVER), liveOnly)}; unknown ${tally(setOf(Loss.UNKNOWN), liveOnly)}; severe delay ${tally(setOf(Loss.SEVERE_DELAY), liveOnly)}; bounded delay ${tally(setOf(Loss.BOUNDED_DELAY), liveOnly)}")
         }
-        appendLine("  the kinds of loss, with no error:")
-        for ((label, n) in kinds) appendLine("    $label: $n")
-        appendLine("    each stage never said ahead:")
-        neverAhead.sorted().forEach(::appendLine)
     }
 
-    /** What a few fixed traces of independent errors do. A pressure check: it says nothing about the traces it does not run. */
-    private fun stressTraces(captures: List<CaptureResult>): String = buildString {
-        appendLine("  fixed error traces, lost with +0 and +1000 ms past the deadline, then never said:")
-        val union = HashSet<StageKey>()
-        val unionFront = HashSet<StageKey>()
+    /** The serious losses of a run, by capture: a track's number starts over in each. */
+    private fun seriousIn(r: CaptureResult, run: PairedBranchRun.Result): Set<Pair<String, StageKey>> =
+        lossesIn(r, run).filterValues { it != Loss.BOUNDED_DELAY }.keys.mapTo(HashSet()) { r.id to it }
+
+    /** What a few fixed traces of independent errors do, read as the nominal run is. A pressure check: it says nothing of the traces it does not run. */
+    private fun stressTraces(captures: List<CaptureResult>, nominal: (CaptureResult) -> PairedBranchRun.Result): String = buildString {
+        val aheadKeys = captures.flatMap { r -> r.production.p.filter { it.frontCritical }.map { r.id to it.key } }.toSet()
+        val base = captures.flatMap { seriousIn(it, nominal(it)) }.toSet()
+        val union = HashSet(base)
+        appendLine("  fixed error traces; added and recovered are serious losses against the nominal run:")
         for (trace in 0 until STRESS_TRACES) {
-            var plain = Counted(0, 0, 0, 0, 0, 0, 0)
-            var longer = Counted(0, 0, 0, 0, 0, 0, 0)
-            var never = Counted(0, 0, 0, 0, 0, 0, 0)
-            for (r in captures) {
-                val run = r.stress[trace]
-                plain += counted(run, r.production, unmodeledOf(r))
-                longer += counted(run, r.production, unmodeledOf(r)) { key -> run.arm.completionMs(key)?.let { it <= r.deadlines.getValue(key) + 1_000 } == true }
-                never += counted(run, r.production, unmodeledOf(r)) { key -> run.arm.completionMs(key) != null }
-                for (key in run.regressions) {
-                    if (run.arm.completionMs(key)?.let { it <= r.deadlines.getValue(key) + 1_000 } != true) {
-                        union += key
-                        if (r.production.m5Of(setOf(key)).let { it.regressionsFront + it.undeterminableFront } > 0) unionFront += key
-                    }
+            val serious = captures.flatMap { seriousIn(it, it.stress[trace]) }.toSet()
+            union += serious
+            val added = serious - base
+            val recovered = base - serious
+            appendLine("    trace $trace: added ${added.size} (ahead ${added.count { it in aheadKeys }}); recovered ${recovered.size} (ahead ${recovered.count { it in aheadKeys }})")
+            append(lossLines(captures.map { it to it.stress[trace] }))
+        }
+        appendLine("    serious in the nominal run or any trace: ${union.size} (ahead ${union.count { it in aheadKeys }})")
+    }
+
+    /**
+     * The stages ahead a person must look at: never over, severely late or unknown, in the nominal run or any trace. Times
+     * are from the capture's first frame. It stays on this machine with the captures.
+     */
+    private fun labelList(results: List<CaptureResult>): String = buildString {
+        appendLine("session,hazard,stage,class,appeared_s,track_ended_s,device_finished_s,readings")
+        for (r in results) {
+            val rowOf = r.device.stages.associateBy { StageKey(it.hazard, it.stage) }
+            val readings = LinkedHashMap<StageKey, MutableList<String>>()
+            val runs = listOf("nominal" to r.arms.getValue(LAUNCH).nominal) + r.stress.mapIndexed { i, run -> "trace$i" to run }
+            val aheadKeys = r.production.p.filter { it.frontCritical }.mapTo(HashSet()) { it.key }
+            for ((name, run) in runs) {
+                for ((key, loss) in lossesIn(r, run)) {
+                    if (loss != Loss.BOUNDED_DELAY && key in aheadKeys) readings.getOrPut(key) { mutableListOf() } += "$name:$loss"
                 }
             }
-            appendLine("    trace $trace: ${plain.total} (ahead ${plain.totalFront}); ${longer.total} (ahead ${longer.totalFront}); ${never.total} (ahead ${never.totalFront})")
+            for ((key, seen) in readings.entries.sortedBy { rowOf.getValue(it.key).appearedAt }) {
+                val row = rowOf.getValue(key)
+                fun s(ms: Long) = String.format(Locale.ROOT, "%.1f", (ms - r.firstAt) / 1000.0)
+                appendLine("${r.id},${key.hazard},${key.stage},${row.hazardClass},${s(row.appearedAt)},${s(row.endAt)},${s(r.deadlines.getValue(key) - 500)},${seen.joinToString(" ")}")
+            }
         }
-        appendLine("    lost with +1000 ms in any trace: ${union.size} (ahead ${unionFront.size})")
     }
 
     /** Stages lost ahead, with no error, where the user heard another warning ahead of the same level or higher anyway. */
@@ -781,6 +739,7 @@ class DetFirstPairedRehearsalTest {
             samples,
             runs.entries.associate { (arm, r) -> arm.name to ArmResult(r.nominal.finish(), r.full.finish(), r.nanos, r.nominalLog.first, r.nominalLog.second) },
             gateFrames,
+            firstAt ?: 0L,
             frames,
             ((lastAt - (firstAt ?: lastAt)) / 60_000.0),
             stationaryMs / 60_000.0,

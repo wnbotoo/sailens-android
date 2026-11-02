@@ -171,6 +171,34 @@ internal object PromptCounts {
     }
 }
 
+/** What becomes of a protected stage in one run, past its deadline of the device's completion + 0.5 s. Null when it is kept. */
+internal enum class Loss {
+    /** Over within [BOUND_MS] past the deadline. */
+    BOUNDED_DELAY,
+
+    /** Over later than that. Whether it still helps is not known from the time alone. */
+    SEVERE_DELAY,
+
+    /** Never over. */
+    NEVER,
+
+    /** The run cannot say, which no later completion makes up for. */
+    UNKNOWN,
+    ;
+
+    companion object {
+        const val BOUND_MS = 1_000L
+
+        fun of(notKept: Boolean, known: Boolean, completionMs: Long?, deadlineMs: Long, unmodeled: UnmodeledFrom): Loss? = when {
+            !notKept && !unmodeled.covers(deadlineMs) -> null
+            !known || unmodeled.covers(deadlineMs + BOUND_MS) -> UNKNOWN
+            completionMs == null -> NEVER
+            completionMs > deadlineMs + BOUND_MS -> SEVERE_DELAY
+            else -> BOUNDED_DELAY
+        }
+    }
+}
+
 /**
  * What a run can no longer vouch for, from the first thing it does not model on: an X3 or X5 window, or a frame that
  * took longer than the branches' skew. Every stage whose deadline is at or after that moment counts as undeterminable.

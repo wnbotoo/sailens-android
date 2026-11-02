@@ -264,6 +264,20 @@ class HapticArbiterTest {
     }
 
     @Test
+    fun `when a shorter rhythm replaces the one playing, what waits starts when the motor is free, not when it would have been`() {
+        val log = playsAt(1_000) { log ->
+            arbiter.claimUnconditionally(durationMs = 940)
+            arbiter.claimOrQueueNavigation(priority = 3, durationMs = 60, expiresAtMs = 3_000, start = { log += "navigation" to now }, onQueuedResult = {})
+            wait.reschedule()
+            now = 1_100
+            arbiter.claimUnconditionally(durationMs = 700)
+            wait.reschedule()
+            runTimersUntil(2_500)
+        }
+        assertEquals(listOf("navigation" to 1_800L), log)
+    }
+
+    @Test
     fun `when the motor is taken again before the timer is due, the timer looks again`() {
         val log = playsAt(1_000) { log ->
             arbiter.claimUnconditionally(durationMs = 100)
