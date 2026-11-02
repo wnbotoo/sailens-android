@@ -83,21 +83,21 @@ internal class PairedBranchRun(
 
     fun onFrame(t: Long, baseline: Decider, arm: Decider) {
         if (capHit) return
-        val cuts = pending.values.map { it.deadlineMs }.filter { it in now until t }.distinct().sorted()
+        val cuts = (pending.values.map { it.deadlineMs }.filter { it in now until t } + pendingQueued.map { it.atMs }.filter { it <= t }).distinct().sorted()
         for (cut in cuts) {
             now = cut
             branches = merged(branches.flatMap { joint -> split(joint, cut, kernel::splitAt) })
             if (overLimit()) return
+            while (pendingQueued.firstOrNull()?.let { it.atMs == cut } == true) {
+                val q = pendingQueued.removeFirst()
+                branches = merged(branches.map { j ->
+                    Joint(j.base.apply(kernel.submit(j.base.speaker, q).single(), 0), j.arm.apply(kernel.submit(j.arm.speaker, q).single(), 1), j.choices)
+                })
+            }
         }
         now = t
 
-        var settled = branches.flatMap { split(it, t, kernel::settle) }
-        while (pendingQueued.firstOrNull()?.let { it.atMs <= t } == true) {
-            val q = pendingQueued.removeFirst()
-            settled = settled.map { j ->
-                Joint(j.base.apply(kernel.submit(j.base.speaker, q).single(), 0), j.arm.apply(kernel.submit(j.arm.speaker, q).single(), 1), j.choices)
-            }
-        }
+        val settled = branches.flatMap { split(it, t, kernel::settle) }
         val next = ArrayList<Joint>()
         for (joint in settled) {
             val bases = decided(joint.base, 0, baseline, t)
@@ -127,7 +127,10 @@ internal class PairedBranchRun(
         return seen.keys.toList()
     }
 
-    /** A straddled end splits both arms together where they share the sentence, and the one that has it where not. */
+    /**
+     * A straddled end splits both arms together where they share the sentence, and the one that has it where
+     * not. A queued sentence with different predecessors in the two arms ends apart, so it is not shared.
+     */
     private fun split(joint: Joint, t: Long, by: (ClosedLoopSpeakerBranches.Speaker, Long) -> List<ClosedLoopSpeakerBranches.Step>): List<Joint> {
         val baseSteps = by(joint.base.speaker, t)
         fun spoken(step: ClosedLoopSpeakerBranches.Step) = step.outcomes.filterIsInstance<ClosedLoopSpeakerBranches.Spoken>().map { it.id }.toSet()
@@ -135,12 +138,9 @@ internal class PairedBranchRun(
             if (steps.size == 1) emptyList() else spoken(step).map { "$it ended by $t" }.ifEmpty { listOf("still speaking at $t") }
         if (joint.coupled) return baseSteps.map { s -> Joint(joint.base.apply(s, 0), joint.arm.apply(s, 1), joint.choices + note(baseSteps, s)) }
         val armSteps = by(joint.arm.speaker, t)
-        val baseIds = joint.base.speaker.queue.map { it.id }.toSet()
-        val armIds = joint.arm.speaker.queue.map { it.id }.toSet()
+        val shared = joint.base.speaker.queue.filter { b -> joint.arm.speaker.queue.any { a -> a.id == b.id && a.startAtMs == b.startAtMs && a.endHi == b.endHi } }.map { it.id }.toSet()
         val product = baseSteps.flatMap { b -> armSteps.map { a -> b to a } }
-        val agreeing = product.filter { (b, a) ->
-            (spoken(b) intersect armIds).all { it in spoken(a) } && (spoken(a) intersect baseIds).all { it in spoken(b) }
-        }
+        val agreeing = product.filter { (b, a) -> (spoken(b) intersect shared) == (spoken(a) intersect shared) }
         return agreeing.ifEmpty { product }.map { (b, a) ->
             Joint(joint.base.apply(b, 0), joint.arm.apply(a, 1), joint.choices + (note(baseSteps, b) + note(armSteps, a)).distinct())
         }

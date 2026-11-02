@@ -158,6 +158,48 @@ class DetFirstPairedRehearsalTest {
         }
         println(report(results))
         assertTrue(results.isNotEmpty())
+        val failed = standingChecks(results)
+        assertTrue("standing checks failed:\n${failed.joinToString("\n")}", failed.isEmpty())
+    }
+
+    /** Stages of P kept by one and not the other, and kept by both more than 1 ms apart. */
+    private fun nominalAgainstFrozen(results: List<CaptureResult>): Pair<Int, Int> {
+        var disagree = 0
+        var offByMoreThan1Ms = 0
+        for (r in results) {
+            val nominal = r.arms.getValue(NoChange().name).evaluation.nominalBaseKept()
+            for ((key, frozenNs) in r.legacy.modelCompletionNs()) {
+                val deadline = r.deadlines.getValue(key)
+                val frozenKept = frozenNs != null && frozenNs / 1_000_000 <= deadline
+                if (frozenKept != (key in nominal)) disagree++
+                if (frozenNs != null && key in nominal && abs(frozenNs / 1_000_000 - nominal.getValue(key)) > 1) offByMoreThan1Ms++
+            }
+        }
+        return disagree to offByMoreThan1Ms
+    }
+
+    /** What must hold for this rehearsal to say anything at all. A passing test means these held. */
+    private fun standingChecks(results: List<CaptureResult>): List<String> = buildList {
+        val (disagree, off) = nominalAgainstFrozen(results)
+        if (disagree != 0 || off != 0) add("the nominal path differs from the frozen nominal model: $disagree stages, $off beyond 1 ms")
+        val limit = maxOf(2, results.sumOf { it.legacy.p.size } / 100)
+        fun total(name: String, of: (PairedEvaluation) -> PairedBranchRun.Result) =
+            results.map { counted(of(it.arms.getValue(name).evaluation), it.legacy) }.reduce(Counted::plus)
+        for (name in results.first().arms.keys) {
+            val cut = results.count { it.arms.getValue(name).evaluation.pairsCut }
+            if (cut > 0) add("$name: pairs cut on $cut captures, so they are not every pair")
+            val invented = results.filter { !it.arms.getValue(name).reference.capHit }.sumOf { r ->
+                val arm = r.arms.getValue(name)
+                (arm.evaluation.result(MAX_SAMPLES).regressions - arm.reference.regressions).size
+            }
+            if (invented > 0) add("$name: $invented regressions the exact reference does not have")
+        }
+        val unchanged = total(NoChange().name) { it.result(MAX_SAMPLES) }
+        if (unchanged.regressions + unchanged.undeterminable + unchanged.fragile != 0) add("an arm that changes nothing scored: $unchanged")
+        for (name in listOf(MutedVehicles().name, Chatter().name)) {
+            val caught = total(name) { it.result(MAX_SAMPLES) }
+            if (caught.regressions + caught.undeterminable <= limit) add("$name must be caught, but scored: $caught")
+        }
     }
 
     private fun report(results: List<CaptureResult>): String {
@@ -167,17 +209,7 @@ class DetFirstPairedRehearsalTest {
             appendLine("M5 limit: at most ${maxOf(2, p / 100)} of |P| = $p; ahead CRITICAL and blocked: 0")
             appendLine()
             appendLine("The nominal path against the frozen nominal model (the arm that changes nothing, baseline side; stages of P):")
-            var disagree = 0
-            var offByMoreThan1Ms = 0
-            for (r in results) {
-                val nominal = r.arms.getValue(NoChange().name).evaluation.nominalBaseKept()
-                for ((key, frozenNs) in r.legacy.modelCompletionNs()) {
-                    val deadline = r.deadlines.getValue(key)
-                    val frozenKept = frozenNs != null && frozenNs / 1_000_000 <= deadline
-                    if (frozenKept != (key in nominal)) disagree++
-                    if (frozenNs != null && key in nominal && abs(frozenNs / 1_000_000 - nominal.getValue(key)) > 1) offByMoreThan1Ms++
-                }
-            }
+            val (disagree, offByMoreThan1Ms) = nominalAgainstFrozen(results)
             appendLine("  stages kept by one and not the other: $disagree; kept by both with first completion more than 1 ms apart: $offByMoreThan1Ms")
             for (name in results.first().arms.keys) {
                 appendLine()

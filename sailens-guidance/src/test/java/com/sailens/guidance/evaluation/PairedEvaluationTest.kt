@@ -163,6 +163,93 @@ class PairedEvaluationTest {
         assertEquals("the arms had differed since before the stage appeared at 0", setOf(target), result.bothLostApart)
     }
 
+    private val guard = StageKey("guard", Stage.CRITICAL)
+
+    private fun rejoining(cooldown: CooldownManager, t: Long, experimental: Boolean, record: SceneEvent): PairedBranchRun.Decision? = when {
+        t == 0L -> decision(offer(0, "a", 1_010))
+        t == 1_000L -> {
+            cooldown.recordEvent(record, t)
+            PairedBranchRun.Decision(offer(t, "r", 500), emptyList(), onAccepted = { it.confirm(record.id) }, onRefused = { it.revoke(record.id) })
+        }
+        t == 2_000L && experimental && cooldown.filter(listOf(record), t).isEmpty() -> decision(offer(t, "q"))
+        else -> null
+    }
+
+    @Test
+    fun `a path back on the nominal state keeps what it did before, and a target that changes nothing changes no verdict`() {
+        // If A ends by 1 000 the record stands and the arm alone says Q at 2 000. The record then dies out and
+        // both arms are back on the nominal state long before P's deadline, which neither speaks for.
+        val frames = listOf(0L, 1_000L, 2_000L, 3_000L, 22_000L, 25_000L)
+        val p = PairedEvaluation.Target(target, 24_000, 0)
+        val record = event(EventCategory.OBSTACLE, "obstacle_PRIMARY_CENTER", 1_000)
+        val alone = PairedEvaluation({ 150 }, listOf(p), emptyList(), frames.toLongArray(), 0, heldAfterDone = false, frameSkewMs = 0)
+        val anchored = PairedEvaluation({ 150 }, listOf(p, PairedEvaluation.Target(guard, 60_000, 0)), emptyList(), frames.toLongArray(), 0, heldAfterDone = false, frameSkewMs = 0)
+        for (run in listOf(alone, anchored)) {
+            for (t in frames) run.onFrame(t, { rejoining(it, t, false, record) }, { rejoining(it, t, true, record) })
+            run.finish()
+        }
+        assertEquals(setOf(target), alone.result(0).bothLostApart)
+        assertEquals(emptySet<StageKey>(), alone.result(0).sameInputs)
+        assertEquals(setOf(target), anchored.result(0).bothLostApart - guard)
+        assertEquals("the nominal path alone has the arms the same throughout", setOf(target), alone.result(0, withFaults = false).sameInputs)
+    }
+
+    private fun queuedRegression(frames: List<Long>, deadlineMs: Long, queued: List<SpeakerModel.Queued>, baseline: Map<Long, SpeakerModel.Offer>, arm: Map<Long, SpeakerModel.Offer>) {
+        val run = PairedEvaluation({ 150 }, listOf(targetOf(deadlineMs)), queued, frames.toLongArray(), 0, heldAfterDone = false, frameSkewMs = 0)
+        val reference = PairedBranchRun(frozenKernel, listOf(targetOf(deadlineMs)), queued)
+        for (t in frames) {
+            run.onFrame(t, { decision(baseline[t]) }, { decision(arm[t]) })
+            reference.onFrame(t, { decision(baseline[t]) }, { decision(arm[t]) })
+        }
+        run.finish()
+        assertEquals(setOf(target), reference.finish().regressions)
+        assertEquals("one sentence's error shows it", setOf(target), run.result(0, withPairs = false).regressions)
+    }
+
+    @Test
+    fun `a queued sentence's own error is a fault, in a one-millisecond gap`() {
+        val b = offer(900, "b")
+        val p = offer(1_100, "p")
+        val base = mapOf(900L to b, 1_100L to p)
+        val arm = base + (901L to offer(901, "q"))
+        queuedRegression(listOf(0L, 900L, 901L, 1_100L, 2_300L, 2_600L), 2_500, listOf(SpeakerModel.Queued(0, "a", 3, 1_000)), base, arm)
+        queuedRegression(buildList { add(0L); addAll(850L..1_150L); add(2_300L); add(2_600L) }, 2_500, listOf(SpeakerModel.Queued(0, "a", 3, 1_000)), base, arm)
+    }
+
+    @Test
+    fun `an error moves what is queued behind the sentence, so the moments that matter move back with it`() {
+        // Only A ending in (900, 901] puts the queued sentence's end in (1 900, 1 901]: B refused, the arm's Q taken, P held off.
+        val a = offer(0, "a")
+        val b = offer(1_900, "b")
+        val p = offer(2_100, "p")
+        val base = mapOf(0L to a, 1_900L to b, 2_100L to p)
+        val arm = base + (1_901L to offer(1_901, "q"))
+        val queued = SpeakerModel.Queued(10, "queued", 3, 1_000)
+        val frames = listOf(0L, 10L, 1_900L, 1_901L, 2_100L, 3_300L, 3_600L)
+        queuedRegression(frames, 3_500, listOf(queued), base, arm)
+        // The frozen model on that one realization agrees.
+        val baseInputs = listOf(offer(0, "a", 901), queued, b, p)
+        val completed = { inputs: List<SpeakerModel.Input> -> SpeakerModel().run(inputs).single { it.id == "p" }.completed }
+        assertTrue(completed(baseInputs))
+        assertTrue(!completed(baseInputs + offer(1_901, "q")))
+    }
+
+    @Test
+    fun `a queued sentence reaches the speaker at its own time, not at the next frame`() {
+        // A ends at 1 000; the sentence queued at 900 starts then, though the first frame to see it is at 1 500.
+        val a = offer(0, "a")
+        val queued = SpeakerModel.Queued(900, "queued", 3, 1_000)
+        val frames = listOf(0L, 1_500L, 1_950L, 2_050L, 3_000L)
+        val p = offer(1_950, "p")
+        val run = evaluated(5_000, frames, mapOf(0L to a, 1_950L to p), mapOf(0L to a, 1_950L to p), sweep = false)
+        assertEquals("without a queue, P is taken", 2_950L, run.nominalBaseKept()[target])
+        val withQueued = PairedEvaluation({ 150 }, listOf(targetOf(5_000)), listOf(queued), frames.toLongArray(), 0, heldAfterDone = false, frameSkewMs = 0, sweep = false)
+        for (t in frames) withQueued.onFrame(t, { decision(mapOf(0L to a, 1_950L to p)[t]) }, { decision(mapOf(0L to a, 1_950L to p)[t]) })
+        withQueued.finish()
+        assertEquals("queued behind A, it still speaks at 1 950 and holds P off", null, withQueued.nominalBaseKept()[target])
+        assertTrue(!SpeakerModel().run(listOf(a, queued, p)).single { it.id == "p" }.completed)
+    }
+
     private fun randomStream(random: Random): Triple<List<Long>, Map<Long, SpeakerModel.Offer>, Map<Long, SpeakerModel.Offer>> {
         val frames = (0L..6_000L step 50L).toList()
         val base = HashMap<Long, SpeakerModel.Offer>()
@@ -198,6 +285,147 @@ class PairedEvaluationTest {
         println("random streams: exact regressions $exactRegressions, found $found")
         assertTrue("the streams exercise it", exactRegressions >= 20)
         assertEquals(exactRegressions, found)
+    }
+
+    /** The frozen model with these errors on these sentences: does the baseline speak P by the deadline and the arm not? */
+    private fun frozenRegression(deadlineMs: Long, queued: List<SpeakerModel.Queued>, base: Map<Long, SpeakerModel.Offer>, arm: Map<Long, SpeakerModel.Offer>, errors: Map<String, Long>): Boolean {
+        fun keeps(offers: Map<Long, SpeakerModel.Offer>): Boolean {
+            val inputs = offers.values.map { it.copy(durationMs = it.durationMs + (errors[it.id] ?: 0)) } + queued.map { it.copy(durationMs = it.durationMs + (errors[it.id] ?: 0)) }
+            val p = SpeakerModel().run(inputs).single { it.id == "p" }
+            return p.completed && p.endAtMs!! <= deadlineMs
+        }
+        return keeps(base) && !keeps(arm)
+    }
+
+    @Test
+    fun `single faults find exactly what the frozen model finds at every millisecond of one sentence's error`() {
+        val random = Random(23)
+        var found = 0
+        repeat(60) {
+            val (frames, base, arm) = randomStream(random)
+            val queued = List(1 + random.nextInt(3)) { i -> SpeakerModel.Queued(50L * random.nextInt(80) + 7, "n$i", if (random.nextBoolean()) 3 else null, 400L + random.nextInt(800)) }
+            val run = PairedEvaluation({ 150 }, listOf(targetOf(5_500)), queued, frames.toLongArray(), 0, heldAfterDone = false, frameSkewMs = 0)
+            for (t in frames) run.onFrame(t, { decision(base[t]) }, { decision(arm[t]) })
+            run.finish()
+            val ids = (base.values + arm.values).map { it.id }.toSet() + queued.map { it.id }
+            val frozen = frozenRegression(5_500, queued, base, arm, emptyMap()) ||
+                ids.any { id -> (-150L..150L).any { error -> frozenRegression(5_500, queued, base, arm, mapOf(id to error)) } }
+            assertEquals(frozen, target in run.result(0, withPairs = false).regressions)
+            if (frozen) found++
+        }
+        println("random streams, frozen model at every millisecond of one error: $found regressions")
+        assertTrue("the streams exercise it", found >= 5)
+    }
+
+    @Test
+    fun `against the exact reference with queued sentences, nothing is invented, and what pairs miss takes three errors`() {
+        val random = Random(21)
+        var exactRegressions = 0
+        var bySingles = 0
+        var byPairs = 0
+        var takeThree = 0
+        repeat(200) {
+            val (frames, base, arm) = randomStream(random)
+            val queued = List(1 + random.nextInt(3)) { i -> SpeakerModel.Queued(50L * random.nextInt(80) + 7, "n$i", if (random.nextBoolean()) 3 else null, 400L + random.nextInt(800)) }
+            val run = PairedEvaluation({ 150 }, listOf(targetOf(5_500)), queued, frames.toLongArray(), 0, heldAfterDone = false, frameSkewMs = 0)
+            val reference = PairedBranchRun(frozenKernel, listOf(targetOf(5_500)), queued)
+            for (t in frames) {
+                run.onFrame(t, { decision(base[t]) }, { decision(arm[t]) })
+                reference.onFrame(t, { decision(base[t]) }, { decision(arm[t]) })
+            }
+            run.finish()
+            val exact = reference.finish()
+            assertTrue("the reference settles these", !exact.capHit)
+            assertTrue("nothing the exact run does not have", (run.result(0).regressions - exact.regressions).isEmpty())
+            exactRegressions += exact.regressions.size
+            bySingles += run.result(0, withPairs = false).regressions.size
+            byPairs += run.result(0).regressions.size
+            if (target !in exact.regressions || target in run.result(0).regressions) return@repeat
+            // Missed: the frozen model must not show it with two errors, on as fine a grid as is affordable.
+            val ids = ((base.values + arm.values).map { it.id }.toSet() + queued.map { it.id }).toList()
+            for (i in ids.indices) for (j in i + 1 until ids.size) {
+                for (x in -150L..150L step 3) for (y in -150L..150L step 3) {
+                    assertTrue("${ids[i]} $x, ${ids[j]} $y", !frozenRegression(5_500, queued, base, arm, mapOf(ids[i] to x, ids[j] to y)))
+                }
+            }
+            takeThree++
+        }
+        println("random streams with queued sentences: exact regressions $exactRegressions, by single faults $bySingles, and pairs $byPairs, the rest $takeThree")
+        assertTrue("the streams exercise it", exactRegressions >= 10)
+        assertEquals(exactRegressions, byPairs + takeThree)
+    }
+
+    @Test
+    fun `a frame seen late by less than the whole of the skew is a fault of its own`() {
+        // Both arms offer P at 1 000, over a sentence of their own: the baseline's ends at 1 020, the arm's at 1 040.
+        // Seen 30 ms late, the baseline's is over and the arm's is not, so only the baseline's P is taken.
+        // Seen on time both are refused, seen a whole δ late both are taken, and neither is a regression.
+        val theirs = offer(0, "b", 1_020)
+        val ours = offer(0, "a", 1_040)
+        val p = offer(1_000, "p", 800)
+        val frames = listOf(0L, 1_000L, 1_500L, 2_500L)
+        val run = PairedEvaluation({ 0 }, listOf(targetOf(2_400)), emptyList(), frames.toLongArray(), 0, heldAfterDone = false, frameSkewMs = 50)
+        for (t in frames) run.onFrame(t, { decision(mapOf(0L to theirs, 1_000L to p)[t]) }, { decision(mapOf(0L to ours, 1_000L to p)[t]) })
+        run.finish()
+        assertEquals(setOf(target), run.result(0).regressions)
+    }
+
+    @Test
+    fun `with a frame's skew and a late onDone too, nothing is invented`() {
+        val random = Random(24)
+        var exactRegressions = 0
+        var found = 0
+        repeat(100) {
+            val (frames, base, arm) = randomStream(random)
+            val queued = List(random.nextInt(3)) { i -> SpeakerModel.Queued(50L * random.nextInt(80) + 7, "n$i", 3, 400L + random.nextInt(800)) }
+            val run = PairedEvaluation({ 150 }, listOf(targetOf(5_500)), queued, frames.toLongArray(), 0, heldAfterDone = true, frameSkewMs = 50)
+            val reference = PairedBranchRun(ClosedLoopSpeakerBranches({ 150 }, heldAfterDone = true, frameSkewMs = 50), listOf(targetOf(5_500)), queued)
+            for (t in frames) {
+                run.onFrame(t, { decision(base[t]) }, { decision(arm[t]) })
+                reference.onFrame(t, { decision(base[t]) }, { decision(arm[t]) })
+            }
+            run.finish()
+            val exact = reference.finish()
+            if (exact.capHit) return@repeat
+            assertTrue("nothing the exact run does not have", (run.result(0).regressions - exact.regressions).isEmpty())
+            exactRegressions += exact.regressions.size
+            found += run.result(0).regressions.size
+        }
+        println("random streams with skew: exact regressions $exactRegressions, found $found")
+        assertTrue("the streams exercise it", exactRegressions >= 5)
+        // The one left needs four things at once, worked by hand: a queued sentence's error, the error of the sentence
+        // ahead of it in the arm, the error of a later sentence, and a frame seen late.
+        assertEquals(exactRegressions - 1, found)
+    }
+
+    @Test
+    fun `a target that changes nothing changes no stage's verdict, and the nominal reading stands alone`() {
+        val random = Random(22)
+        var apart = 0
+        repeat(100) {
+            val (frames, base, arm) = randomStream(random)
+            val queued = List(random.nextInt(2)) { i -> SpeakerModel.Queued(50L * random.nextInt(80) + 7, "n$i", 3, 400L + random.nextInt(800)) }
+            // The cut at the guard's deadline is outside every sentence's interval, so the two have the same realizations.
+            val alone = PairedEvaluation({ 150 }, listOf(targetOf(5_500)), queued, frames.toLongArray(), 0, heldAfterDone = false, frameSkewMs = 0)
+            val anchored = PairedEvaluation({ 150 }, listOf(targetOf(5_500), PairedEvaluation.Target(guard, 60_000, 0)), queued, frames.toLongArray(), 0, heldAfterDone = false, frameSkewMs = 0)
+            val nominalOnly = PairedEvaluation({ 150 }, listOf(targetOf(5_500)), queued, frames.toLongArray(), 0, heldAfterDone = false, frameSkewMs = 0, sweep = false)
+            for (run in listOf(alone, anchored, nominalOnly)) {
+                for (t in frames) run.onFrame(t, { decision(base[t]) }, { decision(arm[t]) })
+                run.finish()
+            }
+            val a = alone.result(0)
+            val b = anchored.result(0)
+            assertEquals(a.regressions, b.regressions - guard)
+            assertEquals(a.bothLostApart, b.bothLostApart - guard)
+            assertEquals(a.sameInputs, b.sameInputs - guard)
+            apart += a.bothLostApart.size
+            val n = nominalOnly.result(0, withFaults = false)
+            val fromSweep = alone.result(0, withFaults = false)
+            assertEquals(n.regressions, fromSweep.regressions)
+            assertEquals(n.bothLostApart, fromSweep.bothLostApart)
+            assertEquals(n.sameInputs, fromSweep.sameInputs)
+        }
+        println("random streams: both lost apart $apart")
     }
 
     @Test

@@ -11,20 +11,27 @@ import com.sailens.guidance.processor.decision.CooldownManager
  *
  * Which realizations:
  * - **Nominal.** No error.
- * - **Every single fault.** One sentence ending in each gap of its interval, the others nominal. A gap
- *   runs between two moments something compares against: a frame or a stage's deadline. Inside a gap the
- *   sentence's exact end changes nothing, so this covers everything one sentence's error can do, however
- *   narrow its range. Also one frame seen δ late, and each other outcome of one offer. Each starts from
- *   the nominal path and ends when both arms are provably back on it ([ArmPath.sameAs]), so the count
- *   cannot pile up over a session.
- * - **Every pair of faults**, where they can interact: a second fault starts only on a path the first has not
- *   yet left, since a path back on the nominal one has forgotten the first. Counted apart.
- * - **Fixed samples**, for more faults at once: every sentence ending in a gap drawn uniformly, so a
+ * - **Every single fault.** One sentence, queued ones included, with its error in each gap of its interval,
+ *   the others nominal. A gap runs between two errors at which something flips: the sentence, or one queued
+ *   behind it and so moved with it, ends exactly at a frame, at a frame plus δ, or at a stage's deadline.
+ *   Inside a gap the exact error changes nothing, so this covers everything one sentence's error can do,
+ *   however narrow its range. Also one frame seen late, by as much as puts each end straddling it in the
+ *   past (one lateness for both arms, as they share the frame), and each other outcome of one offer. Each
+ *   starts from the nominal path and ends when both arms are provably back on it and its history can no
+ *   longer change a verdict, so the count cannot pile up over a session.
+ * - **Every pair of faults**, where they can interact: a second fault starts only on a path that still
+ *   differs from the nominal one, in state or in history. Counted apart.
+ * - **Fixed samples**, for more faults at once: every sentence's error in a gap drawn uniformly, so a
  *   narrow gap is as likely as a wide one. These carry no guarantee.
  *
+ * An error belongs to the sentence, not to a moment: a queued sentence that starts later in one arm ends
+ * later there by the same error.
+ *
  * A fault is spent once its frame has run: from then on a path's future is its state alone. So paths in equal
- * state merge, whatever brought them there, and only the worst of their [Path.sameSince] is kept. Pairs stop
- * starting past [maxPathsForPairs], and [pairsCut] says so: the pairs are then not every pair.
+ * state merge, whatever brought them there, and only the worst of their [Path.sameSince] is kept. The verdict
+ * also looks back, though, so equal state is not enough to end a path: one on the nominal state runs on until
+ * [Path.noWorseThan] shows its past cannot change a verdict. Pairs stop starting past [maxPathsForPairs], and
+ * [pairsCut] says so: the pairs are then not every pair.
  *
  * Provably back on the path means equal speakers, equal marks, and equal cooldowns up to what [liveCooldown]
  * shows cannot affect a later decision. An arm with more state (a delivery protocol) has to add it there.
@@ -42,7 +49,7 @@ internal class PairedEvaluation(
     private val frameSkewMs: Long,
     private val sweep: Boolean = true,
     private val pairing: Boolean = sweep,
-    private val maxPathsForPairs: Int = 4_000,
+    private val maxPathsForPairs: Int = 20_000,
     private val seed: Long = 0x5A11E25L,
 ) {
     /** @param appearedAtMs when the stage first appeared on the device, before anything could be offered for it. */
@@ -53,6 +60,9 @@ internal class PairedEvaluation(
     private val all = targets.map { it.key }.toSet()
     private val deadlineOf = targets.associate { it.key to it.deadlineMs }
     private val deadlines = byDeadline.map { it.deadlineMs }.distinct().toLongArray()
+
+    /** A frame compares twice: an end by the frame, and an end by the frame plus δ (or, for a late `onDone`, the millisecond after it). */
+    private val frameWindowMs = if (heldAfterDone) maxOf(frameSkewMs, 1) else frameSkewMs
 
     /** Which stages each sentence speaks for, by arm: the two arms may credit the same words differently. */
     private val credits = listOf(HashMap<String, List<StageKey>>(), HashMap<String, List<StageKey>>())
@@ -69,9 +79,12 @@ internal class PairedEvaluation(
             liveCooldown(cooldown.canonicalState(), now) == liveCooldown(other.cooldown.canonicalState(), now)
     }
 
+    /** A sentence taken on a path: where it ends with no error, and the first queued input that can line up behind it. */
+    private data class Taken(val nominalEnd: Long, val nextQueued: Int)
+
     private sealed interface Realization {
-        /** Where this sentence ends, given its nominal end; null keeps it nominal. */
-        fun endOf(id: String, nominalEnd: Long): Long? = null
+        /** This sentence's error; null keeps it nominal. */
+        fun errorOf(id: String, taken: Taken): Long? = null
 
         /** How much later than the decision this frame compares. */
         fun skewAt(t: Long): Long = 0
@@ -82,12 +95,12 @@ internal class PairedEvaluation(
 
     private data object Nominal : Realization
 
-    private data class EndFault(val id: String, val end: Long) : Realization {
-        override fun endOf(id: String, nominalEnd: Long) = end.takeIf { id == this.id }
+    private data class EndFault(val id: String, val error: Long) : Realization {
+        override fun errorOf(id: String, taken: Taken) = error.takeIf { id == this.id }
     }
 
     private data class TwoFaults(val first: Realization, val second: Realization) : Realization {
-        override fun endOf(id: String, nominalEnd: Long) = second.endOf(id, nominalEnd) ?: first.endOf(id, nominalEnd)
+        override fun errorOf(id: String, taken: Taken) = second.errorOf(id, taken) ?: first.errorOf(id, taken)
         override fun skewAt(t: Long) = maxOf(first.skewAt(t), second.skewAt(t))
         override fun stepOf(id: String, t: Long, size: Int) = second.stepOf(id, t, size) ?: first.stepOf(id, t, size)
     }
@@ -101,6 +114,9 @@ internal class PairedEvaluation(
     }
 
     private inner class Sampled(private val index: Int) : Realization {
+        /** Drawn once per sentence, so a queued sentence has one error in both arms wherever each arm has it end. */
+        private val errors = HashMap<String, Long>()
+
         private fun hash(id: String, t: Long): Long {
             var h = seed * 31 + index
             h = h * 1_000_003 + id.hashCode()
@@ -110,9 +126,9 @@ internal class PairedEvaluation(
             return h xor (h ushr 32)
         }
 
-        override fun endOf(id: String, nominalEnd: Long): Long {
-            val gaps = endsAcrossGaps(nominalEnd, epsilonMs(id))
-            return gaps[Math.floorMod(hash(id, 0), gaps.size.toLong()).toInt()]
+        override fun errorOf(id: String, taken: Taken): Long = errors.getOrPut(id) {
+            val gaps = errorsAcrossGaps(id, taken)
+            gaps[Math.floorMod(hash(id, 0), gaps.size.toLong()).toInt()]
         }
 
         override fun skewAt(t: Long) = if (frameSkewMs == 0L) 0 else Math.floorMod(hash("skew", t), frameSkewMs + 1)
@@ -120,18 +136,34 @@ internal class PairedEvaluation(
         override fun stepOf(id: String, t: Long, size: Int) = Math.floorMod(hash(id, t), size.toLong()).toInt()
     }
 
-    /** One end in each gap of the interval around [nominalEnd]: its upper limit, every frame and every deadline in it. */
-    private fun endsAcrossGaps(nominalEnd: Long, epsilon: Long): List<Long> {
-        val lo = nominalEnd - epsilon
-        val hi = nominalEnd + epsilon
-        val cuts = sortedSetOf(hi)
-        var i = frames.binarySearch(lo).let { if (it < 0) -it - 1 else it }
-        while (i < frames.size && frames[i] < hi) cuts += frames[i++]
-        var d = deadlines.binarySearch(lo).let { if (it < 0) -it - 1 else it }
-        while (d < deadlines.size && deadlines[d] < hi) {
-            cuts += deadlines[d]
-            cuts += deadlines[d] + 1
-            d++
+    /** How far behind this sentence's end each sentence that can queue behind it ends, itself first. */
+    private fun queuedBehind(id: String, taken: Taken): List<Long> {
+        val offsets = mutableListOf(0L)
+        var offset = 0L
+        var latestEnd = taken.nominalEnd + epsilonMs(id)
+        for (i in taken.nextQueued until sortedQueued.size) {
+            val q = sortedQueued[i]
+            if (q.atMs > latestEnd) break
+            offset += q.durationMs
+            latestEnd += q.durationMs + epsilonMs(q.id)
+            offsets += offset
+        }
+        return offsets
+    }
+
+    /** One error in each gap of the sentence's interval: its upper limit, and every error at which something flips. */
+    private fun errorsAcrossGaps(id: String, taken: Taken): List<Long> {
+        val epsilon = epsilonMs(id)
+        val cuts = sortedSetOf(epsilon)
+        for (offset in queuedBehind(id, taken)) {
+            val end = taken.nominalEnd + offset
+            fun cutsAt(moments: LongArray, shift: Long) {
+                var i = moments.binarySearch(end - epsilon - shift).let { if (it < 0) -it - 1 else it }
+                while (i < moments.size && moments[i] + shift < end + epsilon) cuts += moments[i++] + shift - end
+            }
+            cutsAt(frames, 0)
+            if (frameWindowMs > 0) cutsAt(frames, frameWindowMs)
+            cutsAt(deadlines, 0)
         }
         return cuts.toList()
     }
@@ -147,15 +179,15 @@ internal class PairedEvaluation(
         /** The two arms have had equal state and equal inputs since this time; null while they differ. */
         private var sameSince: Long?,
     ) {
-        /** What the frame offered that could be a fault of its own: sentences taken, frames straddled, offers with other outcomes. */
-        val taken = mutableMapOf<String, Long>()
-        var straddled = false
+        /** What the frame offered that could be a fault of its own: sentences taken (per arm, a queued one may end apart), frames straddled, offers with other outcomes. */
+        val taken = mutableMapOf<String, MutableSet<Taken>>()
+        val straddlingSkews = sortedSetOf<Long>()
         val otherSteps = mutableMapOf<String, Int>()
 
         private fun settled(a: ArmPath, side: Int, t: Long): ArmPath {
             val steps = kernel.settle(a.speaker, t)
             if (steps.size == 1) return credited(a, side, steps.single())
-            straddled = true
+            a.speaker.queue.mapNotNullTo(straddlingSkews) { item -> (item.endHi - t).takeIf { it in 1..frameSkewMs } }
             val skew = realization.skewAt(t)
             val step = steps.firstOrNull { s ->
                 a.speaker.queue.all { item ->
@@ -186,14 +218,15 @@ internal class PairedEvaluation(
             val known = credits[side].getOrPut(id) { decision.credits }
             check(known == decision.credits) { "$id speaks for different stages in one arm" }
             val nominalEnd = nominalOffer.atMs + nominalOffer.durationMs
-            val offer = nominalOffer.copy(durationMs = (realization.endOf(id, nominalEnd) ?: nominalEnd) - nominalOffer.atMs)
+            val sentence = Taken(nominalEnd, nextQueued)
+            val offer = nominalOffer.copy(durationMs = nominalOffer.durationMs + (realization.errorOf(id, sentence) ?: 0))
             val steps = kernel.submit(a.speaker, offer)
             val nominal = steps.indexOfFirst { it.speaker.deferred.size == a.speaker.deferred.size }.coerceAtLeast(0)
             if (steps.size > 1) otherSteps[id] = maxOf(otherSteps[id] ?: 0, steps.size)
             val step = steps[realization.stepOf(id, t, steps.size)?.takeIf { it < steps.size } ?: nominal]
             val accepted = step.outcomes.any { it is ClosedLoopSpeakerBranches.Accepted && it.id == id }
             if (accepted) {
-                taken[id] = nominalEnd
+                taken.getOrPut(id) { mutableSetOf() } += sentence
                 decision.onAccepted(cooldown)
             } else {
                 decision.onRefused(cooldown)
@@ -201,25 +234,29 @@ internal class PairedEvaluation(
             return credited(a, side, step, cooldown) to nominalOffer
         }
 
-        private fun withQueued(a: ArmPath, side: Int, inputs: List<SpeakerModel.Queued>): ArmPath {
+        /** Queued inputs reach the speaker at their own time, not the frame's, each behind what is still speaking then. */
+        private fun withQueued(a: ArmPath, side: Int, firstInput: Int, inputs: List<SpeakerModel.Queued>): ArmPath {
             var now = a
-            for (q in inputs) {
-                val nominalEnd = q.atMs + q.durationMs
-                val at = q.copy(durationMs = (realization.endOf(q.id, nominalEnd) ?: nominalEnd) - q.atMs)
-                now = credited(now, side, kernel.submit(now.speaker, at).single())
+            inputs.forEachIndexed { i, q ->
+                now = credited(now, side, kernel.splitAt(now.speaker, q.atMs).single())
+                val start = maxOf(q.atMs, now.speaker.queue.lastOrNull()?.endHi ?: Long.MIN_VALUE)
+                val sentence = Taken(start + q.durationMs, firstInput + i + 1)
+                val step = kernel.submit(now.speaker, q.copy(durationMs = q.durationMs + (realization.errorOf(q.id, sentence) ?: 0))).single()
+                if (step.outcomes.any { it is ClosedLoopSpeakerBranches.Accepted }) taken.getOrPut(q.id) { mutableSetOf() } += sentence
+                now = credited(now, side, step)
             }
             return now
         }
 
         fun onFrame(t: Long, baseline: PairedBranchRun.Decider, experimental: PairedBranchRun.Decider) {
             taken.clear()
-            straddled = false
+            straddlingSkews.clear()
             otherSteps.clear()
             val first = nextQueued
             while (nextQueued < sortedQueued.size && sortedQueued[nextQueued].atMs <= t) nextQueued++
             val inputs = sortedQueued.subList(first, nextQueued)
-            val (b, baseOffer) = decided(withQueued(settled(base, 0, t), 0, inputs), 0, baseline, t)
-            val (a, armOffer) = decided(withQueued(settled(arm, 1, t), 1, inputs), 1, experimental, t)
+            val (b, baseOffer) = decided(settled(withQueued(base, 0, first, inputs), 0, t), 0, baseline, t)
+            val (a, armOffer) = decided(settled(withQueued(arm, 1, first, inputs), 1, t), 1, experimental, t)
             base = b
             arm = a
             sameSince = if (baseOffer == armOffer && a.sameAs(b, t)) sameSince ?: t else null
@@ -264,6 +301,21 @@ internal class PairedEvaluation(
             val mine = sameSince
             val theirs = other.sameSince
             sameSince = if (mine == null || theirs == null) null else maxOf(mine, theirs)
+        }
+
+        /**
+         * On equal state, [other]'s verdicts include this path's from here on: wherever this path could not
+         * claim the arms had run the same since a stage appeared, [other] cannot either. It stays true as
+         * both run on: they then differ or agree together, and a later start only raises the bar.
+         */
+        fun noWorseThan(other: Path): Boolean {
+            val mine = sameSince ?: Long.MAX_VALUE
+            val theirs = other.sameSince ?: Long.MAX_VALUE
+            if (mine <= theirs) return true
+            for (i in nextDeadline until byDeadline.size) {
+                if (byDeadline[i].appearedAtMs in theirs until mine) return false
+            }
+            return true
         }
     }
 
@@ -325,24 +377,33 @@ internal class PairedEvaluation(
                 pairsOn(path, before)
             }
             val nominalKey = nominal.stateKey(t)
-            val merged = LinkedHashMap<List<Any>, Path>()
-            for (path in faults.filter { it.realization !is TwoFaults } + singles + faults.filter { it.realization is TwoFaults } + pairs) {
+            val singlesHeld = LinkedHashMap<List<Any>, Path>()
+            for (path in faults.filter { it.realization !is TwoFaults } + singles) {
                 val key = path.stateKey(t)
-                if (key == nominalKey) continue
-                val held = merged[key]
-                if (held == null) merged[key] = path else held.absorb(path)
+                if (key == nominalKey && path.noWorseThan(nominal)) continue
+                val held = singlesHeld[key]
+                if (held == null) singlesHeld[key] = path else held.absorb(path)
             }
-            faults = merged.values.toMutableList()
+            // Apart from the singles, so that "every single fault" means that and no pair's history.
+            val pairsHeld = LinkedHashMap<List<Any>, Path>()
+            for (path in faults.filter { it.realization is TwoFaults } + pairs) {
+                val key = path.stateKey(t)
+                if (key == nominalKey && path.noWorseThan(nominal)) continue
+                if (singlesHeld[key]?.let(path::noWorseThan) == true) continue
+                val held = pairsHeld[key]
+                if (held == null) pairsHeld[key] = path else held.absorb(path)
+            }
+            faults = (singlesHeld.values + pairsHeld.values).toMutableList()
             mostFaultsAtOnce = maxOf(mostFaultsAtOnce, faults.size)
         }
     }
 
     /** What the frame [path] just ran offers as a fault of its own. */
     private fun faultsOf(path: Path, t: Long): List<Realization> = buildList {
-        for ((id, nominalEnd) in path.taken) {
-            for (end in endsAcrossGaps(nominalEnd, epsilonMs(id))) add(EndFault(id, end))
+        for ((id, sentences) in path.taken) {
+            for (error in sentences.flatMapTo(sortedSetOf()) { errorsAcrossGaps(id, it) }) add(EndFault(id, error))
         }
-        if (frameSkewMs > 0 && path.straddled) add(SkewFault(t, frameSkewMs))
+        for (skew in path.straddlingSkews) add(SkewFault(t, skew))
         for ((id, size) in path.otherSteps) for (step in 0 until size) add(StepFault(id, t, step))
     }
 
