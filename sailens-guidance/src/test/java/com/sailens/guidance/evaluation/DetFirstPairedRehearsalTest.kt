@@ -325,9 +325,9 @@ class DetFirstPairedRehearsalTest {
                     val known = lates.filterNot { it.isNaN() }.sorted()
                     appendLine(String.format(Locale.ROOT, "    %s: %d%s", label, lates.size, if (known.isEmpty()) "" else String.format(Locale.ROOT, "; past the deadline median %.2f s, max %.2f s", known[known.size / 2], known.last())))
                 }
+                append(longerTolerance(rows))
                 if (name == LAUNCH) {
                     appendLine(whyNotBeforeCrossing(rows))
-                    append(longerTolerance(rows))
                     append(heardAheadInstead(rows))
                 }
                 if (name == LAUNCH || name == NO_CHANGE) {
