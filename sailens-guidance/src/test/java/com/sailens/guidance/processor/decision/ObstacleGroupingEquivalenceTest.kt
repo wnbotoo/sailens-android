@@ -64,7 +64,7 @@ class ObstacleGroupingEquivalenceTest {
         assertEquals(EventPriority.CRITICAL, generator.ownObstaclePriority(car))
     }
 
-    private fun withoutId(event: SceneEvent) = event.copy(id = ZERO)
+    private fun withoutId(event: SceneEvent) = event.copy(id = ZERO, components = emptyList())
 
     private fun randomObstacle(n: Int, random: Random): DetectedObstacle {
         val zone = DirectionZone.entries.random(random)

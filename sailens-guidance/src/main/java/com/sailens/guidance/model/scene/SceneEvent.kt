@@ -42,6 +42,10 @@ data class SceneEvent(
     val relatedZones: List<DirectionZone> = emptyList(),
     val distance: DistanceLevel? = null,
     val directionHint: DirectionBias? = null,
+    /** Which hazards an obstacle event can speak for; empty for any other. Not in its record: see [EventComponent]. */
+    val components: List<EventComponent> = emptyList(),
+    /** Its standing within its priority band ([com.sailens.guidance.processor.decision.SpeechRanks]). */
+    val rank: Int = 0,
 ) {
     fun isExpired(now: Long): Boolean = now > expiresAt
 

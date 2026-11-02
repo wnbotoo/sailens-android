@@ -3,11 +3,16 @@ package com.sailens.guidance.processor.decision
 import com.sailens.guidance.model.common.DirectionZone
 import com.sailens.guidance.model.common.EventCategory
 import com.sailens.guidance.model.common.EventPriority
+import com.sailens.guidance.model.common.ObstacleCategory
 import com.sailens.guidance.model.common.Severity
+import com.sailens.guidance.model.perception.ObstacleSource
+import com.sailens.guidance.model.scene.EventComponent
+import com.sailens.guidance.model.scene.HazardRef
 import com.sailens.guidance.model.scene.SceneEvent
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.UUID
 
 class EventConflictResolverTest {
     private val resolver = EventConflictResolver()
@@ -42,6 +47,33 @@ class EventConflictResolverTest {
                 it.category == EventCategory.OBSTACLE && it.relatedZones == listOf(DirectionZone.LEFT)
             }
         )
+    }
+
+    private fun centerObstacle(source: ObstacleSource) = sceneEvent(
+        category = EventCategory.OBSTACLE,
+        messageKey = "event_obstacle_center",
+        relatedZones = listOf(DirectionZone.CENTER),
+    ).copy(
+        components = listOf(
+            EventComponent(
+                DirectionZone.CENTER, EventPriority.HIGH, UUID(0, 1), setOf("obstacle_CENTER"),
+                listOf(HazardRef(UUID(0, 1), ObstacleCategory.PERSON, todayNear = false, speechNear = false, ownPriority = EventPriority.HIGH, source = source)),
+            ),
+        ),
+    )
+
+    @Test
+    fun `a blocked path keeps a detected obstacle ahead only when told to`() {
+        val blocked = sceneEvent(category = EventCategory.BLOCKED, messageKey = "event_blocked")
+        val events = listOf(blocked, centerObstacle(ObstacleSource.DETECTION))
+        assertEquals(listOf(EventCategory.BLOCKED), resolver.resolve(events).map { it.category })
+        assertEquals(listOf(EventCategory.BLOCKED, EventCategory.OBSTACLE), EventConflictResolver(keepBlockedWithObstacle = true).resolve(events).map { it.category })
+    }
+
+    @Test
+    fun `a semantic-source obstacle ahead stays suppressed, one mask saying one thing`() {
+        val events = listOf(sceneEvent(category = EventCategory.BLOCKED, messageKey = "event_blocked"), centerObstacle(ObstacleSource.SEMANTIC))
+        assertEquals(listOf(EventCategory.BLOCKED), EventConflictResolver(keepBlockedWithObstacle = true).resolve(events).map { it.category })
     }
 
     @Test

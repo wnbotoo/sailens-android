@@ -11,6 +11,7 @@ import com.sailens.guidance.model.scene.SceneEvent
 import com.sailens.guidance.model.scene.SceneEventMessageKeys
 import com.sailens.guidance.model.trace.PromptDeliveryChannels
 import com.sailens.guidance.model.trace.PromptOutcomeTrace
+import com.sailens.guidance.processor.decision.SpeechScale
 import com.sailens.output.Announcement
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -115,7 +116,7 @@ class GuidanceOutputWiringTest {
         val notice = announcementsSpoken.single()
         assertEquals(SceneEventMessageKeys.CAMERA_BLOCKED, notice.key)
         assertEquals("text of ${SceneEventMessageKeys.CAMERA_BLOCKED}", notice.text)
-        assertEquals(EventPriority.CRITICAL.value, notice.priority)
+        assertEquals(SpeechScale.of(EventPriority.CRITICAL), notice.priority)
         assertEquals(now + VisionFaultAlerts.Fault.OBSTRUCTED.deadlineMs, notice.expiresAtMs)
         assertTrue(SceneEventMessageKeys.CAMERA_BLOCKED in onSpokenByKey)
     }

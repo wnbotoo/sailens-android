@@ -1,6 +1,7 @@
 package com.sailens.shell.device
 
 import com.sailens.guidance.model.scene.SceneEvent
+import com.sailens.guidance.processor.decision.SpeechScale
 import com.sailens.output.Announcement
 
 /**
@@ -18,7 +19,7 @@ class GuidanceAnnouncements(
         id = event.id.toString(),
         key = event.messageKey,
         text = textResolver.resolve(event.toSceneEventText()),
-        priority = event.priority.value,
+        priority = SpeechScale.of(event),
         expiresAtMs = event.expiresAt,
     )
 }

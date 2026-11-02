@@ -7,6 +7,8 @@ import com.sailens.guidance.processor.decision.CooldownManager
 import com.sailens.guidance.processor.decision.EventConflictResolver
 import com.sailens.guidance.processor.decision.EventGenerator
 import com.sailens.guidance.processor.decision.EventMerger
+import com.sailens.guidance.processor.decision.SpeechRanks
+import com.sailens.guidance.processor.decision.SpeechScale
 import com.sailens.guidance.repository.DeviceSensorRepository
 import com.sailens.guidance.trace.regression.RegressionRecorder
 
@@ -48,7 +50,9 @@ class DecideEventsUseCase(
         val resolvedEvents = conflictResolver.resolve(rawEvents)
 
         // 3. 事件合并
-        val mergedEvents = eventMerger.merge(resolvedEvents)
+        val merged = eventMerger.merge(resolvedEvents)
+        val detFirst = eventGenerator.detFirst
+        val mergedEvents = if (detFirst.speechRank) merged.map { it.copy(rank = SpeechRanks.of(it, detFirst)) } else merged
 
         // 冷却的操作作为一个整体（见 CooldownManager.decide）：撤销只能落在两次决策之间。
         return cooldownManager.decide {
@@ -58,8 +62,8 @@ class DecideEventsUseCase(
             // 4. 冷却过滤
             val filteredEvents = filter(mergedEvents, now)
 
-            // 5. 按优先级排序（稳定排序：同优先级保持生成顺序）
-            val prioritized = filteredEvents.sortedByDescending { it.priority.value }
+            // 5. 按喇叭刻度排序（稳定排序：同刻度保持生成顺序）。rank 全 0 时就是按优先级。
+            val prioritized = filteredEvents.sortedByDescending { SpeechScale.of(it) }
 
             // 6. 只为要送达的那条记录冷却
             prioritized.firstOrNull()?.let { recordEvent(it, now) }

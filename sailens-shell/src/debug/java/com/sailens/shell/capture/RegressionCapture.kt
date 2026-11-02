@@ -1,5 +1,6 @@
 package com.sailens.shell.capture
 
+import com.sailens.guidance.processor.decision.SpeechScale
 import com.sailens.guidance.geometry.CameraGeometry
 import com.sailens.core.frame.ImageFrame
 import com.sailens.core.frame.Yuv420FrameData
@@ -119,7 +120,7 @@ internal class RegressionCapture(
     }
 
     /** The manifest block written when the capture starts; counters are filled in by [finish]. */
-    fun manifestBlock(): RegressionManifest = manifestBase().copy(utteranceLifecycle = speechSessions != null)
+    fun manifestBlock(): RegressionManifest = manifestBase().copy(utteranceLifecycle = speechSessions != null, speechPriorityScale = SpeechScale.FACTOR)
 
     /** The session directory exists now: the writer may start. Writer-thread caller. */
     fun attach(sessionId: String, directory: File) {

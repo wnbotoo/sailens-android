@@ -4,8 +4,8 @@ import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
-import com.sailens.guidance.model.common.EventPriority
 import com.sailens.guidance.model.scene.SceneEvent
+import com.sailens.guidance.processor.decision.SpeechScale
 import com.sailens.output.HapticPlayer
 
 /**
@@ -37,7 +37,7 @@ class HapticManager(context: Context) {
      */
     fun trigger(event: SceneEvent): Boolean {
         val haptic = GuidanceHaptic.forEvent(event)
-        if (!arbiter.tryClaim(event.priority.value, haptic.durationMs)) return false
+        if (!arbiter.tryClaim(SpeechScale.of(event), haptic.durationMs)) return false
         player.play(timings = haptic.timings, amplitude = GuidanceHaptic.amplitudeFor(event))
         return true
     }
@@ -49,10 +49,11 @@ class HapticManager(context: Context) {
      * that pattern ends, ahead of any rhythm asked for after it -- on the main thread, with or without new
      * frames. Once started nothing cuts it. One reservation at a time: a newer one replaces it.
      *
+     * @param speechPriority on [SpeechScale], as the navigation rhythms it competes with.
      * @param onPlayed called on the main thread when it starts, which may be before this returns.
      */
-    fun playOrReserve(haptic: GuidanceHaptic, priority: EventPriority, amplitude: Int, onPlayed: () -> Unit) {
-        val started = arbiter.claimOrReserve(priority.value, haptic.durationMs) {
+    fun playOrReserve(haptic: GuidanceHaptic, speechPriority: Int, amplitude: Int, onPlayed: () -> Unit) {
+        val started = arbiter.claimOrReserve(speechPriority, haptic.durationMs) {
             player.play(timings = haptic.timings, amplitude = amplitude)
             onPlayed()
         }

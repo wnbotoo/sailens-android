@@ -2,13 +2,16 @@ package com.sailens.guidance.processor.decision
 
 import com.sailens.guidance.model.common.DirectionZone
 import com.sailens.guidance.model.common.EventCategory
+import com.sailens.guidance.model.perception.ObstacleSource
 import com.sailens.guidance.model.scene.SceneEvent
 import com.sailens.guidance.model.scene.SceneEventMessageKeys
 
 /**
  * 事件冲突解决器
  */
-class EventConflictResolver {
+class EventConflictResolver(
+    private val keepBlockedWithObstacle: Boolean = false,
+) {
 
     private data class ConflictRule(
         val dominant: EventCategory,
@@ -22,7 +25,7 @@ class EventConflictResolver {
             dominant = EventCategory.BLOCKED,
             suppressed = EventCategory.OBSTACLE,
             condition = { _, obstacle ->
-                obstacle.relatedZones.contains(DirectionZone.CENTER)
+                obstacle.relatedZones.contains(DirectionZone.CENTER) && !isKept(obstacle)
             }
         ),
 
@@ -47,6 +50,15 @@ class EventConflictResolver {
             suppressed = EventCategory.NARROWING
         ),
     )
+
+    /**
+     * A detection is independent evidence of what stands ahead, so with [keepBlockedWithObstacle] neither
+     * statement is dropped. A semantic-source obstacle comes from the same mask as BLOCKED, and dropping
+     * it stays what it is: not saying one thing twice.
+     */
+    private fun isKept(obstacle: SceneEvent): Boolean = keepBlockedWithObstacle &&
+        obstacle.components.isNotEmpty() &&
+        obstacle.components.all { component -> component.hazards.all { it.source == ObstacleSource.DETECTION } }
 
     fun resolve(events: List<SceneEvent>): List<SceneEvent> {
         // 输入质量问题优先于一切：镜头被挡或环境过暗时，其余事件全部建立在一张不可信的画面上，

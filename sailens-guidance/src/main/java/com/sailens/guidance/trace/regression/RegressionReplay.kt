@@ -412,7 +412,7 @@ class RegressionReplay(
             private set
         val decide = DecideEventsUseCase(
             eventGenerator = EventGenerator(config = analysisConfig),
-            conflictResolver = EventConflictResolver(),
+            conflictResolver = EventConflictResolver(analysisConfig.detFirst.keepBlockedWithObstacle),
             eventMerger = EventMerger(),
             cooldownManager = cooldown,
             deviceSensorRepository = sensors,

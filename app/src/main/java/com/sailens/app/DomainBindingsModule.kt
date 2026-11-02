@@ -2,6 +2,7 @@ package com.sailens.app
 
 import com.sailens.shell.guidance.settings.PhoneGeometryStore
 import com.sailens.BuildConfig
+import com.sailens.guidance.config.AnalysisConfig
 import com.sailens.guidance.geometry.CameraFactsSource
 import com.sailens.guidance.repository.DeviceSensorRepository
 import com.sailens.guidance.processor.analysis.ConnectivityAnalysisProcessor
@@ -83,7 +84,7 @@ val domainBindingsModule = module {
         )
     }
     single { EventGenerator(config = get()) }
-    single { EventConflictResolver() }
+    single { EventConflictResolver(keepBlockedWithObstacle = get<AnalysisConfig>().detFirst.keepBlockedWithObstacle) }
     single { EventMerger() }
     single { CooldownManager() }
 

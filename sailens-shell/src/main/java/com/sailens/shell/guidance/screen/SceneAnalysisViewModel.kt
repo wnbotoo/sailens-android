@@ -5,9 +5,12 @@ import androidx.lifecycle.viewModelScope
 import android.graphics.Bitmap
 import android.os.SystemClock
 import com.sailens.camera.FrameSource
+import com.sailens.guidance.config.DetFirstConfig
 import com.sailens.guidance.delivery.GuidanceOutputSettings
 import com.sailens.guidance.delivery.VisionFaultAlerts
 import com.sailens.guidance.model.common.EventPriority
+import com.sailens.guidance.processor.decision.SpeechRanks
+import com.sailens.guidance.processor.decision.SpeechScale
 import com.sailens.guidance.model.scene.SceneResult
 import com.sailens.core.log.LogService
 import com.sailens.guidance.service.TraceService
@@ -92,6 +95,8 @@ class SceneAnalysisViewModel(
     /** Tells Guidance a decided event never reached the user, so its cooldown does not mute it. */
     private val revokeUndeliveredEvent: RevokeUndeliveredEventUseCase,
     private val noticeText: GuidanceNoticeText,
+    /** The det-first switches, the same ones Guidance decided with. */
+    private val detFirst: DetFirstConfig = DetFirstConfig(),
     /** Bound only by debug tooling; null means Guidance may always start. */
     private val startGate: GuidanceStartGate? = null,
     /** The same monotonic clock Guidance stamps events with. */
@@ -134,7 +139,7 @@ class SceneAnalysisViewModel(
         playOrReserveVisionFault = { priority, onPlayed ->
             hapticManager.playOrReserve(
                 GuidanceHaptic.VISION_UNRELIABLE,
-                priority = priority,
+                speechPriority = SpeechScale.of(priority, SpeechRanks.ofVisionFaultRhythm(priority, detFirst)),
                 amplitude = maxOf(GuidanceHaptic.amplitudeFor(priority), GuidanceHaptic.amplitudeFor(EventPriority.HIGH)),
                 onPlayed = onPlayed,
             )
@@ -164,6 +169,7 @@ class SceneAnalysisViewModel(
         recordOutcome = traceService::recordPromptOutcome,
         onReachedUser = { event -> _uiState.update { it.copy(lastAnnouncedEvent = event) } },
         clock = clock,
+        detFirst = detFirst,
     )
     private var releaseJob: Job? = null
     private var overlayRenderJob: Job? = null
@@ -442,7 +448,7 @@ class SceneAnalysisViewModel(
         if (state.isScreenReaderActive) {
             screenReaderAnnouncer.announce(text)
         } else {
-            speechManager.speakSystemNotice(text, priority = notice.speechPriority)
+            speechManager.speakSystemNotice(text, priority = notice.speechPriority(detFirst))
         }
     }
 

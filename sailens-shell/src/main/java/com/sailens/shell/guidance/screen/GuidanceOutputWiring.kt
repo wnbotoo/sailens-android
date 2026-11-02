@@ -10,9 +10,12 @@ import com.sailens.guidance.delivery.GuidanceScreenReaderPort
 import com.sailens.guidance.delivery.GuidanceSettingsPort
 import com.sailens.guidance.delivery.GuidanceSpeechPort
 import com.sailens.guidance.delivery.VisionFaultAlerts
+import com.sailens.guidance.config.DetFirstConfig
 import com.sailens.guidance.model.common.EventPriority
 import com.sailens.guidance.model.scene.SceneEvent
 import com.sailens.guidance.model.trace.PromptOutcomeTrace
+import com.sailens.guidance.processor.decision.SpeechRanks
+import com.sailens.guidance.processor.decision.SpeechScale
 import com.sailens.output.Announcement
 
 /**
@@ -67,6 +70,7 @@ internal class GuidanceOutputWiring(
     recordOutcome: (PromptOutcomeTrace) -> Unit,
     onReachedUser: (SceneEvent) -> Unit,
     clock: () -> Long,
+    detFirst: DetFirstConfig = DetFirstConfig(),
 ) {
     val protocol = GuidanceOutputProtocol(
         speech = object : GuidanceSpeechPort {
@@ -79,7 +83,7 @@ internal class GuidanceOutputWiring(
                     id = notice.id,
                     key = notice.messageKey,
                     text = noticeText(notice.messageKey),
-                    priority = notice.priority.value,
+                    priority = SpeechScale.of(notice.priority, SpeechRanks.ofNotice(notice.messageKey, detFirst)),
                     expiresAtMs = notice.expiresAtMs,
                 ),
                 onSpoken,

@@ -9,9 +9,9 @@ import com.sailens.guidance.model.common.ObstacleCategory
 import com.sailens.guidance.model.perception.ObstacleSourceFrame
 import com.sailens.guidance.model.perception.RawObstacle
 import com.sailens.guidance.model.scene.SceneEvent
-import com.sailens.guidance.model.scene.SceneEventMessageKeys
 import com.sailens.guidance.processor.decision.EventGenerator
 import com.sailens.guidance.processor.decision.ObstacleZoneGroup
+import com.sailens.guidance.processor.decision.PromptCredit
 import com.sailens.guidance.processor.perception.ObstacleTracker
 import java.util.UUID
 
@@ -44,19 +44,8 @@ internal class BirthOrderTrackIds : ObstacleTracker.TrackIdSource {
 internal enum class Stage { FIRST, CRITICAL, NEAR }
 
 /**
- * Which hazard a prompt speaks for, and for which stage (det-first plan D1.1-4).
- *
- * What a prompt says out loud is a category word (the primary's, kept on a merge only when every
- * component agrees), the zones, the NEAR prefix (from the nearest in a zone) and its priority. Credit
- * goes only to the tracks those words are true of:
- * - **FIRST**: the primary of each spoken zone ([Role.PRIMARY]); another track in that zone whose
- *   category word is the spoken one is covered by the same prompt ([Role.COVERED]); any other track
- *   there -- including a primary whose word a merge replaced -- is [Role.AMBIGUOUS].
- * - **NEAR**: only a track that is NEAR on this frame, in a spoken zone, of the spoken category or
- *   under the generic word; a NEAR track of another category makes the prefix ambiguous.
- * - **CRITICAL**: only a CRITICAL prompt, and only to a component whose own priority is CRITICAL.
- *
- * Ambiguous credit is listed apart and never counts as success.
+ * The production rules of [PromptCredit], over what an evaluation has to hand: zones before an event is
+ * made, and [Stage]s, which are this package's own.
  */
 internal object StageCredit {
     enum class Role { PRIMARY, COVERED, CREDITED, AMBIGUOUS }
@@ -65,43 +54,23 @@ internal object StageCredit {
         val counts: Boolean get() = role != Role.AMBIGUOUS
     }
 
-    data class Spoken(val zones: Set<DirectionZone>, val word: String?, val near: Boolean, val priority: EventPriority)
+    @Suppress("FunctionName")
+    fun Spoken(zones: Set<DirectionZone>, word: String?, near: Boolean, priority: EventPriority) = PromptCredit.Spoken(zones, word, near, priority)
 
-    fun spoken(event: SceneEvent): Spoken = Spoken(
-        zones = event.relatedZones.toSet(),
-        word = SceneEventMessageKeys.obstacleSuffix(event.messageKey),
-        near = event.distance == DistanceLevel.NEAR,
-        priority = event.priority,
-    )
+    fun spoken(event: SceneEvent): PromptCredit.Spoken = PromptCredit.spoken(event)
 
     /** What one zone's own event (before merging) says. */
-    fun spoken(group: ObstacleZoneGroup, generator: EventGenerator, proximityPrefix: Boolean): Spoken = Spoken(
+    fun spoken(group: ObstacleZoneGroup, generator: EventGenerator, proximityPrefix: Boolean) = PromptCredit.Spoken(
         zones = setOf(group.zone),
         word = generator.obstacleCategorySuffix(group.primary.category),
         near = proximityPrefix && group.nearestDistance == DistanceLevel.NEAR,
         priority = group.priority,
     )
 
-    fun credits(spoken: Spoken, groups: List<ObstacleZoneGroup>, generator: EventGenerator): List<Credit> = buildList {
-        for (group in groups) {
-            if (group.zone !in spoken.zones) continue
-            for (obstacle in group.obstacles) {
-                val sameWord = generator.obstacleCategorySuffix(obstacle.category) == spoken.word
-                val firstRole = when {
-                    !sameWord -> Role.AMBIGUOUS
-                    obstacle === group.primary -> Role.PRIMARY
-                    else -> Role.COVERED
-                }
-                add(Credit(obstacle.id, Stage.FIRST, firstRole))
-                if (spoken.near && obstacle.distance == DistanceLevel.NEAR) {
-                    add(Credit(obstacle.id, Stage.NEAR, if (sameWord || spoken.word == null) Role.CREDITED else Role.AMBIGUOUS))
-                }
-                if (spoken.priority == EventPriority.CRITICAL && generator.ownObstaclePriority(obstacle) == EventPriority.CRITICAL) {
-                    add(Credit(obstacle.id, Stage.CRITICAL, Role.CREDITED))
-                }
-            }
+    fun credits(spoken: PromptCredit.Spoken, groups: List<ObstacleZoneGroup>, generator: EventGenerator): List<Credit> =
+        PromptCredit.credits(spoken, groups.map(generator::componentOf)).map {
+            Credit(it.trackId, Stage.valueOf(it.stage.name), Role.valueOf(it.role.name))
         }
-    }
 }
 
 /**

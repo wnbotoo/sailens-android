@@ -41,6 +41,11 @@ data class RegressionManifest(
      * lifecycle evidence at all, which is not the same as "nothing failed".
      */
     val utteranceLifecycle: Boolean = false,
+    /**
+     * What a lifecycle record's `priority` is scaled by: the factor of `SpeechScale`, or null for a record
+     * made before there was one, whose priorities are `EventPriority.value` (schema 1.6).
+     */
+    val speechPriorityScale: Int? = null,
 ) {
     companion object {
         const val RECORDER_VERSION: Int = 1
@@ -298,6 +303,8 @@ data class EventRecord(
     val relatedZones: List<String> = emptyList(),
     val distance: String? = null,
     val directionHint: String? = null,
+    /** Its standing within its band (schema 1.6); 0 in an older record, as the switches off would make it. */
+    val rank: Int = 0,
 )
 
 /**
@@ -311,6 +318,8 @@ data class RegressionRevokeRecord(
     val eventId: String,
     val decisionsBefore: Long,
     val elapsedRealtimeNanos: Long,
+    /** Why, one of `PromptRevokeReasons` (schema 1.6). Replay does not read it. */
+    val reason: String? = null,
 ) : CaptureRecord
 
 /**
