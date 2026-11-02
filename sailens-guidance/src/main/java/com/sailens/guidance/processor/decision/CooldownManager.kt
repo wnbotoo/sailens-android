@@ -387,6 +387,11 @@ class CooldownManager(
         return !onlyRegiven
     }
 
+    /** [eventId] 说出的阶段里，这次接收算重给的那些。只用于报告。 */
+    @Synchronized
+    internal fun stagesAwaitingRegive(eventId: UUID): Set<PromptStageKey> =
+        awaitingOutcome[eventId]?.stages.orEmpty().filterTo(HashSet()) { retries[it] == RetryState.AWAITING_REGIVE }
+
     /**
      * 自带语音接收了的 [eventId] 被打断了。写入还没确认、而且它说出的**每一个**阶段都还没被打断过时撤回，这些阶段
      * 等一次重给；否则确认（用户没听完），它说出的阶段不再有重给。所以同一个阶段最多重给一次：A → A+B → A+B，第二次

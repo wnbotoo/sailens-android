@@ -26,6 +26,9 @@ import java.util.Locale
  *   terminal record, so all that still held the speaker was a sentence whose main-thread task had not run.
  *   The time since the latest `done` is a lower bound on how late that task was.
  *
+ * - **Decision to a flush**: from the decision of the frame that offered, to a sentence superseded on the speaker.
+ *   The first lifecycle record is taken before the speak call, so it does not bound this one.
+ *
  * Captures of the sealed acceptance set are skipped, as everywhere ([SealedCaptures]).
  */
 class SpeechTimingMeasurementTest {
@@ -39,6 +42,7 @@ class SpeechTimingMeasurementTest {
         assumeTrue(SealedCaptures.refusalMessage(path, split.sealed.size), split.open.isNotEmpty())
 
         val hops = mutableListOf<Double>()
+        val toFlush = mutableListOf<Double>()
         var offeredWithoutRecord = 0
         val heldPastEnd = mutableListOf<Double>()
         var outrankedRefusals = 0
@@ -56,6 +60,12 @@ class SpeechTimingMeasurementTest {
                 val decidedAt = frame.clocks[RegressionClocks.DECIDE]?.lastOrNull() ?: continue
                 val first = firstRecord[offered]
                 if (first == null) offeredWithoutRecord++ else hops += first.elapsedRealtimeNanos / 1e6 - decidedAt
+            }
+            val decisions = session.regressionFrames.filter { it.events.isNotEmpty() }.mapNotNull { it.clocks[RegressionClocks.DECIDE]?.lastOrNull() }.sorted()
+            for (r in records) {
+                if (r.event != E.SUPERSEDED) continue
+                val now = r.elapsedRealtimeNanos / 1e6
+                decisions.lastOrNull { it <= now }?.let { toFlush += now - it }
             }
             val open = HashSet<String>()
             var lastDoneNanos: Long? = null
@@ -79,6 +89,8 @@ class SpeechTimingMeasurementTest {
         val report = buildString {
             appendLine("captures ${split.open.size}; sealed and skipped ${split.sealed.size}")
             appendLine("decision to first lifecycle record, ms: n ${hops.size}, ${quantiles(hops)}; beyond 150 ms ${hops.count { it > 150 }}; offers with no record $offeredWithoutRecord")
+            if (toFlush.isNotEmpty()) appendLine("decision to a flush, ms: n ${toFlush.size}, ${quantiles(toFlush)}; beyond 50 ms ${toFlush.count { it > 50 }}")
+            appendLine("decision to first record beyond 50 ms: ${hops.count { it > 50 }}")
             appendLine("refused as outranked $outrankedRefusals; of them with every accepted attempt already ended ${heldPastEnd.size}")
             if (heldPastEnd.isNotEmpty()) appendLine("  ms since the latest done: ${quantiles(heldPastEnd)}; beyond 150 ms ${heldPastEnd.count { it > 150 }}")
         }

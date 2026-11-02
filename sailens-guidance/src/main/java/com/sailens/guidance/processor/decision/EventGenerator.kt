@@ -392,7 +392,7 @@ class EventGenerator(
 
     /** What holds [obstacle] at the metric gate, for a report of why; null when nothing does. */
     internal fun metricGateHold(obstacle: DetectedObstacle, gate: MetricGateConfig): String? {
-        if (!obstacle.isStable(minFrames = 3)) return "not stable"
+        if (!obstacle.isStable(minFrames = gate.minStableFrames)) return "not stable"
         if (obstacle.confidence < MIN_OBSTACLE_CONFIDENCE_TO_ANNOUNCE) return "low confidence"
         if (!hasMeasuredDistance(obstacle)) return "no measured distance"
         if (obstacle.distanceEstimate!!.contact.lowerM!! > metricThresholdM(obstacle, gate)) return "farther than the gate"

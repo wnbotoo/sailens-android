@@ -158,7 +158,18 @@ class GuidanceSimulator(
             groundRecognitionAnalyzer = GroundRecognitionAnalyzer(analysisConfig, semantics, clock),
         )
         val decide = DecideEventsUseCase(
-            EventGenerator(analysisConfig), EventConflictResolver(), EventMerger(), CooldownManager(), sensors, clock,
+            EventGenerator(analysisConfig),
+            EventConflictResolver(analysisConfig.detFirst.keepBlockedWithObstacle),
+            EventMerger(),
+            analysisConfig.detFirst.let {
+                CooldownManager(
+                    proximityEscalation = it.proximityEscalation,
+                    retryInterrupted = it.retryInterrupted,
+                    metricOnlyRepeatMs = it.metricGate?.metricOnlyRepeatMs ?: 6_000L,
+                )
+            },
+            sensors,
+            clock,
         )
         val start = StartSceneAnalysisUseCase(
             profileManager = profiles,

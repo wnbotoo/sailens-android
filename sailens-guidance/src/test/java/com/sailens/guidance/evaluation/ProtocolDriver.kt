@@ -32,6 +32,8 @@ import kotlinx.coroutines.flow.StateFlow
 internal class SentenceDurations(private val durations: SpeakerDurations, private val measuredLabel: String) {
     private val fallback = HashSet<String>()
 
+    fun isFallback(id: String): Boolean = id in fallback
+
     /** How long [wording] takes, noting for sentence [id] whether that was measured on recordings. */
     fun of(id: String, wording: Wording): Long {
         val (source, ms) = durations.of(wording)
@@ -95,9 +97,10 @@ internal class ProtocolDriver(
     private val sentences = HashMap<String, Sentence>()
 
     /** One sentence offered, in a run with one branch: for counting, and for saying what became of a stage. */
-    class Offered(val id: String, val atMs: Long, val accepted: Boolean, val scale: Int) {
+    class Offered(val id: String, val atMs: Long, val accepted: Boolean, val scale: Int, val event: SceneEvent?, val stationary: Boolean) {
         var endAtMs: Long? = null
         var cutAtMs: Long? = null
+        var regivenStages: Set<Any> = emptySet()
     }
 
     val offered = LinkedHashMap<String, Offered>()
@@ -113,7 +116,7 @@ internal class ProtocolDriver(
         val outcomes = ArrayList<ClosedLoopSpeakerBranches.Outcome>()
 
         /** @return whether it was taken. */
-        fun offer(offer: SpeakerModel.Offer): Boolean {
+        fun offer(offer: SpeakerModel.Offer, event: SceneEvent? = null): Boolean {
             inputs += offer
             val steps = kernel.submit(speaker, offer)
             val pick = choices.getOrElse(options.size) { 0 }
@@ -128,7 +131,7 @@ internal class ProtocolDriver(
                 }
             }
             val taken = step.outcomes.any { it is ClosedLoopSpeakerBranches.Accepted && it.id == offer.id }
-            offered[offer.id] = Offered(offer.id, offer.atMs, taken, offer.priority)
+            offered[offer.id] = Offered(offer.id, offer.atMs, taken, offer.priority, event, scene?.stationary == true)
             return taken
         }
     }
@@ -144,7 +147,7 @@ internal class ProtocolDriver(
             override fun speak(event: SceneEvent, atMs: Long?, onOutcome: ((SpeechOutcome) -> Unit)?): Boolean {
                 val id = idOf(event)
                 sentences[id] = Sentence.Prompt(at)
-                return running!!.offer(SpeakerModel.Offer(at, id, SpeechScale.of(event), event.expiresAt, durations.of(id, event.messageKey to event.isNear)))
+                return running!!.offer(SpeakerModel.Offer(at, id, SpeechScale.of(event), event.expiresAt, durations.of(id, event.messageKey to event.isNear)), event)
             }
 
             override fun speakNotice(notice: VisionFaultAlerts.Notice, atMs: Long?, onSpoken: () -> Unit): Boolean {
@@ -192,7 +195,10 @@ internal class ProtocolDriver(
 
             override fun reportHeardAfterCut(event: SceneEvent) = Unit
 
-            override fun accepted(event: SceneEvent): Boolean = running!!.cooldown.promptAccepted(event.id)
+            override fun accepted(event: SceneEvent): Boolean {
+                offered[idOf(event)]?.regivenStages = running!!.cooldown.stagesAwaitingRegive(event.id)
+                return running!!.cooldown.promptAccepted(event.id)
+            }
         },
         settings = object : GuidanceSettingsPort {
             override fun output() = GuidanceOutputSettings(speechEnabled = true, screenReaderActive = false, hapticsEnabled = true)

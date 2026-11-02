@@ -62,4 +62,5 @@ data class MetricGateConfig(
     val staticM: Float = 2.5f,
     val roadsideStaticM: Float = 2.0f,
     val metricOnlyRepeatMs: Long = 6_000,
+    val minStableFrames: Int = 3,
 )
