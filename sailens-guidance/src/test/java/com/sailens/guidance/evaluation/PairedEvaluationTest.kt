@@ -355,6 +355,71 @@ class PairedEvaluationTest {
         assertEquals(exactRegressions, byPairs + takeThree)
     }
 
+    private val heldKernel get() = ClosedLoopSpeakerBranches({ 150 }, heldAfterDone = true, frameSkewMs = 50)
+
+    @Test
+    fun `the branch run finds what takes two errors moved together, a sentence and the one queued behind it`() {
+        val a = offer(0, "a")
+        val p = offer(2_100, "p")
+        val base = mapOf(0L to a, 2_100L to p)
+        val arm = base + (1_750L to offer(1_750, "x"))
+        val queued = listOf(SpeakerModel.Queued(10, "queued", 3, 1_000))
+        val reference = PairedBranchRun(frozenKernel, listOf(targetOf(3_500)), queued)
+        for (t in listOf(0L, 10L, 1_750L, 2_100L, 3_300L, 3_600L)) reference.onFrame(t, { decision(base[t]) }, { decision(arm[t]) })
+        assertEquals(setOf(target), reference.finish().regressions)
+    }
+
+    @Test
+    fun `the branch run finds what takes one error and part of a frame's lateness`() {
+        // The arm's first sentence 140 ms short and the frame at 1 000 seen 20 ms late: R is taken in the arm alone, and its record holds P off.
+        val record = event(EventCategory.ROAD_WARNING, "road_warning_control", 1_000)
+        fun decide(cooldown: CooldownManager, t: Long, experimental: Boolean): PairedBranchRun.Decision? = when {
+            t == 0L -> decision(if (experimental) offer(0, "a", 1_160) else offer(0, "b", 1_025))
+            t == 1_000L -> {
+                cooldown.recordEvent(record, t)
+                PairedBranchRun.Decision(offer(t, "r", 500), emptyList(), onAccepted = { it.confirm(record.id) }, onRefused = { it.revoke(record.id) })
+            }
+            t == 2_000L && cooldown.filter(listOf(record), t).isNotEmpty() -> decision(offer(t, "p"))
+            else -> null
+        }
+        val reference = PairedBranchRun(heldKernel, listOf(targetOf(3_500)), emptyList())
+        for (t in listOf(0L, 1_000L, 2_000L, 3_300L, 3_600L)) reference.onFrame(t, { decide(it, t, false) }, { decide(it, t, true) })
+        assertEquals(setOf(target), reference.finish().regressions)
+    }
+
+    @Test
+    fun `the branch run finds what takes three errors at once`() {
+        // The arm withholds P only if all three sentences ran short enough for all three records to stand.
+        val controls = List(3) { i -> event(EventCategory.ROAD_WARNING, "road_warning_control$i", i * 2_000L + 901) }
+        fun decide(cooldown: CooldownManager, t: Long, experimental: Boolean): PairedBranchRun.Decision? {
+            for (i in 0 until 3) {
+                val start = i * 2_000L
+                if (t == start) return decision(offer(t, "ca$i"))
+                if (t == start + 900) return decision(offer(t, "cb$i"))
+                if (t == start + 901) {
+                    val r = controls[i]
+                    cooldown.recordEvent(r, t)
+                    return PairedBranchRun.Decision(offer(t, "cr$i", 500), emptyList(), onAccepted = { it.confirm(r.id) }, onRefused = { it.revoke(r.id) })
+                }
+            }
+            if (t != 6_500L) return null
+            val all = controls.all { cooldown.filter(listOf(it), t).isEmpty() }
+            return if (experimental && all) null else decision(offer(t, "p"))
+        }
+        val frames = sortedSetOf(6_500L, 7_800L, 8_100L)
+        for (i in 0 until 3) {
+            val start = i * 2_000L
+            frames += start
+            frames += start + 901
+            for (offset in 850L..1_150L step 5) frames += start + offset
+        }
+        val reference = PairedBranchRun(heldKernel, listOf(targetOf(8_000)), emptyList())
+        for (t in frames) reference.onFrame(t, { decide(it, t, false) }, { decide(it, t, true) })
+        val result = reference.finish()
+        assertTrue(!result.capHit)
+        assertEquals(setOf(target), result.regressions)
+    }
+
     @Test
     fun `a frame seen late by less than the whole of the skew is a fault of its own`() {
         // Both arms offer P at 1 000, over a sentence of their own: the baseline's ends at 1 020, the arm's at 1 040.

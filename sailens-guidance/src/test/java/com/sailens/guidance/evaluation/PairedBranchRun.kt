@@ -55,7 +55,14 @@ internal class PairedBranchRun(
                     if (outcome.endAtMs <= target.deadlineMs) marks = marks + key
                 }
             }
-            return Arm(step.speaker, cooldown, marks)
+            // A result still to come that can mark nothing is no state: without this, a flush's three variants stay apart.
+            val speaker = step.speaker.copy(
+                deferred = step.speaker.deferred.filter { d ->
+                    val spoken = d.outcome as? ClosedLoopSpeakerBranches.Spoken ?: return@filter false
+                    credits[side][spoken.id].orEmpty().any { key -> pending[key]?.let { spoken.endAtMs <= it.deadlineMs } == true }
+                },
+            )
+            return Arm(speaker, cooldown, marks)
         }
     }
 
@@ -81,8 +88,12 @@ internal class PairedBranchRun(
     private val armLost = mutableSetOf<StageKey>()
     private val witnesses = HashMap<StageKey, List<String>>()
 
+    /** This frame's decisions by side and cooldown: many branches differ only in the speaker. */
+    private val decisions = listOf(HashMap<CooldownManager.Canonical, Pair<CooldownManager, Decision?>>(), HashMap<CooldownManager.Canonical, Pair<CooldownManager, Decision?>>())
+
     fun onFrame(t: Long, baseline: Decider, arm: Decider) {
         if (capHit) return
+        decisions.forEach { it.clear() }
         val cuts = (pending.values.map { it.deadlineMs }.filter { it in now until t } + pendingQueued.map { it.atMs }.filter { it <= t }).distinct().sorted()
         for (cut in cuts) {
             now = cut
@@ -148,8 +159,11 @@ internal class PairedBranchRun(
 
     /** Every result of this arm's decision: the arm, the id it offered, a note if the offer had other outcomes. */
     private fun decided(arm: Arm, side: Int, decider: Decider, t: Long): List<Triple<Arm, String?, String?>> {
-        val cooldown = arm.cooldown.copy()
-        val decision = decider.decide(cooldown) ?: return listOf(Triple(Arm(arm.speaker, cooldown, arm.kept), null, null))
+        val (cooldown, decision) = decisions[side].getOrPut(arm.cooldown.canonicalState()) {
+            val fresh = arm.cooldown.copy()
+            fresh to decider.decide(fresh)
+        }
+        if (decision == null) return listOf(Triple(Arm(arm.speaker, cooldown, arm.kept), null, null))
         val id = decision.offer.id
         credits[side].getOrPut(id) { decision.credits }
         val steps = kernel.submit(arm.speaker, decision.offer)
