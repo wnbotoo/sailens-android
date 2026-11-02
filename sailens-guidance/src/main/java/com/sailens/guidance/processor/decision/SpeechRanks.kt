@@ -38,23 +38,23 @@ object SpeechRanks {
 
     private const val INPUT_QUALITY = 7
     private const val STALLED = 6
-    private const val OBSTACLE_SAYING_NEAR = 5
     private const val OBSTACLE_OR_BLOCKED = 4
     private const val METRIC_ONLY = 3
 
     fun of(event: SceneEvent, config: DetFirstConfig): Int = if (!config.speechRank) 0 else when (event.category) {
         EventCategory.SENSOR_QUALITY -> INPUT_QUALITY
         EventCategory.BLOCKED -> OBSTACLE_OR_BLOCKED
-        EventCategory.OBSTACLE -> when {
-            event.isMetricOnly -> METRIC_ONLY
-            saysNearOfADetectedHazard(event) -> OBSTACLE_SAYING_NEAR
-            else -> OBSTACLE_OR_BLOCKED
-        }
+        EventCategory.OBSTACLE -> if (event.isMetricOnly) METRIC_ONLY else OBSTACLE_OR_BLOCKED
         else -> 0
     }
 
-    /** A semantic-source obstacle keeps today's standing level with BLOCKED: both come from one mask. */
-    private fun saysNearOfADetectedHazard(event: SceneEvent): Boolean {
+    /**
+     * Whether the prompt says NEAR of a detected hazard: it goes first among the obstacle prompts of a frame, within its
+     * band. It does not stand higher on the speaker. A NEAR prompt cutting another of its band loses that sentence's
+     * stage, BLOCKED among them, for a stage that can wait for the sentence to end, as the cooldown no longer holds it.
+     * A semantic-source obstacle is not one: it comes from the same mask as BLOCKED.
+     */
+    fun saysNearOfADetectedHazard(event: SceneEvent): Boolean {
         val detected = event.components.flatMap { it.hazards }.filter { it.source == ObstacleSource.DETECTION }.map { it.trackId }.toSet()
         return PromptCredit.credits(event).any { it.stage == PromptCredit.Stage.NEAR && it.counts && it.trackId in detected }
     }

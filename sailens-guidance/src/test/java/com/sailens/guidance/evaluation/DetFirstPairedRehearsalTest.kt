@@ -269,6 +269,36 @@ class DetFirstPairedRehearsalTest {
                         why.getOrPut("$ahead: $label") { mutableListOf() } += (spokenLate?.endAtMs?.let { (it - deadline) / 1000.0 } ?: Double.NaN)
                     }
                 }
+                val blockers = java.util.TreeMap<String, Int>()
+                fun kind(o: ProtocolDriver.Offered): String {
+                    val parts = o.id.split('|')
+                    val what = when {
+                        parts[0] == "notice" -> parts[1]
+                        parts[0] == "mode" || parts[0] == "chatter" -> parts[0]
+                        else -> parts[1].removePrefix("event_").let { if (it.startsWith("obstacle")) "obstacle${if (parts[2] == "true") " NEAR" else ""}" else it }
+                    }
+                    return "$what ${o.scale / 8}.${o.scale % 8}"
+                }
+                for ((r, a) in rows) {
+                    val classOf = r.device.stages.associateBy { StageKey(it.hazard, it.stage) }
+                    for (key in a.nominal.regressions) {
+                        val deadline = r.deadlines.getValue(key)
+                        val ahead = classOf.getValue(key).let { row -> if (row.hazardClass == "blocked" || (row.stage == Stage.CRITICAL && row.hazardClass in setOf("vehicle/front", "person/front"))) "ahead" else "other" }
+                        val sentences = a.nominalArm.offered.values.filter { key in a.nominalArm.credits[it.id].orEmpty() && it.atMs <= deadline }
+                        val all = a.nominalArm.offered.values.toList()
+                        if (sentences.isEmpty() || sentences.any { it.endAtMs != null }) continue
+                        val cut = sentences.lastOrNull { it.cutAtMs != null }
+                        if (cut != null) {
+                            val by = all.firstOrNull { it.accepted && it.atMs == cut.cutAtMs }
+                            blockers.merge("$ahead cut: ${kind(cut)} by ${by?.let(::kind) ?: "?"}", 1, Int::plus)
+                        } else if (sentences.none { it.accepted }) {
+                            val last = sentences.last()
+                            val holder = all.lastOrNull { it.accepted && it.atMs <= last.atMs && (it.endAtMs ?: Long.MAX_VALUE) > last.atMs && (it.cutAtMs ?: Long.MAX_VALUE) > last.atMs }
+                            blockers.merge("$ahead refused: ${kind(last)} by ${holder?.let(::kind) ?: "? (queued input or expired)"}", 1, Int::plus)
+                        }
+                    }
+                }
+                for ((label, n) in blockers) appendLine("    $label: $n")
                 for ((label, lates) in why) {
                     val known = lates.filterNot { it.isNaN() }.sorted()
                     appendLine(String.format(Locale.ROOT, "    %s: %d%s", label, lates.size, if (known.isEmpty()) "" else String.format(Locale.ROOT, "; past the deadline median %.2f s, max %.2f s", known[known.size / 2], known.last())))

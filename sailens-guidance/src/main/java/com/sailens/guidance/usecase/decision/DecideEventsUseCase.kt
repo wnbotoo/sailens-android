@@ -2,6 +2,7 @@ package com.sailens.guidance.usecase.decision
 
 import com.sailens.guidance.model.analysis.SceneSnapshot
 import com.sailens.guidance.model.analysis.VisionFaults
+import com.sailens.guidance.model.common.EventCategory
 import com.sailens.guidance.model.scene.SceneEvent
 import com.sailens.guidance.model.trace.PromptRevokeReasons
 import com.sailens.guidance.processor.decision.CooldownManager
@@ -66,7 +67,14 @@ class DecideEventsUseCase(
             val filteredEvents = filter(mergedEvents, now)
 
             // 5. 按喇叭刻度排序（稳定排序：同刻度保持生成顺序）。rank 全 0 时就是按优先级。
-            val prioritized = filteredEvents.sortedByDescending { SpeechScale.of(it) }
+            val prioritized = if (detFirst.speechRank) {
+                filteredEvents.sortedWith(
+                    compareByDescending<SceneEvent> { SpeechScale.of(it) }
+                        .thenBy { event -> if (event.category == EventCategory.OBSTACLE && !SpeechRanks.saysNearOfADetectedHazard(event)) 1 else 0 },
+                )
+            } else {
+                filteredEvents.sortedByDescending { SpeechScale.of(it) }
+            }
 
             // 6. 只为要送达的那条记录冷却
             prioritized.firstOrNull()?.let { recordEvent(it, now) }

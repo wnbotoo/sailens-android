@@ -95,7 +95,7 @@ internal class ProtocolDriver(
     private val sentences = HashMap<String, Sentence>()
 
     /** One sentence offered, in a run with one branch: for counting, and for saying what became of a stage. */
-    class Offered(val id: String, val atMs: Long, val accepted: Boolean) {
+    class Offered(val id: String, val atMs: Long, val accepted: Boolean, val scale: Int) {
         var endAtMs: Long? = null
         var cutAtMs: Long? = null
     }
@@ -128,7 +128,7 @@ internal class ProtocolDriver(
                 }
             }
             val taken = step.outcomes.any { it is ClosedLoopSpeakerBranches.Accepted && it.id == offer.id }
-            offered[offer.id] = Offered(offer.id, offer.atMs, taken)
+            offered[offer.id] = Offered(offer.id, offer.atMs, taken, offer.priority)
             return taken
         }
     }
