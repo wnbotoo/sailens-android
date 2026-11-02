@@ -353,7 +353,7 @@ class DetFirstPairedRehearsalTest {
         const val PRESET_HEIGHT_M = 1.15f
         const val OTHER_C = "other C captures"
         const val EARLY_BOTTOM_Y = 0.45f
-        val SAMPLES = listOf(8, 16, 32)
+        val SAMPLES = listOf(8, 16, 32, 64, 128, 256)
         val MAX_SAMPLES = SAMPLES.max()
         const val FIRST_SEED = 0x5A11E25L
         const val OTHER_SEED = 0x7E57C0DEL
