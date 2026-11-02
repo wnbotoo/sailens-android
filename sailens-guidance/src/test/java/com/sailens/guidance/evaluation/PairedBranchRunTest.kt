@@ -197,6 +197,88 @@ class PairedBranchRunTest {
         assertTrue("A short and B long: over by 1 500 in the baseline only", frozenRegression(2_400, listOf(queued), base, arm, mapOf("a" to -150L, "b" to 150L)))
     }
 
+    /** Same bounds behind different sentences: A short and B long has N over by 1 600 in the baseline only. */
+    private fun twinsBehindDifferentSentences(frames: List<Long>, appearedAtMs: Long = 0) = run(
+        2_600, frames,
+        mapOf(0L to offer(0, "a", 1_000), 1_600L to offer(1_600, "p", 500)),
+        mapOf(0L to offer(0, "b", 1_000), 1_600L to offer(1_600, "p", 500)),
+        listOf(SpeakerModel.Queued(100, "n", 3, 600)),
+        heldKernel,
+        appearedAtMs,
+    )
+
+    @Test
+    fun `equal bounds do not make two arms one again while what they hold depends on a past that differed`() {
+        assertEquals(setOf(target), twinsBehindDifferentSentences(listOf(0L, 100L, 1_600L, 2_800L)).regressions)
+        assertEquals("a frame with nothing on it changes nothing", setOf(target), twinsBehindDifferentSentences(listOf(0L, 100L, 1_160L, 1_600L, 2_800L)).regressions)
+        val appearedLater = twinsBehindDifferentSentences(listOf(0L, 100L, 1_160L, 1_300L, 1_600L, 2_800L), appearedAtMs = 1_300)
+        assertEquals(setOf(target), appearedLater.regressions)
+        assertEquals(emptySet<StageKey>(), appearedLater.sameInputs)
+    }
+
+    @Test
+    fun `two arms become one again once nothing they hold depends on their past`() {
+        // Apart until N is over; then equal, with nothing on the speaker, and A running long costs both arms P in one realization.
+        val a = offer(5_000, "a", 1_010)
+        val p = offer(6_000, "p")
+        val base = mapOf(0L to offer(0, "x", 1_000), 5_000L to a, 6_000L to p)
+        val arm = mapOf(0L to offer(0, "y", 1_000), 5_000L to a, 6_000L to p)
+        val result = run(7_500, listOf(0L, 100L, 2_500L, 5_000L, 6_000L, 7_000L, 8_000L), base, arm, listOf(SpeakerModel.Queued(100, "n", 3, 600)), appearedAtMs = 4_000)
+        assertEquals(emptySet<StageKey>(), result.regressions)
+        assertEquals(setOf(target), result.sameInputs)
+    }
+
+    private fun obstacleEvent(t: Long, priority: EventPriority) = SceneEvent(
+        UUID.randomUUID(), t, EventCategory.OBSTACLE, priority, "probe", emptyMap(), t + 5_000, "obstacle_PRIMARY_CENTER", setOf("obstacle_PRIMARY_CENTER"), emptyList(), 1f, Severity.MODERATE, emptyList(), DistanceLevel.MEDIUM, null,
+    )
+
+    @Test
+    fun `a cooldown's old summary is kept while a write still open can fold onto it again`() {
+        val left = CooldownManager()
+        val right = CooldownManager()
+        obstacleEvent(0, EventPriority.CRITICAL).let { left.recordEvent(it, 0); left.confirm(it.id) }
+        obstacleEvent(0, EventPriority.HIGH).let { right.recordEvent(it, 0); right.confirm(it.id) }
+        val revoked = obstacleEvent(4_000, EventPriority.CRITICAL)
+        val open = listOf(obstacleEvent(3_000, EventPriority.HIGH), revoked, obstacleEvent(6_000, EventPriority.HIGH), obstacleEvent(9_000, EventPriority.HIGH))
+        for (c in listOf(left, right)) open.forEach { c.recordEvent(it, it.timestamp) }
+        assertTrue("these two behave differently", liveCooldown(left.canonicalState(), 10_000) != liveCooldown(right.canonicalState(), 10_000))
+        for (c in listOf(left, right)) c.revoke(revoked.id)
+        val critical = obstacleEvent(10_000, EventPriority.CRITICAL)
+        assertEquals(0, left.filter(listOf(critical), 10_000).size)
+        assertEquals(1, right.filter(listOf(critical), 10_000).size)
+    }
+
+    @Test
+    fun `with no write open, a cooldown's old summary can matter no more`() {
+        val left = CooldownManager()
+        val right = CooldownManager()
+        obstacleEvent(0, EventPriority.CRITICAL).let { left.recordEvent(it, 0); left.confirm(it.id) }
+        obstacleEvent(0, EventPriority.HIGH).let { right.recordEvent(it, 0); right.confirm(it.id) }
+        assertEquals(liveCooldown(left.canonicalState(), 30_000), liveCooldown(right.canonicalState(), 30_000))
+    }
+
+    @Test
+    fun `a watch stays open while a sentence speaking for its stage is still on the speaker`() {
+        // The hazard was last seen at 1 000, the sentence for it runs to 8 000: it counts, however far past that.
+        val run = PairedBranchRun(frozenKernel, emptyList(), emptyList(), listOf(PairedBranchRun.Watch(target, 1_000)))
+        val p = offer(1_000, "p", 7_000)
+        for (t in listOf(1_000L, 2_000L, 7_000L, 9_000L)) run.onFrame(t, { decision(if (t == 1_000L) p else null) }, { decision(if (t == 1_000L) p else null) })
+        val result = run.finish()
+        assertEquals(setOf(target), result.arm.everywhere)
+        assertEquals(setOf(target), result.baseline.everywhere)
+        assertEquals(emptySet<StageKey>(), result.creditedAfterClose)
+    }
+
+    @Test
+    fun `a sentence offered for a stage whose watch has closed is reported`() {
+        val run = PairedBranchRun(frozenKernel, emptyList(), emptyList(), listOf(PairedBranchRun.Watch(target, 1_000)))
+        val p = offer(3_000, "p", 500)
+        for (t in listOf(1_000L, 2_000L, 3_000L, 4_000L)) run.onFrame(t, { decision(if (t == 3_000L) p else null) }, { decision(if (t == 3_000L) p else null) })
+        val result = run.finish()
+        assertEquals(setOf(target), result.creditedAfterClose)
+        assertEquals(emptySet<StageKey>(), result.arm.everywhere)
+    }
+
     private fun assertQueuedRegression(frames: List<Long>, deadlineMs: Long, queued: List<SpeakerModel.Queued>, base: Map<Long, SpeakerModel.Offer>, arm: Map<Long, SpeakerModel.Offer>) {
         assertEquals(setOf(target), run(deadlineMs, frames, base, arm, queued).regressions)
     }
@@ -395,7 +477,9 @@ class PairedBranchRunTest {
         var charged = 0
         var checkedQueued = 0
         repeat(150) { stream ->
-            val (frames, base, arm) = randomStream(random)
+            val (frames, base, plainArm) = randomStream(random)
+            // Every third arm says the same as the baseline in other words of the same length, so its queue can match in bounds and not in fact.
+            val arm = if (stream % 3 == 2) base.mapValues { (t, o) -> if (o.id == "p" || t >= 3_000) o else o.copy(id = "twin${o.id}") } else plainArm
             val queued = if (stream % 3 == 0) emptyList() else randomQueued(random)
             val result = run(5_500, frames, base, arm, queued)
             assertTrue("these settle", !result.capHit)

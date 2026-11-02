@@ -9,11 +9,15 @@ import java.util.IdentityHashMap
  * by its deadline and the arm not. An arm that says exactly what the baseline says cannot score one, and that
  * is observed, not assumed: nothing here is told whether the arms differ.
  *
- * Each joint branch holds both arms. While the two are in equal state they split together, as one sentence in
- * one realization ends at one moment. Once apart, each arm splits for itself, except that a sentence both
- * have, started at the same known moment, has one outcome. A stage's deadline and a queued input's time are
- * moments to split at like any frame, so a sentence ending around them has both outcomes. Two branches merge
- * only when all their state is equal, whatever brought them there.
+ * Each joint branch holds both arms. While the two are one they split together, as one sentence in one
+ * realization ends at one moment. Once apart, each arm splits for itself, except that a sentence both have,
+ * started at the same known moment, has one outcome. A stage's deadline and a queued input's time are moments
+ * to split at like any frame, so a sentence ending around them has both outcomes. Two branches merge only when
+ * all their state is equal, whatever brought them there.
+ *
+ * Equal state does not make two arms one again. Bounds are not values: a queued sentence behind one sentence
+ * in the baseline and another in the arm can have equal bounds and end apart. So they are one again only when
+ * equal and nothing on the speaker has a start that depends on the past ([Joint.coupled]).
  *
  * This over-approximates and never under-approximates. A queued sentence's interval does not narrow once what
  * is ahead of it has ended, and two arms apart share no frame lateness and no sentence with an unknown start,
@@ -40,7 +44,10 @@ internal class PairedBranchRun(
     /** @param appearedAtMs when the stage first appeared on the device, before anything could be offered for it. */
     class Target(val key: StageKey, val deadlineMs: Long, val appearedAtMs: Long)
 
-    /** @param closesAtMs by when no sentence still to come can speak for the stage. A sentence not over by the first frame after it does not count. */
+    /**
+     * @param closesAtMs the last moment a sentence can be offered for the stage: its hazard's last frame. The answer waits
+     * past it for whatever is still on the speaker for the stage; [Result.creditedAfterClose] says if this was too early.
+     */
     class Watch(val key: StageKey, val closesAtMs: Long)
 
     class Decision(val offer: SpeakerModel.Offer, val credits: List<StageKey>, val onAccepted: (CooldownManager) -> Unit, val onRefused: (CooldownManager) -> Unit)
@@ -82,6 +89,8 @@ internal class PairedBranchRun(
         val witnesses: Map<StageKey, List<String>>,
         val baseline: Completions,
         val arm: Completions,
+        /** Offered for a stage whose watch had already closed without it: the watch's moment was wrong, and its answer cannot be trusted. */
+        val creditedAfterClose: Set<StageKey>,
     )
 
     private class Arm(
@@ -105,18 +114,27 @@ internal class PairedBranchRun(
         fun toList(): List<String> = generateSequence(this) { it.before }.map { it.note }.toList().asReversed()
     }
 
-    private class Joint(val base: Arm, val arm: Arm, val choices: Choice?, sameSince: Long?) {
-        val coupled: Boolean get() = base == arm
+    private class Joint(val base: Arm, val arm: Arm, val choices: Choice?, wasCoupled: Boolean, sameSince: Long?) {
+        /**
+         * The two arms hold the same in every realization this branch stands for, not only the same bounds: they
+         * were so a moment ago, or whatever is on the speaker first has a known start, and what follows it the same.
+         */
+        var coupled: Boolean = base == arm && (wasCoupled || base.speaker.queue.firstOrNull()?.startKnown != false)
+            private set
 
         /** The two arms have had equal state and equal inputs since this time; null while they differ. */
         var sameSince: Long? = sameSince.takeIf { coupled }
             private set
 
-        /** On equal state the futures are equal, so only the worse past needs keeping: a stage is exempt only if every way here is. */
+        /**
+         * Only the worse past needs keeping. A stage is exempt only if every way here is. And arms not known to
+         * be one can do all that arms known to be one can, and more, so the branch goes on as not known.
+         */
         fun absorb(other: Joint) {
             val mine = sameSince
             val theirs = other.sameSince
-            sameSince = if (mine == null || theirs == null) null else maxOf(mine, theirs)
+            coupled = coupled && other.coupled
+            sameSince = if (mine == null || theirs == null || !coupled) null else maxOf(mine, theirs)
         }
 
         override fun equals(other: Any?) = other is Joint && base == other.base && arm == other.arm
@@ -152,6 +170,7 @@ internal class PairedBranchRun(
     private val everywhere = listOf(mutableSetOf<StageKey>(), mutableSetOf<StageKey>())
     private val missed = listOf(mutableSetOf<StageKey>(), mutableSetOf<StageKey>())
     private val latestEndMs = listOf(HashMap<StageKey, Long>(), HashMap<StageKey, Long>())
+    private val creditedAfterClose = mutableSetOf<StageKey>()
 
     /** Most of what a frame does is the same for many branches: they differ in the other arm, or only in the speaker. */
     private val liveOf = IdentityHashMap<CooldownManager, CooldownManager.Canonical>()
@@ -227,18 +246,18 @@ internal class PairedBranchRun(
         val bases = movesOf(joint.base, 0, by)
         val arms = movesOf(joint.arm, 1, by)
         if (joint.coupled) {
-            return bases.indices.map { i -> Joint(bases[i].arm, arms[i].arm, noted(joint.choices, bases[i].note), joint.sameSince) }
+            return bases.indices.map { i -> Joint(bases[i].arm, arms[i].arm, noted(joint.choices, bases[i].note), true, joint.sameSince) }
         }
         val together = shared(joint)
         val agreeing = ArrayList<Joint>(bases.size * arms.size)
         for (b in bases) {
             for (a in arms) {
                 if (together.isNotEmpty() && together.any { (it in b.spoken) != (it in a.spoken) }) continue
-                agreeing += Joint(b.arm, a.arm, noted(noted(joint.choices, b.note), a.note.takeIf { it != b.note }), null)
+                agreeing += Joint(b.arm, a.arm, noted(noted(joint.choices, b.note), a.note.takeIf { it != b.note }), false, null)
             }
         }
         if (agreeing.isNotEmpty()) return agreeing
-        return bases.flatMap { b -> arms.map { a -> Joint(b.arm, a.arm, noted(noted(joint.choices, b.note), a.note.takeIf { it != b.note }), null) } }
+        return bases.flatMap { b -> arms.map { a -> Joint(b.arm, a.arm, noted(noted(joint.choices, b.note), a.note.takeIf { it != b.note }), false, null) } }
     }
 
     private fun noted(before: Choice?, note: String?) = if (note == null) before else Choice(note, before)
@@ -268,7 +287,7 @@ internal class PairedBranchRun(
     private var branches = listOf(
         run {
             val start = arm(kernel.start(), CooldownManager(), emptySet(), emptySet())
-            Joint(start, start, null, Long.MIN_VALUE)
+            Joint(start, start, null, true, Long.MIN_VALUE)
         },
     )
 
@@ -299,7 +318,7 @@ internal class PairedBranchRun(
 
     private fun framed(joint: Joint, b: Move, a: Move, t: Long): Joint {
         val same = b.offer == a.offer && b.arm == a.arm
-        return Joint(b.arm, a.arm, noted(noted(joint.choices, b.note), a.note.takeIf { it != b.note }), if (same) joint.sameSince ?: t else null)
+        return Joint(b.arm, a.arm, noted(noted(joint.choices, b.note), a.note.takeIf { it != b.note }), joint.coupled, if (same) joint.sameSince ?: t else null)
     }
 
     private fun overLimit(): Boolean {
@@ -319,6 +338,7 @@ internal class PairedBranchRun(
         val id = decision.offer.id
         val known = credits[side].getOrPut(id) { decision.credits }
         check(known == decision.credits) { "$id speaks for different stages in one arm" }
+        decision.credits.filterTo(creditedAfterClose) { it in missed[side] }
         val steps = kernel.submit(from.speaker, decision.offer)
         steps.mapIndexed { i, step ->
             val accepted = step.outcomes.any { it is ClosedLoopSpeakerBranches.Accepted && it.id == id }
@@ -349,12 +369,13 @@ internal class PairedBranchRun(
             }
         }
         val closedWatches = mutableSetOf<StageKey>()
+        val onTheSpeaker by lazy(::onTheSpeaker)
         for (watch in open.values) {
             val key = watch.key
             if (key !in everywhere[0] && branches.all { key in it.base.heard }) everywhere[0] += key
             if (key !in everywhere[1] && branches.all { key in it.arm.heard }) everywhere[1] += key
             // Marks stay until both sides are done with them, so that one side's closing cannot part two arms in equal state.
-            if (t > watch.closesAtMs || t == Long.MAX_VALUE || (key in everywhere[0] && key in everywhere[1])) closedWatches += key
+            if ((key in everywhere[0] && key in everywhere[1]) || t == Long.MAX_VALUE || (t > watch.closesAtMs && key !in onTheSpeaker)) closedWatches += key
         }
         for (key in closedWatches) {
             open.remove(key)
@@ -364,7 +385,22 @@ internal class PairedBranchRun(
         if (closedTargets.isEmpty() && closedWatches.isEmpty()) return
         val stripped = IdentityHashMap<Arm, Arm>()
         fun strip(a: Arm) = stripped.getOrPut(a) { arm(a.speaker, a.cooldown, a.kept - closedTargets, a.heard - closedWatches) }
-        branches = merged(branches.map { j -> Joint(strip(j.base), strip(j.arm), j.choices, j.sameSince) })
+        branches = merged(branches.map { j -> Joint(strip(j.base), strip(j.arm), j.choices, j.coupled, j.sameSince) })
+    }
+
+    /** The stages some sentence still to end, or a result still to come, speaks for in some branch. */
+    private fun onTheSpeaker(): Set<StageKey> {
+        val stages = mutableSetOf<StageKey>()
+        for (side in 0..1) {
+            val seen = IdentityHashMap<Arm, Unit>()
+            for (j in branches) {
+                val a = if (side == 0) j.base else j.arm
+                if (seen.put(a, Unit) != null) continue
+                for (item in a.speaker.queue) credits[side][item.id]?.let(stages::addAll)
+                for (d in a.speaker.deferred) credits[side][d.outcome.id]?.let(stages::addAll)
+            }
+        }
+        return stages
     }
 
     fun finish(): Result {
@@ -375,6 +411,6 @@ internal class PairedBranchRun(
         }
         val undeterminable = all - kept - regressions - bothLostApart - sameInputs
         fun completions(side: Int) = Completions(everywhere[side].toSet(), allWatched - everywhere[side] - missed[side], latestEndMs[side].toMap())
-        return Result(highest, capHit, branchFrames, kept, regressions, bothLostApart, sameInputs, armLost, undeterminable, witnesses, completions(0), completions(1))
+        return Result(highest, capHit, branchFrames, kept, regressions, bothLostApart, sameInputs, armLost, undeterminable, witnesses, completions(0), completions(1), creditedAfterClose)
     }
 }

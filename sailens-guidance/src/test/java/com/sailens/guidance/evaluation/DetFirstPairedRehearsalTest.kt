@@ -246,6 +246,8 @@ class DetFirstPairedRehearsalTest {
             if (full.capHit) add("${r.id}: an arm that changes nothing did not settle")
             if (full.baseline.everywhere != full.arm.everywhere || full.baseline.latestEndMs != full.arm.latestEndMs) add("${r.id}: an arm that changes nothing answers its stages differently from the baseline")
             if (r.arms.values.any { it.nominal.maxBranches != 1 }) add("${r.id}: with no error there is more than one branch")
+            val late = r.arms.values.sumOf { it.full.creditedAfterClose.size + it.nominal.creditedAfterClose.size }
+            if (late != 0) add("${r.id}: $late stages were offered for after their watches closed")
             for ((name, other) in r.arms) {
                 if (other.full.capHit) continue
                 if (other.full.baseline.everywhere != full.baseline.everywhere || other.full.baseline.latestEndMs != full.baseline.latestEndMs) add("${r.id}: the baseline answers its stages differently when paired with $name")
@@ -316,7 +318,7 @@ class DetFirstPairedRehearsalTest {
         }
 
         val targets = ProtectedStages.of(device).map { PairedBranchRun.Target(StageKey(it.hazard, it.stage), it.completedAtNanos!! / 1_000_000 + 500, it.appearedAt) }
-        val watches = device.stages.filter { !it.ambiguousOnly && (it.stage != Stage.FIRST || !it.trackless) }.map { PairedBranchRun.Watch(StageKey(it.hazard, it.stage), it.endAt + WATCH_AFTER_LAST_SEEN_MS) }
+        val watches = device.stages.filter { !it.ambiguousOnly && (it.stage != Stage.FIRST || !it.trackless) }.map { PairedBranchRun.Watch(StageKey(it.hazard, it.stage), it.endAt) }
         val wordings = HashMap<String, Wording>()
         val epsilon = { id: String ->
             val measuredWording = wordings[id]?.let { durations.of(it).first == OTHER_C } ?: (!id.startsWith("early") && !id.startsWith("chatter"))
@@ -402,8 +404,6 @@ class DetFirstPairedRehearsalTest {
         const val EARLY_BOTTOM_Y = 0.45f
         const val M1_THRESHOLD_M = 2.0f
 
-        /** Longer than any sentence on the speaker, offered on the last frame a hazard was seen. */
-        const val WATCH_AFTER_LAST_SEEN_MS = 5_000L
         const val MAX_BRANCHES = 4_000_000
         const val MAX_BRANCH_FRAMES = 2_000_000_000L
     }

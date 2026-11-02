@@ -25,13 +25,16 @@ private fun longestCooldownMs(key: String): Long = when {
  * What of a cooldown state can still affect a decision at [now]: without records past the longest
  * cooldown their key can have under any event and scale (threshold note §3.3's bound) and emissions out
  * of the storm window. Two states that differ only there behave the same.
+ *
+ * An old confirmed summary stays while any write is open: revoking one folds the others onto the summary
+ * again, and a priority can come down a chain of writes from a summary of any age.
  */
 internal fun liveCooldown(state: CooldownManager.Canonical, now: Long): CooldownManager.Canonical {
     fun live(records: Map<String, Pair<Long, com.sailens.guidance.model.common.EventPriority>>) =
         records.filter { (key, record) -> now - record.first <= longestCooldownMs(key) }
     return state.copy(
         records = live(state.records),
-        confirmed = live(state.confirmed),
+        confirmed = if (state.openWrites.isEmpty()) live(state.confirmed) else state.confirmed,
         emissions = state.emissions.filter { now - it <= STORM_WINDOW_MS },
     )
 }
