@@ -29,7 +29,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
 /** Which sentences are measured and how long a wording takes, for both arms: one sentence has one length and one error. */
-internal class SentenceDurations(private val durations: SpeakerDurations, private val measuredLabel: String) {
+internal class SentenceDurations(private val durations: SpeakerDurations, private val measuredLabel: String, private val errorTrace: Int? = null) {
     private val fallback = HashSet<String>()
 
     fun isFallback(id: String): Boolean = id in fallback
@@ -39,7 +39,15 @@ internal class SentenceDurations(private val durations: SpeakerDurations, privat
         val (source, ms) = durations.of(wording)
         val supplementary = SupplementaryTtsDurations.ZH_CN_RATE_130[wording.first]
         if (source != measuredLabel) fallback += id
-        return if (source == measuredLabel || supplementary == null) ms else supplementary
+        val nominal = if (source == measuredLabel || supplementary == null) ms else supplementary
+        return nominal + errorOf(id)
+    }
+
+    /** With [errorTrace]: one fixed error for this sentence, anywhere in its bound. Both arms say a sentence with the same id, so they share it. */
+    private fun errorOf(id: String): Long {
+        val trace = errorTrace ?: return 0
+        val bound = epsilonMs(id)
+        return Math.floorMod(31L * id.hashCode() + trace * 1_000_003L, 2 * bound + 1) - bound
     }
 
     /** R10: a wording not measured on recordings is twice as uncertain. */
