@@ -316,4 +316,3 @@ internal class ModelSpeech(private val durations: SpeakerDurations, queued: List
         const val MODEL_ENGINE = 1L
     }
 }
-

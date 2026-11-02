@@ -80,6 +80,15 @@ class PromptCountsTest {
     }
 
     @Test
+    fun `the frozen count takes each stage credited again, not each sentence`() {
+        val history = PromptCounts.RepeatHistory()
+        history.metric(aFirst, bFirst)
+        history.today(aFirst, bFirst, aNear)
+        history.today(aFirst)
+        assertEquals(3, history.stagesCreditedAgain)
+    }
+
+    @Test
     fun `a stage is covered from the first thing not modeled, from a window or from a slow frame`() {
         val none = UnmodeledFrom(emptyList(), emptyList())
         assertFalse(none.covers(Long.MAX_VALUE))

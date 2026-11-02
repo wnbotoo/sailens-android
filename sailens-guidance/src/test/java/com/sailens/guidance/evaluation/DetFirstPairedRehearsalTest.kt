@@ -326,6 +326,7 @@ class DetFirstPairedRehearsalTest {
                     appendLine(String.format(Locale.ROOT, "    %s: %d%s", label, lates.size, if (known.isEmpty()) "" else String.format(Locale.ROOT, "; past the deadline median %.2f s, max %.2f s", known[known.size / 2], known.last())))
                 }
                 append(longerTolerance(rows))
+                if (name == LAUNCH) append(whatLossesAreWorth(rows))
                 if (name == LAUNCH) {
                     appendLine(whyNotBeforeCrossing(rows))
                     append(heardAheadInstead(rows))
@@ -373,11 +374,11 @@ class DetFirstPairedRehearsalTest {
         appendLine("    B4 NEAR or CRITICAL removed by conflict resolution: this arm ${captures.sumOf { it.removedNearOrCritical.getValue(name).first }} frames, ${captures.sumOf { it.removedNearOrCritical.getValue(name).second }} hazards; baseline ${captures.sumOf { it.removedNearOrCritical.getValue(NO_CHANGE).first }} frames, ${captures.sumOf { it.removedNearOrCritical.getValue(NO_CHANGE).second }} hazards (must be 0)")
         appendLine("    B6, C7 completed per minute: this arm ${f(arm.perMinute)} (${arm.completed}), baseline ${f(base.perMinute)} (${base.completed}), ratio ${f(arm.perMinute / base.perMinute)} (at most 1.25)")
         appendLine("    C7 completed per stationary minute: this arm ${f(arm.stationaryPerMinute)} (${arm.completedStationary}), baseline ${f(base.stationaryPerMinute)} (${base.completedStationary}), ratio ${f(arm.stationaryPerMinute / base.stationaryPerMinute)} (at most 1.25)")
-        appendLine("    B7 regives: ${arm.regiven}, ${f(100.0 * arm.regiven / maxOf(arm.completed, 1))}% of completed (at most 15%); most of one stage ${arm.mostRegivesOfAStage} (at most 1)")
+        appendLine("    B7 regives: stages ${arm.regivenStages}, ${f(100.0 * arm.regivenStages / maxOf(arm.completed, 1))}% of completed (at most 15%); most of one stage ${arm.mostRegivesOfAStage} (at most 1). Sentences ${arm.regivenSentences}, ${f(100.0 * arm.regivenSentences / maxOf(arm.completed, 1))}%")
         appendLine("    metric-only prompts: offered ${arm.metricOnlyOffered}, completed ${arm.metricOnlyCompleted}")
         appendLine("    C4 metric-only never within 2.0 m: ${arm.metricOnlyNeverWithin2m}, ${f(arm.neverWithin2mPerMinute)} per minute (at most 1.0)")
         appendLine("    C5 metric-only on a track under 1 s: ${arm.metricOnlyShortLived}, ${f(100.0 * arm.metricOnlyShortLived / maxOf(arm.metricOnlyCompleted, 1))}% (at most 5%)")
-        appendLine("    C6 by the revised count: repeats ${arm.repeat} (must be 0); overlaps ${arm.overlap}, periodic repeats ${arm.periodic} (reported only). By the frozen count: ${arm.creditedAgainUnderTheOldRule}")
+        appendLine("    C6 by the revised count: repeats ${arm.repeat} (must be 0); overlaps ${arm.overlap}, periodic repeats ${arm.periodic} (reported only). By the frozen count: ${arm.stagesCreditedAgain} stages in ${arm.promptsCreditedAgain} prompts")
         appendLine("    D1 path-complex prompts offered: ${arm.pathComplexOffered} (must be 0 with its switch on)")
         appendLine("    sentences of a wording not measured on recordings: ${arm.fallbackWordings} of ${arm.offered}")
         appendLine("    untimed offers (frames the device offered nothing on): ${captures.sumOf { it.untimedOffers.getValue(name) }}")
@@ -395,6 +396,64 @@ class DetFirstPairedRehearsalTest {
             val within = over { it.full }
             appendLine("    +$extra ms: ${noError.total} (ahead ${noError.totalFront}) | ${within.total} (ahead ${within.totalFront})")
         }
+    }
+
+    /**
+     * The stages lost with no error, by what kind of loss each is: never said while the hazard lasted, said within a
+     * bounded delay, or so late it no longer helps. Each stage never said ahead gets a line of numbers.
+     */
+    private fun whatLossesAreWorth(rows: List<Pair<CaptureResult, ArmResult>>): String = buildString {
+        val kinds = java.util.TreeMap<String, Int>()
+        val neverAhead = ArrayList<String>()
+        for ((r, a) in rows) {
+            val rowOf = r.device.stages.associateBy { StageKey(it.hazard, it.stage) }
+            for (key in a.nominal.regressions) {
+                val row = rowOf.getValue(key)
+                val ahead = row.hazardClass == "blocked" || (row.stage == Stage.CRITICAL && row.hazardClass in setOf("vehicle/front", "person/front"))
+                val deadline = r.deadlines.getValue(key)
+                val completion = a.nominal.arm.completionMs(key)
+                val samples = r.samples[key.hazard].orEmpty()
+                val kind = when {
+                    completion == null -> "never said"
+                    completion > row.endAt -> "said after the hazard's last frame"
+                    else -> {
+                        val at = samples.lastOrNull { it.cameraNanos / 1_000_000 <= completion }?.validPointM
+                        val delay = when {
+                            completion <= deadline + 1_000 -> "within 1 s of the deadline"
+                            completion <= deadline + 2_000 -> "1 to 2 s past it"
+                            else -> "over 2 s past it"
+                        }
+                        val where = when {
+                            row.hazardClass == "blocked" -> "no distance"
+                            at == null -> "no fresh distance"
+                            at < USEFUL_WARNING_M -> "under ${USEFUL_WARNING_M} m left"
+                            else -> "${USEFUL_WARNING_M} m or more left"
+                        }
+                        "$delay, $where"
+                    }
+                }
+                kinds.merge("${if (ahead) "ahead" else "other"}: $kind", 1, Int::plus)
+                if (ahead && completion == null) {
+                    val after = (row.endAt - deadline) / 1000.0
+                    val later = samples.filter { it.cameraNanos / 1_000_000 >= deadline }.mapNotNull { it.validPointM }
+                    val spokenOf = a.nominalArm.offered.values.filter { o -> o.endAtMs != null && a.nominalArm.credits[o.id].orEmpty().any { it.hazard == key.hazard } }
+                    neverAhead += String.format(
+                        Locale.ROOT,
+                        "      %s %s: lasted %.1f s past the deadline; nearest after it %s; other stages of it said before the deadline %d, after it %d",
+                        row.hazardClass,
+                        row.stage,
+                        after,
+                        later.minOrNull()?.let { String.format(Locale.ROOT, "%.1f m", it) } ?: "not known",
+                        spokenOf.count { it.endAtMs!! <= deadline },
+                        spokenOf.count { it.endAtMs!! > deadline },
+                    )
+                }
+            }
+        }
+        appendLine("  the kinds of loss, with no error:")
+        for ((label, n) in kinds) appendLine("    $label: $n")
+        appendLine("    each stage never said ahead:")
+        neverAhead.sorted().forEach(::appendLine)
     }
 
     /** Stages lost ahead, with no error, where the user heard another warning ahead of the same level or higher anyway. */
@@ -668,6 +727,9 @@ class DetFirstPairedRehearsalTest {
     private companion object {
         val PRESET_HEIGHT_M = System.getProperty("sailens.m3a.phoneHeight").orEmpty().toFloatOrNull() ?: 1.15f
         const val HEARD_WITHIN_MS = 5_000L
+
+        /** What walking 1.2 m/s covers in the time to take in a warning and stop: below it a warning comes too late to act on. */
+        const val USEFUL_WARNING_M = 1.0f
         const val OTHER_C = "other C captures"
         const val M1_THRESHOLD_M = 2.0f
         const val FIRST_SENTENCE_MS = 1_250L

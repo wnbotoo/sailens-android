@@ -27,6 +27,10 @@ internal object PromptCounts {
         private val highest = HashMap<String, Int>()
         private val highestMetric = HashMap<String, Int>()
 
+        /** Each stage a today's prompt credited that a metric-only prompt had completed: C6 as first written. */
+        var stagesCreditedAgain = 0
+            private set
+
         /**
          * @param credits the stages the prompt credits, ambiguous ones left out.
          * @param own each hazard's own priority as the prompt's event had it.
@@ -34,6 +38,7 @@ internal object PromptCounts {
          */
         fun onCompleted(credits: Set<StageKey>, own: Map<String, Int>, metricOnly: Boolean): Repeat? {
             val result = if (metricOnly || credits.none { it in saidMetric }) null else classify(credits, own)
+            if (!metricOnly) stagesCreditedAgain += credits.count { it in saidMetric }
             said += credits
             if (metricOnly) saidMetric += credits
             for (hazard in credits.map { it.hazard }.toSet()) {
@@ -62,7 +67,10 @@ internal object PromptCounts {
         val offered: Int = 0,
         val completed: Int = 0,
         val completedStationary: Int = 0,
-        val regiven: Int = 0,
+        /** Stages that went from waiting to be given again to given again: B7 as defined. */
+        val regivenStages: Int = 0,
+        /** Sentences carrying at least one of those: how many more sentences the user hears. */
+        val regivenSentences: Int = 0,
         val mostRegivesOfAStage: Int = 0,
         val metricOnlyOffered: Int = 0,
         val metricOnlyCompleted: Int = 0,
@@ -71,7 +79,8 @@ internal object PromptCounts {
         val overlap: Int = 0,
         val repeat: Int = 0,
         val periodic: Int = 0,
-        val creditedAgainUnderTheOldRule: Int = 0,
+        val promptsCreditedAgain: Int = 0,
+        val stagesCreditedAgain: Int = 0,
         val pathComplexOffered: Int = 0,
         val fallbackWordings: Int = 0,
     ) {
@@ -81,7 +90,8 @@ internal object PromptCounts {
             offered + o.offered,
             completed + o.completed,
             completedStationary + o.completedStationary,
-            regiven + o.regiven,
+            regivenStages + o.regivenStages,
+            regivenSentences + o.regivenSentences,
             maxOf(mostRegivesOfAStage, o.mostRegivesOfAStage),
             metricOnlyOffered + o.metricOnlyOffered,
             metricOnlyCompleted + o.metricOnlyCompleted,
@@ -90,7 +100,8 @@ internal object PromptCounts {
             overlap + o.overlap,
             repeat + o.repeat,
             periodic + o.periodic,
-            creditedAgainUnderTheOldRule + o.creditedAgainUnderTheOldRule,
+            promptsCreditedAgain + o.promptsCreditedAgain,
+            stagesCreditedAgain + o.stagesCreditedAgain,
             pathComplexOffered + o.pathComplexOffered,
             fallbackWordings + o.fallbackWordings,
         )
@@ -138,7 +149,8 @@ internal object PromptCounts {
             offered = prompts.size,
             completed = spoken.size,
             completedStationary = spoken.count { it.stationary },
-            regiven = prompts.count { it.regivenStages.isNotEmpty() },
+            regivenStages = regives.values.sum(),
+            regivenSentences = prompts.count { it.regivenStages.isNotEmpty() },
             mostRegivesOfAStage = regives.values.maxOrNull() ?: 0,
             metricOnlyOffered = metricOnly.size,
             metricOnlyCompleted = spoken.count { it.event!!.isMetricOnly },
@@ -147,7 +159,8 @@ internal object PromptCounts {
             overlap = repeats[Repeat.OVERLAP] ?: 0,
             repeat = repeats[Repeat.REPEAT] ?: 0,
             periodic = repeats[Repeat.PERIODIC] ?: 0,
-            creditedAgainUnderTheOldRule = repeats.values.sum(),
+            promptsCreditedAgain = repeats.values.sum(),
+            stagesCreditedAgain = history.stagesCreditedAgain,
             pathComplexOffered = prompts.count { it.event!!.messageKey == SceneEventMessageKeys.PATH_COMPLEX },
             fallbackWordings = log.count { isFallback(it.id) },
         )
