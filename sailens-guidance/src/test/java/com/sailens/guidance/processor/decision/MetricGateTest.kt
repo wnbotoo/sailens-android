@@ -45,7 +45,7 @@ class MetricGateTest {
         height: HeightSource? = HeightSource.PRESET,
         source: ObstacleSource = ObstacleSource.DETECTION,
         className: String = category.name.lowercase(),
-        stable: Int = 5,
+        stable: Int = 20,
         confidence: Float = 0.9f,
     ) = DetectedObstacle(
         id = UUID(0, n.toLong()),

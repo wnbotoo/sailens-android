@@ -330,7 +330,7 @@ class DetFirstPairedRehearsalTest {
                     append(longerTolerance(rows))
                     append(heardAheadInstead(rows))
                 }
-                if (name == LAUNCH || name == NO_CHANGE || name == STEADIER) {
+                if (name == LAUNCH || name == NO_CHANGE) {
                     val armCounts = rows.map { (r, a) -> countsOf(r, a.nominalArm) }.reduce(PromptCounts.Counts::plus)
                     val baseCounts = rows.map { (r, a) -> countsOf(r, a.nominalBase) }.reduce(PromptCounts.Counts::plus)
                     append(countLines(name, rows.map { it.first }, armCounts, baseCounts))
@@ -679,13 +679,10 @@ class DetFirstPairedRehearsalTest {
         const val LAUNCH = "launch"
         const val MUTED = "every vehicle prompt withheld"
         const val CHATTER = "a top-priority sentence every 10 s"
-        const val STEADIER = "launch, metric gate only after 10 stable frames"
 
         /** For diagnosis: each switch alone, with what it needs. */
-        val SINGLE_SWITCHES: List<Pair<String, DetFirstConfig>> = if (System.getProperty("sailens.replay.singleSwitches") == null) {
+        val SINGLE_SWITCHES: List<Pair<String, DetFirstConfig>> = if (System.getProperty("sailens.replay.singleSwitches") in setOf(null, "launch")) {
             emptyList()
-        } else if (System.getProperty("sailens.replay.singleSwitches") == "launch") {
-            listOf(STEADIER to DetFirstConfig.LAUNCH.copy(metricGate = DetFirstConfig.LAUNCH.metricGate!!.copy(minStableFrames = 10)))
         } else if (System.getProperty("sailens.replay.singleSwitches") == "without") {
             val launch = DetFirstConfig.LAUNCH
             listOf(

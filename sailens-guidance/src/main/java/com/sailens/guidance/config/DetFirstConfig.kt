@@ -62,5 +62,11 @@ data class MetricGateConfig(
     val staticM: Float = 2.5f,
     val roadsideStaticM: Float = 2.0f,
     val metricOnlyRepeatMs: Long = 6_000,
-    val minStableFrames: Int = 3,
+    /**
+     * How long a track must have lasted before its measured distance alone speaks. A track shorter than a sentence is
+     * gone before the sentence ends. On the calibration captures (SM8850, sem + det at their recorded rate), at 3 frames
+     * 35% of these prompts were about tracks under 1 s; at 20, none, with the first prompts ahead over before 2.0 m going
+     * from 13/41 to 11/41 for persons and 9/38 to 7/38 for vehicles. It counts frames, so a slower device waits longer.
+     */
+    val minStableFrames: Int = 20,
 )

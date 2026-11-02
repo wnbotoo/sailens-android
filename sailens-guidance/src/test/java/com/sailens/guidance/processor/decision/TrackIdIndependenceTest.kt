@@ -54,7 +54,7 @@ class TrackIdIndependenceTest {
         distance = distance,
         urgency = UrgencyLevel.HIGH,
         confidence = 0.9f,
-        stableFrames = 5,
+        stableFrames = 20,
         areaRatio = box.area,
         timestamp = 0,
         distanceEstimate = DistanceEstimate(distance, distance, GroundContactEstimate(ContactValidity.VALID, lowerM = lowerM, pointM = lowerM, upperM = lowerM), distance, HeightSource.PRESET),
