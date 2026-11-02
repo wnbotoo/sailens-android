@@ -36,6 +36,8 @@ class GuidanceOutputProtocol(
     private val wallClock: () -> Long = Timestamp::now,
     private val retryInterrupted: Boolean = false,
     pathComplexOff: Boolean = false,
+    /** Fixed only by an evaluation in which two runs have to name a notice alike. */
+    noticeIdPrefix: String? = null,
 ) {
     /** The running frame's time, while one runs. */
     private var frameAtMs: Long? = null
@@ -55,6 +57,7 @@ class GuidanceOutputProtocol(
 
             override fun cancelVibration() = motor.cancelVisionFaultVibration()
         },
+        noticeIdPrefix = noticeIdPrefix ?: VisionFaultAlerts.newNoticeIdPrefix(),
     )
 
     /** Says that path-complex prompts are off; null when they are not. */
@@ -87,6 +90,17 @@ class GuidanceOutputProtocol(
         run++
         visionFaultAlerts.reset()
         modeNotice?.reset()
+    }
+
+    /** Everything that decides what this protocol does next, for an evaluation that follows several possible futures. */
+    internal data class State(val alerts: VisionFaultAlerts.State, val mode: ModeNotice.State?, val run: Long)
+
+    internal fun state(): State = State(visionFaultAlerts.state(), modeNotice?.state(), run)
+
+    internal fun restore(state: State) {
+        visionFaultAlerts.restore(state.alerts)
+        state.mode?.let { modeNotice?.restore(it) }
+        run = state.run
     }
 
     /**

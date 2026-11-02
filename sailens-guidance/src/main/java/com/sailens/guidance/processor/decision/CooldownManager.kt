@@ -413,6 +413,12 @@ class CooldownManager(
         return CutReceipt(CutResult.KEPT, decisionsBefore)
     }
 
+    /** 这个时刻的决策写下的事件 id：一次决策最多一次写入。给跟着多个可能未来走的评估用，那里同一次决策的 id 各不相同。 */
+    internal fun writeAt(timestampMs: Long): UUID? = synchronized(this) {
+        awaitingOutcome.entries.firstOrNull { it.value.timestampMs == timestampMs }?.key
+            ?: openWrites.firstOrNull { it.timestampMs == timestampMs }?.eventId
+    }
+
     /** 已完成的决策次数：一条回执在回放里放回的位置。 */
     @Synchronized
     fun decisionsSoFar(): Long = decisions

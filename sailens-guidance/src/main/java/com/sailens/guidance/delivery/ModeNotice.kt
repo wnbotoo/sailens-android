@@ -22,13 +22,11 @@ internal class ModeNotice(
     private var cuts = 0
     private var nextOfferAt = Long.MIN_VALUE
     private var lastFrameAt = Long.MIN_VALUE
-    private var attempts = 0
 
     fun act(now: Long) {
         lastFrameAt = now
         if (heard || saying || now < nextOfferAt) return
-        val attempt = ++attempts
-        when (offer("mode-notice-$attempt", SceneEventMessageKeys.MODE_OBSTACLES_AND_BLOCKED, now, now + DEADLINE_MS, ::onOutcome)) {
+        when (offer("mode-notice-$now", SceneEventMessageKeys.MODE_OBSTACLES_AND_BLOCKED, now, now + DEADLINE_MS, ::onOutcome)) {
             Offer.ACCEPTED -> saying = true
             Offer.REFUSED -> nextOfferAt = now + REFUSED_RETRY_MS
             Offer.PUBLISHED -> heard = true
@@ -56,7 +54,19 @@ internal class ModeNotice(
         cuts = 0
         nextOfferAt = Long.MIN_VALUE
         lastFrameAt = Long.MIN_VALUE
-        attempts = 0
+    }
+
+    /** Everything that decides what it does next. Once heard there is nothing more it will do. */
+    internal data class State(val heard: Boolean, val saying: Boolean, val cuts: Int, val nextOfferAt: Long, val lastFrameAt: Long)
+
+    internal fun state(): State = if (heard) State(true, false, 0, Long.MIN_VALUE, Long.MIN_VALUE) else State(false, saying, cuts, nextOfferAt, lastFrameAt)
+
+    internal fun restore(state: State) {
+        heard = state.heard
+        saying = state.saying
+        cuts = state.cuts
+        nextOfferAt = state.nextOfferAt
+        lastFrameAt = state.lastFrameAt
     }
 
     private companion object {

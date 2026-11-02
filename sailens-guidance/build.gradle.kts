@@ -60,6 +60,7 @@ android {
             // is passed only once the thresholds it is judged against are frozen.
             test.systemProperty("sailens.replay.unseal", project.hasProperty("unsealCapture").toString())
             // A capture path given means this run must actually replay, not reuse a cached result.
+            project.findProperty("replaySingleSwitches")?.let { test.systemProperty("sailens.replay.singleSwitches", it.toString()) }
             if (project.hasProperty("replayCapture")) test.outputs.upToDateWhen { false }
             // The paired M5 rehearsal holds hundreds of runs of a whole capture in memory.
             if (project.hasProperty("replayCapture")) test.maxHeapSize = "6g"
