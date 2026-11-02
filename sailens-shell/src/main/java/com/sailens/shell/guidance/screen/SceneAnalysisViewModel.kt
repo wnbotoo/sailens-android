@@ -14,7 +14,10 @@ import com.sailens.guidance.processor.decision.SpeechScale
 import com.sailens.guidance.model.scene.SceneResult
 import com.sailens.core.log.LogService
 import com.sailens.guidance.service.TraceService
+import com.sailens.guidance.usecase.decision.AcceptedPromptUseCase
 import com.sailens.guidance.usecase.decision.ConfirmDeliveredEventUseCase
+import com.sailens.guidance.usecase.decision.ReportCutPromptUseCase
+import com.sailens.guidance.usecase.decision.ReportHeardAfterCutUseCase
 import com.sailens.guidance.usecase.decision.RevokeUndeliveredEventUseCase
 import com.sailens.guidance.usecase.scene.StartSceneAnalysisUseCase
 import com.sailens.shell.app.GuidanceStartGate
@@ -94,6 +97,11 @@ class SceneAnalysisViewModel(
     private val confirmDeliveredEvent: ConfirmDeliveredEventUseCase,
     /** Tells Guidance a decided event never reached the user, so its cooldown does not mute it. */
     private val revokeUndeliveredEvent: RevokeUndeliveredEventUseCase,
+    /** Tells Guidance a decided event own speech took was cut off. */
+    private val reportCutPrompt: ReportCutPromptUseCase,
+    private val reportHeardAfterCut: ReportHeardAfterCutUseCase,
+    /** Tells Guidance a channel took a decided event. */
+    private val acceptedPrompt: AcceptedPromptUseCase,
     private val noticeText: GuidanceNoticeText,
     /** The det-first switches, the same ones Guidance decided with. */
     private val detFirst: DetFirstConfig = DetFirstConfig(),
@@ -126,7 +134,8 @@ class SceneAnalysisViewModel(
 
     /** Takes each frame's decisions to the user; see [com.sailens.guidance.delivery.GuidanceOutputProtocol]. */
     private val guidanceOutput = GuidanceOutputWiring(
-        speakOwn = { announcement, onSpoken -> speechManager.speak(announcement, onSpoken) },
+        speakOwn = { announcement, onSpoken, onOutcome, atMs -> speechManager.speak(announcement, onSpoken, onOutcome, atMs) },
+        settleFrame = speechManager::settleFrame,
         speechReady = { speechManager.isReady },
         stopSpeech = { speechManager.stop() },
         announcementFor = announcements::announcementFor,
@@ -150,7 +159,10 @@ class SceneAnalysisViewModel(
         descriptionHoldsTheFloor = { sceneDescriptionCoordinator.holdsTheFloor },
         preemptDescription = sceneDescriptionCoordinator::preemptForGuidance,
         confirmDelivered = { event -> confirmDeliveredEvent(event) },
-        revokeUndelivered = { event -> revokeUndeliveredEvent(event) },
+        revokeUndelivered = { event, reason -> revokeUndeliveredEvent(event, reason) },
+        reportCut = { event -> reportCutPrompt(event) },
+        reportHeardAfterCut = { event -> reportHeardAfterCut(event) },
+        promptAccepted = { event -> acceptedPrompt(event) },
         outputSettings = {
             val state = _uiState.value
             GuidanceOutputSettings(
@@ -168,7 +180,6 @@ class SceneAnalysisViewModel(
         logger = logger,
         recordOutcome = traceService::recordPromptOutcome,
         onReachedUser = { event -> _uiState.update { it.copy(lastAnnouncedEvent = event) } },
-        clock = clock,
         detFirst = detFirst,
     )
     private var releaseJob: Job? = null

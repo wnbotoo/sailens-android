@@ -10,6 +10,7 @@ import com.sailens.guidance.delivery.GuidanceOutputSettings
 import com.sailens.guidance.delivery.GuidanceScreenReaderPort
 import com.sailens.guidance.delivery.GuidanceSettingsPort
 import com.sailens.guidance.delivery.GuidanceSpeechPort
+import com.sailens.guidance.delivery.SpeechOutcome
 import com.sailens.guidance.delivery.VisionFaultAlerts
 import com.sailens.guidance.model.analysis.VisionFaults
 import com.sailens.guidance.model.common.EventPriority
@@ -171,8 +172,9 @@ internal class ClosedLoopRun(
         private val protocol = GuidanceOutputProtocol(
             speech = object : GuidanceSpeechPort {
                 override val isReady: Boolean = true
-                override fun speak(event: SceneEvent): Boolean = speech.offer(event)
-                override fun speakNotice(notice: VisionFaultAlerts.Notice, onSpoken: () -> Unit): Boolean = speech.offerNotice(notice, onSpoken)
+                override fun settleFrame(): Long = clock()
+                override fun speak(event: SceneEvent, atMs: Long?, onOutcome: ((SpeechOutcome) -> Unit)?): Boolean = speech.offer(event)
+                override fun speakNotice(notice: VisionFaultAlerts.Notice, atMs: Long?, onSpoken: () -> Unit): Boolean = speech.offerNotice(notice, onSpoken)
             },
             screenReader = object : GuidanceScreenReaderPort {
                 override fun announce(event: SceneEvent) = error("no screen reader in a closed-loop run")
@@ -189,9 +191,14 @@ internal class ClosedLoopRun(
             },
             cooldown = object : GuidanceCooldownPort {
                 override fun confirm(event: SceneEvent) = cooldown.confirm(event.id)
-                override fun revoke(event: SceneEvent) {
+                override fun revoke(event: SceneEvent, reason: String) {
                     cooldown.revoke(event.id)
                 }
+                override fun reportCut(event: SceneEvent) {
+                    cooldown.reportCut(event.id)
+                }
+                override fun reportHeardAfterCut(event: SceneEvent) = Unit
+                override fun accepted(event: SceneEvent): Boolean = cooldown.promptAccepted(event.id)
             },
             settings = object : GuidanceSettingsPort {
                 override fun output() = GuidanceOutputSettings(speechEnabled = true, screenReaderActive = false, hapticsEnabled = true)
@@ -200,7 +207,6 @@ internal class ClosedLoopRun(
             logger = SilentLog,
             recordOutcome = {},
             onReachedUser = {},
-            clock = clock,
             wallClock = clock,
         )
 

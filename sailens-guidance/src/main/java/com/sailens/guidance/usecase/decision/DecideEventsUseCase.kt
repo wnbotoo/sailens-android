@@ -3,7 +3,9 @@ package com.sailens.guidance.usecase.decision
 import com.sailens.guidance.model.analysis.SceneSnapshot
 import com.sailens.guidance.model.analysis.VisionFaults
 import com.sailens.guidance.model.scene.SceneEvent
+import com.sailens.guidance.model.trace.PromptRevokeReasons
 import com.sailens.guidance.processor.decision.CooldownManager
+import com.sailens.guidance.processor.decision.CutResult
 import com.sailens.guidance.processor.decision.EventConflictResolver
 import com.sailens.guidance.processor.decision.EventGenerator
 import com.sailens.guidance.processor.decision.EventMerger
@@ -58,6 +60,7 @@ class DecideEventsUseCase(
         return cooldownManager.decide {
             // 把运动状态喂给冷却器：站着不动时同一个场景不该被反复播报。
             setStationary(stationary)
+            observeHazards(snapshot.obstacles.mapTo(HashSet()) { it.id }, rawEvents, now)
 
             // 4. 冷却过滤
             val filteredEvents = filter(mergedEvents, now)
@@ -93,8 +96,47 @@ class RevokeUndeliveredEventUseCase(
     private val cooldownManager: CooldownManager,
     private val regressionRecorder: RegressionRecorder = RegressionRecorder.None,
 ) {
-    operator fun invoke(event: SceneEvent) {
+    operator fun invoke(event: SceneEvent, reason: String? = null) {
         val decisionsBefore = cooldownManager.revoke(event.id)
-        if (regressionRecorder.isRecording) regressionRecorder.onRevoke(event.id, decisionsBefore)
+        if (regressionRecorder.isRecording) regressionRecorder.onRevoke(event.id, decisionsBefore, reason)
     }
+}
+
+/**
+ * 送达方的回执：[DecideEventsUseCase] 选出的那条事件，自带语音接收之后被打断了。冷却决定撤回并重给，还是确认
+ * （没听完），两种都进模型回归记录。
+ */
+class ReportCutPromptUseCase(
+    private val cooldownManager: CooldownManager,
+    private val regressionRecorder: RegressionRecorder = RegressionRecorder.None,
+) {
+    operator fun invoke(event: SceneEvent) {
+        val receipt = cooldownManager.reportCut(event.id)
+        if (!regressionRecorder.isRecording) return
+        when (receipt.result) {
+            CutResult.REVOKED -> regressionRecorder.onRevoke(event.id, receipt.decisionsBefore, PromptRevokeReasons.CUT)
+            CutResult.KEPT -> regressionRecorder.onCutKept(event.id, receipt.decisionsBefore)
+        }
+    }
+}
+
+/** 送达方的回执：判为被打断之后，引擎又说它其实念完了。不收回打断做过的事，只留下记录。 */
+class ReportHeardAfterCutUseCase(
+    private val cooldownManager: CooldownManager,
+    private val regressionRecorder: RegressionRecorder = RegressionRecorder.None,
+) {
+    operator fun invoke(event: SceneEvent) {
+        if (regressionRecorder.isRecording) regressionRecorder.onHeardAfterCut(event.id, cooldownManager.decisionsSoFar())
+    }
+}
+
+/**
+ * 送达方的回执：某个通道**接收**了这条事件。它说出的、等着重给的阶段这时才算重给了。
+ *
+ * @return 要不要伴随震动，见 [CooldownManager.promptAccepted]。
+ */
+class AcceptedPromptUseCase(
+    private val cooldownManager: CooldownManager,
+) {
+    operator fun invoke(event: SceneEvent): Boolean = cooldownManager.promptAccepted(event.id)
 }

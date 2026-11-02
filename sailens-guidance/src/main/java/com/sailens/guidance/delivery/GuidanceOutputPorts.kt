@@ -14,19 +14,41 @@ interface GuidanceSpeechPort {
     val isReady: Boolean
 
     /**
-     * Offers a navigation prompt.
+     * Starts a frame, before its first offer: what the engine has ended by now no longer holds the speaker.
      *
+     * @return the frame's time, which every offer of the frame is judged at.
+     */
+    fun settleFrame(): Long
+
+    /**
+     * Offers a navigation prompt. Returning true on the main thread only means it was taken; this is
+     * always called there.
+     *
+     * @param atMs the frame's time, from [settleFrame].
+     * @param onOutcome when given, what became of it if it is taken. It only changes the caller's state.
      * @return whether it was taken. False when a prompt of equal or higher priority is being spoken,
      *   when it expired, or when the engine is not ready (the attempt still asks the engine to start).
      */
-    fun speak(event: SceneEvent): Boolean
+    fun speak(event: SceneEvent, atMs: Long?, onOutcome: ((SpeechOutcome) -> Unit)?): Boolean
 
     /**
      * Offers a [VisionFaultAlerts] notice on the same terms.
      *
      * @param onSpoken called when the engine finished playing it, and not otherwise.
      */
-    fun speakNotice(notice: VisionFaultAlerts.Notice, onSpoken: () -> Unit): Boolean
+    fun speakNotice(notice: VisionFaultAlerts.Notice, atMs: Long?, onSpoken: () -> Unit): Boolean
+}
+
+/** What became of a prompt the speech port took. */
+enum class SpeechOutcome {
+    /** The engine played it to the end. */
+    SPOKEN,
+
+    /** Given up on with no end known at that moment. */
+    CUT,
+
+    /** After [CUT]: the engine said it played to the end after all. */
+    HEARD_AFTER_CUT,
 }
 
 /** The screen reader, when it is the spoken channel. It always takes a line and reports no completion. */
@@ -63,7 +85,16 @@ interface GuidanceDescriptionPort {
 interface GuidanceCooldownPort {
     fun confirm(event: SceneEvent)
 
-    fun revoke(event: SceneEvent)
+    /** @param reason one of `PromptRevokeReasons`. */
+    fun revoke(event: SceneEvent, reason: String)
+
+    /** Own speech took [event] and it was cut off: the cooldown takes it back or keeps it. */
+    fun reportCut(event: SceneEvent)
+
+    fun reportHeardAfterCut(event: SceneEvent)
+
+    /** A channel took [event]. @return whether a rhythm goes with it: not for a prompt only saying again what was cut off. */
+    fun accepted(event: SceneEvent): Boolean
 }
 
 /** The user's switches, read at the moment each decision is made. */

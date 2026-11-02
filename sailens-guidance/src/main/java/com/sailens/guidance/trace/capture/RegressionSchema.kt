@@ -323,6 +323,30 @@ data class RegressionRevokeRecord(
 ) : CaptureRecord
 
 /**
+ * A prompt cut off that the cooldown kept rather than took back (schema 1.6): it marks this one write as not
+ * heard to the end. Applied like a revoke, before decision number [decisionsBefore].
+ */
+@Serializable
+@SerialName("regression_cut_kept")
+data class RegressionCutKeptRecord(
+    val eventId: String,
+    val decisionsBefore: Long,
+    val elapsedRealtimeNanos: Long,
+) : CaptureRecord
+
+/**
+ * A prompt judged cut off whose `onDone` arrived after all (schema 1.6): this one write was heard. Applied
+ * like a revoke, before decision number [decisionsBefore].
+ */
+@Serializable
+@SerialName("regression_heard_after_cut")
+data class RegressionHeardAfterCutRecord(
+    val eventId: String,
+    val decisionsBefore: Long,
+    val elapsedRealtimeNanos: Long,
+) : CaptureRecord
+
+/**
  * One event in the life of one utterance handed to the speech engine (schema 1.5). Measurement only:
  * replay never reads it.
  *

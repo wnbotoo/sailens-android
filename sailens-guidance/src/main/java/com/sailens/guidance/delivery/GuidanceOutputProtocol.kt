@@ -17,8 +17,9 @@ private const val TAG = "GuidanceOutputProtocol"
  *
  * @param recordOutcome receives exactly one `prompt_outcome` trace record per offered prompt.
  * @param onReachedUser the prompt was heard or felt, so it is what a replay repeats.
- * @param clock the monotonic clock Guidance stamps events with; drives [VisionFaultAlerts].
  * @param wallClock wall-clock milliseconds, the clock of the frame trace's `pipelineCompletedAt`.
+ * @param retryInterrupted a prompt own speech took is confirmed once heard, and one cut off goes to
+ *   [GuidanceCooldownPort.reportCut]. Off, it is confirmed when taken, and nobody asks what became of it.
  */
 class GuidanceOutputProtocol(
     private val speech: GuidanceSpeechPort,
@@ -30,9 +31,15 @@ class GuidanceOutputProtocol(
     private val logger: LogService,
     private val recordOutcome: (PromptOutcomeTrace) -> Unit,
     private val onReachedUser: (SceneEvent) -> Unit,
-    private val clock: () -> Long,
     private val wallClock: () -> Long = Timestamp::now,
+    private val retryInterrupted: Boolean = false,
 ) {
+    /** The running frame's time, while one runs. */
+    private var frameAtMs: Long? = null
+
+    /** Outcomes of a stopped run find nothing to report to: its cooldown was cleared. */
+    private var run = 0L
+
     /** Everything said and felt about a covered lens, low light and an unrecognised floor; see [VisionFaultAlerts]. */
     private val visionFaultAlerts = VisionFaultAlerts(
         outputs = object : VisionFaultAlerts.Outputs {
@@ -55,10 +62,12 @@ class GuidanceOutputProtocol(
      * prompt, so a higher prompt in the same frame does not cut off a floor notice just begun.
      */
     fun onFrame(events: List<SceneEvent>, sequenceNumber: Long, visionFaults: VisionFaults) {
-        val alertsNow = clock()
-        visionFaultAlerts.observe(alertsNow, visionFaults, settings.visionFaults())
+        val frameAt = speech.settleFrame()
+        frameAtMs = frameAt
+        visionFaultAlerts.observe(frameAt, visionFaults, settings.visionFaults())
         onSceneEvents(events, sequenceNumber)
-        visionFaultAlerts.act(alertsNow, settings.visionFaults())
+        visionFaultAlerts.act(frameAt, settings.visionFaults())
+        frameAtMs = null
     }
 
     /** A switch changed: an owed vision-fault rhythm whose switch was just turned off is dropped now, not at the next frame. */
@@ -68,6 +77,7 @@ class GuidanceOutputProtocol(
 
     /** Guidance stopped: no recovery is said for what was still faulty. */
     fun reset() {
+        run++
         visionFaultAlerts.reset()
     }
 
@@ -85,7 +95,7 @@ class GuidanceOutputProtocol(
             screenReader.announceNotice(notice.messageKey)
             return VisionFaultAlerts.Offer.PUBLISHED
         }
-        val accepted = speech.speakNotice(notice, onSpoken = { visionFaultAlerts.onSpoken(notice.id) })
+        val accepted = speech.speakNotice(notice, frameAtMs, onSpoken = { visionFaultAlerts.onSpoken(notice.id) })
         return if (accepted) VisionFaultAlerts.Offer.ACCEPTED else VisionFaultAlerts.Offer.REFUSED
     }
 
@@ -98,6 +108,9 @@ class GuidanceOutputProtocol(
 
         logger.debug(TAG, "Scene events generated, ${primaryEvent.messageKey}", mapOf("count" to events.size))
 
+        // 自带语音接收了、又要等结果时，这里不确认：结果来了再说。
+        val prompt = PromptSpeech(primaryEvent)
+
         // 等描述 / 打断描述 / 送达就确认冷却、没送达就撤销冷却，并为这条提示写一条 prompt_outcome（实际
         // 送达的通道或撤回原因）——整条规则在 offerAndTraceGuidancePrompt 里，有单测。
         val delivery = offerAndTraceGuidancePrompt(
@@ -107,9 +120,9 @@ class GuidanceOutputProtocol(
             waitsForDescription = description.waits(primaryEvent.priority),
             now = wallClock,
             preemptDescription = { description.preempt(primaryEvent.messageKey) },
-            deliver = { deliver(primaryEvent, outputs) },
-            confirm = { cooldown.confirm(primaryEvent) },
-            revoke = { cooldown.revoke(primaryEvent) },
+            deliver = { deliver(primaryEvent, outputs, prompt) },
+            confirm = { if (!prompt.awaitsOutcome) cooldown.confirm(primaryEvent) },
+            revoke = { reason -> cooldown.revoke(primaryEvent, reason) },
             record = recordOutcome,
         )
         // Replay history follows what the user actually heard or felt, not the state read before the
@@ -122,13 +135,61 @@ class GuidanceOutputProtocol(
      *
      * @return 真正接收了它的通道；为空表示没送达。
      */
-    private fun deliver(event: SceneEvent, outputs: GuidanceOutputSettings): GuidanceDeliveryResult = deliverGuidanceEvent(
+    private fun deliver(event: SceneEvent, outputs: GuidanceOutputSettings, prompt: PromptSpeech): GuidanceDeliveryResult = deliverGuidanceEvent(
         speechEnabled = outputs.speechEnabled,
         screenReaderActive = outputs.screenReaderActive,
         speechEngineReady = { speech.isReady },
         hapticsEnabled = outputs.hapticsEnabled,
-        announceToScreenReader = { screenReader.announce(event) },
-        speak = { speech.speak(event) },
-        vibrate = { motor.vibrate(event) },
+        announceToScreenReader = {
+            screenReader.announce(event)
+            prompt.taken()
+        },
+        speak = { prompt.speak() },
+        vibrate = { prompt.vibrate() },
     )
+
+    /** One prompt's way through the channels: which took it, and whether a rhythm goes with it. */
+    private inner class PromptSpeech(private val event: SceneEvent) {
+        /** Own speech took it and its outcome is yet to come. */
+        var awaitsOutcome = false
+            private set
+        private var takenByVoice = false
+        private var rhythmGoesWithIt = true
+
+        fun taken() {
+            if (!retryInterrupted) return
+            takenByVoice = true
+            rhythmGoesWithIt = cooldown.accepted(event)
+        }
+
+        fun speak(): Boolean {
+            val taken = speech.speak(event, frameAtMs, if (retryInterrupted) outcomeHandler(event) else null)
+            if (taken) {
+                awaitsOutcome = retryInterrupted
+                taken()
+            }
+            return taken
+        }
+
+        /** Going with speech or the screen reader it can stay silent; on its own it is the channel, and always plays. */
+        fun vibrate(): Boolean {
+            if (takenByVoice) return rhythmGoesWithIt && motor.vibrate(event)
+            val played = motor.vibrate(event)
+            if (played && retryInterrupted) cooldown.accepted(event)
+            return played
+        }
+    }
+
+    private fun outcomeHandler(event: SceneEvent): (SpeechOutcome) -> Unit {
+        val thisRun = run
+        return { outcome ->
+            if (thisRun == run) {
+                when (outcome) {
+                    SpeechOutcome.SPOKEN -> cooldown.confirm(event)
+                    SpeechOutcome.CUT -> cooldown.reportCut(event)
+                    SpeechOutcome.HEARD_AFTER_CUT -> cooldown.reportHeardAfterCut(event)
+                }
+            }
+        }
+    }
 }

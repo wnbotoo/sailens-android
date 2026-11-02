@@ -39,12 +39,13 @@ class GuidanceOutputWiringTest {
     private var reservation: (() -> Unit)? = null
 
     private val wiring = GuidanceOutputWiring(
-        speakOwn = { announcement, onSpoken ->
+        speakOwn = { announcement, onSpoken, _, _ ->
             calls += "speak:${announcement.key}"
             announcementsSpoken += announcement
             onSpoken?.let { onSpokenByKey[announcement.key] = it }
             true
         },
+        settleFrame = { now },
         speechReady = { true },
         stopSpeech = { calls += "stopSpeech" },
         announcementFor = { event ->
@@ -75,7 +76,10 @@ class GuidanceOutputWiringTest {
         descriptionHoldsTheFloor = { describing },
         preemptDescription = { calls += "preempt:$it" },
         confirmDelivered = { calls += "confirm" },
-        revokeUndelivered = { calls += "revoke" },
+        revokeUndelivered = { _, _ -> calls += "revoke" },
+        reportCut = { calls += "cut" },
+        reportHeardAfterCut = { calls += "heardAfterCut" },
+        promptAccepted = { true },
         outputSettings = {
             GuidanceOutputSettings(speechEnabled = speechEnabled, screenReaderActive = screenReader, hapticsEnabled = true)
         },
@@ -83,7 +87,6 @@ class GuidanceOutputWiringTest {
         logger = SilentLog,
         recordOutcome = { outcomes += it },
         onReachedUser = { calls += "reached:${it.messageKey}" },
-        clock = { now },
     )
 
     @Test

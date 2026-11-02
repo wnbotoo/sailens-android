@@ -155,7 +155,7 @@ class RegressionReplayRoundTripTest {
                 }
             }
         }
-        override fun onRevoke(eventId: UUID, decisionsBefore: Long) {
+        override fun onRevoke(eventId: UUID, decisionsBefore: Long, reason: String?) {
             revokes += RegressionRevokeRecord(eventId.toString(), decisionsBefore, 0)
         }
     }

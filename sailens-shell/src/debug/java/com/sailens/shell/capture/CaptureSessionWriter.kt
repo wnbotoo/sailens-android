@@ -7,6 +7,8 @@ import com.sailens.guidance.trace.capture.ClockAnchorRecord
 import com.sailens.guidance.trace.capture.FrameRecord
 import com.sailens.guidance.trace.capture.MarkerRecord
 import com.sailens.guidance.trace.capture.RegressionFrameRecord
+import com.sailens.guidance.trace.capture.RegressionCutKeptRecord
+import com.sailens.guidance.trace.capture.RegressionHeardAfterCutRecord
 import com.sailens.guidance.trace.capture.RegressionRevokeRecord
 import com.sailens.guidance.trace.capture.RegressionUtteranceRecord
 import com.sailens.guidance.trace.capture.SensorRecord
@@ -114,7 +116,7 @@ internal class CaptureSessionWriter(
         is SensorRecord -> CaptureSchema.SENSORS_FILE
         is ClockAnchorRecord -> CaptureSchema.ANCHORS_FILE
         is MarkerRecord -> CaptureSchema.MARKERS_FILE
-        is RegressionFrameRecord, is RegressionRevokeRecord, is RegressionUtteranceRecord -> CaptureSchema.REGRESSION_FILE
+        is RegressionFrameRecord, is RegressionRevokeRecord, is RegressionCutKeptRecord, is RegressionHeardAfterCutRecord, is RegressionUtteranceRecord -> CaptureSchema.REGRESSION_FILE
         is WindowFrameRecord -> CaptureSchema.WINDOWS_FILE
     }
 

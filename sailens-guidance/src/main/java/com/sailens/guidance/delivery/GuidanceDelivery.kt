@@ -160,7 +160,7 @@ data class GuidanceOutputSettings(
  *
  * @param now wall-clock milliseconds, the clock of the frame trace's `pipelineCompletedAt`.
  * @param confirm makes the provisional cooldown record final.
- * @param revoke takes back the provisional cooldown record.
+ * @param revoke takes back the provisional cooldown record, for one of [PromptRevokeReasons].
  * @return which channels took the prompt; none when it was not delivered.
  */
 internal inline fun offerAndTraceGuidancePrompt(
@@ -172,7 +172,7 @@ internal inline fun offerAndTraceGuidancePrompt(
     preemptDescription: () -> Unit,
     deliver: () -> GuidanceDeliveryResult,
     confirm: () -> Unit,
-    revoke: () -> Unit,
+    revoke: (reason: String) -> Unit,
     record: (PromptOutcomeTrace) -> Unit,
 ): GuidanceDeliveryResult {
     var revokeReason: String? = null
@@ -184,7 +184,7 @@ internal inline fun offerAndTraceGuidancePrompt(
         confirm = confirm,
         revoke = { reason ->
             revokeReason = reason
-            revoke()
+            revoke(reason)
         },
     )
     val at = now()

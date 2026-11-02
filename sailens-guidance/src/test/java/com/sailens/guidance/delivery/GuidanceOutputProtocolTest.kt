@@ -41,16 +41,30 @@ class GuidanceOutputProtocolTest {
     private val spokenCallbacks = mutableMapOf<String, () -> Unit>()
     private var reservedRhythm: (() -> Unit)? = null
 
-    private val protocol = GuidanceOutputProtocol(
+    private var settledFrames = 0
+    private val frameTimes = mutableListOf<Long?>()
+    private val revokeReasons = mutableListOf<String>()
+    private var onOutcome: ((SpeechOutcome) -> Unit)? = null
+    private var rhythmGoesWithIt = true
+
+    private fun protocolWith(retryInterrupted: Boolean) = GuidanceOutputProtocol(
         speech = object : GuidanceSpeechPort {
             override val isReady: Boolean get() = engineReady
 
-            override fun speak(event: SceneEvent): Boolean {
+            override fun settleFrame(): Long {
+                settledFrames++
+                return now
+            }
+
+            override fun speak(event: SceneEvent, atMs: Long?, onOutcome: ((SpeechOutcome) -> Unit)?): Boolean {
                 calls += "speak:${event.messageKey}"
+                frameTimes += atMs
+                if (speechAccepts) this@GuidanceOutputProtocolTest.onOutcome = onOutcome
                 return speechAccepts
             }
 
-            override fun speakNotice(notice: VisionFaultAlerts.Notice, onSpoken: () -> Unit): Boolean {
+            override fun speakNotice(notice: VisionFaultAlerts.Notice, atMs: Long?, onSpoken: () -> Unit): Boolean {
+                frameTimes += atMs
                 calls += "notice:${notice.messageKey}"
                 if (speechAccepts) spokenCallbacks[notice.messageKey] = onSpoken
                 return speechAccepts
@@ -93,8 +107,22 @@ class GuidanceOutputProtocolTest {
                 calls += "confirm"
             }
 
-            override fun revoke(event: SceneEvent) {
+            override fun revoke(event: SceneEvent, reason: String) {
                 calls += "revoke"
+                revokeReasons += reason
+            }
+
+            override fun reportCut(event: SceneEvent) {
+                calls += "cut"
+            }
+
+            override fun reportHeardAfterCut(event: SceneEvent) {
+                calls += "heardAfterCut"
+            }
+
+            override fun accepted(event: SceneEvent): Boolean {
+                calls += "accepted"
+                return rhythmGoesWithIt
             }
         },
         settings = object : GuidanceSettingsPort {
@@ -111,9 +139,89 @@ class GuidanceOutputProtocolTest {
         logger = SilentLog,
         recordOutcome = { outcomes += it },
         onReachedUser = { reached += it },
-        clock = { now },
         wallClock = { WALL_CLOCK },
+        retryInterrupted = retryInterrupted,
     )
+
+    private val protocol = protocolWith(retryInterrupted = false)
+
+    private fun event() = SceneEvent(
+        timestamp = now, category = EventCategory.OBSTACLE, priority = EventPriority.HIGH, messageKey = "event_obstacle_center_person",
+        expiresAt = now + 3_000, dedupeKey = "obstacle_CENTER",
+    )
+
+    @Test
+    fun `a frame settles the speaker first, and every offer in it is judged at the frame's time`() {
+        protocol.onFrame(listOf(event()), 1, VisionFaults(FrameQuality.OBSTRUCTED, groundUnrecognized = false))
+        assertEquals(1, settledFrames)
+        assertEquals(listOf<Long?>(now, now), frameTimes)
+    }
+
+    @Test
+    fun `off, a prompt is confirmed when taken and nobody asks what became of it`() {
+        protocol.onFrame(listOf(event()), 1, VisionFaults.NONE)
+        assertEquals(null, onOutcome)
+        assertTrue("confirm" in calls)
+        assertFalse("accepted" in calls)
+    }
+
+    @Test
+    fun `on, a prompt own speech took waits for its outcome`() {
+        val on = protocolWith(retryInterrupted = true)
+        on.onFrame(listOf(event()), 1, VisionFaults.NONE)
+        assertFalse("not yet", "confirm" in calls)
+        assertTrue("taken is written when taken", outcomes.single().deliveredAt != null)
+        assertEquals(listOf("speak:event_obstacle_center_person", "accepted", "vibrate:event_obstacle_center_person"), calls.filter { it != "preempt:event_obstacle_center_person" })
+        onOutcome!!(SpeechOutcome.SPOKEN)
+        assertEquals("confirm", calls.last())
+    }
+
+    @Test
+    fun `on, a cut prompt goes to the cooldown, and a late end after it`() {
+        val on = protocolWith(retryInterrupted = true)
+        on.onFrame(listOf(event()), 1, VisionFaults.NONE)
+        onOutcome!!(SpeechOutcome.CUT)
+        assertEquals("cut", calls.last())
+        onOutcome!!(SpeechOutcome.HEARD_AFTER_CUT)
+        assertEquals("heardAfterCut", calls.last())
+        assertFalse("confirm" in calls)
+    }
+
+    @Test
+    fun `on, a prompt only saying again what was cut off does not vibrate again, and refused it is revoked as refused`() {
+        val on = protocolWith(retryInterrupted = true)
+        rhythmGoesWithIt = false
+        on.onFrame(listOf(event()), 1, VisionFaults.NONE)
+        assertFalse(calls.any { it.startsWith("vibrate") })
+        assertEquals(listOf(PromptDeliveryChannels.SPEECH), outcomes.single().deliveredVia)
+
+        calls.clear()
+        speechAccepts = false
+        hapticsEnabled = false
+        on.onFrame(listOf(event()), 2, VisionFaults.NONE)
+        assertFalse("accepted" in calls)
+        assertEquals(listOf(PromptRevokeReasons.OUTPUT_REFUSED), revokeReasons)
+    }
+
+    @Test
+    fun `on, the motor alone always plays and only then counts as taken`() {
+        val on = protocolWith(retryInterrupted = true)
+        speechEnabled = false
+        rhythmGoesWithIt = false
+        on.onFrame(listOf(event()), 1, VisionFaults.NONE)
+        assertEquals(listOf("vibrate:event_obstacle_center_person", "accepted", "confirm"), calls.filter { !it.startsWith("preempt") })
+    }
+
+    @Test
+    fun `on, an outcome from a stopped run reports nothing`() {
+        val on = protocolWith(retryInterrupted = true)
+        on.onFrame(listOf(event()), 1, VisionFaults.NONE)
+        on.reset()
+        calls.clear()
+        onOutcome!!(SpeechOutcome.CUT)
+        onOutcome!!(SpeechOutcome.SPOKEN)
+        assertEquals(emptyList<String>(), calls)
+    }
 
     private fun frame(vararg events: SceneEvent, faults: VisionFaults = VisionFaults.NONE, sequence: Long = 1) {
         protocol.onFrame(events.toList(), sequence, faults)

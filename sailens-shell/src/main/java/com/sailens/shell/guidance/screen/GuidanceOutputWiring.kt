@@ -9,6 +9,7 @@ import com.sailens.guidance.delivery.GuidanceOutputSettings
 import com.sailens.guidance.delivery.GuidanceScreenReaderPort
 import com.sailens.guidance.delivery.GuidanceSettingsPort
 import com.sailens.guidance.delivery.GuidanceSpeechPort
+import com.sailens.guidance.delivery.SpeechOutcome
 import com.sailens.guidance.delivery.VisionFaultAlerts
 import com.sailens.guidance.config.DetFirstConfig
 import com.sailens.guidance.model.common.EventPriority
@@ -17,6 +18,7 @@ import com.sailens.guidance.model.trace.PromptOutcomeTrace
 import com.sailens.guidance.processor.decision.SpeechRanks
 import com.sailens.guidance.processor.decision.SpeechScale
 import com.sailens.output.Announcement
+import com.sailens.output.UtteranceOutcome
 
 /**
  * Whether a Guidance prompt waits for a scene description instead of cutting it off.
@@ -36,12 +38,20 @@ internal fun guidanceWaitsForDescription(
 
 internal val GUIDANCE_PREEMPTS_DESCRIPTION_AT: EventPriority = EventPriority.HIGH
 
+private fun UtteranceOutcome.toSpeechOutcome(): SpeechOutcome = when (this) {
+    UtteranceOutcome.SPOKEN -> SpeechOutcome.SPOKEN
+    UtteranceOutcome.CUT -> SpeechOutcome.CUT
+    UtteranceOutcome.HEARD_AFTER_CUT -> SpeechOutcome.HEARD_AFTER_CUT
+}
+
 /**
  * The shell's side of [GuidanceOutputProtocol]: the Android outputs behind its ports, the policy between
  * Guidance and Describe, and the mapping from Guidance's types to what sailens-output understands.
  * Takes plain functions so that the wiring, and the order of a stop, can be checked on the JVM.
  *
- * @param speakOwn own TTS; the callback, when given, says the engine finished playing it.
+ * @param speakOwn own TTS. `onSpoken`, when given, says the engine finished playing it; `onOutcome`, what
+ *   became of it; `atMs`, the frame's time, from [settleFrame].
+ * @param settleFrame starts a frame on the speech engine; returns its time.
  * @param announcementFor the seam of `docs/architecture.md` §6.6, mapping an event to text and a priority number.
  * @param eventText the copy of an event, for the screen reader.
  * @param noticeText the copy of a [VisionFaultAlerts] notice or recovery, by message key.
@@ -49,7 +59,8 @@ internal val GUIDANCE_PREEMPTS_DESCRIPTION_AT: EventPriority = EventPriority.HIG
  *   top this screen's UI is not composed at all, and collecting here would silently drop the line.
  */
 internal class GuidanceOutputWiring(
-    speakOwn: (Announcement, onSpoken: (() -> Unit)?) -> Boolean,
+    speakOwn: (Announcement, onSpoken: (() -> Unit)?, onOutcome: ((UtteranceOutcome) -> Unit)?, atMs: Long?) -> Boolean,
+    settleFrame: () -> Long,
     speechReady: () -> Boolean,
     private val stopSpeech: () -> Unit,
     announcementFor: (SceneEvent) -> Announcement,
@@ -63,22 +74,27 @@ internal class GuidanceOutputWiring(
     descriptionHoldsTheFloor: () -> Boolean,
     preemptDescription: (reason: String) -> Unit,
     confirmDelivered: (SceneEvent) -> Unit,
-    revokeUndelivered: (SceneEvent) -> Unit,
+    revokeUndelivered: (SceneEvent, reason: String) -> Unit,
+    reportCut: (SceneEvent) -> Unit,
+    reportHeardAfterCut: (SceneEvent) -> Unit,
+    promptAccepted: (SceneEvent) -> Boolean,
     outputSettings: () -> GuidanceOutputSettings,
     visionFaultSettings: () -> VisionFaultAlerts.Settings,
     logger: LogService,
     recordOutcome: (PromptOutcomeTrace) -> Unit,
     onReachedUser: (SceneEvent) -> Unit,
-    clock: () -> Long,
     detFirst: DetFirstConfig = DetFirstConfig(),
 ) {
     val protocol = GuidanceOutputProtocol(
         speech = object : GuidanceSpeechPort {
             override val isReady: Boolean get() = speechReady()
 
-            override fun speak(event: SceneEvent): Boolean = speakOwn(announcementFor(event), null)
+            override fun settleFrame(): Long = settleFrame()
 
-            override fun speakNotice(notice: VisionFaultAlerts.Notice, onSpoken: () -> Unit): Boolean = speakOwn(
+            override fun speak(event: SceneEvent, atMs: Long?, onOutcome: ((SpeechOutcome) -> Unit)?): Boolean =
+                speakOwn(announcementFor(event), null, onOutcome?.let { report -> { report(it.toSpeechOutcome()) } }, atMs)
+
+            override fun speakNotice(notice: VisionFaultAlerts.Notice, atMs: Long?, onSpoken: () -> Unit): Boolean = speakOwn(
                 Announcement(
                     id = notice.id,
                     key = notice.messageKey,
@@ -87,6 +103,8 @@ internal class GuidanceOutputWiring(
                     expiresAtMs = notice.expiresAtMs,
                 ),
                 onSpoken,
+                null,
+                atMs,
             )
         },
         screenReader = object : GuidanceScreenReaderPort {
@@ -111,7 +129,13 @@ internal class GuidanceOutputWiring(
         cooldown = object : GuidanceCooldownPort {
             override fun confirm(event: SceneEvent) = confirmDelivered(event)
 
-            override fun revoke(event: SceneEvent) = revokeUndelivered(event)
+            override fun revoke(event: SceneEvent, reason: String) = revokeUndelivered(event, reason)
+
+            override fun reportCut(event: SceneEvent) = reportCut(event)
+
+            override fun reportHeardAfterCut(event: SceneEvent) = reportHeardAfterCut(event)
+
+            override fun accepted(event: SceneEvent): Boolean = promptAccepted(event)
         },
         settings = object : GuidanceSettingsPort {
             override fun output(): GuidanceOutputSettings = outputSettings()
@@ -121,7 +145,7 @@ internal class GuidanceOutputWiring(
         logger = logger,
         recordOutcome = recordOutcome,
         onReachedUser = onReachedUser,
-        clock = clock,
+        retryInterrupted = detFirst.retryInterrupted,
     )
 
     /**

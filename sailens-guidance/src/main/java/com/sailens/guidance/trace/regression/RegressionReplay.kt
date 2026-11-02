@@ -331,7 +331,7 @@ class RegressionReplay(
             private set
 
         val stationary = MutableStateFlow(false)
-        val cooldown = CooldownManager(proximityEscalation = analysisConfig.detFirst.proximityEscalation)
+        val cooldown = CooldownManager(proximityEscalation = analysisConfig.detFirst.proximityEscalation, retryInterrupted = analysisConfig.detFirst.retryInterrupted)
         val frameQuality = FrameQualityAnalyzer()
 
         private val repository = object : PerceptionRepository {

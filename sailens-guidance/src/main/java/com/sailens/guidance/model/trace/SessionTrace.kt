@@ -214,7 +214,10 @@ object PromptRevokeReasons {
      */
     const val OUTPUT_REFUSED = "output_refused"
 
-    val all: Set<String> = setOf(WAITING_FOR_DESCRIPTION, OUTPUT_REFUSED)
+    /** Taken by own speech, then cut off before it was heard; offered again later. */
+    const val CUT = "cut"
+
+    val all: Set<String> = setOf(WAITING_FOR_DESCRIPTION, OUTPUT_REFUSED, CUT)
 }
 
 /** The closed set of [PromptOutcomeTrace.deliveredVia] values. */
