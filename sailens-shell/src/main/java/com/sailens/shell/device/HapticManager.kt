@@ -25,8 +25,13 @@ class HapticManager(context: Context) {
     private val arbiter = HapticArbiter(clock = SystemClock::elapsedRealtime)
     private val mainHandler = Handler(Looper.getMainLooper())
 
-    /** Starts the reserved rhythm when the motor is free, or looks again when it turned out still busy. */
-    private val startReserved = Runnable { if (!arbiter.startReservedIfFree()) scheduleReserved() }
+    private val motorWait: MotorWait = MotorWait(
+        arbiter,
+        clock = SystemClock::elapsedRealtime,
+        post = { delayMs -> mainHandler.postDelayed(motorFree, delayMs) },
+        removePosted = { mainHandler.removeCallbacks(motorFree) },
+    )
+    private val motorFree: Runnable = Runnable { motorWait.onDue() }
 
     /**
      * Plays the rhythm for [event], unless a pattern of equal or higher priority is still playing.
@@ -37,9 +42,10 @@ class HapticManager(context: Context) {
      */
     fun trigger(event: SceneEvent): Boolean {
         val haptic = GuidanceHaptic.forEvent(event)
-        if (!arbiter.tryClaim(SpeechScale.of(event), haptic.durationMs)) return false
-        player.play(timings = haptic.timings, amplitude = GuidanceHaptic.amplitudeFor(event))
-        return true
+        val claimed = arbiter.tryClaim(SpeechScale.of(event), haptic.durationMs)
+        if (claimed) player.play(timings = haptic.timings, amplitude = GuidanceHaptic.amplitudeFor(event))
+        motorWait.reschedule()
+        return claimed
     }
 
     /**
@@ -60,7 +66,7 @@ class HapticManager(context: Context) {
             },
             onQueuedResult = onQueuedResult,
         )
-        if (claim == NavigationClaim.QUEUED) scheduleReserved()
+        motorWait.reschedule()
         return claim
     }
 
@@ -75,23 +81,17 @@ class HapticManager(context: Context) {
      * @param onPlayed called on the main thread when it starts, which may be before this returns.
      */
     fun playOrReserve(haptic: GuidanceHaptic, speechPriority: Int, amplitude: Int, onPlayed: () -> Unit) {
-        val started = arbiter.claimOrReserve(speechPriority, haptic.durationMs) {
+        arbiter.claimOrReserve(speechPriority, haptic.durationMs) {
             player.play(timings = haptic.timings, amplitude = amplitude)
             onPlayed()
         }
-        if (!started) scheduleReserved()
+        motorWait.reschedule()
     }
 
     /** Drops a reserved rhythm that has not started. */
     fun cancelReservation() {
         arbiter.cancelReservation()
-        mainHandler.removeCallbacks(startReserved)
-    }
-
-    private fun scheduleReserved() {
-        val freeAt = arbiter.reservationFreeAtMs() ?: return
-        mainHandler.removeCallbacks(startReserved)
-        mainHandler.postDelayed(startReserved, (freeAt - SystemClock.elapsedRealtime()).coerceAtLeast(0))
+        motorWait.reschedule()
     }
 
     /**
@@ -101,6 +101,7 @@ class HapticManager(context: Context) {
     fun play(haptic: GuidanceHaptic, amplitude: Int = DEFAULT_AMPLITUDE) {
         arbiter.claimUnconditionally(haptic.durationMs)
         player.play(timings = haptic.timings, amplitude = amplitude)
+        motorWait.reschedule()
     }
 
     /**
@@ -112,12 +113,13 @@ class HapticManager(context: Context) {
         arbiter.dropQueuedNavigation()
         if (arbiter.releaseNavigation()) player.cancel()
         arbiter.startReservedIfFree()
+        motorWait.reschedule()
     }
 
     /** Guidance stopped: stops whatever plays and drops a reserved rhythm. */
     fun cancel() {
-        mainHandler.removeCallbacks(startReserved)
         arbiter.stop()
+        motorWait.reschedule()
         player.cancel()
     }
 
@@ -127,6 +129,29 @@ class HapticManager(context: Context) {
 }
 
 private val GuidanceHaptic.durationMs: Long get() = timings.sum()
+
+/**
+ * Keeps one timer running for as long as anything waits for the motor, so what waits starts with no new frame.
+ * Starting one rhythm can leave another waiting behind it, and a claim can move the motor's free time earlier as well
+ * as later, so the timer is set again after every change, not only when the motor turned out still busy.
+ */
+internal class MotorWait(
+    private val arbiter: HapticArbiter,
+    private val clock: () -> Long,
+    private val post: (delayMs: Long) -> Unit,
+    private val removePosted: () -> Unit,
+) {
+    fun reschedule() {
+        removePosted()
+        val freeAt = arbiter.reservationFreeAtMs() ?: return
+        post((freeAt - clock()).coerceAtLeast(0))
+    }
+
+    fun onDue() {
+        arbiter.startReservedIfFree()
+        reschedule()
+    }
+}
 
 /** What became of a navigation rhythm asked for by [HapticManager.triggerOrQueue]. */
 enum class NavigationClaim { STARTED, QUEUED, REFUSED }

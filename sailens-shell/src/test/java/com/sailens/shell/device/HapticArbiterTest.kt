@@ -214,6 +214,89 @@ class HapticArbiterTest {
         assertEquals(listOf("fault", "n"), played)
     }
 
+    // ---- The timer: what waits starts with no frame and no further claim ----------------------------
+
+    private var timerDueAt: Long? = null
+    private val wait = MotorWait(arbiter, clock = { now }, post = { timerDueAt = now + it }, removePosted = { timerDueAt = null })
+
+    /** Lets time pass as the main loop does: only a posted timer runs anything. */
+    private fun runTimersUntil(end: Long) {
+        while (true) {
+            val due = timerDueAt?.takeIf { it <= end } ?: break
+            timerDueAt = null
+            now = maxOf(now, due)
+            wait.onDue()
+        }
+        now = end
+    }
+
+    private fun playsAt(start: Long, block: (log: MutableList<Pair<String, Long>>) -> Unit): List<Pair<String, Long>> {
+        now = start
+        return mutableListOf<Pair<String, Long>>().also(block)
+    }
+
+    @Test
+    fun `a fault rhythm starting leaves the timer running for the navigation rhythm behind it`() {
+        val log = playsAt(1_000) { log ->
+            arbiter.claimUnconditionally(durationMs = 100)
+            arbiter.claimOrReserve(priority = 0, durationMs = 200) { log += "fault" to now }
+            wait.reschedule()
+            arbiter.claimOrQueueNavigation(priority = 3, durationMs = 60, expiresAtMs = 2_000, start = { log += "navigation" to now }, onQueuedResult = {})
+            wait.reschedule()
+            runTimersUntil(1_500)
+        }
+        assertEquals(listOf("fault" to 1_100L, "navigation" to 1_300L), log)
+        assertNull(timerDueAt)
+    }
+
+    @Test
+    fun `a cancelled reservation leaves the timer running for the navigation rhythm waiting`() {
+        val log = playsAt(1_000) { log ->
+            arbiter.claimUnconditionally(durationMs = 100)
+            arbiter.claimOrReserve(priority = 0, durationMs = 200) { log += "fault" to now }
+            arbiter.claimOrQueueNavigation(priority = 3, durationMs = 60, expiresAtMs = 2_000, start = { log += "navigation" to now }, onQueuedResult = {})
+            wait.reschedule()
+            arbiter.cancelReservation()
+            wait.reschedule()
+            runTimersUntil(1_500)
+        }
+        assertEquals(listOf("navigation" to 1_100L), log)
+    }
+
+    @Test
+    fun `when a shorter rhythm replaces the one playing, what waits starts when the motor is free, not when it would have been`() {
+        val log = playsAt(1_000) { log ->
+            arbiter.claimUnconditionally(durationMs = 940)
+            arbiter.claimOrQueueNavigation(priority = 3, durationMs = 60, expiresAtMs = 3_000, start = { log += "navigation" to now }, onQueuedResult = {})
+            wait.reschedule()
+            now = 1_100
+            arbiter.claimUnconditionally(durationMs = 700)
+            wait.reschedule()
+            runTimersUntil(2_500)
+        }
+        assertEquals(listOf("navigation" to 1_800L), log)
+    }
+
+    @Test
+    fun `when the motor is taken again before the timer is due, the timer looks again`() {
+        val log = playsAt(1_000) { log ->
+            arbiter.claimUnconditionally(durationMs = 100)
+            arbiter.claimOrQueueNavigation(priority = 3, durationMs = 60, expiresAtMs = 2_000, start = { log += "navigation" to now }, onQueuedResult = {})
+            wait.reschedule()
+            now = 1_050
+            arbiter.claimUnconditionally(durationMs = 200)
+            runTimersUntil(1_500)
+        }
+        assertEquals(listOf("navigation" to 1_250L), log)
+    }
+
+    @Test
+    fun `with nothing waiting no timer is left`() {
+        arbiter.claimUnconditionally(durationMs = 100)
+        wait.reschedule()
+        assertNull(timerDueAt)
+    }
+
     @Test
     fun `held off by another navigation rhythm it is refused, as ever`() {
         val arbiter = HapticArbiter { 0L }

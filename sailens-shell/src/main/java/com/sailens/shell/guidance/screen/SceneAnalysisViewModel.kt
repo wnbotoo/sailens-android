@@ -103,7 +103,7 @@ class SceneAnalysisViewModel(
     /** Tells Guidance a channel took a decided event. */
     private val acceptedPrompt: AcceptedPromptUseCase,
     private val noticeText: GuidanceNoticeText,
-    /** The det-first switches, the same ones Guidance decided with. */
+    /** The policy switches, the same ones Guidance decided with. */
     private val detFirst: DetFirstConfig = DetFirstConfig(),
     /** Bound only by debug tooling; null means Guidance may always start. */
     private val startGate: GuidanceStartGate? = null,

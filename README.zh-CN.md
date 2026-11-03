@@ -114,6 +114,7 @@ zero-pipeline 屏，并指向这里。官方发行版声明导航为必需，因
 | [`docs/trace_metrics_guide.zh-CN.md`](docs/trace_metrics_guide.zh-CN.md) | [English](docs/trace_metrics_guide.md) | Trace / replay 指标定义 |
 | [`docs/trace_replay_workflow.zh-CN.md`](docs/trace_replay_workflow.zh-CN.md) | [English](docs/trace_replay_workflow.md) | 可观测 → 可回放 → 可评估 |
 | [`docs/geometry.zh-CN.md`](docs/geometry.zh-CN.md) | [English](docs/geometry.md) | 相机几何、接地点距离、深度地面拟合、仿真器 |
+| [`docs/guidance-operating-envelope.zh-CN.md`](docs/guidance-operating-envelope.zh-CN.md) | [English](docs/guidance-operating-envelope.md) | 导航看不见、判断不了什么，以及怎么理解"没有提示" |
 | [`docs/field-capture.zh-CN.md`](docs/field-capture.zh-CN.md) | [English](docs/field-capture.md) | 现场采集格式、模型回归记录与回放、提示标注 |
 
 `AGENTS.md` 是给编码 agent 的仓库指南（仅英文——它是给工具读的，不是给人读的）。

@@ -79,7 +79,7 @@ import java.util.UUID
 class VisionFaultAlerts(
     private val outputs: Outputs,
     private val timing: Timing = Timing(),
-    private val noticeIdPrefix: String = "$NOTICE_ID_PREFIX${UUID.randomUUID()}_",
+    private val noticeIdPrefix: String = newNoticeIdPrefix(),
 ) {
     /**
      * The three states and how each is said. Periods and priorities are the cooldowns and event
@@ -212,7 +212,6 @@ class VisionFaultAlerts(
 
     /** Recovery notices not said yet, oldest first: the lens and the floor can both recover in one frame. */
     private val recoveries = ArrayDeque<Recovery>()
-    private var nextNoticeId = 0L
 
     /** The track whose rhythm is waiting for the motor, and the request's token (a stale start is ignored). */
     private var buzzRequestedBy: Track? = null
@@ -382,7 +381,7 @@ class VisionFaultAlerts(
         if (lastAccepted != null && now - lastAccepted <= track.fault.deadlineMs) return
         if (!retryDue(track.lastOfferAtMs, now)) return
         track.lastOfferAtMs = now
-        val notice = Notice(newNoticeId(), track.fault.messageKey, track.fault.priority, now + track.fault.deadlineMs)
+        val notice = Notice(newNoticeId(now, track.fault.messageKey), track.fault.messageKey, track.fault.priority, now + track.fault.deadlineMs)
         // Known before speaking, so a completion reported at once still counts.
         track.attemptIds += notice.id
         when (outputs.speak(notice)) {
@@ -410,18 +409,97 @@ class VisionFaultAlerts(
         val pending = recoveries.firstOrNull() ?: return
         if (!retryDue(pending.lastOfferAtMs, now)) return
         pending.lastOfferAtMs = now
-        val notice = Notice(newNoticeId(), pending.messageKey, EventPriority.LOW, pending.expiresAtMs)
+        val notice = Notice(newNoticeId(now, pending.messageKey), pending.messageKey, EventPriority.LOW, pending.expiresAtMs)
         if (outputs.speak(notice) != Offer.REFUSED) recoveries.removeFirst()
     }
 
     private fun retryDue(lastOfferAtMs: Long?, now: Long): Boolean =
         lastOfferAtMs == null || now - lastOfferAtMs >= timing.retryIntervalMs
 
-    private fun newNoticeId(): String = "$noticeIdPrefix${nextNoticeId++}"
+    /** Unique: at most one notice of a key per frame. By time, not by count, so equal histories name a notice alike. */
+    private fun newNoticeId(now: Long, messageKey: String): String = "$noticeIdPrefix${now}_$messageKey"
+
+    // ---- for an evaluation that follows several possible futures of one session
+
+    internal data class TrackState(
+        val fault: Fault,
+        val cycleStartMs: Long,
+        val heard: Boolean,
+        val acceptedAttempts: Int,
+        val lastAcceptedAtMs: Long?,
+        val lastOfferAtMs: Long?,
+        val fallbackRequested: Boolean,
+        val noticeBuzzOwed: Boolean,
+        val speechOffBuzzOwed: Boolean,
+        val fallbackBuzzOwed: Boolean,
+        val attemptIds: Set<String>,
+    )
+
+    internal data class RecoveryState(val messageKey: String, val expiresAtMs: Long, val ofFrameQuality: Boolean, val lastOfferAtMs: Long?)
+
+    /** Everything that decides what these alerts do next. A rhythm waiting for the motor has no place here: such a run's motor is always free. */
+    internal data class State(
+        val frame: TrackState?,
+        val ground: TrackState?,
+        val frameClearSinceMs: Long?,
+        val frameDebtSinceMs: Long?,
+        val groundDebtSinceMs: Long?,
+        val recoveries: List<RecoveryState>,
+        val activeIsFrame: Boolean?,
+    )
+
+    private fun Track.state() = TrackState(
+        fault, cycleStartMs, heard, acceptedAttempts, lastAcceptedAtMs, lastOfferAtMs, fallbackRequested,
+        noticeBuzzOwed, speechOffBuzzOwed, fallbackBuzzOwed, attemptIds.toSet(),
+    )
+
+    private fun TrackState.track(debt: Debt) = Track(fault, debt).also {
+        it.cycleStartMs = cycleStartMs
+        it.heard = heard
+        it.acceptedAttempts = acceptedAttempts
+        it.lastAcceptedAtMs = lastAcceptedAtMs
+        it.lastOfferAtMs = lastOfferAtMs
+        it.fallbackRequested = fallbackRequested
+        it.noticeBuzzOwed = noticeBuzzOwed
+        it.speechOffBuzzOwed = speechOffBuzzOwed
+        it.fallbackBuzzOwed = fallbackBuzzOwed
+        it.attemptIds += attemptIds
+    }
+
+    internal fun state(): State {
+        check(buzzRequestedBy == null) { "a rhythm is waiting for the motor" }
+        return State(
+            frame = frame?.state(),
+            ground = ground?.state(),
+            frameClearSinceMs = frameClearSinceMs,
+            frameDebtSinceMs = frameDebt.sinceMs,
+            groundDebtSinceMs = groundDebt.sinceMs,
+            recoveries = recoveries.map { RecoveryState(it.messageKey, it.expiresAtMs, it.ofFrameQuality, it.lastOfferAtMs) },
+            activeIsFrame = active?.let { it === frame },
+        )
+    }
+
+    internal fun restore(state: State) {
+        frameDebt.sinceMs = state.frameDebtSinceMs
+        groundDebt.sinceMs = state.groundDebtSinceMs
+        frame = state.frame?.track(frameDebt)
+        ground = state.ground?.track(groundDebt)
+        frameClearSinceMs = state.frameClearSinceMs
+        recoveries.clear()
+        state.recoveries.mapTo(recoveries) { r -> Recovery(r.messageKey, r.expiresAtMs, r.ofFrameQuality).also { it.lastOfferAtMs = r.lastOfferAtMs } }
+        active = when (state.activeIsFrame) {
+            true -> frame
+            false -> ground
+            null -> null
+        }
+        buzzRequestedBy = null
+    }
 
     companion object {
         /** Notice ids, distinct from event ids (UUIDs) and system notices in the speech lifecycle record. */
         const val NOTICE_ID_PREFIX: String = "vision_notice_"
+
+        internal fun newNoticeIdPrefix(): String = "$NOTICE_ID_PREFIX${UUID.randomUUID()}_"
     }
 }
 

@@ -26,9 +26,9 @@ import java.io.File
  * gradlew :sailens-guidance:testDebugUnitTest --tests "*DetFirstRehearsalTest*" -PreplayCapture=<dir>
  * ```
  *
- * A sealed capture is refused ([SealedCaptures.forMetrics]). The report goes to
- * `sailens-guidance/build/replay/detfirst-rehearsal.txt`; numbers only. The test fails on a replay
- * problem, not on a threshold: a threshold is a verdict for the report.
+ * A sealed capture is refused ([SealedCaptures.forMetrics]) unless `-PunsealCapture` is given, and the run reads one whole
+ * frozen set or nothing ([AcceptanceSet]). The report goes to `sailens-guidance/build/replay/detfirst-rehearsal.txt`; numbers
+ * only. The test fails on a replay problem, not on a threshold: a threshold is a verdict for the report.
  */
 class DetFirstRehearsalTest {
 
@@ -57,24 +57,30 @@ class DetFirstRehearsalTest {
 
         val preset = PhoneGeometrySettings(PRESET_HEIGHT_M, HeightSource.PRESET)
         val frozen = PromptPolicyCaptureEvaluation(preset)
-        // Durations are read in one pass, then each capture is scored without its own (threshold note §3.2).
-        val evaluated = split.open.mapNotNull { dir ->
-            frozen.evaluate(CaptureSessionReader.read(dir).orThrow())?.takeIf { D18Sets.of(it.id) == D18Sets.Group.CALIBRATION }?.let { dir to it }
-        }
+        val found = split.open.map { dir -> dir to frozen.evaluate(CaptureSessionReader.read(dir).orThrow()) }
+        val setProblems = AcceptanceSet.problems(found.map { (dir, r) -> AcceptanceSet.of(dir, r) })
+        assertTrue("not one whole frozen set (R7), nothing computed:\n${setProblems.joinToString("\n")}", setProblems.isEmpty())
+        val evaluated = found.map { (dir, r) -> dir to r!! }
+        val group = checkNotNull(D18Sets.of(evaluated.first().second.id))
+        // Durations are read in one pass, then each capture is scored without its own (threshold note §3.2): a calibration
+        // capture by the others, a sealed one by the table frozen from all of C.
         val measured = evaluated.associate { (_, r) -> r.id to r.speaker?.measured.orEmpty() }
 
         val results = evaluated.map { (dir, result) ->
-            val durations = SpeakerDurations.pooled(measured.filterKeys { it != result.id }.values.flatten(), OTHER_C)
-            rehearse(CaptureSessionReader.read(dir).orThrow(), result, durations, preset)
+            val (durations, label) = when (group) {
+                D18Sets.Group.SEALED -> SpeakerDurations.FROZEN_C to C_TABLE
+                D18Sets.Group.CALIBRATION -> SpeakerDurations.pooled(measured.filterKeys { it != result.id }.values.flatten(), OTHER_C) to OTHER_C
+            }
+            rehearse(CaptureSessionReader.read(dir).orThrow(), result, durations, label, preset)
         }
 
         val problems = results.flatMap { it.problems }
         val report = buildString {
-            appendLine("det-first closed-loop rehearsal over ${results.size} calibration captures; problems ${problems.size}; sealed and skipped ${split.sealed.size}")
+            appendLine("det-first closed-loop rehearsal over ${results.size} ${group.name.lowercase()} captures; problems ${problems.size}; sealed and skipped ${split.sealed.size}")
             problems.forEach { appendLine("  $it") }
             appendLine()
             val a12 = results.map { it.a12 }.reduce(ProtectedStages.Reproduction::plus)
-            appendLine("A12: today's policy, legacy output path, recorded 1.2 m, nominal model, leave-one-out durations")
+            appendLine("A12: today's policy, legacy output path, recorded 1.2 m, nominal model, ${if (group == D18Sets.Group.SEALED) "the frozen C table" else "leave-one-out durations"}")
             append(a12.render("all captures"))
             appendLine("    A12a ${verdict(a12.a12a)}, A12b ${verdict(a12.a12b)}, A12c ${verdict(a12.a12c)}, A12d ${verdict(a12.a12d)}: A12 ${verdict(a12.pass)}")
             appendLine()
@@ -122,13 +128,13 @@ class DetFirstRehearsalTest {
         File(out, "detfirst-rehearsal.txt").writeText(report)
         println(report)
         assertTrue("rehearsal problems: $problems", problems.isEmpty())
-        assertTrue("no calibration capture under $path", results.isNotEmpty())
     }
 
     private fun rehearse(
         session: CaptureSession,
         result: PromptPolicyCaptureEvaluation.Result,
         durations: SpeakerDurations,
+        measuredLabel: String,
         preset: PhoneGeometrySettings,
     ): CaptureResult {
         val problems = mutableListOf<String>()
@@ -180,11 +186,11 @@ class DetFirstRehearsalTest {
             BranchLoadMeasure.Target(StageKey(row.hazard, row.stage), emptySet(), row.completedAtNanos!! / 1_000_000 + 500)
         }
         val closedLoop = linkedMapOf(
-            "frozen semantics (no skew, no held)" to ClosedLoopBranchMeasure(analysis, durations, OTHER_C, creditedByForTargets, inputs.queued, heldAfterDone = false, frameSkewMs = 0),
-            "held after done, frame skew 50 ms" to ClosedLoopBranchMeasure(analysis, durations, OTHER_C, creditedByForTargets, inputs.queued, heldAfterDone = true, frameSkewMs = 50),
-            "frozen semantics, dead cooldown records ignored when merging" to ClosedLoopBranchMeasure(analysis, durations, OTHER_C, creditedByForTargets, inputs.queued, heldAfterDone = false, frameSkewMs = 0, ignoreDeadRecords = true),
-            "held after done, frame skew 50 ms, dead cooldown records ignored when merging" to ClosedLoopBranchMeasure(analysis, durations, OTHER_C, creditedByForTargets, inputs.queued, heldAfterDone = true, frameSkewMs = 50, ignoreDeadRecords = true),
-            "frozen semantics, dead records ignored, no branch limit" to ClosedLoopBranchMeasure(analysis, durations, OTHER_C, creditedByForTargets, inputs.queued, heldAfterDone = false, frameSkewMs = 0, ignoreDeadRecords = true, maxBranches = 4_096),
+            "frozen semantics (no skew, no held)" to ClosedLoopBranchMeasure(analysis, durations, measuredLabel, creditedByForTargets, inputs.queued, heldAfterDone = false, frameSkewMs = 0),
+            "held after done, frame skew 50 ms" to ClosedLoopBranchMeasure(analysis, durations, measuredLabel, creditedByForTargets, inputs.queued, heldAfterDone = true, frameSkewMs = 50),
+            "frozen semantics, dead cooldown records ignored when merging" to ClosedLoopBranchMeasure(analysis, durations, measuredLabel, creditedByForTargets, inputs.queued, heldAfterDone = false, frameSkewMs = 0, ignoreDeadRecords = true),
+            "held after done, frame skew 50 ms, dead cooldown records ignored when merging" to ClosedLoopBranchMeasure(analysis, durations, measuredLabel, creditedByForTargets, inputs.queued, heldAfterDone = true, frameSkewMs = 50, ignoreDeadRecords = true),
+            "frozen semantics, dead records ignored, no branch limit" to ClosedLoopBranchMeasure(analysis, durations, measuredLabel, creditedByForTargets, inputs.queued, heldAfterDone = false, frameSkewMs = 0, ignoreDeadRecords = true, maxBranches = 4_096),
         )
         val scenes = RegressionReplay(perception, analysis, semantics).replayScenes(
             session.regressionFrames, ::classMap, lost, geometry.evaluation, presetBirths,
@@ -206,7 +212,7 @@ class DetFirstRehearsalTest {
         val offers = inputs.offers.map { o -> SpeakerModel.Offer(o.atMs, o.id, o.priority, o.expiresAtMs, durations.of(o.wording).second) }
         val wordings = inputs.offers.associate { it.id to it.wording }
         val epsilon = { id: String ->
-            val measuredWording = wordings[id]?.let { durations.of(it).first == OTHER_C } ?: true
+            val measuredWording = wordings[id]?.let { durations.of(it).first == measuredLabel } ?: true
             if (measuredWording) SpeakerModel.END_ERROR_BOUND_MS else 2 * SpeakerModel.END_ERROR_BOUND_MS
         }
         val creditedBy = HashMap<StageKey, MutableSet<String>>()
@@ -244,5 +250,6 @@ class DetFirstRehearsalTest {
         /** R4: the arms' height. */
         const val PRESET_HEIGHT_M = 1.15f
         const val OTHER_C = "other C captures"
+        const val C_TABLE = "c table"
     }
 }

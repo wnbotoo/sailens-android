@@ -159,6 +159,7 @@ val shellModule = module {
             guidanceDiagnosticsStore = get(),
             speechManager = get(),
             hapticManager = get(),
+            pathComplexOff = get<AnalysisConfig>().detFirst.pathComplexOff,
         )
     }
 }

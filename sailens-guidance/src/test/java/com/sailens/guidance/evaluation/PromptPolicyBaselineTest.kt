@@ -25,7 +25,8 @@ import java.util.Locale
  *
  * Captures of the sealed acceptance set ([SealedCaptures]) are skipped, and the summary says how
  * many, unless `-PunsealCapture` is given -- which the D1.8 plan allows only after the thresholds are
- * frozen.
+ * frozen. A run that reads any capture of a frozen D1.8 set must read that whole set and nothing else
+ * ([AcceptanceSet]); other captures, read on their own, are only reported.
  */
 class PromptPolicyBaselineTest {
 
@@ -42,7 +43,12 @@ class PromptPolicyBaselineTest {
         assertTrue("no capture under $path", captures.isNotEmpty() || sealed.isNotEmpty())
         assumeTrue(SealedCaptures.refusalMessage(path, sealed.size), captures.isNotEmpty())
 
-        val results = captures.mapNotNull { evaluation.evaluate(CaptureSessionReader.read(it).orThrow()) }
+        val found = captures.map { it to evaluation.evaluate(CaptureSessionReader.read(it).orThrow()) }
+        if (found.any { (_, r) -> r != null && D18Sets.of(r.id) != null }) {
+            val setProblems = AcceptanceSet.problems(found.map { (dir, r) -> AcceptanceSet.of(dir, r) })
+            assertTrue("not one whole frozen set (R7), nothing reported:\n${setProblems.joinToString("\n")}", setProblems.isEmpty())
+        }
+        val results = found.mapNotNull { it.second }
         val problems = results.flatMap { it.problems }
         val complete = results.filter { it.complete && it.evaluation != null }
 

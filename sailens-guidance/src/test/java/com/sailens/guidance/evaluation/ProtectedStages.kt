@@ -89,6 +89,13 @@ internal object ProtectedStages {
             return M5Count(regressions.size, regressions.count { it.frontCritical }, undeterminable.size, undeterminable.count { it.frontCritical })
         }
 
+        /** The same stages against another nominal run: what it says of each stage of P in [modelNs], in ns. */
+        fun withModel(modelNs: Map<StageKey, Long?>): Reproduction = Reproduction(
+            rows.map { Row(it.key, it.frontCritical, it.inP, it.deviceNs, if (it.key in modelNs) modelNs[it.key] else it.modelNs, it.modelHasStage) },
+            deviceCompleted,
+            modelCompleted,
+        )
+
         /** When the nominal model first spoke each stage of P to the end, in ns; null if it never did. */
         fun modelCompletionNs(): Map<StageKey, Long?> = p.associate { it.key to it.modelNs }
 

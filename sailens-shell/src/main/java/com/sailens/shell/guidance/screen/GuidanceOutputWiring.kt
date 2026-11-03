@@ -109,6 +109,19 @@ internal class GuidanceOutputWiring(
                 null,
                 atMs,
             )
+
+            override fun speakModeNotice(id: String, messageKey: String, atMs: Long, expiresAtMs: Long, onOutcome: (SpeechOutcome) -> Unit): Boolean = speakOwn(
+                Announcement(
+                    id = id,
+                    key = messageKey,
+                    text = noticeText(messageKey),
+                    priority = SpeechRanks.MODE_NOTICE_SCALE,
+                    expiresAtMs = expiresAtMs,
+                ),
+                null,
+                { onOutcome(it.toSpeechOutcome()) },
+                atMs,
+            )
         },
         screenReader = object : GuidanceScreenReaderPort {
             override fun announce(event: SceneEvent) = announceToScreenReader(eventText(event))
@@ -156,6 +169,7 @@ internal class GuidanceOutputWiring(
         recordOutcome = recordOutcome,
         onReachedUser = onReachedUser,
         retryInterrupted = detFirst.retryInterrupted,
+        pathComplexOff = detFirst.pathComplexOff,
     )
 
     /**

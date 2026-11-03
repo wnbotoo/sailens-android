@@ -61,7 +61,7 @@ class EventGenerator(
         )
     }
 
-    /** The det-first switches this generator's config carries. */
+    /** The policy switches this generator's config carries. */
     val detFirst: DetFirstConfig get() = config.detFirst
 
     /**
@@ -98,7 +98,7 @@ class EventGenerator(
         if (pathJudgementReliable && snapshot.connectivity.isBlocked) {
             if (isHardBlocked(snapshot)) {
                 events.add(createBlockedEvent(snapshot, now))
-            } else {
+            } else if (!config.detFirst.pathComplexOff) {
                 events.add(createPathComplexEvent(snapshot, now))
             }
         }
@@ -388,17 +388,25 @@ class EventGenerator(
      * in for those two. Everything else today asks of an obstacle it asks too. It does not read [speechNear], so
      * changing [DetFirstConfig.nearMeters] cannot change what is admitted.
      */
-    private fun passesMetricGate(obstacle: DetectedObstacle, gate: MetricGateConfig): Boolean {
-        if (!obstacle.isStable(minFrames = 3) || obstacle.confidence < MIN_OBSTACLE_CONFIDENCE_TO_ANNOUNCE) return false
-        if (!hasMeasuredDistance(obstacle)) return false
-        if (obstacle.distanceEstimate!!.contact.lowerM!! > metricThresholdM(obstacle, gate)) return false
-        return when (obstacle.zone) {
+    private fun passesMetricGate(obstacle: DetectedObstacle, gate: MetricGateConfig): Boolean = metricGateHold(obstacle, gate) == null
+
+    /** What holds [obstacle] at the metric gate, for a report of why; null when nothing does. */
+    internal fun metricGateHold(obstacle: DetectedObstacle, gate: MetricGateConfig): String? {
+        if (!obstacle.isStable(minFrames = gate.minStableFrames)) return "not stable"
+        if (obstacle.confidence < MIN_OBSTACLE_CONFIDENCE_TO_ANNOUNCE) return "low confidence"
+        if (!hasMeasuredDistance(obstacle)) return "no measured distance"
+        if (obstacle.distanceEstimate!!.contact.lowerM!! > metricThresholdM(obstacle, gate)) return "farther than the gate"
+        val evidence = when (obstacle.zone) {
             DirectionZone.CENTER -> obstacle.urgency >= UrgencyLevel.CRITICAL ||
                 obstacle.distance == DistanceLevel.NEAR ||
                 obstacle.areaRatio >= centerAreaThreshold(obstacle)
             else -> hasEnoughSideObstacleEvidence(obstacle)
         }
+        return if (evidence) null else if (obstacle.zone == DirectionZone.CENTER) "too small ahead" else "too little evidence at the side"
     }
+
+    /** Whether today's gates admit [obstacle], for a report of why. */
+    internal fun passesTodaysGates(obstacle: DetectedObstacle): Boolean = shouldAnnounceObstacle(obstacle)
 
     private fun metricThresholdM(obstacle: DetectedObstacle, gate: MetricGateConfig): Float {
         val ahead = isForwardZone(obstacle.zone)

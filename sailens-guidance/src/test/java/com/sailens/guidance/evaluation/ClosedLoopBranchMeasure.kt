@@ -39,6 +39,8 @@ internal fun liveCooldown(state: CooldownManager.Canonical, now: Long): Cooldown
         emissions = state.emissions.filter { now - it <= STORM_WINDOW_MS },
         confirmedEscalation = if (state.openWrites.isEmpty()) state.confirmedEscalation.filterValues { now - it.latestAt < ESCALATION_WINDOW_MS } else state.confirmedEscalation,
         escalation = state.escalation.filterValues { now - it.latestAt < ESCALATION_WINDOW_MS },
+        // State episodes only name stages for the retry states: with none to refer to, their numbering changes nothing.
+        episodes = if (state.retries.keys.any { it.episode != null } || state.awaitingOutcome.values.any { stages -> stages.any { it.episode != null } }) state.episodes else emptyMap(),
     )
 }
 

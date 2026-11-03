@@ -1,24 +1,30 @@
 package com.sailens.guidance.evaluation
 
+import com.sailens.core.geometry.NormalizedRect
 import com.sailens.guidance.config.AnalysisConfig
+import com.sailens.guidance.config.DetFirstConfig
+import com.sailens.guidance.config.MetricGateConfig
 import com.sailens.guidance.config.PerceptionConfig
 import com.sailens.guidance.geometry.HeightSource
 import com.sailens.guidance.geometry.PhoneGeometrySettings
 import com.sailens.guidance.model.common.DirectionZone
+import com.sailens.guidance.model.common.EventCategory
 import com.sailens.guidance.model.common.EventPriority
-import com.sailens.guidance.model.common.ObstacleCategory
 import com.sailens.guidance.model.scene.SceneEvent
 import com.sailens.guidance.model.scene.SceneEventMessageKeys
 import com.sailens.guidance.processor.decision.CooldownManager
 import com.sailens.guidance.processor.decision.EventConflictResolver
 import com.sailens.guidance.processor.decision.EventGenerator
 import com.sailens.guidance.processor.decision.EventMerger
+import com.sailens.guidance.processor.decision.SpeechScale
 import com.sailens.guidance.repository.DeviceSensorRepository
 import com.sailens.guidance.semantics.DefaultNavigationSemanticsProvider
 import com.sailens.guidance.trace.capture.CaptureSchema
 import com.sailens.guidance.trace.capture.CaptureSession
 import com.sailens.guidance.trace.capture.CaptureSessionReader
+import com.sailens.guidance.trace.capture.RegressionClocks
 import com.sailens.guidance.trace.capture.RegressionFrameRecord
+import com.sailens.guidance.trace.capture.UtteranceRecordEvents
 import com.sailens.guidance.trace.capture.orThrow
 import com.sailens.guidance.trace.regression.GroundContactEvaluation
 import com.sailens.guidance.trace.regression.RegressionReplay
@@ -33,91 +39,58 @@ import java.util.Locale
 import kotlin.math.abs
 
 /**
- * The paired reading of M5 ([PairedBranchRun]) against stand-in arms, on real captures.
- * None of the arms is a real policy: they exist to show what the reading does with no change, with a
- * change that adds sentences, and with changes that must be caught. Skipped unless a path is given, as
- * [DetFirstRehearsalTest]; the report goes to `sailens-guidance/build/replay/detfirst-paired.txt`.
+ * The paired reading of M5 ([PairedBranchRun]) on real captures: the policy with its switches against today's, each
+ * through the production delivery protocol ([ProtocolDriver]), beside an arm that changes nothing and two that must
+ * be caught. Skipped unless a path is given, as [DetFirstRehearsalTest]; the report goes to
+ * `sailens-guidance/build/replay/detfirst-paired.txt`.
  */
 class DetFirstPairedRehearsalTest {
 
-    /** A stand-in for an experimental arm. Nothing downstream is told where it differs from today's policy. */
-    private abstract class StandIn(val name: String) {
-        /** Sees every frame once, before any run. */
-        open fun prepare(scene: RegressionReplay.SceneFrame) = Unit
-
-        /** A sentence of its own for this frame, when today's policy has none. */
-        open fun extra(scene: RegressionReplay.SceneFrame, durations: SpeakerDurations): SpeakerModel.Offer? = null
-
-        /** Today's prompt is withheld. */
-        open fun withholds(primary: SceneEvent): Boolean = false
-    }
-
-    private class NoChange : StandIn("no change")
-
-    /**
-     * What the metric gate will do to the speaker: a person or vehicle ahead is named once, earlier than
-     * today's bottom-of-box gate, at the priority its first prompt would have. It leaves no cooldown
-     * record and credits no stage, both of which the real gate will.
-     */
-    private class EarlyAhead : StandIn("early first prompt for a person or vehicle ahead") {
-        private val seen = mutableSetOf<String>()
-        private val firing = HashMap<Long, Pair<String, Int>>()
-
-        override fun prepare(scene: RegressionReplay.SceneFrame) {
-            for (o in scene.snapshot.obstacles) {
-                if (o.zone != DirectionZone.CENTER || !o.isStable(3) || o.confidence < 0.55f) continue
-                val gate = when (o.category) {
-                    ObstacleCategory.PERSON -> 0.56f
-                    ObstacleCategory.VEHICLE -> 0.55f
-                    else -> continue
-                }
-                if (o.boundingBox.maxY !in EARLY_BOTTOM_Y..gate || !seen.add(o.id.toString())) continue
-                val person = o.category == ObstacleCategory.PERSON
-                val suffix = if (person) SceneEventMessageKeys.SUFFIX_PERSON else SceneEventMessageKeys.SUFFIX_VEHICLE
-                val priority = if (person) EventPriority.HIGH else EventPriority.CRITICAL
-                firing[scene.record.seq] = SceneEventMessageKeys.obstacle(SceneEventMessageKeys.zonePart(DirectionZone.CENTER), suffix) to priority.value
-            }
-        }
-
-        override fun extra(scene: RegressionReplay.SceneFrame, durations: SpeakerDurations): SpeakerModel.Offer? {
-            val (key, priority) = firing[scene.record.seq] ?: return null
-            return SpeakerModel.Offer(scene.decidedAt, "early|${scene.record.seq}", priority, scene.decidedAt + 3_000, durations.of(key to false).second)
-        }
-    }
+    private class Arm(val name: String, val detFirst: DetFirstConfig, val alteration: () -> ProtocolDriver.Alteration = { ProtocolDriver.Alteration.NONE })
 
     /** Must be caught: every vehicle prompt withheld. */
-    private class MutedVehicles : StandIn("every vehicle prompt withheld") {
+    private class MutedVehicles : ProtocolDriver.Alteration {
         override fun withholds(primary: SceneEvent) = SceneEventMessageKeys.obstacleSuffix(primary.messageKey) == SceneEventMessageKeys.SUFFIX_VEHICLE
     }
 
     /** Must be caught: a top-priority sentence every ten seconds, cutting whatever is speaking. */
-    private class Chatter : StandIn("a top-priority sentence every 10 s") {
-        private var next = Long.MIN_VALUE
-        private val firing = mutableSetOf<Long>()
-
-        override fun prepare(scene: RegressionReplay.SceneFrame) {
-            if (scene.decidedAt < next) return
-            next = scene.decidedAt + 10_000
-            firing += scene.record.seq
-        }
-
-        override fun extra(scene: RegressionReplay.SceneFrame, durations: SpeakerDurations): SpeakerModel.Offer? {
+    private class Chatter(private val firing: Set<Long>) : ProtocolDriver.Alteration {
+        override fun extra(scene: RegressionReplay.SceneFrame): SpeakerModel.Offer? {
             if (scene.record.seq !in firing) return null
-            return SpeakerModel.Offer(scene.decidedAt, "chatter|${scene.record.seq}", EventPriority.CRITICAL.value, scene.decidedAt + 3_000, 1_500)
+            return SpeakerModel.Offer(scene.decidedAt, "chatter|${scene.decidedAt}", SpeechScale.of(EventPriority.CRITICAL, SpeechScale.MAX_RANK), scene.decidedAt + 3_000, 1_500)
         }
     }
 
-    private class ArmResult(val nominal: PairedBranchRun.Result, val full: PairedBranchRun.Result, val nanos: Long)
+    private class ArmResult(val nominal: PairedBranchRun.Result, val full: PairedBranchRun.Result, val nanos: Long, val nominalArm: ProtocolDriver, val nominalBase: ProtocolDriver)
 
     private class CaptureResult(
         val id: String,
-        val legacy: ProtectedStages.Reproduction,
+        /** P against the baseline with no error, on the production protocol at the arms' height: what M5 asks of the baseline. */
+        val production: ProtectedStages.Reproduction,
         val device: PromptPolicyEvaluation.Result,
         val deadlines: Map<StageKey, Long>,
-        /** First completion of each stage of P with no error, on the path the branch run itself takes. */
-        val nominalFirst: PairedBranchRun.Completions,
+        /** The legacy path with no error, by this run's own code, against [frozenLegacy]. */
+        val nominalLegacyFirst: PairedBranchRun.Completions,
+        val frozenLegacy: ProtectedStages.Reproduction,
         val samples: Map<String, List<LeadTime.Sample>>,
         val arms: Map<String, ArmResult>,
+        /** Each hazard's frames as the launch policy's gates see them: time, then what holds it, null when it is admitted. */
+        val gateFrames: Map<String, List<Pair<Long, String?>>>,
+        val firstAt: Long,
+        /** For the label list: each frame's seq and time, and each track's box by seq. */
+        val frameTimes: List<Pair<Long, Long>>,
+        val trackBoxes: Map<String, List<Pair<Long, NormalizedRect>>>,
+        val frames: Int,
+        val minutes: Double,
+        val stationaryMinutes: Double,
+        /** Events said to be NEAR or CRITICAL that conflict resolution removed, by arm: frames, and distinct hazards. */
+        val removedNearOrCritical: Map<String, Pair<Int, Int>>,
+        /** The launch arm with no branching, once per fixed trace of independent sentence errors. */
+        val stress: List<PairedBranchRun.Result>,
+        val unmodeled: UnmodeledFrom,
+        /** Frames the arm offered on where the device offered nothing, so nothing timed them. */
+        val untimedOffers: Map<String, Int>,
+        val sentences: SentenceDurations,
     )
 
     private data class Counted(val regressions: Int, val regressionsFront: Int, val undeterminable: Int, val undeterminableFront: Int, val fragile: Int, val fragileFront: Int, val same: Int) {
@@ -130,10 +103,14 @@ class DetFirstPairedRehearsalTest {
             "undeterminable $undeterminable (ahead $undeterminableFront); reported only: fragile $fragile (ahead $fragileFront), same inputs $same"
     }
 
-    private fun counted(result: PairedBranchRun.Result, legacy: ProtectedStages.Reproduction): Counted {
-        val regressions = legacy.m5Of(result.regressions)
-        val apart = legacy.m5Of(result.bothLostApart)
-        val stopped = legacy.m5Of(result.undeterminable)
+    private fun counted(
+        result: PairedBranchRun.Result,
+        reproduction: ProtectedStages.Reproduction,
+        unmodeled: Set<StageKey> = emptySet(),
+    ): Counted {
+        val regressions = reproduction.m5Of(result.regressions - unmodeled)
+        val apart = reproduction.m5Of(result.bothLostApart - unmodeled)
+        val stopped = reproduction.m5Of(result.undeterminable + (unmodeled intersect (result.kept + result.regressions + result.bothLostApart)))
         return Counted(
             regressions.regressions + regressions.undeterminable,
             regressions.regressionsFront + regressions.undeterminableFront,
@@ -165,13 +142,14 @@ class DetFirstPairedRehearsalTest {
         for (row in r.device.stages) {
             if (row.ambiguousOnly) continue
             val key = StageKey(row.hazard, row.stage)
+            val said = key in side.everywhere && !r.unmodeled.covers(row.endAt)
             if (row.stage == Stage.NEAR && !row.trackless) {
-                count("B3 near all", key in side.everywhere)
-                if (row.hazardClass == "person/front") count("B1 near person", key in side.everywhere)
-                if (row.hazardClass == "vehicle/front") count("B2 near vehicle", key in side.everywhere)
+                count("B3 near all", said)
+                if (row.hazardClass == "person/front") count("B1 near person", said)
+                if (row.hazardClass == "vehicle/front") count("B2 near vehicle", said)
             }
-            if (row.stage == Stage.CRITICAL && row.hazardClass == "person/front") count("B5 critical person", key in side.everywhere)
-            if (row.stage == Stage.CRITICAL && row.hazardClass == "vehicle/front") count("B5 critical vehicle", key in side.everywhere)
+            if (row.stage == Stage.CRITICAL && row.hazardClass == "person/front") count("B5 critical person", said)
+            if (row.stage == Stage.CRITICAL && row.hazardClass == "vehicle/front") count("B5 critical vehicle", said)
         }
         for (lead in r.device.leads) {
             if (lead.stage != Stage.FIRST || lead.thresholdM != M1_THRESHOLD_M) continue
@@ -180,7 +158,7 @@ class DetFirstPairedRehearsalTest {
                 "vehicle/front" -> "vehicle"
                 else -> continue
             }
-            val completion = side.completionMs(StageKey(lead.hazard, Stage.FIRST))
+            val completion = side.completionMs(StageKey(lead.hazard, Stage.FIRST))?.takeUnless(r.unmodeled::covers)
             val outcome = LeadTime.classify(r.samples[lead.hazard].orEmpty(), M1_THRESHOLD_M, completion?.let { it * 1_000_000 }).outcome
             if (outcome == LeadTime.Outcome.UNKNOWABLE) continue
             count("C1-2 before, $name", outcome == LeadTime.Outcome.BEFORE)
@@ -193,26 +171,35 @@ class DetFirstPairedRehearsalTest {
     fun `the paired reading of M5 on recorded captures`() {
         val path = System.getProperty("sailens.replay.capture").orEmpty()
         assumeTrue("set -PreplayCapture=<capture dir> to rehearse on captures", path.isNotBlank())
+        val nominalOnly = NOMINAL_ONLY
         val out = File(System.getProperty("sailens.replay.out").orEmpty().ifBlank { "build/replay" }).apply { mkdirs() }
         val split = SealedCaptures.forMetrics(File(path))
         assumeTrue(SealedCaptures.refusalMessage(path, split.sealed.size), split.open.isNotEmpty())
 
         val preset = PhoneGeometrySettings(PRESET_HEIGHT_M, HeightSource.PRESET)
         val frozen = PromptPolicyCaptureEvaluation(preset)
-        val evaluated = split.open.mapNotNull { dir ->
-            frozen.evaluate(CaptureSessionReader.read(dir).orThrow())?.takeIf { D18Sets.of(it.id) == D18Sets.Group.CALIBRATION }?.let { dir to it }
-        }
-        val measured = evaluated.associate { (_, r) -> r.id to r.speaker?.measured.orEmpty() }
+        val found = split.open.map { dir -> dir to frozen.evaluate(CaptureSessionReader.read(dir).orThrow()) }
+        val setProblems = AcceptanceSet.problems(found.map { (dir, r) -> AcceptanceSet.of(dir, r) })
+        assertTrue("not one whole frozen set (R7), nothing computed:\n${setProblems.joinToString("\n")}", setProblems.isEmpty())
+        val evaluated = found.map { (dir, r) -> dir to r!! }
+        val measured = evaluated.filter { (_, r) -> D18Sets.of(r.id) == D18Sets.Group.CALIBRATION }.associate { (_, r) -> r.id to r.speaker?.measured.orEmpty() }
         val results = mutableListOf<CaptureResult>()
         val started = System.currentTimeMillis()
         for ((dir, result) in evaluated) {
-            val durations = SpeakerDurations.pooled(measured.filterKeys { it != result.id }.values.flatten(), OTHER_C)
-            results += rehearse(CaptureSessionReader.read(dir).orThrow(), result, durations, preset)
+            // A calibration capture is timed by the others; a sealed one by the table frozen from all of them.
+            val (durations, label) = when (D18Sets.of(result.id)) {
+                D18Sets.Group.SEALED -> SpeakerDurations.FROZEN_C to C_TABLE
+                else -> SpeakerDurations.pooled(measured.filterKeys { it != result.id }.values.flatten(), OTHER_C) to OTHER_C
+            }
+            results += rehearse(CaptureSessionReader.read(dir).orThrow(), result, durations, label, preset)
             File(out, "detfirst-paired.txt").writeText("${results.size} of ${evaluated.size} captures, ${(System.currentTimeMillis() - started) / 60_000} min\n" + report(results))
         }
         println(report(results))
+        File(out, "detfirst-label-list.csv").writeText(labelList(results))
+        File(out, "detfirst-label-frames.csv").writeText(labelFrames(results))
+        File(out, "detfirst-c8-list.csv").writeText(metricOnlyLabelList(results))
         assertTrue(results.isNotEmpty())
-        val failed = standingChecks(results)
+        val failed = if (nominalOnly) nominalChecks(results) else standingChecks(results)
         assertTrue("standing checks failed:\n${failed.joinToString("\n")}", failed.isEmpty())
     }
 
@@ -221,10 +208,10 @@ class DetFirstPairedRehearsalTest {
         var disagree = 0
         var offByMoreThan1Ms = 0
         for (r in results) {
-            for ((key, frozenNs) in r.legacy.modelCompletionNs()) {
+            for ((key, frozenNs) in r.frozenLegacy.modelCompletionNs()) {
                 val deadline = r.deadlines.getValue(key)
                 val frozenKept = frozenNs != null && frozenNs / 1_000_000 <= deadline
-                val nominal = r.nominalFirst.completionMs(key)
+                val nominal = r.nominalLegacyFirst.completionMs(key)
                 if (frozenKept != (nominal != null && nominal <= deadline)) disagree++
                 if (frozenNs != null && nominal != null && abs(frozenNs / 1_000_000 - nominal) > 1) offByMoreThan1Ms++
             }
@@ -236,13 +223,12 @@ class DetFirstPairedRehearsalTest {
     private fun standingChecks(results: List<CaptureResult>): List<String> = buildList {
         val (disagree, off) = nominalAgainstFrozen(results)
         if (disagree != 0 || off != 0) add("the nominal path differs from the frozen nominal model: $disagree stages, $off beyond 1 ms")
-        val limit = maxOf(2, results.sumOf { it.legacy.p.size } / 100)
-        fun total(name: String) = results.map { counted(it.arms.getValue(name).full, it.legacy) }.reduce(Counted::plus)
-        val noChange = NoChange().name
-        val unchanged = total(noChange)
+        val limit = maxOf(2, results.sumOf { it.production.p.size } / 100)
+        fun total(name: String) = results.map { counted(it.arms.getValue(name).full, it.production) }.reduce(Counted::plus)
+        val unchanged = total(NO_CHANGE)
         if (unchanged.total + unchanged.fragile != 0) add("an arm that changes nothing scored: $unchanged")
         for (r in results) {
-            val full = r.arms.getValue(noChange).full
+            val full = r.arms.getValue(NO_CHANGE).full
             if (full.capHit) add("${r.id}: an arm that changes nothing did not settle")
             if (full.baseline.everywhere != full.arm.everywhere || full.baseline.latestEndMs != full.arm.latestEndMs) add("${r.id}: an arm that changes nothing answers its stages differently from the baseline")
             if (r.arms.values.any { it.nominal.maxBranches != 1 }) add("${r.id}: with no error there is more than one branch")
@@ -253,35 +239,239 @@ class DetFirstPairedRehearsalTest {
                 if (other.full.baseline.everywhere != full.baseline.everywhere || other.full.baseline.latestEndMs != full.baseline.latestEndMs) add("${r.id}: the baseline answers its stages differently when paired with $name")
             }
         }
-        for (name in listOf(MutedVehicles().name, Chatter().name)) {
+        for (name in listOf(MUTED, CHATTER)) {
             val caught = total(name)
             if (caught.total <= limit) add("$name must be caught, but scored: $caught")
         }
     }
 
+    /** What must hold for a reading with no error to say anything at all. */
+    private fun nominalChecks(results: List<CaptureResult>): List<String> = buildList {
+        val (disagree, off) = nominalAgainstFrozen(results)
+        if (disagree != 0 || off != 0) add("the nominal path differs from the frozen nominal model: $disagree stages, $off beyond 1 ms")
+        val unchanged = results.map { counted(it.arms.getValue(NO_CHANGE).nominal, it.production) }.reduce(Counted::plus)
+        if (unchanged.total + unchanged.fragile != 0) add("an arm that changes nothing scored: $unchanged")
+        for (r in results) {
+            val nominal = r.arms.getValue(NO_CHANGE).nominal
+            if (nominal.baseline.everywhere != nominal.arm.everywhere || nominal.baseline.latestEndMs != nominal.arm.latestEndMs) add("${r.id}: an arm that changes nothing answers its stages differently from the baseline")
+            if (r.arms.values.any { it.nominal.maxBranches != 1 }) add("${r.id}: with no error there is more than one branch")
+            val late = r.arms.values.sumOf { it.nominal.creditedAfterClose.size }
+            if (late != 0) add("${r.id}: $late stages were offered for after their watches closed")
+        }
+        for (name in listOf(MUTED, CHATTER)) {
+            val caught = seriousAhead(results, name).size
+            if (caught <= LABELLED_NEEDED_AHEAD_MAX) add("$name must be caught, but lost $caught stages ahead")
+        }
+    }
+
+    /** @param passed null when it is not judged here: it waits for labels, or is reported at this height. */
+    private class Verdict(val name: String, val reading: String, val passed: Boolean?, val awaitsLabels: Boolean = false)
+
+    /** The serious losses ahead of an arm with no error: the list a person labels. */
+    private fun seriousAhead(results: List<CaptureResult>, arm: String): List<Pair<String, Boolean>> = results.flatMap { r ->
+        val ahead = r.production.p.filter { it.frontCritical }.mapTo(HashSet()) { it.key }
+        lossesIn(r, r.arms.getValue(arm).nominal).filter { (key, loss) -> key in ahead && loss != Loss.BOUNDED_DELAY }.keys
+            .map { key -> "${r.id}|${key.hazard}|${key.stage}" to (arm == LAUNCH && heardAheadWithin(r, key)) }
+    }
+
+    /** The frozen thresholds (docs/experiments/detfirst-thresholds-2026-10.md §4.7), on the launch arm with no error. */
+    private fun acceptance(results: List<CaptureResult>): List<Verdict> = buildList {
+        fun percent(n: Int, of: Int) = String.format(Locale.ROOT, "%d/%d = %.1f%%", n, of, 100.0 * n / maxOf(of, 1))
+        fun times(x: Double) = String.format(Locale.ROOT, "%.2f", x)
+        val arm = results.map { lines(it, it.arms.getValue(LAUNCH).nominal.arm) }.reduce(Lines::plus)
+        val base = results.map { lines(it, it.arms.getValue(NO_CHANGE).nominal.baseline) }.reduce(Lines::plus)
+        fun spoken(of: Lines, line: String) = of.spoken[line] ?: 0
+        fun total(of: Lines, line: String) = of.of[line] ?: 0
+        fun rate(of: Lines, line: String) = spoken(of, line).toDouble() / maxOf(total(of, line), 1)
+
+        val listed = seriousAhead(results, LAUNCH)
+        val labels = LABELS
+        if (labels == null) {
+            add(Verdict("a1, a2 serious losses ahead, to be labelled", "${listed.size}; not heard ahead ${listed.count { !it.second }}", null, awaitsLabels = true))
+        } else {
+            // The whole list must be labelled, each with one of the four labels; anything else is not labelled.
+            val required = labelList(results).lineSequence().drop(1).filter { it.isNotBlank() }.map { it.split(',').take(3).joinToString("|") }.toList()
+            val missing = required.count { labels[it] !in VALID_LABELS }
+            val needed = listed.filter { labels[it.first] in setOf("need", "unknown") }
+            val notHeard = needed.count { !it.second }
+            add(Verdict("a1 needed and no warning ahead heard", "$notHeard, at most $LABELLED_NOT_HEARD_MAX; not labelled $missing", notHeard <= LABELLED_NOT_HEARD_MAX && missing == 0))
+            add(Verdict("a2 needed", "${needed.size}, at most $LABELLED_NEEDED_AHEAD_MAX; not labelled $missing", needed.size <= LABELLED_NEEDED_AHEAD_MAX && missing == 0))
+        }
+
+        var live = 0
+        var liveAhead = 0
+        var bounded = 0
+        var boundedAhead = 0
+        var serious = 0
+        var seriousOfAhead = 0
+        for (r in results) {
+            val ends = r.device.stages.associate { StageKey(it.hazard, it.stage) to it.endAt }
+            val losses = lossesIn(r, r.arms.getValue(LAUNCH).nominal)
+            for (stage in r.production.p) {
+                if (r.deadlines.getValue(stage.key) - 500 > ends.getValue(stage.key)) continue
+                live++
+                if (stage.frontCritical) liveAhead++
+                val loss = losses[stage.key] ?: continue
+                if (loss == Loss.BOUNDED_DELAY) {
+                    bounded++
+                    if (stage.frontCritical) boundedAhead++
+                } else {
+                    serious++
+                    if (stage.frontCritical) seriousOfAhead++
+                }
+            }
+        }
+        // R5: a share over fewer than MIN_DENOMINATOR is undeterminable, and undeterminable does not pass.
+        fun enough(vararg of: Int) = of.all { it >= MIN_DENOMINATOR }
+        fun small(vararg of: Int) = if (enough(*of)) "" else "; undeterminable, fewer than $MIN_DENOMINATOR"
+        add(Verdict("b bounded delay, of stages finished while the track lived", "${percent(bounded, live)}; ahead ${percent(boundedAhead, liveAhead)}; at most 30%, 35%${small(live, liveAhead)}", enough(live, liveAhead) && bounded * 100 <= live * 30 && boundedAhead * 100 <= liveAhead * 35))
+        add(Verdict("c serious loss, of stages finished while the track lived", "${percent(serious, live)}; ahead ${percent(seriousOfAhead, liveAhead)}; at most 5%, 7%${small(live, liveAhead)}", enough(live, liveAhead) && serious * 100 <= live * 5 && seriousOfAhead * 100 <= liveAhead * 7))
+
+        fun atLeast(name: String, min: Int) = add(Verdict(name, "${percent(spoken(arm, name), total(arm, name))}, at least $min%${small(total(arm, name))}", enough(total(arm, name)) && spoken(arm, name) * 100 >= total(arm, name) * min))
+        atLeast("B1 near person", 55)
+        atLeast("B2 near vehicle", 55)
+        atLeast("B3 near all", 55)
+        for (line in listOf("B5 critical person", "B5 critical vehicle")) {
+            add(Verdict(line, "${percent(spoken(arm, line), total(arm, line))}, baseline ${percent(spoken(base, line), total(base, line))}${small(total(arm, line))}", enough(total(arm, line)) && rate(arm, line) >= rate(base, line)))
+        }
+        for (line in listOf("C3 clearly missed, person", "C3 clearly missed, vehicle")) {
+            add(Verdict(line, "${percent(spoken(arm, line), total(arm, line))}, baseline ${percent(spoken(base, line), total(base, line))}${small(total(arm, line))}", enough(total(arm, line)) && rate(arm, line) <= rate(base, line)))
+        }
+        val judgedHere = PRESET_HEIGHT_M == 1.15f
+        for ((name, line, min) in listOf(Triple("C1 before, person", "C1-2 before, person", 20), Triple("C2 before, vehicle", "C1-2 before, vehicle", 15))) {
+            add(Verdict(name, "${percent(spoken(arm, line), total(arm, line))}, at least $min%${small(total(arm, line))}", if (judgedHere) enough(total(arm, line)) && spoken(arm, line) * 100 >= total(arm, line) * min else null))
+        }
+
+        val armCounts = results.map { countsOf(it, it.arms.getValue(LAUNCH).nominalArm) }.reduce(PromptCounts.Counts::plus)
+        val baseCounts = results.map { countsOf(it, it.arms.getValue(NO_CHANGE).nominalBase) }.reduce(PromptCounts.Counts::plus)
+        val moving = armCounts.perMinute / baseCounts.perMinute
+        val still = armCounts.stationaryPerMinute / baseCounts.stationaryPerMinute
+        add(Verdict("B6 per minute against the baseline", "${times(moving)}, at most $RATE_MAX", moving <= RATE_MAX))
+        add(Verdict("C7 per stationary minute against the baseline", "${times(still)}, at most $RATE_MAX", still <= RATE_MAX))
+        add(Verdict("B7 regiven sentences", "${percent(armCounts.regivenSentences, armCounts.completed)}, at most 30%", armCounts.regivenSentences * 100 <= armCounts.completed * 30))
+        add(Verdict("B7 regives of one stage", "${armCounts.mostRegivesOfAStage}, at most 1", armCounts.mostRegivesOfAStage <= 1))
+        add(Verdict("B4 NEAR or CRITICAL removed", "${results.sumOf { it.removedNearOrCritical.getValue(LAUNCH).first }} frames, must be 0", results.all { it.removedNearOrCritical.getValue(LAUNCH).first == 0 }))
+        add(Verdict("C4 metric-only never within 2.0 m", "${times(armCounts.neverWithin2mPerMinute)} per minute, at most $METRIC_ONLY_FAR_MAX", armCounts.neverWithin2mPerMinute <= METRIC_ONLY_FAR_MAX))
+        add(Verdict("C5 metric-only on a track under 1 s", "${percent(armCounts.metricOnlyShortLived, armCounts.metricOnlyCompleted)}, at most 5%", armCounts.metricOnlyShortLived * 100 <= armCounts.metricOnlyCompleted * 5))
+        add(Verdict("C6 repeats", "${armCounts.repeat}, must be 0", armCounts.repeat == 0))
+        add(Verdict("D1 path-complex prompts", "${armCounts.pathComplexOffered}, must be 0", armCounts.pathComplexOffered == 0))
+    }
+
     private fun report(results: List<CaptureResult>): String {
         return buildString {
-            val p = results.sumOf { it.legacy.p.size }
+            val p = results.sumOf { it.production.p.size }
             val limit = maxOf(2, p / 100)
-            appendLine("Paired M5 over ${results.size} calibration captures, legacy output path, $PRESET_HEIGHT_M m; both arms decide for themselves on every frame")
-            appendLine("M5 limit: at most $limit of |P| = $p; ahead CRITICAL and blocked: 0. Stop at $MAX_BRANCHES branches or $MAX_BRANCH_FRAMES branch-frames.")
+            appendLine("Paired M5 over ${results.size} calibration captures, production protocol, $PRESET_HEIGHT_M m; both arms decide for themselves on every frame")
+            appendLine("Reported only, the older limit on every realization: at most $limit of |P| = $p; ahead CRITICAL and blocked: 0. Stop at $MAX_BRANCHES branches or $MAX_BRANCH_FRAMES branch-frames.")
             appendLine()
-            appendLine("The path with no error against the frozen nominal model (stages of P):")
+            if (LAUNCH in results.first().arms) {
+                appendLine("Acceptance, launch arm with no error, at $PRESET_HEIGHT_M m. C8 and the device cases are judged apart:")
+                val verdicts = acceptance(results)
+                for (v in verdicts) appendLine("  ${when (v.passed) { true -> "pass"; false -> "FAIL"; null -> if (v.awaitsLabels) "open" else "report" }} ${v.name}: ${v.reading}")
+                appendLine("  judged here: ${if (verdicts.any { it.passed == false }) "FAIL" else "pass"}; waiting for labels: ${verdicts.count { it.awaitsLabels }}")
+                appendLine()
+            }
+            appendLine("The legacy path with no error against the frozen nominal model (stages of P):")
             val (disagree, offByMoreThan1Ms) = nominalAgainstFrozen(results)
             appendLine("  stages kept by one and not the other: $disagree; kept by both with first completion more than 1 ms apart: $offByMoreThan1Ms")
+            appendLine("The baseline with no error against the device, production protocol: P $p, reproduced ${results.sumOf { it.production.reproducedAll }}, of ahead CRITICAL and blocked ${results.sumOf { it.production.frontP.size }}: ${results.sumOf { it.production.reproducedFront }}")
+            appendLine(String.format(Locale.ROOT, "%d frames in %.1f min: %.1f a second, so 20 stable frames are at least %.2f s", results.sumOf { it.frames }, results.sumOf { it.minutes }, results.sumOf { it.frames } / (results.sumOf { it.minutes } * 60), 20 / (results.sumOf { it.frames } / (results.sumOf { it.minutes } * 60))))
+            appendLine("Not modeled, so counted undeterminable from then on: X3 and X5 windows ${results.sumOf { it.unmodeled.windowCount }}, frames past ${ClosedLoopSpeakerBranches.FRAME_SKEW_MS} ms ${results.sumOf { it.unmodeled.overrunCount }}, stages of P after them ${results.sumOf { r -> r.production.p.count { it.key in unmodeledOf(r) } }}")
             for (name in results.first().arms.keys) {
                 appendLine()
                 appendLine(name)
                 val rows = results.map { it to it.arms.getValue(name) }
                 val settled = rows.count { !it.second.full.capHit }
                 appendLine("  settled $settled of ${rows.size}, highest branches ${rows.maxOf { it.second.full.maxBranches }}, branch-frames ${rows.sumOf { it.second.full.branchFrames }}, slowest capture ${rows.maxOf { it.second.nanos } / 1_000_000_000} s, all ${rows.sumOf { it.second.nanos } / 1_000_000_000} s")
-                appendLine("  no error:      ${rows.map { (r, a) -> counted(a.nominal, r.legacy) }.reduce(Counted::plus)}")
-                val full = rows.map { (r, a) -> counted(a.full, r.legacy) }.reduce(Counted::plus)
+                appendLine("  no error:      ${rows.map { (r, a) -> counted(a.nominal, r.production) }.reduce(Counted::plus)}")
+                val full = rows.map { (r, a) -> counted(a.full, r.production, unmodeledOf(r)) }.reduce(Counted::plus)
                 appendLine("  within epsilon: $full")
-                appendLine("  M5 ${if (full.total <= limit && full.totalFront == 0) "passes" else "fails"} (reading only: this arm is a stand-in)")
+                appendLine("  what is lost with no error, by class and stage (never / late, in s past t_dev + 0.5):")
+                val lost = HashMap<String, MutableList<Double?>>()
+                for ((r, a) in rows) {
+                    val classOf = r.device.stages.associateBy { StageKey(it.hazard, it.stage) }
+                    for (key in a.nominal.regressions) {
+                        val row = classOf.getValue(key)
+                        val late = a.nominal.arm.completionMs(key)?.let { (it - r.deadlines.getValue(key)) / 1000.0 }
+                        lost.getOrPut("${row.hazardClass} ${row.stage}") { mutableListOf() } += late
+                    }
+                }
+                for ((label, lates) in lost.entries.sortedByDescending { it.value.size }) {
+                    val known = lates.filterNotNull().sorted()
+                    appendLine(String.format(Locale.ROOT, "    %s: %d; never %d; late %d%s", label, lates.size, lates.count { it == null }, known.size, if (known.isEmpty()) "" else String.format(Locale.ROOT, ", median %.1f, max %.1f", known[known.size / 2], known.last())))
+                }
+                appendLine("  and what became of the sentences that could have said them, with no error:")
+                val why = java.util.TreeMap<String, MutableList<Double>>()
+                for ((r, a) in rows) {
+                    val classOf = r.device.stages.associateBy { StageKey(it.hazard, it.stage) }
+                    for (key in a.nominal.regressions) {
+                        val deadline = r.deadlines.getValue(key)
+                        val row = classOf.getValue(key)
+                        val ahead = if (row.hazardClass == "blocked" || (row.stage == Stage.CRITICAL && row.hazardClass in setOf("vehicle/front", "person/front"))) "ahead" else "other"
+                        val sentences = a.nominalArm.offered.values.filter { key in a.nominalArm.credits[it.id].orEmpty() && it.atMs <= deadline }
+                        val theirs = a.nominalBase.offered.values.filter { key in a.nominalBase.credits[it.id].orEmpty() && it.endAtMs != null && it.endAtMs!! <= deadline }.minByOrNull { it.endAtMs!! }
+                        val spokenLate = sentences.filter { it.endAtMs != null }.minByOrNull { it.endAtMs!! }
+                        val label = when {
+                            spokenLate != null && "|true|" in spokenLate.id && theirs != null && "|true|" !in theirs.id && spokenLate.atMs <= theirs.atMs + 100 -> "spoken in time for today, but with the NEAR prefix, so longer"
+                            spokenLate != null && theirs != null && "|true|" in spokenLate.id && "|true|" !in theirs.id -> "spoken later, with the NEAR prefix"
+                            spokenLate != null -> "spoken later"
+                            sentences.any { it.cutAtMs != null } -> "taken, then cut off, not said again in time"
+                            sentences.any { it.accepted } -> "taken, not over by the deadline"
+                            sentences.isNotEmpty() -> "offered, every time refused"
+                            else -> "never offered in time"
+                        }
+                        why.getOrPut("$ahead: $label") { mutableListOf() } += (spokenLate?.endAtMs?.let { (it - deadline) / 1000.0 } ?: Double.NaN)
+                    }
+                }
+                val blockers = java.util.TreeMap<String, Int>()
+                fun kind(o: ProtocolDriver.Offered): String {
+                    val parts = o.id.split('|')
+                    val what = when {
+                        parts[0] == "notice" -> parts[1]
+                        parts[0] == "mode" || parts[0] == "chatter" -> parts[0]
+                        else -> parts[1].removePrefix("event_").let { if (it.startsWith("obstacle")) "obstacle${if (parts[2] == "true") " NEAR" else ""}" else it }
+                    }
+                    return "$what ${o.scale / 8}.${o.scale % 8}"
+                }
+                for ((r, a) in rows) {
+                    val classOf = r.device.stages.associateBy { StageKey(it.hazard, it.stage) }
+                    for (key in a.nominal.regressions) {
+                        val deadline = r.deadlines.getValue(key)
+                        val ahead = classOf.getValue(key).let { row -> if (row.hazardClass == "blocked" || (row.stage == Stage.CRITICAL && row.hazardClass in setOf("vehicle/front", "person/front"))) "ahead" else "other" }
+                        val sentences = a.nominalArm.offered.values.filter { key in a.nominalArm.credits[it.id].orEmpty() && it.atMs <= deadline }
+                        val all = a.nominalArm.offered.values.toList()
+                        if (sentences.isEmpty() || sentences.any { it.endAtMs != null }) continue
+                        val cut = sentences.lastOrNull { it.cutAtMs != null }
+                        if (cut != null) {
+                            val by = all.firstOrNull { it.accepted && it.atMs == cut.cutAtMs }
+                            blockers.merge("$ahead cut: ${kind(cut)} by ${by?.let(::kind) ?: "?"}", 1, Int::plus)
+                        } else if (sentences.none { it.accepted }) {
+                            val last = sentences.last()
+                            val holder = all.lastOrNull { it.accepted && it.atMs <= last.atMs && (it.endAtMs ?: Long.MAX_VALUE) > last.atMs && (it.cutAtMs ?: Long.MAX_VALUE) > last.atMs }
+                            blockers.merge("$ahead refused: ${kind(last)} by ${holder?.let(::kind) ?: "? (queued input or expired)"}", 1, Int::plus)
+                        }
+                    }
+                }
+                for ((label, n) in blockers) appendLine("    $label: $n")
+                for ((label, lates) in why) {
+                    val known = lates.filterNot { it.isNaN() }.sorted()
+                    appendLine(String.format(Locale.ROOT, "    %s: %d%s", label, lates.size, if (known.isEmpty()) "" else String.format(Locale.ROOT, "; past the deadline median %.2f s, max %.2f s", known[known.size / 2], known.last())))
+                }
+                appendLine("  losses with no error, count (ahead):")
+                append(lossLines(rows.map { (r, a) -> r to a.nominal }))
+                if (name == LAUNCH) append(stressTraces(rows.map { it.first }) { it.arms.getValue(LAUNCH).nominal })
+                if (name == LAUNCH) {
+                    appendLine(whyNotBeforeCrossing(rows))
+                    append(heardAheadInstead(rows))
+                }
+                if (name == LAUNCH || name == NO_CHANGE) {
+                    val armCounts = rows.map { (r, a) -> countsOf(r, a.nominalArm) }.reduce(PromptCounts.Counts::plus)
+                    val baseCounts = rows.map { (r, a) -> countsOf(r, a.nominalBase) }.reduce(PromptCounts.Counts::plus)
+                    append(countLines(name, rows.map { it.first }, armCounts, baseCounts))
+                }
                 appendLine("  by capture:")
                 for ((r, a) in rows) {
-                    val c = counted(a.full, r.legacy)
+                    val c = counted(a.full, r.production)
                     appendLine("    ${r.id.take(6)}: ${if (a.full.capHit) "stopped" else "settled"}, highest ${a.full.maxBranches}, branch-frames ${a.full.branchFrames}, ${a.nanos / 1_000_000_000} s; counted ${c.total} (ahead ${c.totalFront}), of those not settled ${a.full.undeterminable.size}")
                 }
                 appendLine("  every realization, baseline: ${rows.map { (r, a) -> lines(r, a.full.baseline) }.reduce(Lines::plus).render()}")
@@ -295,10 +485,291 @@ class DetFirstPairedRehearsalTest {
         }
     }
 
+    /** The stages whose deadline falls at or after the first thing the run does not model. */
+    private fun unmodeledOf(r: CaptureResult): Set<StageKey> = r.deadlines.filterValues(r.unmodeled::covers).keys
+
+    private fun countsOf(r: CaptureResult, driver: ProtocolDriver): PromptCounts.Counts = PromptCounts.of(
+        driver.offered.values,
+        driver.credits,
+        object : PromptCounts.Lives {
+            override fun everWithin2m(hazard: String) = r.samples[hazard].orEmpty().any { (it.validPointM ?: Float.MAX_VALUE) <= M1_THRESHOLD_M }
+
+            override fun shorterThan1s(hazard: String) = r.gateFrames[hazard].orEmpty().let { it.isEmpty() || it.last().first - it.first().first < 1_000 }
+        },
+        r.minutes,
+        r.stationaryMinutes,
+        r.sentences::isFallback,
+    )
+
+    private fun countLines(name: String, captures: List<CaptureResult>, arm: PromptCounts.Counts, base: PromptCounts.Counts): String = buildString {
+        fun f(x: Double) = String.format(Locale.ROOT, "%.2f", x)
+        appendLine("  the counting lines, with no error (${f(arm.minutes)} min, stationary ${f(arm.stationaryMinutes)} min):")
+        appendLine("    B4 NEAR or CRITICAL removed by conflict resolution: this arm ${captures.sumOf { it.removedNearOrCritical.getValue(name).first }} frames, ${captures.sumOf { it.removedNearOrCritical.getValue(name).second }} hazards; baseline ${captures.sumOf { it.removedNearOrCritical.getValue(NO_CHANGE).first }} frames, ${captures.sumOf { it.removedNearOrCritical.getValue(NO_CHANGE).second }} hazards (must be 0)")
+        appendLine("    B6, C7 completed per minute: this arm ${f(arm.perMinute)} (${arm.completed}), baseline ${f(base.perMinute)} (${base.completed}), ratio ${f(arm.perMinute / base.perMinute)} (at most $RATE_MAX)")
+        appendLine("    C7 completed per stationary minute: this arm ${f(arm.stationaryPerMinute)} (${arm.completedStationary}), baseline ${f(base.stationaryPerMinute)} (${base.completedStationary}), ratio ${f(arm.stationaryPerMinute / base.stationaryPerMinute)} (at most $RATE_MAX)")
+        appendLine("    B7 regives: sentences ${arm.regivenSentences}, ${f(100.0 * arm.regivenSentences / maxOf(arm.completed, 1))}% of completed (at most 30%); most of one stage ${arm.mostRegivesOfAStage} (at most 1). Stages, reported only: ${arm.regivenStages}, ${f(100.0 * arm.regivenStages / maxOf(arm.completed, 1))}%")
+        appendLine("    metric-only prompts: offered ${arm.metricOnlyOffered}, completed ${arm.metricOnlyCompleted}")
+        appendLine("    C4 metric-only never within 2.0 m: ${arm.metricOnlyNeverWithin2m}, ${f(arm.neverWithin2mPerMinute)} per minute (at most $METRIC_ONLY_FAR_MAX)")
+        appendLine("    C5 metric-only on a track under 1 s: ${arm.metricOnlyShortLived}, ${f(100.0 * arm.metricOnlyShortLived / maxOf(arm.metricOnlyCompleted, 1))}% (at most 5%)")
+        appendLine("    C6 by the revised count: repeats ${arm.repeat} (must be 0); overlaps ${arm.overlap}, periodic repeats ${arm.periodic} (reported only). By the frozen count: ${arm.stagesCreditedAgain} stages in ${arm.promptsCreditedAgain} prompts")
+        appendLine("    D1 path-complex prompts offered: ${arm.pathComplexOffered} (must be 0 with its switch on)")
+        appendLine("    sentences of a wording not measured on recordings: ${arm.fallbackWordings} of ${arm.offered}")
+        appendLine("    untimed offers (frames the device offered nothing on): ${captures.sumOf { it.untimedOffers.getValue(name) }}")
+    }
+
+    private fun lossesIn(r: CaptureResult, run: PairedBranchRun.Result): Map<StageKey, Loss> = buildMap {
+        for (stage in r.production.p) {
+            val key = stage.key
+            val notKept = key in run.regressions || key in run.bothLostApart || key in run.undeterminable
+            Loss.of(notKept, key !in run.undeterminable, run.arm.completionMs(key), r.deadlines.getValue(key), r.unmodeled)?.let { put(key, it) }
+        }
+    }
+
+    private class Tally(val all: Int, val ahead: Int) {
+        override fun toString() = "$all ($ahead)"
+    }
+
+    /**
+     * Each kind of loss over every protected stage, and over those the device finished while the track lived. That second
+     * group is a split for reading, not a judgement: a track ending does not mean the hazard has gone.
+     */
+    private fun lossLines(rows: List<Pair<CaptureResult, PairedBranchRun.Result>>): String = buildString {
+        fun tally(kinds: Set<Loss>, liveOnly: Boolean): Tally {
+            var all = 0
+            var ahead = 0
+            for ((r, run) in rows) {
+                val aheadKeys = r.production.p.filter { it.frontCritical }.mapTo(HashSet()) { it.key }
+                val ends = r.device.stages.associate { StageKey(it.hazard, it.stage) to it.endAt }
+                for ((key, loss) in lossesIn(r, run)) {
+                    if (loss !in kinds) continue
+                    if (liveOnly && r.deadlines.getValue(key) - 500 > ends.getValue(key)) continue
+                    all++
+                    if (key in aheadKeys) ahead++
+                }
+            }
+            return Tally(all, ahead)
+        }
+        for ((name, liveOnly) in listOf("every stage" to false, "device finished while the track lived" to true)) {
+            appendLine("      $name: never ${tally(setOf(Loss.NEVER), liveOnly)}; unknown ${tally(setOf(Loss.UNKNOWN), liveOnly)}; severe delay ${tally(setOf(Loss.SEVERE_DELAY), liveOnly)}; bounded delay ${tally(setOf(Loss.BOUNDED_DELAY), liveOnly)}")
+        }
+    }
+
+    /** The serious losses of a run, by capture: a track's number starts over in each. */
+    private fun seriousIn(r: CaptureResult, run: PairedBranchRun.Result): Set<Pair<String, StageKey>> =
+        lossesIn(r, run).filterValues { it != Loss.BOUNDED_DELAY }.keys.mapTo(HashSet()) { r.id to it }
+
+    /** What a few fixed traces of independent errors do, read as the nominal run is. A pressure check: it says nothing of the traces it does not run. */
+    private fun stressTraces(captures: List<CaptureResult>, nominal: (CaptureResult) -> PairedBranchRun.Result): String = buildString {
+        val aheadKeys = captures.flatMap { r -> r.production.p.filter { it.frontCritical }.map { r.id to it.key } }.toSet()
+        val base = captures.flatMap { seriousIn(it, nominal(it)) }.toSet()
+        val union = HashSet(base)
+        appendLine("  fixed error traces; added and recovered are serious losses against the nominal run:")
+        for (trace in 0 until STRESS_TRACES) {
+            val serious = captures.flatMap { seriousIn(it, it.stress[trace]) }.toSet()
+            union += serious
+            val added = serious - base
+            val recovered = base - serious
+            appendLine("    trace $trace: added ${added.size} (ahead ${added.count { it in aheadKeys }}); recovered ${recovered.size} (ahead ${recovered.count { it in aheadKeys }})")
+            append(lossLines(captures.map { it to it.stress[trace] }))
+        }
+        appendLine("    serious in the nominal run or any trace: ${union.size} (ahead ${union.count { it in aheadKeys }})")
+    }
+
+    /**
+     * The stages a person must look at: never over, severely late or unknown, in the nominal run or any trace, if they are
+     * ahead or the device finished them while the track lived. Times are from the capture's first frame. It stays on this
+     * machine with the captures.
+     */
+    private fun labelList(results: List<CaptureResult>): String = buildString {
+        appendLine("session,hazard,stage,class,ahead,track_lived,appeared_s,track_ended_s,device_finished_s,nearest_m,readings,heard_ahead")
+        for (r in results) {
+            val rowOf = r.device.stages.associateBy { StageKey(it.hazard, it.stage) }
+            val readings = LinkedHashMap<StageKey, MutableList<String>>()
+            val runs = listOf("nominal" to r.arms.getValue(LAUNCH).nominal) + r.stress.mapIndexed { i, run -> "trace$i" to run }
+            val aheadKeys = r.production.p.filter { it.frontCritical }.mapTo(HashSet()) { it.key }
+            for ((name, run) in runs) {
+                for ((key, loss) in lossesIn(r, run)) {
+                    val lived = r.deadlines.getValue(key) - 500 <= rowOf.getValue(key).endAt
+                    if (loss != Loss.BOUNDED_DELAY && (key in aheadKeys || lived)) readings.getOrPut(key) { mutableListOf() } += "$name:$loss"
+                }
+            }
+            for ((key, seen) in readings.entries.sortedBy { rowOf.getValue(it.key).appearedAt }) {
+                val row = rowOf.getValue(key)
+                fun s(ms: Long) = String.format(Locale.ROOT, "%.1f", (ms - r.firstAt) / 1000.0)
+                val nearest = r.samples[key.hazard].orEmpty().mapNotNull { it.validPointM }.minOrNull()?.let { String.format(Locale.ROOT, "%.1f", it) }.orEmpty()
+                val heard = if (seen.any { it.startsWith("nominal:") }) heardAheadWithin(r, key).toString() else ""
+                appendLine("${r.id},${key.hazard},${key.stage},${row.hazardClass},${key in aheadKeys},${r.deadlines.getValue(key) - 500 <= row.endAt},${s(row.appearedAt)},${s(row.endAt)},${s(r.deadlines.getValue(key) - 500)},$nearest,${seen.joinToString(" ")},$heard")
+            }
+        }
+    }
+
+    /**
+     * With no error, whether another warning ahead, as strong as the sentence the device said for [key], ended between the
+     * hazard appearing and the end of the stage's tolerance. A warning about the way ahead may be about another object: it
+     * says the user was told to stop, not that this hazard was named.
+     */
+    private fun heardAheadWithin(r: CaptureResult, key: StageKey): Boolean {
+        val a = r.arms.getValue(LAUNCH)
+        val level = a.nominalBase.offered.values.filter { it.endAtMs != null && key in a.nominalBase.credits[it.id].orEmpty() }.mapNotNull { it.event?.priority }.maxOrNull() ?: return false
+        val from = r.device.stages.first { StageKey(it.hazard, it.stage) == key }.appearedAt
+        val to = r.deadlines.getValue(key) + Loss.BOUND_MS
+        return a.nominalArm.offered.values.any { o ->
+            val end = o.endAtMs
+            val event = o.event
+            end != null && event != null && end in from..to && event.priority >= level &&
+                (event.category == EventCategory.BLOCKED || (event.category == EventCategory.OBSTACLE && DirectionZone.CENTER in event.relatedZones))
+        }
+    }
+
+    /** The prompts of the launch arm with no error that only the metric gate let in and that were said to the end, in the order of [C8_SEED]. */
+    private fun metricOnlyPrompts(results: List<CaptureResult>): List<Pair<CaptureResult, ProtocolDriver.Offered>> =
+        results.flatMap { r -> r.arms.getValue(LAUNCH).nominalArm.offered.values.filter { it.endAtMs != null && it.event?.isMetricOnly == true }.sortedBy { it.atMs }.map { r to it } }
+            .shuffled(java.util.Random(C8_SEED))
+
+    /** C8's list in the form of the label list: all of them up to [C8_SAMPLE], above that the first [C8_SAMPLE] of the seeded order. */
+    private fun metricOnlyLabelList(results: List<CaptureResult>): String = buildString {
+        appendLine("session,hazard,stage,class,ahead,track_lived,appeared_s,track_ended_s,device_finished_s,nearest_m,readings,heard_ahead")
+        for ((r, o) in metricOnlyPrompts(results).take(C8_SAMPLE)) {
+            val event = o.event!!
+            val hazard = event.components.first().primaryTrackId.toString()
+            fun s(ms: Long) = String.format(Locale.ROOT, "%.1f", (ms - r.firstAt) / 1000.0)
+            val lastSeen = r.gateFrames[hazard].orEmpty().lastOrNull()?.first ?: o.endAtMs!!
+            val nearest = r.samples[hazard].orEmpty().mapNotNull { it.validPointM }.minOrNull()?.let { String.format(Locale.ROOT, "%.1f", it) }.orEmpty()
+            appendLine("${r.id},$hazard,prompt at ${s(o.atMs)},${event.messageKey},${DirectionZone.CENTER in event.relatedZones},${o.endAtMs!! <= lastSeen},${s(o.atMs)},${s(lastSeen)},${s(o.endAtMs!!)},$nearest,metric only,")
+        }
+    }
+
+    /** Where the frames of the label lists are: each capture's times, and the boxes of the tracks on them. */
+    private fun labelFrames(results: List<CaptureResult>): String = buildString {
+        appendLine("session,seq,t_s,hazard,x,y,w,h")
+        val listed = (labelList(results).lineSequence().drop(1) + metricOnlyLabelList(results).lineSequence().drop(1)).filter { it.isNotBlank() }.map { it.split(',') }.map { it[0] to it[1] }.toSet()
+        for (r in results) {
+            for ((seq, t) in r.frameTimes) appendLine(String.format(Locale.ROOT, "%s,%d,%.3f,,,,,", r.id, seq, (t - r.firstAt) / 1000.0))
+            for ((hazard, boxes) in r.trackBoxes) {
+                if (r.id to hazard !in listed) continue
+                for ((seq, box) in boxes) appendLine(String.format(Locale.ROOT, "%s,%d,,%s,%.4f,%.4f,%.4f,%.4f", r.id, seq, hazard, box.x, box.y, box.width, box.height))
+            }
+        }
+    }
+
+    /** Stages lost ahead, with no error, where the user heard another warning ahead of the same level or higher anyway. */
+    private fun heardAheadInstead(rows: List<Pair<CaptureResult, ArmResult>>): String = buildString {
+        var lostAhead = 0
+        var heard = 0
+        for ((r, a) in rows) {
+            val rowOf = r.device.stages.associateBy { StageKey(it.hazard, it.stage) }
+            for (key in a.nominal.regressions) {
+                val row = rowOf.getValue(key)
+                val ahead = row.hazardClass == "blocked" || (row.stage == Stage.CRITICAL && row.hazardClass in setOf("vehicle/front", "person/front"))
+                if (!ahead) continue
+                lostAhead++
+                val deadline = r.deadlines.getValue(key)
+                val level = a.nominalBase.offered.values.filter { key in a.nominalBase.credits[it.id].orEmpty() }.mapNotNull { it.event?.priority }.maxOrNull() ?: continue
+                val covered = a.nominalArm.offered.values.any { o ->
+                    val end = o.endAtMs
+                    val event = o.event
+                    end != null && event != null && end in (deadline - HEARD_WITHIN_MS)..deadline && event.priority >= level &&
+                        DirectionZone.CENTER in event.relatedZones && event.category in setOf(EventCategory.OBSTACLE, EventCategory.BLOCKED)
+                }
+                if (covered) heard++
+            }
+        }
+        appendLine("  stages lost ahead with no error: $lostAhead; of them, another warning ahead of that level or higher ended within ${HEARD_WITHIN_MS / 1000} s before the deadline: $heard")
+    }
+
+    /** For each hazard ahead with a bracketed crossing of 2.0 m: what kept its first prompt from ending before it. */
+    private fun whyNotBeforeCrossing(rows: List<Pair<CaptureResult, ArmResult>>): String = buildString {
+        appendLine("  why a first prompt ahead is not over before 2.0 m, with no error (a sentence is taken as $FIRST_SENTENCE_MS ms):")
+        val counts = java.util.TreeMap<String, Int>()
+        val secondsSeen = HashMap<String, MutableList<Double>>()
+        for ((r, a) in rows) {
+            for (lead in r.device.leads) {
+                if (lead.stage != Stage.FIRST || lead.thresholdM != M1_THRESHOLD_M) continue
+                val name = when (lead.hazardClass) {
+                    "person/front" -> "person"
+                    "vehicle/front" -> "vehicle"
+                    else -> continue
+                }
+                val key = StageKey(lead.hazard, Stage.FIRST)
+                val samples = r.samples[lead.hazard].orEmpty()
+                val completion = a.nominal.arm.completionMs(key)
+                val result = LeadTime.classify(samples, M1_THRESHOLD_M, completion?.let { it * 1_000_000 })
+                val crossing = result.crossing ?: continue
+                val crossAt = crossing.t1Nanos / 1_000_000
+                val frames = r.gateFrames[lead.hazard].orEmpty()
+                val latestStart = crossAt - FIRST_SENTENCE_MS
+                val firstSeen = frames.firstOrNull()?.first
+                val admitted = frames.firstOrNull { it.second == null }?.first
+                val heldAt = frames.lastOrNull { it.first <= latestStart }?.second
+                val sentences = a.nominalArm.offered.values.filter { key in a.nominalArm.credits[it.id].orEmpty() && it.atMs <= latestStart }
+                val why = when {
+                    result.outcome == LeadTime.Outcome.BEFORE -> "over before the crossing"
+                    firstSeen == null || firstSeen > latestStart -> "first tracked too late to say it"
+                    admitted == null -> "never admitted: $heldAt"
+                    admitted > latestStart -> "admitted too late, at the last moment held by: $heldAt"
+                    sentences.isEmpty() -> "admitted in time, not offered in time: the cooldown, or a higher prompt first"
+                    sentences.any { it.endAtMs != null } -> "said in time by the model's clock but over after t1"
+                    sentences.any { it.cutAtMs != null } -> "offered in time, then cut off"
+                    sentences.any { it.accepted } -> "offered in time, not over"
+                    else -> "offered in time, refused"
+                }
+                counts.merge("$name: $why", 1, Int::plus)
+                if (firstSeen != null) secondsSeen.getOrPut(name) { mutableListOf() } += (crossAt - firstSeen) / 1000.0
+            }
+        }
+        for ((label, n) in counts) appendLine("    $label: $n")
+        for ((name, seen) in secondsSeen) {
+            val sorted = seen.sorted()
+            appendLine(String.format(Locale.ROOT, "    %s: tracked before the crossing, s: p25 %.1f, median %.1f, p75 %.1f", name, sorted[sorted.size / 4], sorted[sorted.size / 2], sorted[sorted.size * 3 / 4]))
+        }
+    }
+
+    /** One arm's runs on one capture: with no error, and within ε, on their own kernels, with drivers of their own. */
+    private inner class ArmRuns(arm: Arm, analysis: AnalysisConfig, durations: SentenceDurations, queued: List<SpeakerModel.Queued>, targets: List<PairedBranchRun.Target>, watches: List<PairedBranchRun.Watch>) {
+        private val off = analysis.copy(detFirst = DetFirstConfig())
+        private val on = analysis.copy(detFirst = arm.detFirst)
+        private val offScale = queued.onSpeechScale(DetFirstConfig())
+        private val onScale = queued.onSpeechScale(arm.detFirst)
+
+        private val noError = ClosedLoopSpeakerBranches({ 0 }, heldAfterDone = false, frameSkewMs = 0)
+        private val withError = ClosedLoopSpeakerBranches(durations::epsilonMs, heldAfterDone = true, frameSkewMs = ClosedLoopSpeakerBranches.FRAME_SKEW_MS)
+        private val nominalBase = ProtocolDriver(noError, off, durations)
+        private val nominalArm = ProtocolDriver(noError, on, durations, arm.alteration())
+        private val fullBase = ProtocolDriver(withError, off, durations)
+        private val fullArm = ProtocolDriver(withError, on, durations, arm.alteration())
+
+        val nominalLog get() = nominalArm to nominalBase
+
+        val nominal = PairedBranchRun(
+            noError, targets, offScale, watches, maxBranches = MAX_BRANCHES, maxBranchFrames = MAX_BRANCH_FRAMES, queuedForArm = onScale,
+            startExtra = nominalBase.startExtra(),
+            startCooldown = { if (it) nominalArm.startCooldown() else nominalBase.startCooldown() },
+            startArmExtra = nominalArm.startExtra(),
+        )
+        val full = PairedBranchRun(
+            withError, targets, offScale, watches, maxBranches = MAX_BRANCHES, maxBranchFrames = MAX_BRANCH_FRAMES, queuedForArm = onScale,
+            startExtra = fullBase.startExtra(),
+            startCooldown = { if (it) fullArm.startCooldown() else fullBase.startCooldown() },
+            startArmExtra = fullArm.startExtra(),
+        )
+        var nanos = 0L
+
+        fun onScene(scene: RegressionReplay.SceneFrame) {
+            val t = scene.decidedAt
+            for (driver in listOf(nominalBase, nominalArm)) driver.onScene(scene)
+            nominal.onFrame(t, nominalBase, nominalArm)
+            val before = System.nanoTime()
+            for (driver in listOf(fullBase, fullArm)) driver.onScene(scene)
+            full.onFrame(t, fullBase, fullArm)
+            nanos += System.nanoTime() - before
+        }
+    }
+
     private fun rehearse(
         session: CaptureSession,
         result: PromptPolicyCaptureEvaluation.Result,
         durations: SpeakerDurations,
+        measuredLabel: String,
         preset: PhoneGeometrySettings,
     ): CaptureResult {
         val device = checkNotNull(result.evaluation) { "${result.id}: not evaluable" }
@@ -310,42 +781,97 @@ class DetFirstPairedRehearsalTest {
         val geometry = GroundContactEvaluation(preset).geometrySource(session, preset) as GroundContactEvaluation.GeometrySource.Available
         val lost = block.stats.firstLostSeq
         fun classMap(record: RegressionFrameRecord) = CaptureSessionReader.classMap(session, record)
-        val generator = EventGenerator(analysis)
 
-        val arms = listOf(NoChange(), EarlyAhead(), MutedVehicles(), Chatter())
+        val firing = mutableSetOf<Long>()
+        var nextChatter = Long.MIN_VALUE
         RegressionReplay(perception, analysis, semantics).replayScenes(session.regressionFrames, ::classMap, lost, geometry.evaluation, BirthOrderTrackIds()) { scene ->
-            arms.forEach { it.prepare(scene) }
+            if (scene.decidedAt >= nextChatter) {
+                nextChatter = scene.decidedAt + 10_000
+                firing += scene.record.seq
+            }
         }
 
+        val deviceOffered = inputs.offers.mapTo(HashSet()) { it.atMs }
+        val overruns = frameOverruns(session)
         val targets = ProtectedStages.of(device).map { PairedBranchRun.Target(StageKey(it.hazard, it.stage), it.completedAtNanos!! / 1_000_000 + 500, it.appearedAt) }
-        val watches = device.stages.filter { !it.ambiguousOnly && (it.stage != Stage.FIRST || !it.trackless) }.map { PairedBranchRun.Watch(StageKey(it.hazard, it.stage), it.endAt) }
-        val wordings = HashMap<String, Wording>()
-        val epsilon = { id: String ->
-            val measuredWording = wordings[id]?.let { durations.of(it).first == OTHER_C } ?: (!id.startsWith("early") && !id.startsWith("chatter"))
-            if (measuredWording) SpeakerModel.END_ERROR_BOUND_MS else 2 * SpeakerModel.END_ERROR_BOUND_MS
-        }
-        fun noError() = ClosedLoopSpeakerBranches({ 0 }, heldAfterDone = false, frameSkewMs = 0)
-        val nominalFirst = PairedBranchRun(noError(), emptyList(), inputs.queued, targets.map { PairedBranchRun.Watch(it.key, Long.MAX_VALUE) })
-        val nominals = arms.associateWith { PairedBranchRun(noError(), targets, inputs.queued, watches) }
-        val fulls = arms.associateWith {
-            PairedBranchRun(
-                ClosedLoopSpeakerBranches(epsilon, heldAfterDone = true, frameSkewMs = ClosedLoopSpeakerBranches.FRAME_SKEW_MS),
-                targets, inputs.queued, watches, maxBranches = MAX_BRANCHES, maxBranchFrames = MAX_BRANCH_FRAMES,
+        val watches = device.stages.filter { !it.ambiguousOnly }.map { PairedBranchRun.Watch(StageKey(it.hazard, it.stage), it.endAt) }
+        val sentences = SentenceDurations(durations, measuredLabel)
+        val arms = listOf(
+            Arm(NO_CHANGE, DetFirstConfig()),
+            Arm(LAUNCH, DetFirstConfig.LAUNCH),
+            Arm(MUTED, DetFirstConfig()) { MutedVehicles() },
+            Arm(CHATTER, DetFirstConfig()) { Chatter(firing) },
+        ) + SINGLE_SWITCHES.map { (name, config) -> Arm(name, config) }
+        val stressRuns = (0 until STRESS_TRACES).map { trace ->
+            val traced = SentenceDurations(durations, measuredLabel, errorTrace = trace)
+            val kernel = ClosedLoopSpeakerBranches({ 0 }, heldAfterDone = false, frameSkewMs = 0)
+            val off = ProtocolDriver(kernel, analysis, traced)
+            val on = ProtocolDriver(kernel, analysis.copy(detFirst = DetFirstConfig.LAUNCH), traced)
+            Triple(
+                off,
+                on,
+                PairedBranchRun(
+                    kernel, targets, inputs.queued.onSpeechScale(DetFirstConfig()), watches, maxBranches = 1, maxBranchFrames = MAX_BRANCH_FRAMES, queuedForArm = inputs.queued.onSpeechScale(DetFirstConfig.LAUNCH),
+                    startExtra = off.startExtra(),
+                    startCooldown = { armSide -> if (armSide) on.startCooldown() else off.startCooldown() },
+                    startArmExtra = on.startExtra(),
+                ),
             )
         }
-        val spent = HashMap<StandIn, Long>()
+        val runs = arms.associateWith { ArmRuns(it, analysis, sentences, inputs.queued, targets, watches) }
 
-        val merger = EventMerger()
+        // The baseline with no error, for what M5 asks of it: does it reproduce the device?
+        val noError = ClosedLoopSpeakerBranches({ 0 }, heldAfterDone = false, frameSkewMs = 0)
+        val baseA = ProtocolDriver(noError, analysis, sentences)
+        val baseB = ProtocolDriver(noError, analysis, sentences)
+        val forever = targets.map { PairedBranchRun.Watch(it.key, Long.MAX_VALUE) }
+        val baselineFirst = PairedBranchRun(noError, emptyList(), inputs.queued.onSpeechScale(DetFirstConfig()), forever, startExtra = baseA.startExtra())
+
+        // The legacy path with no error, by this class's own code, against the frozen model.
+        val generator = EventGenerator(analysis)
         val resolver = EventConflictResolver()
+        val merger = EventMerger()
         val episodes = StateEpisodes()
         val legacy = ClosedLoopRun(analysis, durations, inputs.queued, ClosedLoopRun.Protocol.LEGACY)
+        val legacyFirst = PairedBranchRun(noError, emptyList(), inputs.queued, forever)
         val births = BirthOrderTrackIds()
         val samples = HashMap<String, MutableList<LeadTime.Sample>>()
+        val gateFrames = HashMap<String, MutableList<Pair<Long, String?>>>()
+        var firstAt: Long? = null
+        var lastAt = 0L
+        var stationaryMs = 0L
+        var frames = 0
+        val frameTimes = ArrayList<Pair<Long, Long>>()
+        val trackBoxes = HashMap<String, MutableList<Pair<Long, NormalizedRect>>>()
+        val removed = HashMap<String, Pair<Int, MutableSet<String>>>()
+        val conflictOf = mapOf(NO_CHANGE to (generator to EventConflictResolver()))
+        val launchGenerator = EventGenerator(analysis.copy(detFirst = DetFirstConfig.LAUNCH))
+        val launchGate = DetFirstConfig.LAUNCH.metricGate!!
         RegressionReplay(perception, analysis, semantics).replayScenes(session.regressionFrames, ::classMap, lost, geometry.evaluation, births) { scene ->
             val pitch = geometry.evaluation(scene.record)?.pitchDownDegrees
             legacy.onScene(scene, pitch)
             val t = scene.decidedAt
-            for (o in scene.snapshot.obstacles) LeadTime.freshSample(o, scene.record.seq, pitch)?.let { samples.getOrPut(o.id.toString()) { mutableListOf() } += it }
+            frames++
+            frameTimes += scene.record.seq to t
+            for (o in scene.snapshot.obstacles) trackBoxes.getOrPut(o.id.toString()) { mutableListOf() } += scene.record.seq to o.boundingBox
+            if (firstAt == null) firstAt = t else if (scene.stationary) stationaryMs += t - lastAt
+            lastAt = t
+            for ((name, pair) in conflictOf + (LAUNCH to (launchGenerator to EventConflictResolver(DetFirstConfig.LAUNCH.keepBlockedWithObstacle)))) {
+                val (eventsFrom, resolve) = pair
+                val all = eventsFrom.generate(scene.snapshot, t)
+                val kept = resolve.resolve(all).toSet()
+                val gone = all.filter { it !in kept && (it.isNear || it.priority == EventPriority.CRITICAL) }
+                if (gone.isNotEmpty()) {
+                    val (frames, hazards) = removed[name] ?: (0 to mutableSetOf())
+                    hazards += gone.flatMap { event -> event.components.ifEmpty { null }?.map { it.primaryTrackId.toString() } ?: listOf(event.messageKey) }
+                    removed[name] = (frames + 1) to hazards
+                }
+            }
+            for (o in scene.snapshot.obstacles) {
+                LeadTime.freshSample(o, scene.record.seq, pitch)?.let { samples.getOrPut(o.id.toString()) { mutableListOf() } += it }
+                val hold = if (launchGenerator.passesTodaysGates(o)) null else launchGenerator.metricGateHold(o, launchGate)
+                gateFrames.getOrPut(o.id.toString()) { mutableListOf() } += scene.decidedAt to hold
+            }
             for (event in generator.generate(scene.snapshot, t)) {
                 if (event.category in StateEpisodes.TRACKLESS) episodes.observe(StateEpisodes.keyOf(event), t, scene.record.seq)
             }
@@ -358,53 +884,134 @@ class DetFirstPairedRehearsalTest {
                 override fun startObserving() = Unit
                 override fun stopObserving() = Unit
             }
-            fun decide(cooldown: CooldownManager, arm: StandIn?): PairedBranchRun.Decision? {
-                val primary = DecideEventsUseCase(generator, resolver, merger, cooldown, sensors, clock = { t })(scene.snapshot).firstOrNull()
-                if (primary == null || arm?.withholds(primary) == true) {
-                    primary?.let { cooldown.revoke(it.id) }
-                    return arm?.extra(scene, durations)?.let { PairedBranchRun.Decision(it, emptyList(), onAccepted = {}, onRefused = {}) }
-                }
+            val decide = PairedBranchRun.Decider { cooldown: CooldownManager ->
+                val primary = DecideEventsUseCase(generator, resolver, merger, cooldown, sensors, clock = { t })(scene.snapshot).firstOrNull() ?: return@Decider null
                 val wording = primary.messageKey to primary.isNear
                 val id = "${scene.record.seq}|${primary.messageKey}|${primary.isNear}|${primary.priority.value}|${primary.relatedZones}"
-                wordings[id] = wording
                 val credits = if (primary.category in StateEpisodes.TRACKLESS) {
                     listOfNotNull(episodes.current(StateEpisodes.keyOf(primary), t)?.let { StageKey(it.id, Stage.FIRST) })
                 } else {
                     StageCredit.credits(StageCredit.spoken(primary), groups, generator).filter { it.counts }.map { StageKey(it.trackId.toString(), it.stage) }
                 }
-                return PairedBranchRun.Decision(
+                PairedBranchRun.Decision(
                     SpeakerModel.Offer(t, id, primary.priority.value, primary.expiresAt, durations.of(wording).second),
                     credits,
                     onAccepted = { it.confirm(primary.id) },
                     onRefused = { it.revoke(primary.id) },
                 )
             }
-            nominalFirst.onFrame(t, { decide(it, null) }, { decide(it, null) })
-            for ((arm, run) in nominals) run.onFrame(t, { decide(it, null) }, { decide(it, arm) })
-            for ((arm, run) in fulls) {
-                val before = System.nanoTime()
-                run.onFrame(t, { decide(it, null) }, { decide(it, arm) })
-                spent.merge(arm, System.nanoTime() - before, Long::plus)
+            legacyFirst.onFrame(t, decide, decide)
+            baseA.onScene(scene)
+            baseB.onScene(scene)
+            baselineFirst.onFrame(t, baseA, baseB)
+            runs.values.forEach { it.onScene(scene) }
+            for ((off, on, run) in stressRuns) {
+                off.onScene(scene)
+                on.onScene(scene)
+                run.onFrame(t, off, on)
             }
         }
+        val baselineCompletions = baselineFirst.finish().baseline
+        val frozenLegacy = ProtectedStages.Reproduction.of(device, legacy.finish(births))
         return CaptureResult(
             result.id,
-            ProtectedStages.Reproduction.of(device, legacy.finish(births)),
+            frozenLegacy.withModel(targets.associate { it.key to baselineCompletions.completionMs(it.key)?.let { ms -> ms * 1_000_000 } }),
             device,
             targets.associate { it.key to it.deadlineMs },
-            nominalFirst.finish().baseline,
+            legacyFirst.finish().baseline,
+            frozenLegacy,
             samples,
-            arms.associate { it.name to ArmResult(nominals.getValue(it).finish(), fulls.getValue(it).finish(), spent[it] ?: 0) },
+            runs.entries.associate { (arm, r) -> arm.name to ArmResult(r.nominal.finish(), r.full.finish(), r.nanos, r.nominalLog.first, r.nominalLog.second) },
+            gateFrames,
+            firstAt ?: 0L,
+            frameTimes,
+            trackBoxes,
+            frames,
+            ((lastAt - (firstAt ?: lastAt)) / 60_000.0),
+            stationaryMs / 60_000.0,
+            arms.map { it.name }.associateWith { name -> removed[name]?.let { it.first to it.second.size } ?: (0 to 0) },
+            stressRuns.map { it.third.finish() },
+            UnmodeledFrom(inputs.windows.map { it.first }, overruns),
+            runs.entries.associate { (arm, r) -> arm.name to r.nominalLog.first.offered.values.count { it.event != null && it.atMs !in deviceOffered } },
+            sentences,
         )
     }
 
-    private companion object {
-        const val PRESET_HEIGHT_M = 1.15f
-        const val OTHER_C = "other C captures"
-        const val EARLY_BOTTOM_Y = 0.45f
-        const val M1_THRESHOLD_M = 2.0f
+    /** Frames whose prompt took past the branches' skew to reach the speaker or to flush it. */
+    private fun frameOverruns(session: CaptureSession): List<Long> {
+        val records = session.utterances.sortedBy { it.elapsedRealtimeNanos }
+        val first = HashMap<String, Double>()
+        for (r in records) if (r.event == UtteranceRecordEvents.SUBMITTED || r.event == UtteranceRecordEvents.REFUSED) first.putIfAbsent(r.logicalId ?: r.attemptId, r.elapsedRealtimeNanos / 1e6)
+        val decisions = session.regressionFrames.filter { it.events.isNotEmpty() }.mapNotNull { f -> f.clocks[RegressionClocks.DECIDE]?.lastOrNull()?.let { it to f } }.sortedBy { it.first }
+        val over = mutableListOf<Long>()
+        for ((at, frame) in decisions) first[frame.events.first().id]?.let { if (it - at > ClosedLoopSpeakerBranches.FRAME_SKEW_MS) over += at.toLong() }
+        for (r in records) {
+            if (r.event != UtteranceRecordEvents.SUPERSEDED) continue
+            val now = r.elapsedRealtimeNanos / 1e6
+            decisions.lastOrNull { it.first <= now }?.let { (at, _) -> if (now - at > ClosedLoopSpeakerBranches.FRAME_SKEW_MS) over += at.toLong() }
+        }
+        return over
+    }
 
-        const val MAX_BRANCHES = 4_000_000
-        const val MAX_BRANCH_FRAMES = 2_000_000_000L
+    private companion object {
+        val PRESET_HEIGHT_M = System.getProperty("sailens.m3a.phoneHeight").orEmpty().toFloatOrNull() ?: 1.15f
+        const val HEARD_WITHIN_MS = 5_000L
+        const val STRESS_TRACES = 4
+
+        /** What walking 1.2 m/s covers in the time to take in a warning and stop: below it a warning comes too late to act on. */
+        const val USEFUL_WARNING_M = 1.0f
+        const val OTHER_C = "other C captures"
+        const val C_TABLE = "c table"
+        const val M1_THRESHOLD_M = 2.0f
+        const val LABELLED_NOT_HEARD_MAX = 3
+        const val LABELLED_NEEDED_AHEAD_MAX = 8
+        const val RATE_MAX = 1.40
+        const val METRIC_ONLY_FAR_MAX = 1.5
+        const val C8_SAMPLE = 60
+        const val MIN_DENOMINATOR = 20
+        val VALID_LABELS = setOf("need", "no", "false", "unknown")
+        const val C8_SEED = 20_261_103L
+
+        /** The labels a person gave the label list, by its id, when `-PreplayLabels` names the exported file. */
+        val LABELS: Map<String, String>? = System.getProperty("sailens.replay.labels").orEmpty().takeIf { it.isNotBlank() }?.let { path ->
+            File(path).readLines().drop(1).filter { it.isNotBlank() }.associate { line ->
+                val fields = line.split(',')
+                fields[0].removeSurrounding("\"") to fields[5]
+            }
+        }
+        const val FIRST_SENTENCE_MS = 1_250L
+        val NOMINAL_ONLY = System.getProperty("sailens.replay.singleSwitches") in setOf("nominal", "launch", "without")
+        val MAX_BRANCHES = if (NOMINAL_ONLY) 1 else 1_000_000
+        const val MAX_BRANCH_FRAMES = 500_000_000L
+
+        const val NO_CHANGE = "no change"
+        const val LAUNCH = "launch"
+        const val MUTED = "every vehicle prompt withheld"
+        const val CHATTER = "a top-priority sentence every 10 s"
+
+        /** For diagnosis: each switch alone, with what it needs. */
+        val SINGLE_SWITCHES: List<Pair<String, DetFirstConfig>> = if (System.getProperty("sailens.replay.singleSwitches") in setOf(null, "launch")) {
+            emptyList()
+        } else if (System.getProperty("sailens.replay.singleSwitches") == "without") {
+            val launch = DetFirstConfig.LAUNCH
+            listOf(
+                "launch without proximityEscalation" to launch.copy(proximityEscalation = false),
+                "launch without retryInterrupted" to launch.copy(retryInterrupted = false),
+                "launch without keepBlockedWithObstacle" to launch.copy(keepBlockedWithObstacle = false),
+                "launch without nearMeters" to launch.copy(nearMeters = null),
+                "launch without pathComplexOff" to launch.copy(pathComplexOff = false),
+                "launch without metricGate" to launch.copy(metricGate = null, nearMeters = null),
+            )
+        } else {
+            listOf(
+                "proximityEscalation" to DetFirstConfig(proximityEscalation = true),
+                "speechRank" to DetFirstConfig(speechRank = true),
+                "retryInterrupted" to DetFirstConfig(retryInterrupted = true),
+                "keepBlockedWithObstacle" to DetFirstConfig(keepBlockedWithObstacle = true),
+                "metricGate" to DetFirstConfig(speechRank = true, metricGate = MetricGateConfig()),
+                "nearMeters" to DetFirstConfig(speechRank = true, metricGate = MetricGateConfig(), nearMeters = 2.0f),
+                "pathComplexOff" to DetFirstConfig(pathComplexOff = true),
+            )
+        }
     }
 }
