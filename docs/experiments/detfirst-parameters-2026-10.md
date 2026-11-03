@@ -99,23 +99,31 @@ Run by the user, on two builds; no video or places here.
 
 ## 8. Opening S
 
-Only after both lines of the assignment file are filled in. The first command runs once, the second at each of the three heights, with `<sealed>` as `sailens-captures\detfirst-d18\sealed`:
+Only after both lines of the assignment file are filled in. The first two commands run once each, the third at each of the three heights, with `<sealed>` as `sailens-captures\detfirst-d18\sealed`:
 
 ```
 gradlew :sailens-guidance:testDebugUnitTest --tests "*PromptPolicyBaselineTest*" -PreplayCapture=<sealed> -PunsealCapture -Pm3aPhoneHeight=1.15
+gradlew :sailens-guidance:testDebugUnitTest --tests "*DetFirstRehearsalTest*" -PreplayCapture=<sealed> -PunsealCapture --rerun
 gradlew :sailens-guidance:testDebugUnitTest --tests "*DetFirstPairedRehearsalTest*" -PreplayCapture=<sealed> -PunsealCapture [-Pm3aPhoneHeight=1.05|1.25] -PreplaySingleSwitches=launch --rerun
 ```
 
-The second writes `detfirst-paired.txt`, `detfirst-label-list.csv`, `detfirst-label-frames.csv` and `detfirst-c8-list.csv`. After the user labels the clips, it runs once more with `-PreplayLabels=<the exported file>` so a1 and a2 have a verdict. C8 is scored apart. If S does not pass, the switch is not flipped; the thresholds cannot be changed and judged again.
+- The first is the open-loop model calibration (the lines of section 3 other than A12), the second A12 (at the recorded 1.2 m), both on the frozen C table.
+- Before computing any metric, each of the three entries checks that it reads exactly the whole of S: all 13 captures, none twice, no other capture, each complete and replaying with no problem. Otherwise nothing counts and nothing is reported.
+- The third writes `detfirst-paired.txt`, `detfirst-label-list.csv`, `detfirst-label-frames.csv` and `detfirst-c8-list.csv`. After the user labels the clips, it runs once more at the same commit with `-PreplayLabels=<the exported file>` so a1 and a2 have a verdict. That rerun is part of the same acceptance, not another opening of S.
+- The labels cover the whole list, each one of need / no need / false detection / cannot tell; with a blank or any other value, a1 and a2 do not pass.
+- A share over a denominator below 20 is undeterminable under R5 and does not pass.
+- The reports, lists, labels and C8 results of each height are kept apart.
+
+**What the results mean:**
+
+- If any substantive line or standing check fails, the switch is not flipped. This S cannot be used to pass after a change to the code or the thresholds.
+- B8's second case (regive after an interruption) is no precondition for opening S, but it is still a hard gate before the switch is flipped. If it fails later and frozen code has to change, this S cannot vouch for the changed version.
 
 ## 9. What is frozen
 
-The 6 files of threshold document section 3.4 stay byte-identical to `5418a35` (`FrozenEvaluationFilesTest`). **Also frozen, at this document's commit:**
+The 6 files of threshold document section 3.4 stay byte-identical to `5418a35` (`FrozenEvaluationFilesTest`).
 
-- the closed-loop evaluation files under `sailens-guidance/src/test/java/com/sailens/guidance/evaluation/`: `ClosedLoopSpeakerBranches.kt`, `ClosedLoopRun.kt`, `FrozenSpeakerInputs.kt`, `SupplementaryTtsDurations.kt`, `ProtocolDriver.kt`, `PairedBranchRun.kt`, `PromptCounts.kt`, `ProtectedStages.kt`, `DetFirstPairedRehearsalTest.kt`;
-- the production code and parameters of sections 1 and 2.
-
-Any change to one means rehearsing on C again; once S is open nothing can change.
+**Also frozen is the commit the assignment file names, as a whole**: everything in the repository at that commit, production code, evaluation code, the acceptance entries, build scripts and Gradle wiring alike, with no list of files. S is opened on a build of that commit with a clean working tree. Any change means rehearsing on C again; once S is open nothing can change.
 
 ## 10. Known limits
 

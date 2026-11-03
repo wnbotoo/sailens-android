@@ -99,23 +99,31 @@ X3、X5 和越过 δ 的帧不恢复：之后的阶段算未知。C 上它们都
 
 ## 8. 打开 S 的命令
 
-分配表两行都填上之后才能跑。第一条跑一次，第二条三个机高各一次；把 `<sealed>` 换成 `sailens-captures\detfirst-d18\sealed`：
+分配表两行都填上之后才能跑。前两条各跑一次，第三条三个机高各一次；把 `<sealed>` 换成 `sailens-captures\detfirst-d18\sealed`：
 
 ```
 gradlew :sailens-guidance:testDebugUnitTest --tests "*PromptPolicyBaselineTest*" -PreplayCapture=<sealed> -PunsealCapture -Pm3aPhoneHeight=1.15
+gradlew :sailens-guidance:testDebugUnitTest --tests "*DetFirstRehearsalTest*" -PreplayCapture=<sealed> -PunsealCapture --rerun
 gradlew :sailens-guidance:testDebugUnitTest --tests "*DetFirstPairedRehearsalTest*" -PreplayCapture=<sealed> -PunsealCapture [-Pm3aPhoneHeight=1.05|1.25] -PreplaySingleSwitches=launch --rerun
 ```
 
-第二条写出 `detfirst-paired.txt`、`detfirst-label-list.csv`、`detfirst-label-frames.csv`、`detfirst-c8-list.csv`。用户看片段标注之后，带 `-PreplayLabels=<导出的文件>` 再跑一次，a1、a2 才有判定。C8 的结果另算。S 不过就不翻开关；不能改门槛再判。
+- 第一条是开环的模型校准（第 3 节里 A12 以外的各项），第二条是 A12（录制机高 1.2 m），都用冻结的 C 时长表。
+- 三个入口在算任何指标之前，都先核对读到的正好是完整的 S：13 段都在，没有重复，没有别的录制，每段都完整、回放没有问题。不满足就不算，什么都不出。
+- 第三条写出 `detfirst-paired.txt`、`detfirst-label-list.csv`、`detfirst-label-frames.csv`、`detfirst-c8-list.csv`。用户看片段标注之后，用同一个提交带 `-PreplayLabels=<导出的文件>` 再跑一次，a1、a2 才有判定。这次重跑属于同一次验收，不算再打开 S。
+- 标注覆盖整张清单，每条只能是“需要 / 不需要 / 误检 / 看不清”四种之一；有空值或别的值，a1、a2 不通过。
+- 分母不足 20 的比例按 R5 记不可判定，不通过。
+- 三个机高的报告、清单、标注文件和 C8 的结果分别留档。
+
+**结果怎么用：**
+
+- 实质验收或常设检查有一项失败，就不翻开关。不能改代码或门槛后，再用这批 S 取得通过。
+- B8 第 2 项（被打断后重给）不是打开 S 的前置条件，但仍是翻开关前的硬门槛。如果它之后失败，需要改冻结的代码，这批 S 就不能为改后的版本背书。
 
 ## 9. 冻结范围
 
-原来的 6 个文件（门槛文档第 3.4 节）仍和 `5418a35` 逐字节相同（`FrozenEvaluationFilesTest`）。**另外冻结这份文档的提交上的**：
+原来的 6 个文件（门槛文档第 3.4 节）仍和 `5418a35` 逐字节相同（`FrozenEvaluationFilesTest`）。
 
-- `sailens-guidance/src/test/java/com/sailens/guidance/evaluation/` 下闭环评估的文件：`ClosedLoopSpeakerBranches.kt`、`ClosedLoopRun.kt`、`FrozenSpeakerInputs.kt`、`SupplementaryTtsDurations.kt`、`ProtocolDriver.kt`、`PairedBranchRun.kt`、`PromptCounts.kt`、`ProtectedStages.kt`、`DetFirstPairedRehearsalTest.kt`；
-- 上面第 1、2 节列的生产代码和参数。
-
-改任何一处都要重新做 C 预演；S 打开之后就不能改。
+**另外冻结的是写进分配表的那个提交本身**：仓库在这个提交上的全部内容，包括生产代码、评估代码、验收入口、构建脚本和 Gradle 接线，不另列文件清单。打开 S 时就用这个提交构建，工作区不能有改动。改任何一处都要重新做 C 预演；S 打开之后就不能改。
 
 ## 10. 已知局限
 
