@@ -21,6 +21,10 @@ set (C) only**; no tool that shows results has opened S.
 >
 > **Revision 7 (an R6 revision, 2026-11-03):** changes only how §4.4 counts C6; the threshold is still 0, and the reasons and C
 > evidence are at the end of §4.4. The GPT second review is a Go and the user agreed (2026-11-03).
+>
+> **Revision 8 (an R6 revision, 2026-11-03):** loosens the acceptance thresholds of the shipped combination; M5 now reads the run with
+> no error and the user's labels. All of it is in §4.7. The files section 3.4 lists do not change. The GPT targeted check is a Conditional
+> Go and the user accepted the costs §4.7 lists (2026-11-03); this commit's id is in the "threshold freeze" line of the assignment file.
 
 ## 1. Data and conventions
 
@@ -502,17 +506,19 @@ both arms does not guarantee that the errors cancel. Hence the rules below.
   M2 dates from revision 4, and on an arm that changes nothing it takes B1 from 19/57 with no error to 16/57, and C1
   from 2/41 to 1/41.
 
+> **Revision 8:** this section's thresholds (0 regressions ahead, 1% in all) are replaced by §4.7; its reading is reported only.
+
 ### 4.3 PR-1b (D3a-2 approach escalation, D3b speaker ranking, D3c remove neither)
 
 | # | Metric | Threshold (S, shipped combination) | C baseline |
 |---|---|---|---|
-| B1 | M2: of front persons entering NEAR (today's definition: box bottom y > 0.75 or ground-contact fusion NEAR), the share with the NEAR wording spoken to the end afterwards | ≥ 60% | 33.3% (19/57) |
-| B2 | M2: front vehicles, likewise | ≥ 60% | 34.9% (22/63) |
+| B1 | M2: of front persons entering NEAR (today's definition: box bottom y > 0.75 or ground-contact fusion NEAR), the share with the NEAR wording spoken to the end afterwards | ≥ 55% (revision 8) | 33.3% (19/57) |
+| B2 | M2: front vehicles, likewise | ≥ 55% (revision 8) | 34.9% (22/63) |
 | B3 | M2: all classes, likewise | ≥ 55% | 40.1% (198/494) |
 | B4 | M3: NEAR / CRITICAL removed by conflict resolution (structurally 0 after D3c) | = 0 | NEAR removed 6 |
 | B5 | M3: share of front vehicles' and front persons' CRITICAL stages spoken to the end | each not below the baseline arm | 52.7% / 60.4% |
-| B6 | M4: prompts spoken to the end per minute | ≤ baseline arm × 1.25 | 9.1 / min |
-| B7 | M4: D3b-4 re-offers (offered again after an interruption) | ≤ 1 per hazard stage; in all ≤ 15% of those spoken to the end | — |
+| B6 | M4: prompts spoken to the end per minute | ≤ baseline arm × 1.40 (revision 8) | 9.1 / min |
+| B7 | M4: D3b-4 re-offers (offered again after an interruption) | ≤ 1 per hazard stage; regiven sentences in all ≤ 30% of those spoken to the end (revision 8) | — |
 | B8 | Device: own TTS and TalkBack each run the scripted cases listed in PR-1b's detailed design | all pass | — |
 
 - M2 counts its denominator with **today's NEAR definition**, not the experiment field (Q4's 2.0 m):
@@ -526,13 +532,13 @@ both arms does not guarantee that the errors cancel. Hence the rules below.
 
 | # | Metric | Threshold (S, shipped combination, 1.15 m) | C baseline |
 |---|---|---|---|
-| C1 | M1: share of front persons' first prompts spoken to the end **before** the 2.0 m crossing (denominator = before + after + clearly missed + order undetermined) | ≥ 50% | 4.9% (2/41) |
-| C2 | M1: front vehicles, likewise | ≥ 50% | 4.9% (2/41) |
+| C1 | M1: share of front persons' first prompts spoken to the end **before** the 2.0 m crossing (denominator = before + after + clearly missed + order undetermined) | ≥ 20% (revision 8, this batch's stage goal) | 4.9% (2/41) |
+| C2 | M1: front vehicles, likewise | ≥ 15% (revision 8, this batch's stage goal) | 4.9% (2/41) |
 | C3 | M1: "clearly missed" as a share of bracketed, front persons and front vehicles | each not above the baseline arm | 17% / 27% |
-| C4 | M4: prompts admitted by the metric threshold only, on hazards that leave without ever coming within 2.0 m (fresh point estimate) | ≤ 1.0 per minute | — |
+| C4 | M4: prompts admitted by the metric threshold only, on hazards that leave without ever coming within 2.0 m (fresh point estimate) | ≤ 1.5 per minute (revision 8) | — |
 | C5 | M4: prompts admitted by the metric threshold only, on tracks living < 1 s | ≤ 5% | — |
 | C6 | M4: a prompt of today's admission, spoken to the end, replaying without new information a stage the metric gate already said (D2-4; how it is counted is at the end of this section, revision 7) | = 0 | — |
-| C7 | M4: prompts spoken to the end per minute; prompts per minute while stationary | each ≤ baseline arm × 1.25 | 9.1 / min; "stationary" is defined in PR-2's detailed design and frozen with the parameters |
+| C7 | M4: prompts spoken to the end per minute; prompts per minute while stationary | each ≤ baseline arm × 1.40 (revision 8) | 9.1 / min; "stationary" is defined in PR-2's detailed design and frozen with the parameters |
 | C8 | Labels: prompts admitted by the metric threshold only and spoken to the end, labelled real or not by the user (all of them up to 60; above that, 60 drawn with a random seed fixed in advance) | real hazards ≥ 80% | — |
 
 - The 3.0 m crossing is reported, not judged: only 30.5% of C's front vehicles bracket it, and on S it
@@ -570,17 +576,103 @@ both arms does not guarantee that the errors cancel. Hence the rules below.
 | # | Metric | Threshold (S, shipped combination) |
 |---|---|---|
 | D1 | PATH_COMPLEX offers with the switch on | = 0 |
-| D2 | Regressions of "blocked" within M5's scope | = 0 (already in 4.2) |
+| D2 | Regressions of "blocked" within M5's scope | no line of its own from revision 8: among a1, a2 and c of §4.7 |
 | D3 | The mode notice at every start of guidance | device: spoken to the end once at every start; not judged in counterfactuals (3.5) |
 | D4 | Indoor sem passage prompts spoken to the end per minute | reported only (C: path complex spoken to the end 37 times) |
 
 ### 4.6 PR-4 (enabling)
 
 Switches are flipped only when all of these hold: A1–A13 of section 3 pass on S; the thresholds of
-4.2–4.5 pass on S (M4 and M5 at all three heights); PR-1b's and PR-3's device cases pass; M3a's
+4.3–4.5 and 4.7 pass on S (M4 and a–c of §4.7 at all three heights); PR-1b's and PR-3's device cases pass; M3a's
 placement is in the user settings (Q9). Then the user walks once outdoors and once indoors: no crash,
 exact replay, and the user's own judgement (the user's decision, not a threshold). PR-D5 is accepted
 on the device under its own detailed design, outside Q6.
+
+### 4.7 Revision 8: the acceptance thresholds of the shipped combination (R6)
+
+This section replaces the M5 thresholds of §4.2 and the values listed below from §4.3 and §4.4; nothing else changes. The
+joint run of §4.1 and the stage-by-stage reading of §4.2 are still reported and **no longer judge**.
+
+**Why.** The real shipped combination does not pass the earlier thresholds on C: it is over M5's limit with no error at
+all, and the joint run does not settle (at a limit of 1 million branches, 9 of 14 captures at 1.15 m; at 1.05 m a 12 GB heap
+overflows). The causes found: more prompts, and longer sentences with the NEAR prefix, both make stages the device finished
+come later; lead time is held back by when tracking starts (C2: 14 of 38 tracked too late). The user decided not to tune the
+policy further to chase the thresholds, and accepts the costs written out below.
+
+**Everything reads the run with no error**, plus the pressure reading below. P_live = the stages the device finished while
+the track still lived (t_dev ≤ the track's last frame); the device decides it, independently of the arm, and it only splits
+the reading: a track ending is no exemption. A serious loss = never over, or over later than t_dev + 1.5 s; an unmodeled
+window (X3, X5, past δ) covering t_dev + 1.5 s reads as unknown and counts as serious. M4 and M5 are judged at all three
+heights; M1 at 1.15 m only (R4 is unchanged).
+
+| # | Constraint | Threshold | 1.05 m | 1.15 m | 1.25 m |
+|---|---|---|---|---|---|
+| a1 | Serious losses ahead labelled as needing a warning, with no warning ahead of that level heard | ≤ 3 | 2 | 2 | 3 |
+| a2 | Serious losses ahead labelled as needing a warning, in all | ≤ 8 | 6 | 5 | 8 |
+| b | Bounded delay within P_live (later than t_dev + 0.5 s, not later than t_dev + 1.5 s) | in all ≤ 30%; ahead ≤ 35% | 23.9%; 29.7% | 18.9%; 25.7% | 11.1%; 13.5% |
+| c | Serious loss within P_live | in all ≤ 5%; ahead ≤ 7% | 4.4%; 6.8% | 4.4%; 5.4% | 4.4%; 5.4% |
+| d | Stages outside P_live | reported; serious losses ahead among them go to a1 and a2 | | | |
+| e | 4 fixed error traces (fixed by sentence id and trace number, shared by both arms) | reported only | see below | | |
+
+| Other lines | Earlier | Revision 8 | 1.05 m | 1.15 m | 1.25 m |
+|---|---|---|---|---|---|
+| B1 | ≥ 60% | ≥ 55% | 71.9% | 61.4% | 56.1% |
+| B2 | ≥ 60% | ≥ 55% | 61.9% | 60.3% | 61.9% |
+| B3 | ≥ 55% | unchanged | 65.4% | 63.4% | 61.9% |
+| B5, C3 | against the baseline | unchanged, read with no error | met | met | met |
+| B6 | ≤ 1.25 × | ≤ 1.40 × | 1.34 | 1.30 | 1.27 |
+| C7 stationary | ≤ 1.25 × | ≤ 1.40 × | 1.38 | 1.34 | 1.33 |
+| B7 in all | stage transitions ≤ 15% | regiven sentences ≤ 30%; stage transitions reported | 23.3% | 24.0% | 24.6% |
+| B7 one stage | ≤ 1 | unchanged | 1 | 1 | 1 |
+| C1 | ≥ 50% | ≥ 20%, judged at 1.15 m only | 25.6% (reported) | 26.8% | 17.1% (reported) |
+| C2 | ≥ 50% | ≥ 15%, judged at 1.15 m only | 14.3% (reported) | 18.4% | 21.4% (reported) |
+| C4 | ≤ 1.0 per minute | ≤ 1.5 | 1.29 | 1.20 | 1.02 |
+| C5, C6, B4, D1, A12 | | unchanged | met | met | met |
+| C8 | ≥ 80% | unchanged, judged on S only | | | |
+| D2 | = 0 | no line of its own: "blocked" is among the ahead of a1, a2 and c | | | |
+
+**Labels.** The report writes a list (`detfirst-label-list.csv`): the serious losses ahead, and those within P_live elsewhere,
+error traces included. The user watches each clip and labels it need / no need / false detection / cannot tell; the page shows
+the kind of loss and the times, not what the arm was saying then. **"Cannot tell" counts as need in a1 and a2; with anything on
+the list unlabelled, a1 and a2 do not pass.** The report computes `heard_ahead`: with no error, another warning ahead (BLOCKED, or
+an obstacle whose relatedZones include CENTER), of no lower priority than the sentence the device finished for that stage, ended
+within [hazard appeared, t_dev + 1.5 s].
+
+**The basis of X.** a1 and a2 are C's highest readings, with no margin and no safety basis independent of these data. What they
+mean: having watched these clips on C the user accepts this level, and S may not be worse.
+
+**The costs the user accepted** (2026-11-03, explicitly):
+
+- **The real budget is a2.** Up to 8 serious losses of stages labelled as needing a warning, per height, in the nominal run.
+  a1 ≤ 3 does not mean at most three hazards went without an effective warning: the sentence behind `heard_ahead` may be about
+  another object or bearing.
+- **More is lost under pressure.** Of the 22 labelled as needed on C, 8 (6 ahead) are lost only on the error traces. They are
+  outside the thresholds, and "better than the control arms overall" does not offset them.
+- **A person at about 1 m may go entirely unmentioned.** One case on C (1.15 m): a vehicle reaches CRITICAL first by proximity,
+  a prompt of the same level does not interrupt, and when the vehicle's sentence ends the person's track has about 0.2 s left.
+- **More prompts**, about 1.3 times today's per minute. **Lead time is only partly gained**: "prompts come late" in the field is
+  only partly addressed.
+
+**Evidence (C, 14 captures, 55.7 minutes, |P| = 609, P_live = 180 of which 74 ahead).** 39 labelled: need 22 (ahead 17 of 28,
+elsewhere 5 of 11), no need 17, false detection 0, cannot tell 0. Serious losses not ahead whose track had ended were not
+labelled: 39 per height. Line e, serious losses within P_live (ahead in brackets):
+
+| | No error | Trace 0 | Trace 1 | Trace 2 | Trace 3 | Union of serious losses over all P |
+|---|---|---|---|---|---|---|
+| 1.05 m | 8 (5) | 8 (4) | 13 (5) | 10 (5) | 12 (6) | 71 (22) |
+| 1.15 m | 8 (4) | 6 (3) | 14 (5) | 9 (3) | 8 (4) | 67 (19) |
+| 1.25 m | 8 (4) | 4 (2) | 11 (4) | 9 (4) | 8 (4) | 68 (21) |
+
+Control arms (1.15 m, all stages, not labelled, never over ahead): every vehicle prompt withheld 47; a top-priority sentence every
+10 s 48; the shipped arm 9. **Standing checks (no error):** the path agrees with the frozen nominal model; an arm that changes
+nothing scores 0 and answers its stages as the baseline does; one branch per arm; no sentence credited to a stage after it closed;
+both control arms' serious losses ahead exceed a2. If any fails, the run counts for nothing.
+
+**Residual risks.** The nominal run plus 4 traces gives no universal guarantee (a review's 40 ms counterexample is only partly within
+their reach); one person labels; outside P_live only serious losses ahead are bound, and how many tracks changed id was not established.
+
+**Review and consent.** GPT second review, targeted check: fixes Go, C6 Go, this section Conditional Go (on the user confirming the
+costs above). The user accepted on 2026-11-03. S's failure exit is unchanged: if S does not pass, the switch is not flipped.
 
 ## 5. (c) Decisions
 
