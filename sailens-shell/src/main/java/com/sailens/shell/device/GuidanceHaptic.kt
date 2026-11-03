@@ -4,6 +4,7 @@ import com.sailens.guidance.model.common.DirectionZone
 import com.sailens.guidance.model.common.EventCategory
 import com.sailens.guidance.model.common.EventPriority
 import com.sailens.guidance.model.scene.SceneEvent
+import com.sailens.guidance.processor.decision.speechBand
 
 // 放在文件级而不是 companion object 里：枚举常量在初始化时读不到自己的伴生对象。
 private const val SHORT = 60L
@@ -132,7 +133,7 @@ enum class GuidanceHaptic(val timings: LongArray) {
          * 它说的是"通行判断停了"，用最弱一档震出来，隔着裤袋可能就错过了。
          */
         fun amplitudeFor(event: SceneEvent): Int {
-            val byPriority = amplitudeFor(event.priority)
+            val byPriority = amplitudeFor(event.speechBand)
             return if (forEvent(event) == VISION_UNRELIABLE) {
                 maxOf(byPriority, amplitudeFor(EventPriority.HIGH))
             } else {

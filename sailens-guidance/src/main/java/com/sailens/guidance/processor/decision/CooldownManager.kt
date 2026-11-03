@@ -70,6 +70,8 @@ class CooldownManager(
     private val proximityEscalation: Boolean = false,
     /** 听完才确认，被打断的提示再给一次：见 [reportCut]。 */
     private val retryInterrupted: Boolean = false,
+    /** 一个危险被仅公制提示说过之后，多久算说过；缩放后封顶 [maxScaledCooldownMs]。 */
+    private val metricOnlyRepeatMs: Long = 6_000L,
 ) {
     /**
      * 最近一个滑窗内记录过的事件（时间戳 + 写入者），用于判定"事件风暴"。撤回只删写入者自己那条，
@@ -132,6 +134,15 @@ class CooldownManager(
      */
     private class AwaitingOutcome(val timestampMs: Long, val stages: List<PromptStageKey>)
 
+    /** 一条仅公制写入说到的一个危险：当时它自身的优先级，和真正归给它的阶段。 */
+    internal data class MetricOnlyHazard(val ownPriority: EventPriority, val stages: Set<PromptCredit.Stage>)
+
+    /** 一条仅公制写入，按写入者存：同一危险同一阶段，前一条听完了，后一条被打断抹不掉它。 */
+    internal data class MetricOnlyWrite(val timestampMs: Long, val hazards: Map<UUID, MetricOnlyHazard>, val status: MetricOnlyStatus)
+
+    /** [SAYING] 和 [HEARD] 算说过；[REVOKED] 留着只等一个迟到的"其实念完了"。 */
+    internal enum class MetricOnlyStatus { SAYING, HEARD, NOT_HEARD, REVOKED }
+
     /** 一个无轨迹危险的状态段：同类事件相邻出现、间隔不超过 [EPISODE_GAP_MS]。 */
     internal data class Episode(val number: Int, val endAt: Long)
 
@@ -169,6 +180,12 @@ class CooldownManager(
     private val awaitingOutcome = LinkedHashMap<UUID, AwaitingOutcome>()
     private val episodes = LinkedHashMap<String, Episode>()
 
+    /**
+     * 仅公制说过什么。轨迹还在就一直留着：去重没有时间窗口。"仍在说"也算，所以"听完"的回执什么时候到不影响决策；
+     * 它的反面都有记录（撤回、没听完、后来又听完了），回放能重建。
+     */
+    private val metricOnlyWrites = LinkedHashMap<UUID, MetricOnlyWrite>()
+
     /** 已完成的 [decide] 次数；撤销记下它，回放据此把撤销放回两次决策之间的原位。 */
     private var decisions = 0L
 
@@ -204,9 +221,39 @@ class CooldownManager(
      * 所以只要合并提示里有一个方位是新的或升级了，整条提示就能播出。
      */
     private fun SceneEvent.passesCooldown(now: Long, scale: Float): Boolean {
+        if (isMetricOnly) return (proximityEscalation && escalates(now)) || hasHazardNotLatelySaid(now, scale)
         val eventScale = if (isExemptFromScaling()) 1.0f else scale
-        return cooldownGroupsOrDefault().any { group -> passesGroup(group, now, eventScale) } ||
-            (proximityEscalation && escalates(now))
+        return (cooldownGroupsOrDefault().any { group -> passesGroup(group, now, eventScale) } || (proximityEscalation && escalates(now))) &&
+            !isRepeatOfMetricOnly()
+    }
+
+    /** 仅公制的候选不看任何 key：组里有一个危险在窗口内没被仅公制说过，就放行。 */
+    private fun SceneEvent.hasHazardNotLatelySaid(now: Long, scale: Float): Boolean {
+        val windowMs = minOf((metricOnlyRepeatMs * scale).toLong(), maxOf(metricOnlyRepeatMs, maxScaledCooldownMs))
+        return components.flatMap { it.hazards }.any { hazard ->
+            metricOnlyWrites.values.none { write ->
+                write.status != MetricOnlyStatus.REVOKED && hazard.trackId in write.hazards && now - write.timestampMs < windowMs
+            }
+        }
+    }
+
+    /**
+     * 这条今天准入的候选说的每个 (危险, 阶段) 都已经被仅公制说过（仍在说或已听完），每个危险自身的优先级也不高于
+     * 那些写入里的最大值：它什么新信息都没有，挡住。这只管仅公制造成的重播，不管今天的周期节奏：今天准入的提示
+     * 自己说过之后，同一句过了冷却照样放行。
+     */
+    private fun SceneEvent.isRepeatOfMetricOnly(): Boolean {
+        if (metricOnlyWrites.isEmpty()) return false
+        val credits = PromptCredit.credits(this).filter { it.counts }
+        if (credits.isEmpty()) return false
+        val effective = metricOnlyWrites.values.filter { it.status == MetricOnlyStatus.SAYING || it.status == MetricOnlyStatus.HEARD }
+        val saidAlready = credits.all { credit -> effective.any { credit.stage in it.hazards[credit.trackId]?.stages.orEmpty() } }
+        if (!saidAlready) return false
+        val spokenOf = credits.mapTo(HashSet()) { it.trackId }
+        return components.flatMap { it.hazards }.filter { it.trackId in spokenOf }.all { hazard ->
+            val said = effective.mapNotNull { it.hazards[hazard.trackId]?.ownPriority }.maxOrNull()
+            said != null && hazard.ownPriority <= said
+        }
     }
 
     /**
@@ -259,7 +306,7 @@ class CooldownManager(
             eventId = event.id,
             timestampMs = now,
             priority = event.priority,
-            baseCooldowns = event.allCooldownKeys().associateWith { key -> event.baseCooldownFor(key) },
+            baseCooldowns = if (event.isMetricOnly) emptyMap() else event.allCooldownKeys().associateWith { key -> event.baseCooldownFor(key) },
             hazardCredits = if (proximityEscalation) event.hazardCredits() else emptyMap(),
         )
         lastEventRecords.fold(write)
@@ -269,7 +316,11 @@ class CooldownManager(
             while (awaitingOutcome.size > MAX_AWAITING_OUTCOMES) awaitingOutcome.remove(awaitingOutcome.keys.first())
         }
         openWrites.addLast(write)
-        recentEmissions.addLast(Emission(now, event.id))
+        if (event.isMetricOnly) {
+            metricOnlyWrites[event.id] = MetricOnlyWrite(now, event.metricOnlyHazards(), MetricOnlyStatus.SAYING)
+        } else {
+            recentEmissions.addLast(Emission(now, event.id))
+        }
         trimEmissionWindow(now)
         // 送达方的回执总是紧跟在决策之后，保留少量即可。更旧的写入不再能撤回，和从前一样。
         while (openWrites.size > MAX_OPEN_WRITES) {
@@ -292,6 +343,14 @@ class CooldownManager(
      */
     @Synchronized
     fun observeHazards(liveTracks: Set<UUID>, generated: List<SceneEvent>, now: Long) {
+        if (metricOnlyWrites.isNotEmpty()) {
+            val eventIds = metricOnlyWrites.keys.toList()
+            for (eventId in eventIds) {
+                val write = metricOnlyWrites.getValue(eventId)
+                val left = write.hazards.filterKeys { it in liveTracks }
+                if (left.isEmpty()) metricOnlyWrites.remove(eventId) else if (left.size != write.hazards.size) metricOnlyWrites[eventId] = write.copy(hazards = left)
+            }
+        }
         if (!retryInterrupted) return
         for (event in generated) {
             if (event.category == EventCategory.OBSTACLE) continue
@@ -343,11 +402,13 @@ class CooldownManager(
         val everyStageFresh = stages.isNotEmpty() && stages.all { it !in retries }
         if (write != null && !write.confirmed && everyStageFresh) {
             revokeRecord(eventId)
+            setMetricOnlyStatus(eventId, MetricOnlyStatus.REVOKED)
             for (stage in stages) retries[stage] = RetryState.AWAITING_REGIVE
             return CutReceipt(CutResult.REVOKED, decisionsBefore)
         }
         write?.confirmed = true
         advanceConfirmedPrefix()
+        setMetricOnlyStatus(eventId, MetricOnlyStatus.NOT_HEARD)
         for (stage in stages) if (retries[stage] != RetryState.AWAITING_REGIVE) retries[stage] = RetryState.EXHAUSTED
         return CutReceipt(CutResult.KEPT, decisionsBefore)
     }
@@ -355,6 +416,28 @@ class CooldownManager(
     /** 已完成的决策次数：一条回执在回放里放回的位置。 */
     @Synchronized
     fun decisionsSoFar(): Long = decisions
+
+    private fun SceneEvent.metricOnlyHazards(): Map<UUID, MetricOnlyHazard> {
+        val credits = PromptCredit.credits(this).filter { it.counts }
+        val result = LinkedHashMap<UUID, MetricOnlyHazard>()
+        for (hazard in components.flatMap { it.hazards }) {
+            val stages = credits.filter { it.trackId == hazard.trackId }.mapTo(LinkedHashSet()) { it.stage }
+            if (stages.isNotEmpty()) result[hazard.trackId] = MetricOnlyHazard(hazard.ownPriority, stages)
+        }
+        return result
+    }
+
+    private fun setMetricOnlyStatus(eventId: UUID, status: MetricOnlyStatus) {
+        metricOnlyWrites[eventId]?.let { metricOnlyWrites[eventId] = it.copy(status = status) }
+    }
+
+    /** 判为被打断之后，引擎又说它其实念完了：不收回打断做过的事，只把这条写入算成听完。 */
+    @Synchronized
+    fun reportHeardAfterCut(eventId: UUID) = setMetricOnlyStatus(eventId, MetricOnlyStatus.HEARD)
+
+    /** 回放里的 `regression_cut_kept`：这条写入没听完。 */
+    @Synchronized
+    fun markNotHeard(eventId: UUID) = setMetricOnlyStatus(eventId, MetricOnlyStatus.NOT_HEARD)
 
     private fun SceneEvent.hazardCredits(): Map<UUID, HazardCredit> {
         val credits = PromptCredit.credits(this).filter { it.counts }
@@ -380,6 +463,7 @@ class CooldownManager(
         openWrites.firstOrNull { it.eventId == eventId }?.confirmed = true
         advanceConfirmedPrefix()
         awaitingOutcome.remove(eventId)
+        setMetricOnlyStatus(eventId, MetricOnlyStatus.HEARD)
     }
 
     /**
@@ -396,6 +480,7 @@ class CooldownManager(
         val decisionsBefore = decisions
         revokeRecord(eventId)
         awaitingOutcome.remove(eventId)
+        setMetricOnlyStatus(eventId, MetricOnlyStatus.REVOKED)
         return decisionsBefore
     }
 
@@ -485,7 +570,7 @@ class CooldownManager(
     /** An independent copy, for an evaluation that follows several possible futures of one session. */
     @Synchronized
     internal fun copy(): CooldownManager {
-        val copy = CooldownManager(stationaryCooldownScale, stormWindowMs, stormEventThreshold, stormCooldownScale, maxCooldownScale, maxScaledCooldownMs, proximityEscalation, retryInterrupted)
+        val copy = CooldownManager(stationaryCooldownScale, stormWindowMs, stormEventThreshold, stormCooldownScale, maxCooldownScale, maxScaledCooldownMs, proximityEscalation, retryInterrupted, metricOnlyRepeatMs)
         copy.recentEmissions.addAll(recentEmissions)
         copy.isStationary = isStationary
         copy.confirmedRecords.putAll(confirmedRecords)
@@ -498,6 +583,7 @@ class CooldownManager(
         copy.retries.putAll(retries)
         copy.awaitingOutcome.putAll(awaitingOutcome)
         copy.episodes.putAll(episodes)
+        copy.metricOnlyWrites.putAll(metricOnlyWrites)
         copy.decisions = decisions
         return copy
     }
@@ -518,6 +604,7 @@ class CooldownManager(
         retries = LinkedHashMap(retries),
         awaitingOutcome = awaitingOutcome.values.associate { it.timestampMs to it.stages },
         episodes = LinkedHashMap(episodes),
+        metricOnlyWrites = metricOnlyWrites.values.associateBy { it.timestampMs },
     )
 
     internal data class Canonical(
@@ -532,6 +619,7 @@ class CooldownManager(
         /** By the writing decision's time: a decision writes at most once. */
         val awaitingOutcome: Map<Long, List<PromptStageKey>> = emptyMap(),
         val episodes: Map<String, Episode> = emptyMap(),
+        val metricOnlyWrites: Map<Long, MetricOnlyWrite> = emptyMap(),
     ) {
         data class OpenWrite(
             val timestampMs: Long,
@@ -597,6 +685,7 @@ class CooldownManager(
         retries.clear()
         awaitingOutcome.clear()
         episodes.clear()
+        metricOnlyWrites.clear()
         openWrites.clear()
         recentEmissions.clear()
         isStationary = false
