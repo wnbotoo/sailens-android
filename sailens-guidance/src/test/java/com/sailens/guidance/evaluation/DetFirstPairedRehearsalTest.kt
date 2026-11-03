@@ -178,10 +178,11 @@ class DetFirstPairedRehearsalTest {
 
         val preset = PhoneGeometrySettings(PRESET_HEIGHT_M, HeightSource.PRESET)
         val frozen = PromptPolicyCaptureEvaluation(preset)
-        val evaluated = split.open.mapNotNull { dir ->
-            frozen.evaluate(CaptureSessionReader.read(dir).orThrow())?.takeIf { D18Sets.of(it.id) != null }?.let { dir to it }
-        }
-        val measured = evaluated.associate { (_, r) -> r.id to r.speaker?.measured.orEmpty() }
+        val found = split.open.map { dir -> dir to frozen.evaluate(CaptureSessionReader.read(dir).orThrow()) }
+        val setProblems = AcceptanceSet.problems(found.map { (dir, r) -> AcceptanceSet.of(dir, r) })
+        assertTrue("not one whole frozen set (R7), nothing computed:\n${setProblems.joinToString("\n")}", setProblems.isEmpty())
+        val evaluated = found.map { (dir, r) -> dir to r!! }
+        val measured = evaluated.filter { (_, r) -> D18Sets.of(r.id) == D18Sets.Group.CALIBRATION }.associate { (_, r) -> r.id to r.speaker?.measured.orEmpty() }
         val results = mutableListOf<CaptureResult>()
         val started = System.currentTimeMillis()
         for ((dir, result) in evaluated) {
@@ -288,7 +289,9 @@ class DetFirstPairedRehearsalTest {
         if (labels == null) {
             add(Verdict("a1, a2 serious losses ahead, to be labelled", "${listed.size}; not heard ahead ${listed.count { !it.second }}", null, awaitsLabels = true))
         } else {
-            val missing = listed.count { it.first !in labels }
+            // The whole list must be labelled, each with one of the four labels; anything else is not labelled.
+            val required = labelList(results).lineSequence().drop(1).filter { it.isNotBlank() }.map { it.split(',').take(3).joinToString("|") }.toList()
+            val missing = required.count { labels[it] !in VALID_LABELS }
             val needed = listed.filter { labels[it.first] in setOf("need", "unknown") }
             val notHeard = needed.count { !it.second }
             add(Verdict("a1 needed and no warning ahead heard", "$notHeard, at most $LABELLED_NOT_HEARD_MAX; not labelled $missing", notHeard <= LABELLED_NOT_HEARD_MAX && missing == 0))
@@ -318,22 +321,25 @@ class DetFirstPairedRehearsalTest {
                 }
             }
         }
-        add(Verdict("b bounded delay, of stages finished while the track lived", "${percent(bounded, live)}; ahead ${percent(boundedAhead, liveAhead)}; at most 30%, 35%", bounded * 100 <= live * 30 && boundedAhead * 100 <= liveAhead * 35))
-        add(Verdict("c serious loss, of stages finished while the track lived", "${percent(serious, live)}; ahead ${percent(seriousOfAhead, liveAhead)}; at most 5%, 7%", serious * 100 <= live * 5 && seriousOfAhead * 100 <= liveAhead * 7))
+        // R5: a share over fewer than MIN_DENOMINATOR is undeterminable, and undeterminable does not pass.
+        fun enough(vararg of: Int) = of.all { it >= MIN_DENOMINATOR }
+        fun small(vararg of: Int) = if (enough(*of)) "" else "; undeterminable, fewer than $MIN_DENOMINATOR"
+        add(Verdict("b bounded delay, of stages finished while the track lived", "${percent(bounded, live)}; ahead ${percent(boundedAhead, liveAhead)}; at most 30%, 35%${small(live, liveAhead)}", enough(live, liveAhead) && bounded * 100 <= live * 30 && boundedAhead * 100 <= liveAhead * 35))
+        add(Verdict("c serious loss, of stages finished while the track lived", "${percent(serious, live)}; ahead ${percent(seriousOfAhead, liveAhead)}; at most 5%, 7%${small(live, liveAhead)}", enough(live, liveAhead) && serious * 100 <= live * 5 && seriousOfAhead * 100 <= liveAhead * 7))
 
-        fun atLeast(name: String, min: Int) = add(Verdict(name, "${percent(spoken(arm, name), total(arm, name))}, at least $min%", spoken(arm, name) * 100 >= total(arm, name) * min))
+        fun atLeast(name: String, min: Int) = add(Verdict(name, "${percent(spoken(arm, name), total(arm, name))}, at least $min%${small(total(arm, name))}", enough(total(arm, name)) && spoken(arm, name) * 100 >= total(arm, name) * min))
         atLeast("B1 near person", 55)
         atLeast("B2 near vehicle", 55)
         atLeast("B3 near all", 55)
         for (line in listOf("B5 critical person", "B5 critical vehicle")) {
-            add(Verdict(line, "${percent(spoken(arm, line), total(arm, line))}, baseline ${percent(spoken(base, line), total(base, line))}", rate(arm, line) >= rate(base, line)))
+            add(Verdict(line, "${percent(spoken(arm, line), total(arm, line))}, baseline ${percent(spoken(base, line), total(base, line))}${small(total(arm, line))}", enough(total(arm, line)) && rate(arm, line) >= rate(base, line)))
         }
         for (line in listOf("C3 clearly missed, person", "C3 clearly missed, vehicle")) {
-            add(Verdict(line, "${percent(spoken(arm, line), total(arm, line))}, baseline ${percent(spoken(base, line), total(base, line))}", rate(arm, line) <= rate(base, line)))
+            add(Verdict(line, "${percent(spoken(arm, line), total(arm, line))}, baseline ${percent(spoken(base, line), total(base, line))}${small(total(arm, line))}", enough(total(arm, line)) && rate(arm, line) <= rate(base, line)))
         }
         val judgedHere = PRESET_HEIGHT_M == 1.15f
         for ((name, line, min) in listOf(Triple("C1 before, person", "C1-2 before, person", 20), Triple("C2 before, vehicle", "C1-2 before, vehicle", 15))) {
-            add(Verdict(name, "${percent(spoken(arm, line), total(arm, line))}, at least $min%", if (judgedHere) spoken(arm, line) * 100 >= total(arm, line) * min else null))
+            add(Verdict(name, "${percent(spoken(arm, line), total(arm, line))}, at least $min%${small(total(arm, line))}", if (judgedHere) enough(total(arm, line)) && spoken(arm, line) * 100 >= total(arm, line) * min else null))
         }
 
         val armCounts = results.map { countsOf(it, it.arms.getValue(LAUNCH).nominalArm) }.reduce(PromptCounts.Counts::plus)
@@ -962,6 +968,8 @@ class DetFirstPairedRehearsalTest {
         const val RATE_MAX = 1.40
         const val METRIC_ONLY_FAR_MAX = 1.5
         const val C8_SAMPLE = 60
+        const val MIN_DENOMINATOR = 20
+        val VALID_LABELS = setOf("need", "no", "false", "unknown")
         const val C8_SEED = 20_261_103L
 
         /** The labels a person gave the label list, by its id, when `-PreplayLabels` names the exported file. */
