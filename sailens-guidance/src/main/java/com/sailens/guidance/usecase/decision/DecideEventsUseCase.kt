@@ -13,6 +13,8 @@ import com.sailens.guidance.processor.decision.EventMerger
 import com.sailens.guidance.processor.decision.SpeechRanks
 import com.sailens.guidance.processor.decision.SpeechScale
 import com.sailens.guidance.repository.DeviceSensorRepository
+import com.sailens.guidance.safety.BaselineQualification
+import com.sailens.guidance.safety.GuidanceQualifier
 import com.sailens.guidance.trace.regression.RegressionRecorder
 
 /**
@@ -41,8 +43,22 @@ class DecideEventsUseCase(
      */
     fun visionFaults(snapshot: SceneSnapshot): VisionFaults = eventGenerator.visionFaults(snapshot)
 
+    /**
+     * Whether [snapshot] lets Guidance judge the way ahead, from the config the generator decides with.
+     * Decides nothing and changes nothing; no decision reads it yet.
+     */
+    fun qualification(snapshot: SceneSnapshot): BaselineQualification = GuidanceQualifier.baseline(snapshot, eventGenerator.config)
+
+    /**
+     * The clock reading the latest decision made, null before the first. Kept rather than read again: a
+     * second reading would be one more value on a recorded clock's tape.
+     */
+    var lastDecisionAtMs: Long? = null
+        private set
+
     operator fun invoke(snapshot: SceneSnapshot): List<SceneEvent> {
         val now = clock()
+        lastDecisionAtMs = now
         val stationary = deviceSensorRepository.isStationary.value
         if (regressionRecorder.isRecording) regressionRecorder.onStationary(stationary)
 

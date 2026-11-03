@@ -8,6 +8,7 @@ import com.sailens.guidance.model.perception.ObstacleDetection
 import com.sailens.guidance.model.perception.SegmentationOutput
 import com.sailens.guidance.model.scene.SceneEvent
 import com.sailens.guidance.processor.analysis.FrameQualityResult
+import com.sailens.guidance.safety.BaselineQualification
 import com.sailens.guidance.trace.capture.RegressionUtteranceRecord
 import java.util.UUID
 
@@ -48,6 +49,12 @@ interface RegressionRecorder {
 
     /** The motion state the decision step read. */
     fun onStationary(stationary: Boolean) {}
+
+    /**
+     * The frame's baseline qualification, after its decision and before [endFrame]. A recorder that
+     * implements this says so in its manifest (`RegressionManifest.qualificationRecorded`).
+     */
+    fun onQualification(baseline: BaselineQualification) {}
 
     /** The decided events of [frame], highest priority first, or the [failure] that stopped it. */
     fun endFrame(frame: ImageFrame, events: List<SceneEvent>, failure: Throwable?) {}

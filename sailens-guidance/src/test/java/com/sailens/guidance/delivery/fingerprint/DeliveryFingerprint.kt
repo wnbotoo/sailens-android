@@ -25,6 +25,7 @@ import com.sailens.guidance.processor.decision.EventMerger
 import com.sailens.guidance.processor.decision.SpeechRanks
 import com.sailens.guidance.processor.decision.SpeechScale
 import com.sailens.guidance.repository.DeviceSensorRepository
+import com.sailens.guidance.safety.visionFaults
 import com.sailens.guidance.trace.capture.CaptureSchema
 import com.sailens.guidance.trace.capture.EventRecord
 import com.sailens.guidance.trace.regression.RegressionReplay
@@ -117,7 +118,8 @@ internal sealed interface MotorAnswer {
  *   appearance, track ids come from the replay's birth order, notice ids have a fixed prefix.
  *
  * Every line starts with the frame's seq. Lines starting with [QUALIFICATION_PREFIX] are not delivery and are left out
- * of a comparison.
+ * of a comparison: what Guidance observed about the frame (its qualification) and about the alerts (their trace
+ * records), each followed by its frame's seq.
  *
  * @param inOutage whether a frame is in the engine outage of an [OutputCondition.engineOutage] condition.
  */
@@ -261,6 +263,7 @@ internal class FingerprintPipeline(
         retryInterrupted = detFirst.retryInterrupted,
         pathComplexOff = detFirst.pathComplexOff,
         noticeIdPrefix = NOTICE_ID_PREFIX,
+        recordAlert = { alert -> observed("alert", alert.toString()) },
     )
 
     fun onFrame(frame: FingerprintFrame) {
@@ -270,6 +273,12 @@ internal class FingerprintPipeline(
         speaker.ready = !(condition.engineOutage && inOutage(frame.seq))
         val events = decide(frame.snapshot)
         line("decided", events.joinToString(prefix = "[", postfix = "]") { "${name(it)}=${record(it)}" })
+        val qualification = decide.qualification(frame.snapshot)
+        // The projection is lossless: what the shell is told equals what the generator tested, on every frame.
+        check(qualification.visionFaults() == frame.visionFaults) {
+            "frame ${frame.seq}: $qualification projects to ${qualification.visionFaults()}, the generator said ${frame.visionFaults}"
+        }
+        observed("qualification", qualification.toRecord().toString())
         protocol.onFrame(events, frame.seq, frame.visionFaults)
     }
 
@@ -301,6 +310,11 @@ internal class FingerprintPipeline(
 
     private fun line(kind: String, detail: String) {
         out += if (detail.isEmpty()) "$seq $kind" else "$seq $kind $detail"
+    }
+
+    /** What Guidance observed rather than delivered: a line a comparison leaves out. */
+    private fun observed(kind: String, detail: String) {
+        out += "$QUALIFICATION_PREFIX$seq $kind $detail"
     }
 
     private fun record(event: SceneEvent): String =

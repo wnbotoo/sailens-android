@@ -1,6 +1,7 @@
 package com.sailens.guidance.service
 
 import com.sailens.guidance.model.trace.FrameTrace
+import com.sailens.guidance.model.trace.GuidanceAlertTrace
 import com.sailens.guidance.model.trace.PromptOutcomeTrace
 import com.sailens.guidance.model.trace.SessionTraceMetadata
 import com.sailens.guidance.model.trace.SessionTraceSummary
@@ -24,4 +25,11 @@ interface TraceService {
     fun recordPromptOutcome(outcome: PromptOutcomeTrace)
     fun recordError(sessionId: String, stage: String, throwable: Throwable)
     fun finishSession(summary: SessionTraceSummary)
+
+    /**
+     * One alert the user was given or offered; see [GuidanceAlertTrace]. Queued with the session's next
+     * `seq` while a session is open, dropped when none is. Called on the main thread, so it must never wait
+     * for the trace's disk writes.
+     */
+    fun recordGuidanceAlert(alert: GuidanceAlertTrace) {}
 }

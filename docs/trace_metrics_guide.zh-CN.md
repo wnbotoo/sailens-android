@@ -17,6 +17,8 @@ Trace 是 JSONL 文件，每一行是一个事件：
   也会记下，但只作背景：听到还是只感到了震动，要看 `deliveredVia`。以 `eventId` 为键，用
   `sourceSequenceNumber` 关联到对应的帧，写在该帧之后；不管采样设置如何，这一帧的记录都会写。`frame`
   记录里的 `messageKeys` 是冷却后的候选，不是用户收到的提示——标注误报要对照 `prompt_outcome`。
+- `guidance_alert`：就某个故障给用户（或试图给用户）的一次告知：一句话或一段节奏，以及输出对它做了什么。
+  见[资格与告警](#资格与告警)。
 - `session_summary`：会话结束后的聚合摘要。
 - `error`：pipeline 或 trace 中出现异常。
 
@@ -631,6 +633,45 @@ bbox 接地带（det∩sem 交叉验证）从 sem 可行走区抠除后的占比
 - 出现 `event_intersection`：表示 scene element 判断为路口。文案不再用“疑似”——盲人无法验证这份不确定性，而“疑似有路口”和“有路口”对应的动作完全一样，含糊措辞只多占播报时长。确定性现在由阈值表达而不是措辞：当前发布 profile 不启用 traffic-light/road-ratio fallback，因为该 fallback 误报偏多；只有显式可靠的路口信号才应进入用户播报。
 - 出现 `event_traffic_light`：表示语义分割稳定检测到红绿灯，但没有把它升级成“疑似路口”。该提示是低优先级、长冷却的宽泛交通提示，应排在车辆、行人、blocked / path-complex 之后；触发前需要满足 traffic-light 像素占比、道路语境和稳定帧门槛，避免远处小目标或单帧误分割过早播报。
 - 出现已禁用策略类提示：检查 EventGenerator / EventMerger 配置。
+
+## 资格与告警
+
+这些都是观测，没有任何决策读它们。它们记下 Guidance 在一帧里能不能照常判断路，以及判断不了时告诉了用户什么。
+
+### Frame 字段
+
+在它们出现之前写的 trace 里没有这些字段，含义是"没记录"，不是"正常"。
+
+- `frameQuality`：去抖后的帧质量（`ok` / `obstructed` / `too_dark`），不管镜头遮挡/过暗事件开没开。`frameQualityClassified`：当帧未去抖的判定；镜头被挡时它比 `frameQuality` 早几帧变化。
+- `qualification`：`qualified`（合格）、`degraded`（一部分提示暂停，其余照常）或 `unqualified`（画面不可信，所有提示都被压掉）。`qualificationReasons` 是小写的原因列表，不合格的原因排在最前：`camera_obstructed`、`too_dark`、`ground_unrecognized`。级别和事件生成器用的是同一个判据：一帧不合格当且仅当它生成了镜头遮挡或光线过暗事件，所以 `unqualified` 的帧正是其余提示被压掉的那些帧。
+- `capabilities`：各可选输入（`orientation`、`camera_geometry`、`ground_contact_distance`）的状况，各有 `status`（`not_configured` / `available` / `degraded` / `unavailable`）和 `issues`。只进 trace，不属于资格。
+- `receiptToDecisionMs`：从帧源收到这一帧到做出决策，两者都是 elapsed realtime。不含曝光到接收的那一段，不是完整帧龄。帧源没记录接收时间时没有这个字段。
+
+### `guidance_alert`
+
+用户得到或被提供的每一次告知一条记录：`source`（`vision`：镜头遮挡、光线过暗、认不出地面）、`kind`（`fault_notice`、`fault_recovery`、`fault_rhythm`）、句子的 `messageKey` 或节奏的 `haptic`、`priority`、`channel`（`speech`、`screen_reader`、`haptics`，什么都没提供时为 `none`：语音关，或场景描述正在说）以及 `result`：
+
+- 句子：`accepted`（自带语音接收）、`published`（交给了读屏）或 `refused`；
+- 节奏：向马达请求时 `requested`，开始播放时 `played`，开始前撤回时 `cancelled`。
+
+`at` 是墙钟，用来和帧对照；`elapsedMs` 是 elapsed realtime。`seq` 是这段会话里告警记录的序号，从 1 起。
+
+### trace 能观测的窗口
+
+只有会话打开期间的记录才会进 trace。`session_start.openedElapsedMs` 和 `session_summary.closedElapsedMs` 用 elapsed realtime 界定这个窗口；窗口外的告警不在任何 trace 里。`session_summary.guidanceAlertCount` 是这段会话放进队列的告警记录条数，所以完整的 trace 里 `seq` 从 1 到它一条不缺。
+
+### `qualificationFrames`
+
+按资格级别统计的 trace 帧数；`none` 是这个字段出现之前写的帧。帧受 trace 采样影响，但提供过提示的帧总会保留。
+
+### `alertsInWindow`
+
+按种类统计的告警记录数，以及是否齐全。这是 trace 窗口内的次数，不是这次运行的全部告警。
+
+- `complete`：`seq` 从 1 到 `guidanceAlertCount` 一条不缺。
+- `incomplete (missing n)`：有缺号、第一条 `seq` 大于 1，或者记录比计数少。trace 队列溢出时会丢最旧的条目，所以繁忙的 trace 可能丢掉一些。
+- `possibly_incomplete`：没发现缺失，但没有计数（进程在写摘要之前被杀，或摘要本身被丢），最后几条可能缺。没有计数时发现的缺号只是下限。
+- `not_recorded`：这份 trace 写于告警记录出现之前。
 
 ## 快速诊断路径
 

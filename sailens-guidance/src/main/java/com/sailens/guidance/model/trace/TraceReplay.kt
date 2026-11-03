@@ -19,6 +19,8 @@ data class TraceReplaySession(
     val promptOutcomes: List<PromptOutcomeTrace> = emptyList(),
     val errors: List<TraceReplayError>,
     val summary: SessionTraceSummary?,
+    /** The alerts given or offered within the trace's window, in file order; empty for traces recorded before these were written. */
+    val guidanceAlerts: List<GuidanceAlertTrace> = emptyList(),
 )
 
 data class TraceReplayError(
@@ -122,7 +124,32 @@ data class TraceReplayReport(
     val avgRoadVehicleAreaRatio: Double,
     val blockageReasonPercentages: List<String>,
     val uniqueMessageKeys: List<String>,
+    /** Traced frames per qualification level; "none" counts frames from before the field existed. */
+    val qualificationFrameCounts: Map<String, Int> = emptyMap(),
+    /** Alert records per kind: the alerts within the trace's window, not every alert of the run. */
+    val guidanceAlertCounts: Map<String, Int> = emptyMap(),
+    val guidanceAlertCompleteness: AlertRecordCompleteness = AlertRecordCompleteness.NOT_RECORDED,
+    /** Alert records known to be missing; with [AlertRecordCompleteness.INCOMPLETE] and no summary, at least this many. */
+    val guidanceAlertsMissing: Long = 0,
 )
+
+/** How far a trace's alert records are all the alerts within its window. */
+enum class AlertRecordCompleteness {
+    /** The trace was written before alerts were recorded. */
+    NOT_RECORDED,
+
+    /** Every `seq` from 1 up to the session's [SessionTraceSummary.guidanceAlertCount] is there. */
+    COMPLETE,
+
+    /** Records are missing: a `seq` gap, a first `seq` above 1, or fewer than the session counted. */
+    INCOMPLETE,
+
+    /**
+     * None found missing, but there is no [SessionTraceSummary.guidanceAlertCount] (the process died, or
+     * the summary was dropped): the last ones could be missing.
+     */
+    POSSIBLY_INCOMPLETE,
+}
 
 object TraceReplayParser {
     private val json = Json {
@@ -136,6 +163,7 @@ object TraceReplayParser {
         val frames = mutableListOf<FrameTrace>()
         val overlayRenders = mutableListOf<OverlayRenderTrace>()
         val promptOutcomes = mutableListOf<PromptOutcomeTrace>()
+        val guidanceAlerts = mutableListOf<GuidanceAlertTrace>()
         val errors = mutableListOf<TraceReplayError>()
 
         lines.forEachIndexed { index, rawLine ->
@@ -148,6 +176,7 @@ object TraceReplayParser {
                 FRAME_TYPE -> frames += parseFrame(entry, index)
                 OVERLAY_RENDER_TYPE -> overlayRenders += parseOverlayRender(entry, index)
                 PROMPT_OUTCOME_TYPE -> promptOutcomes += parsePromptOutcome(entry, index)
+                GUIDANCE_ALERT_TYPE -> guidanceAlerts += parseGuidanceAlert(entry, index)
                 SESSION_SUMMARY_TYPE -> summary = parseSummary(entry, index)
                 ERROR_TYPE -> errors += parseError(entry, index)
                 else -> throw IllegalArgumentException("Unsupported trace entry type '$type' at line ${index + 1}")
@@ -161,6 +190,7 @@ object TraceReplayParser {
             promptOutcomes = promptOutcomes,
             errors = errors,
             summary = summary,
+            guidanceAlerts = guidanceAlerts,
         )
     }
 
@@ -177,6 +207,7 @@ object TraceReplayParser {
         startedAt = entry.requireLong("startedAt", lineIndex),
         pipelineMode = entry.requireString("pipelineMode", lineIndex),
         targetHardwareProfile = entry.requireString("targetHardwareProfile", lineIndex),
+        openedElapsedMs = entry.optionalLong("openedElapsedMs"),
     )
 
     private fun parseFrame(entry: JsonObject, lineIndex: Int) = FrameTrace(
@@ -276,6 +307,18 @@ object TraceReplayParser {
                 levelUsed = distance.requireString("levelUsed", lineIndex),
             )
         },
+        frameQuality = entry.optionalString("frameQuality"),
+        frameQualityClassified = entry.optionalString("frameQualityClassified"),
+        qualification = entry.optionalString("qualification"),
+        qualificationReasons = entry.optionalStringArray("qualificationReasons").orEmpty(),
+        capabilities = (entry["capabilities"] as? JsonObject).orEmpty().mapValues { (_, value) ->
+            val capability = value.jsonObject
+            CapabilityTrace(
+                status = capability.requireString("status", lineIndex),
+                issues = capability.optionalStringArray("issues").orEmpty(),
+            )
+        },
+        receiptToDecisionMs = entry.optionalDouble("receiptToDecisionMs"),
     )
 
     private fun parseOverlayRender(entry: JsonObject, lineIndex: Int) = OverlayRenderTrace(
@@ -321,6 +364,36 @@ object TraceReplayParser {
         }
     }
 
+    /** The invariants live in [GuidanceAlertTrace] itself; this only adds the line number. */
+    private fun parseGuidanceAlert(entry: JsonObject, lineIndex: Int): GuidanceAlertTrace {
+        val sessionId = entry.requireString("sessionId", lineIndex)
+        val seq = entry.requireLong("seq", lineIndex)
+        val at = entry.requireLong("at", lineIndex)
+        val elapsedMs = entry.requireLong("elapsedMs", lineIndex)
+        val source = entry.requireString("source", lineIndex)
+        val kind = entry.requireString("kind", lineIndex)
+        val priority = entry.requireString("priority", lineIndex)
+        val channel = entry.requireString("channel", lineIndex)
+        val result = entry.requireString("result", lineIndex)
+        return try {
+            GuidanceAlertTrace(
+                sessionId = sessionId,
+                seq = seq,
+                at = at,
+                elapsedMs = elapsedMs,
+                source = source,
+                kind = kind,
+                messageKey = entry.optionalString("messageKey"),
+                haptic = entry.optionalString("haptic"),
+                priority = priority,
+                channel = channel,
+                result = result,
+            )
+        } catch (error: IllegalArgumentException) {
+            throw IllegalArgumentException("Invalid guidance_alert at line ${lineIndex + 1}: ${error.message}", error)
+        }
+    }
+
     private fun parseSummary(entry: JsonObject, lineIndex: Int) = SessionTraceSummary(
         sessionId = entry.requireString("sessionId", lineIndex),
         startedAt = entry.requireLong("startedAt", lineIndex),
@@ -335,6 +408,8 @@ object TraceReplayParser {
         avgInferenceMs = entry.requireDouble("avgInferenceMs", lineIndex),
         p95TotalPipelineMs = entry.requireLong("p95TotalPipelineMs", lineIndex),
         maxTotalPipelineMs = entry.requireLong("maxTotalPipelineMs", lineIndex),
+        closedElapsedMs = entry.optionalLong("closedElapsedMs"),
+        guidanceAlertCount = entry.optionalLong("guidanceAlertCount"),
     )
 
     private fun parseError(entry: JsonObject, lineIndex: Int) = TraceReplayError(
@@ -410,6 +485,7 @@ object TraceReplayParser {
     private const val FRAME_TYPE = "frame"
     private const val OVERLAY_RENDER_TYPE = "overlay_render"
     private const val PROMPT_OUTCOME_TYPE = "prompt_outcome"
+    private const val GUIDANCE_ALERT_TYPE = "guidance_alert"
     private const val SESSION_SUMMARY_TYPE = "session_summary"
     private const val ERROR_TYPE = "error"
 }

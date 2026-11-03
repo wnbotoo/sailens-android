@@ -25,6 +25,8 @@
   - `eventCount`
   - `isBlocked` / `isNarrowing` / `isRoadDangerous`
   - `messageKeys`
+  - `frameQuality` / `frameQualityClassified`、`qualification` / `qualificationReasons`、`capabilities`、`receiptToDecisionMs`（见[资格与告警](trace_metrics_guide.zh-CN.md#资格与告警)）
+- 会话打开期间，每次给用户或试图给用户的告知记一条 `guidance_alert`，按 `seq` 编号
 - 会话结束时会输出 `session summary`：
   - `totalFrames`
   - `droppedFrames`
@@ -36,6 +38,7 @@
   - `avgTotalPipelineMs`
   - `p95TotalPipelineMs`
   - `maxTotalPipelineMs`
+  - `closedElapsedMs`、`guidanceAlertCount`（与 `session_start.openedElapsedMs` 一起：trace 能观测的窗口，以及它应有多少条告警记录）
 - 域层已补齐最小离线 replay 能力：
   - `TraceReplayParser`：基于 `kotlinx.serialization.json` 结构化解析 `trace_<sessionId>.jsonl`
   - `BuildTraceReplayReportUseCase`：生成 replay 聚合报告
@@ -50,6 +53,8 @@
     - `p95TotalPipelineMs` / `maxTotalPipelineMs`
     - `errorCount`
     - `uniqueMessageKeys`
+    - `qualificationFrameCounts`
+    - `guidanceAlertCounts`，以及窗口内的告警记录是否齐全
 - `SceneAnalysisView` 已接入正式入口：
   - `Trace sessions` 页面：查看已存储 session 列表
   - `Trace replay report` 页面：查看指定 session 的详细指标
@@ -77,6 +82,7 @@
   - 多条 `frame`
   - 可选 `overlay_render`
   - 可选 `prompt_outcome`（每条交出的提示一条）
+  - 可选 `guidance_alert`（每次告知一条）
   - 可选 `error`
   - `session_summary`
 

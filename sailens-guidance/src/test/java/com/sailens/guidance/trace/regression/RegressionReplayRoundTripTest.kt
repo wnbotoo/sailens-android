@@ -78,6 +78,8 @@ import com.sailens.guidance.usecase.decision.RevokeUndeliveredEventUseCase
 import com.sailens.guidance.usecase.perception.AnalyzeSceneUseCase
 import com.sailens.guidance.usecase.perception.ProcessFrameUseCase
 import com.sailens.guidance.usecase.scene.StartSceneAnalysisUseCase
+import com.sailens.guidance.safety.BaselineQualification
+import com.sailens.guidance.trace.capture.QualificationRecord
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
@@ -136,6 +138,7 @@ class RegressionReplayRoundTripTest {
         override fun onFrameQuality(result: FrameQualityResult) = assembler.onFrameQuality(result)
         override fun onGeometry(geometry: CameraGeometry) = assembler.onGeometry(geometry)
         override fun onStationary(stationary: Boolean) = assembler.onStationary(stationary)
+        override fun onQualification(baseline: BaselineQualification) = assembler.onQualification(baseline)
         override fun endFrame(frame: ImageFrame, events: List<SceneEvent>, failure: Throwable?) {
             when (val outcome = assembler.endFrame(frame, events, failure)) {
                 is RegressionFrameAssembler.Outcome.Lost -> lost += outcome.why
@@ -480,6 +483,7 @@ class RegressionReplayRoundTripTest {
         framesRecorded: Long = session.recorder!!.frames.size.toLong(),
         firstLostSeq: Long? = null,
         utterances: List<com.sailens.guidance.trace.capture.RegressionUtteranceRecord>? = null,
+        qualificationRecorded: Boolean = true,
     ): com.sailens.guidance.trace.capture.CaptureSession {
         val recorder = session.recorder!!
         java.io.FileOutputStream(java.io.File(dir, CaptureSchema.CLASS_MAPS_FILE)).use { out ->
@@ -512,6 +516,7 @@ class RegressionReplayRoundTripTest {
                             utteranceEventsRecorded = utterances.orEmpty().size.toLong(),
                         ),
                         utteranceLifecycle = utterances != null,
+                        qualificationRecorded = qualificationRecorded,
                     ),
                 ),
             ),
@@ -530,20 +535,65 @@ class RegressionReplayRoundTripTest {
         }
     }
 
+    /** Replays [read] as `CaptureReplayTest` does, the manifest's completeness flags included. */
+    private fun replayRead(read: com.sailens.guidance.trace.capture.CaptureSession): RegressionReplay.Report {
+        val block = read.manifest.regression!!
+        return RegressionReplay(
+            CaptureSchema.json.decodeFromJsonElement(PerceptionConfig.serializer(), block.perceptionConfig!!),
+            CaptureSchema.json.decodeFromJsonElement(AnalysisConfig.serializer(), block.analysisConfig!!),
+            semantics,
+        ).replay(
+            read.regressionFrames, read.revokes,
+            classMap = { com.sailens.guidance.trace.capture.CaptureSessionReader.classMap(read, it) },
+            qualificationRecorded = block.qualificationRecorded,
+        )
+    }
+
     @Test
     fun `a record written to disk replays through the reader`() {
         val session = runSession(record = true)
         withTempDir { dir ->
             val read = writeCapture(session, dir)
-            val block = read.manifest.regression!!
-            val report = RegressionReplay(
-                CaptureSchema.json.decodeFromJsonElement(PerceptionConfig.serializer(), block.perceptionConfig!!),
-                CaptureSchema.json.decodeFromJsonElement(AnalysisConfig.serializer(), block.analysisConfig!!),
-                semantics,
-            ).replay(read.regressionFrames, read.revokes, classMap = { com.sailens.guidance.trace.capture.CaptureSessionReader.classMap(read, it) })
+            assertTrue(read.manifest.regression!!.qualificationRecorded)
+            val report = replayRead(read)
             assertNull(report.firstMismatch?.toString(), report.firstMismatch)
             assertEquals(frameCount.toInt(), report.framesReplayed)
         }
+    }
+
+    @Test
+    fun `every frame that decided records its qualification, and replay holds the record to it`() {
+        val session = runSession(record = true)
+        val frames = session.recorder!!.frames
+        assertTrue("decided frames carry it", frames.filter { it.failure == null }.all { it.qualification != null })
+        assertTrue("failed frames do not", frames.filter { it.failure != null }.all { it.qualification == null })
+        assertTrue("a failed frame is in the scene", frames.any { it.failure != null })
+        val target = frames.first { it.failure == null && it.seq > 10 }
+
+        fun replay(edit: (RegressionFrameRecord) -> RegressionFrameRecord, recorded: Boolean = true) = withTempDir { dir ->
+            replayRead(writeCapture(session, dir, frames = frames.map { if (it.seq == target.seq) edit(it) else it }, qualificationRecorded = recorded))
+        }
+
+        val exact = replay({ it })
+        assertNull(exact.firstMismatch?.toString(), exact.firstMismatch)
+        assertTrue(exact.exact)
+
+        // A recorder that says it records the field and left it out: an incomplete record, not a pass.
+        val missing = replay({ it.copy(qualification = null) })
+        assertEquals(target.seq, missing.firstMismatch?.seq)
+        assertEquals("qualification missing", missing.firstMismatch?.what)
+
+        // A different value is a different output, like a different event.
+        val other = if (target.qualification!!.level == "unqualified") QualificationRecord("qualified") else QualificationRecord("unqualified", listOf("too_dark"))
+        val changed = replay({ it.copy(qualification = other) })
+        assertEquals(target.seq, changed.firstMismatch?.seq)
+        assertEquals("qualification", changed.firstMismatch?.what)
+
+        // A record from before the field existed has nothing to compare.
+        val older = withTempDir { dir ->
+            replayRead(writeCapture(session, dir, frames = frames.map { it.copy(qualification = null) }, qualificationRecorded = false))
+        }
+        assertTrue(older.exact)
     }
 
     /** A submission and a done for every offered prompt: what a session with the lifecycle records. */

@@ -2,6 +2,7 @@ package com.sailens.shell.guidance.screen
 
 import com.sailens.core.log.LogService
 import com.sailens.guidance.delivery.GuidanceOutputSettings
+import com.sailens.guidance.delivery.VisionAlert
 import com.sailens.guidance.delivery.VisionFaultAlerts
 import com.sailens.guidance.model.analysis.FrameQuality
 import com.sailens.guidance.model.analysis.VisionFaults
@@ -9,6 +10,11 @@ import com.sailens.guidance.model.common.EventCategory
 import com.sailens.guidance.model.common.EventPriority
 import com.sailens.guidance.model.scene.SceneEvent
 import com.sailens.guidance.model.scene.SceneEventMessageKeys
+import com.sailens.guidance.model.trace.GuidanceAlertChannels
+import com.sailens.guidance.model.trace.GuidanceAlertKinds
+import com.sailens.guidance.model.trace.GuidanceAlertResults
+import com.sailens.guidance.model.trace.GuidanceAlertSources
+import com.sailens.guidance.model.trace.GuidanceAlertTrace
 import com.sailens.guidance.model.trace.PromptDeliveryChannels
 import com.sailens.guidance.model.trace.PromptOutcomeTrace
 import com.sailens.guidance.processor.decision.SpeechScale
@@ -187,6 +193,48 @@ class GuidanceOutputWiringTest {
         wiring.protocol.onFrame(emptyList(), 2, VisionFaults.NONE)
         assertEquals(emptyList<String>(), calls)
         assertFalse("no receipts after a stop", calls.contains("confirm") || calls.contains("revoke"))
+    }
+
+    @Test
+    fun `a vision alert becomes its trace record, a sentence by its key and a rhythm by the vision-unreliable haptic`() {
+        val sentence = VisionAlert(GuidanceAlertKinds.FAULT_NOTICE, SceneEventMessageKeys.CAMERA_BLOCKED, EventPriority.CRITICAL, GuidanceAlertChannels.SPEECH, GuidanceAlertResults.ACCEPTED)
+            .toTrace(at = 1_700_000_000_000L, elapsedMs = 5_000L)
+        assertEquals(
+            GuidanceAlertTrace(
+                at = 1_700_000_000_000L, elapsedMs = 5_000L, source = GuidanceAlertSources.VISION, kind = GuidanceAlertKinds.FAULT_NOTICE,
+                messageKey = SceneEventMessageKeys.CAMERA_BLOCKED, priority = "critical", channel = GuidanceAlertChannels.SPEECH,
+                result = GuidanceAlertResults.ACCEPTED,
+            ),
+            sentence,
+        )
+
+        val rhythm = VisionAlert(GuidanceAlertKinds.FAULT_RHYTHM, null, EventPriority.LOW, GuidanceAlertChannels.HAPTICS, GuidanceAlertResults.PLAYED)
+            .toTrace(at = 1L, elapsedMs = 2L)
+        assertEquals("vision_unreliable", rhythm.haptic)
+        assertNull(rhythm.messageKey)
+        assertEquals("low", rhythm.priority)
+    }
+
+    @Test
+    fun `the wiring hands the protocol's alerts on`() {
+        val alerts = mutableListOf<VisionAlert>()
+        val recording = GuidanceOutputWiring(
+            speakOwn = { _, _, _, _ -> true }, settleFrame = { now }, speechReady = { true }, stopSpeech = {},
+            announcementFor = { Announcement(id = it.id.toString(), key = it.messageKey, text = it.messageKey, priority = 0, expiresAtMs = it.expiresAt) },
+            eventText = { it.messageKey }, noticeText = { it }, announceToScreenReader = {}, vibrateEvent = { true },
+            vibrateEventAlone = { _, _ -> NavigationClaim.STARTED }, playOrReserveVisionFault = { _, onPlayed -> onPlayed() },
+            cancelVisionFaultReservation = {}, cancelHaptics = {}, descriptionHoldsTheFloor = { false }, preemptDescription = {},
+            confirmDelivered = {}, revokeUndelivered = { _, _ -> }, reportCut = {}, reportHeardAfterCut = {}, promptAccepted = { true },
+            outputSettings = { GuidanceOutputSettings(speechEnabled = true, screenReaderActive = false, hapticsEnabled = true) },
+            visionFaultSettings = { VisionFaultAlerts.Settings(speechEnabled = true, faultHapticsEnabled = true) },
+            logger = SilentLog, recordOutcome = {}, onReachedUser = {},
+            recordAlert = { alerts += it },
+        )
+        recording.protocol.onFrame(emptyList(), 1, COVERED)
+        assertEquals(
+            listOf(GuidanceAlertResults.ACCEPTED, GuidanceAlertResults.REQUESTED, GuidanceAlertResults.PLAYED),
+            alerts.map { it.result },
+        )
     }
 
     private fun event(priority: EventPriority = EventPriority.HIGH) = SceneEvent(

@@ -38,6 +38,8 @@ import com.sailens.guidance.processor.perception.SegmentationAnalyzer
 import com.sailens.guidance.repository.DeviceSensorRepository
 import com.sailens.guidance.repository.ObstacleProvider
 import com.sailens.guidance.repository.PerceptionRepository
+import com.sailens.guidance.safety.BaselineQualification
+import com.sailens.guidance.safety.GuidanceQualifier
 import com.sailens.guidance.semantics.NavigationSemantics
 import com.sailens.guidance.trace.capture.ConnectivityRecord
 import com.sailens.guidance.trace.capture.EventRecord
@@ -70,8 +72,8 @@ import java.util.UUID
  * the frame quality, decide. A CI test records a real pipeline run and replays it, which is what
  * keeps the two in step.
  *
- * Exact means: every frame's decided events equal the recorded ones (ignoring the random ids), every
- * clock tape is used up, every recorded connectivity call is matched by an identical input, every
+ * Exact means: every frame's decided events equal the recorded ones (ignoring the random ids), and so
+ * does its qualification where one was recorded (schema 1.7), every clock tape is used up, every recorded connectivity call is matched by an identical input, every
  * rebuilt mask has the recorded CRC. The first frame that breaks any of these ends exact replay;
  * [Report] says which and why. A frame where upstream code changed and connectivity had to be
  * computed in Kotlin is reported as approximate.
@@ -144,6 +146,9 @@ class RegressionReplay(
      *   [CounterfactualDelivery]. Every other check stays.
      * @param onFrame each successfully processed frame's tracked obstacles and decided events.
      * @param trackIds the tracker's id source; an evaluation pairing two runs numbers tracks by birth.
+     * @param qualificationRecorded the manifest's `qualificationRecorded`: a frame that did not fail and
+     *   carries no qualification then ends exact replay ("qualification missing"). A recorded qualification
+     *   is compared whenever it is there, like the events.
      */
     fun replay(
         frames: List<RegressionFrameRecord>,
@@ -156,6 +161,7 @@ class RegressionReplay(
         trackIds: ObstacleTracker.TrackIdSource = ObstacleTracker.TrackIdSource.RANDOM,
         cutKept: List<RegressionCutKeptRecord> = emptyList(),
         heardAfterCut: List<RegressionHeardAfterCutRecord> = emptyList(),
+        qualificationRecorded: Boolean = false,
     ): Report {
         val world = World(classMap, trackIds)
         val revokesByDecision = revokes.groupBy { it.decisionsBefore }
@@ -198,7 +204,10 @@ class RegressionReplay(
                     val events = world.decide(snapshot)
                     decisions++
                     onFrame(record, FrameOutcome(result.getOrThrow().obstacles, events, snapshot, world.decidedAt, cooldownBefore))
-                    if (counterfactual == null) compareEvents(record, events)
+                    if (counterfactual == null) {
+                        compareEvents(record, events)
+                        compareQualification(record, world.decide.qualification(snapshot), qualificationRecorded)
+                    }
                     replayedIdOf.putAll(revokeTargets(record.events, events, counterfactual))
                 }
                 world.finishFrame()
@@ -219,6 +228,7 @@ class RegressionReplay(
      *
      * @param decidedAt the time the decision read on the device.
      * @param stationary the motion state the decision read on the device.
+     * @param qualification the frame's baseline qualification under this replay's analysis config.
      */
     data class SceneFrame(
         val record: RegressionFrameRecord,
@@ -227,11 +237,13 @@ class RegressionReplay(
         val visionFaults: VisionFaults,
         val decidedAt: Long,
         val stationary: Boolean,
+        val qualification: BaselineQualification = BaselineQualification.Qualified,
     )
 
     /**
      * The real path up to the decision step, for a caller that decides for itself: every check of
-     * [replay] but the decided events, and no revoke, because there is no cooldown here.
+     * [replay] but the decision's outputs (the decided events and the qualification, which the caller's
+     * config may change), and no revoke, because there is no cooldown here.
      *
      * @param onScene each successfully processed frame, in order.
      */
@@ -266,7 +278,7 @@ class RegressionReplay(
                     onScene(
                         SceneFrame(
                             record, snapshot, result.getOrThrow().obstacles, generator.visionFaults(snapshot),
-                            decidedAt, record.stationary ?: false,
+                            decidedAt, record.stationary ?: false, GuidanceQualifier.baseline(snapshot, analysisConfig),
                         ),
                     )
                 }
@@ -310,6 +322,13 @@ class RegressionReplay(
         val expected = record.events.map(EventRecord::withoutId)
         val actual = events.map { it.toRecord().withoutId() }
         if (expected != actual) throw Divergence("decided events", expected.toString(), actual.toString())
+    }
+
+    private fun compareQualification(record: RegressionFrameRecord, replayed: BaselineQualification, recorded: Boolean) {
+        val actual = replayed.toRecord()
+        val expected = record.qualification
+            ?: if (recorded) throw Divergence("qualification missing", "recorded", actual.toString()) else return
+        if (expected != actual) throw Divergence("qualification", expected.toString(), actual.toString())
     }
 
     private fun RegressionFrameRecord.frame() = ImageFrame(

@@ -27,6 +27,11 @@ For what each metric means, how it is computed, and how to read it when tuning, 
   - `eventCount`
   - `isBlocked` / `isNarrowing` / `isRoadDangerous`
   - `messageKeys`
+  - `frameQuality` / `frameQualityClassified`, `qualification` / `qualificationReasons`,
+    `capabilities`, `receiptToDecisionMs` (see
+    [Qualification and alerts](trace_metrics_guide.md#qualification-and-alerts))
+- Every alert given or offered while the session is open records a `guidance_alert`, numbered by
+  `seq`.
 - At session end a `session summary` is emitted:
   - `totalFrames`
   - `droppedFrames`
@@ -38,6 +43,8 @@ For what each metric means, how it is computed, and how to read it when tuning, 
   - `avgTotalPipelineMs`
   - `p95TotalPipelineMs`
   - `maxTotalPipelineMs`
+  - `closedElapsedMs`, `guidanceAlertCount` (with `session_start.openedElapsedMs`: the window the
+    trace observes, and how many alert records it should hold)
 - The domain layer has minimal offline replay:
   - `TraceReplayParser` — structured parse of `trace_<sessionId>.jsonl` via
     `kotlinx.serialization.json`
@@ -54,6 +61,8 @@ For what each metric means, how it is computed, and how to read it when tuning, 
     - `p95TotalPipelineMs` / `maxTotalPipelineMs`
     - `errorCount`
     - `uniqueMessageKeys`
+    - `qualificationFrameCounts`
+    - `guidanceAlertCounts`, with whether the alert records are complete within the window
 - `SceneAnalysisView` has real entry points:
   - **Trace sessions** page — browse stored sessions
   - **Trace replay report** page — detailed metrics for a chosen session
@@ -81,6 +90,7 @@ File format:
   - many `frame`
   - optional `overlay_render`
   - optional `prompt_outcome` (one per offered prompt)
+  - optional `guidance_alert` (one per alert given or offered)
   - optional `error`
   - `session_summary`
 

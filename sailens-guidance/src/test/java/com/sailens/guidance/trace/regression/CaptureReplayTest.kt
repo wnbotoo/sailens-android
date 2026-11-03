@@ -58,6 +58,7 @@ class CaptureReplayTest {
                 revokes = session.revokes,
                 classMap = { CaptureSessionReader.classMap(session, it) },
                 firstLostSeq = block.stats.firstLostSeq,
+                qualificationRecorded = block.qualificationRecorded,
             )
             val text = buildString {
                 appendLine("capture ${manifest.sessionId} (${manifest.group ?: "no group"}: ${manifest.sceneLabel ?: "no scene"})")

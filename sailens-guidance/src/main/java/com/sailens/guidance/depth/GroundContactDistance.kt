@@ -161,6 +161,17 @@ object DistanceFusion {
 }
 
 /**
+ * Whether the ground contact can work from [geometry]. Stale gravity is refused: the phone may have
+ * turned since. Estimated intrinsics and receipt-time alignment are accepted -- they bend the angle
+ * a little, and the fusion can only raise risk.
+ */
+internal fun usableForGroundContact(geometry: CameraGeometry): Boolean = when (val quality = geometry.quality) {
+    GeometryQuality.Ok -> true
+    is GeometryQuality.Degraded -> GeometryIssue.STALE_GRAVITY !in quality.issues
+    is GeometryQuality.Unavailable -> false
+}
+
+/**
  * Projects a box's bottom centre onto the ground plane: the ray through the contact pixel, its
  * angle β below the horizon from gravity, and `d = h / tan β` for phone height `h`. Then checks
  * whether that contact can be trusted.
@@ -175,7 +186,7 @@ class GroundContactDistanceEstimator(semantics: NavigationSemantics) {
 
     fun estimate(box: NormalizedRect, category: ObstacleCategory, frame: DistanceFrame): GroundContactEstimate {
         val config = frame.config
-        val geometry = frame.geometry?.takeIf(::usable) ?: return GroundContactEstimate(ContactValidity.NO_GEOMETRY)
+        val geometry = frame.geometry?.takeIf(::usableForGroundContact) ?: return GroundContactEstimate(ContactValidity.NO_GEOMETRY)
         val depression = depressionRad(box.centerX, box.maxY, geometry)
             ?: return GroundContactEstimate(ContactValidity.NO_GEOMETRY)
         val minDepression = Math.toRadians(config.minDepressionDeg.toDouble())
@@ -218,17 +229,6 @@ class GroundContactDistanceEstimator(semantics: NavigationSemantics) {
         val norm = sqrt(rx * rx + ry * ry + 1.0)
         val q = g.x * rx + g.y * ry + g.z
         return asin((q / norm).coerceIn(-1.0, 1.0))
-    }
-
-    /**
-     * Stale gravity is refused: the phone may have turned since. Estimated intrinsics and
-     * receipt-time alignment are accepted -- they bend the angle a little, and the fusion can
-     * only raise risk.
-     */
-    private fun usable(geometry: CameraGeometry): Boolean = when (val quality = geometry.quality) {
-        GeometryQuality.Ok -> true
-        is GeometryQuality.Degraded -> GeometryIssue.STALE_GRAVITY !in quality.issues
-        is GeometryQuality.Unavailable -> false
     }
 
     /** A nearer box (lower bottom) covers the contact row across the box's central half. */

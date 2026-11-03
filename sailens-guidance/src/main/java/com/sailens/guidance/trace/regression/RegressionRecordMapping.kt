@@ -25,12 +25,16 @@ import com.sailens.guidance.model.common.Severity
 import com.sailens.guidance.model.perception.ObstacleDetection
 import com.sailens.guidance.model.perception.SegmentationAnalysisStats
 import com.sailens.guidance.model.scene.SceneEvent
+import com.sailens.guidance.safety.BaselineQualification
+import com.sailens.guidance.safety.traceLevel
+import com.sailens.guidance.safety.traceReasons
 import com.sailens.guidance.trace.capture.BottomStatsRecord
 import com.sailens.guidance.trace.capture.ConnectivityStatsRecord
 import com.sailens.guidance.trace.capture.DetectionItem
 import com.sailens.guidance.trace.capture.EventRecord
 import com.sailens.guidance.trace.capture.GeometryRecord
 import com.sailens.guidance.trace.capture.IntrinsicsRecord
+import com.sailens.guidance.trace.capture.QualificationRecord
 import com.sailens.guidance.trace.capture.SemanticStatsRecord
 import com.sailens.vision.detection.Detection
 import java.nio.ByteBuffer
@@ -240,6 +244,12 @@ fun GeometryRecord.toGeometry(): CameraGeometry {
         },
     )
 }
+
+/**
+ * The baseline qualification as the record writes it. One way only: it is an output, like the decided
+ * events, and replay compares what it computes against it as a record.
+ */
+fun BaselineQualification.toRecord(): QualificationRecord = QualificationRecord(level = traceLevel, reasons = traceReasons)
 
 fun BinaryMask.regressionCrc32(scratch: LongArray = LongArray(0)): Long {
     val words = copyPackedBitsInto(scratch)

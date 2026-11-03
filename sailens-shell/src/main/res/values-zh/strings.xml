@@ -243,6 +243,8 @@
     <string name="trace_report_tracked_obstacle_categories">跟踪障碍物类型：%1$s</string>
     <string name="trace_report_road_vehicle_sources">道路车辆：来源 %1$s，平均置信度 %2$d%%，原因 %3$s，bottom/center/area：%4$d/%5$d/%6$d%%</string>
     <string name="trace_report_blockage_reasons">阻塞原因：%1$s</string>
+    <string name="trace_report_qualification_frames">各资格的帧数：%1$s</string>
+    <string name="trace_report_guidance_alerts">trace 窗口内的告警：%1$s；记录 %2$s</string>
     <string name="trace_session_button_label">会话 %1$s</string>
     <string name="trace_session_selected_label">当前会话 %1$s</string>
     <string name="trace_session_file_name">文件：%1$s</string>

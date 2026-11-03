@@ -39,7 +39,7 @@ debug 版会为一次 Guidance 会话记录什么、用什么格式，以及电�
   带默认值的 manifest 字段、记录类型、已有记录的字段、开放字符串字段的取值（采集模式为此用字符串，旧读
   取器会带着警告读过新模式）。不能删除或改名必填字段，也不能改变字段的含义或类型；那属于大版本。记录
   里的封闭枚举不在小版本里扩展。已有的小版本新增了构建来源（1.2）、模型回归记录（1.3）、记录的几何
-  （1.4）和语音生命周期（1.5）。
+  （1.4）、语音生命周期（1.5）、播报档内排序和打断回执（1.6），以及帧的资格（1.7）。
 - 传感器频率按事件时间戳计算；`SENSOR_DELAY_GAME` 只是请求的档位。
 - **计数**与 Guidance 的丢帧计数分开，这样缺口才能解释。对完整的采集，这些计数覆盖引擎收到的全部内容：
   `framesOffered` = `framesEncoded` + `framesDroppedByEncoder`；`sensorEvents`（已写入）+
@@ -161,6 +161,14 @@ debug 版会为一次 Guidance 会话记录什么、用什么格式，以及电�
 | 撤回（UI 线程） | 事件 id + 它之前已做的决策次数，在冷却锁内读取 | 在那次决策之前应用；id 按位置映射到回放出的事件 |
 | 配置 | 完整的 `PerceptionConfig` / `AnalysisConfig`、类别体系、深度来源 | 宽松解码 |
 | 决策 | 每个决定的事件，全部字段 | 期望输出；比较时忽略随机 id |
+| 资格（schema 1.7） | 帧的基础资格：`level` 和 `reasons` | 和事件一样是期望输出：不同即精确回放结束（"qualification"） |
+
+**资格（schema 1.7）。** `RegressionFrameRecord.qualification` 有 `level`——封闭的三值
+`qualified` / `degraded` / `unqualified`，小版本不能扩展——和 `reasons`，开放的小写字符串，不合格的原因
+排在最前，小版本可以新增。它在决策之后、帧结束之前记录。写它的录制器会设 `RegressionManifest.qualificationRecorded`；
+这时每个没有失败的帧都必须带它，缺了的帧让精确回放在那里结束（"qualification missing"），而不是不检查
+就放过。失败的帧不带它。旧记录（标志为 false）不比较。钩子自己出错时和其他钩子一样丢掉这一帧，所以
+不会被当成感知失败，也不会写出缺字段的成功帧。
 
 只有在连续不断的帧上回放才是精确的：记录丢掉的第一帧（`RegressionStats.firstLostSeq`）就是终点，因为平
 滑器和跟踪器无法接着恢复。超越函数在 ART 和 HotSpot 之间可能差一个 ulp。送达确认不记录：它们不改变任

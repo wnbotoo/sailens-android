@@ -22,6 +22,8 @@ A trace is a JSONL file; each line is one event:
   by `sourceSequenceNumber`; written after that frame, and that frame is always recorded whatever the
   sampling. A `frame` record's `messageKeys` are candidates after cooldown, not what the user
   received — label false alarms against `prompt_outcome`.
+- `guidance_alert` — one alert the user was given or offered about a fault: a sentence or a rhythm
+  and what the output did with it. See [Qualification and alerts](#qualification-and-alerts).
 - `session_summary` — the aggregate summary after a session ends.
 - `error` — an exception in the pipeline or in tracing.
 
@@ -774,6 +776,70 @@ Reading it:
   road context, and stable-frame gates, so distant small targets or single-frame missegmentation do
   not announce prematurely.
 - Disabled-policy prompts appearing: check `EventGenerator` / `EventMerger` config.
+
+## Qualification and alerts
+
+These are observations: nothing decides on them. They record whether Guidance could judge the way
+ahead in a frame, and what it told the user when it could not.
+
+### Frame fields
+
+Each is absent in traces written before it existed, which means "not recorded", not "fine".
+
+- `frameQuality`: frame quality after debouncing (`ok` / `obstructed` / `too_dark`), whether or not
+  sensor-quality events are on. `frameQualityClassified`: the frame's own classification before
+  debouncing; it turns a few frames earlier than `frameQuality` when the lens is covered.
+- `qualification`: `qualified`, `degraded` (some prompts paused, others go on) or `unqualified` (the
+  picture cannot be trusted; every prompt is suppressed). `qualificationReasons` lists the reasons,
+  lower case, the reason a frame is unqualified first: `camera_obstructed`, `too_dark`,
+  `ground_unrecognized`. The level follows the event generator's own test: a frame is unqualified
+  exactly when it makes a covered-lens or low-light event, so `unqualified` frames are the ones whose
+  other prompts were suppressed.
+- `capabilities`: how each optional input stood (`orientation`, `camera_geometry`,
+  `ground_contact_distance`), each with a `status` (`not_configured` / `available` / `degraded` /
+  `unavailable`) and its `issues`. Trace only: they are not part of the qualification.
+- `receiptToDecisionMs`: from the frame source receiving the frame to the decision, both elapsed
+  realtime. It leaves out exposure to receipt, so it is not the frame's whole age. Absent when the
+  source did not record the receipt.
+
+### `guidance_alert`
+
+One record per alert the user was given or offered: `source` (`vision` for a covered lens, low light
+or an unrecognised floor), `kind` (`fault_notice`, `fault_recovery`, `fault_rhythm`), a sentence's
+`messageKey` or a rhythm's `haptic`, `priority`, `channel` (`speech`, `screen_reader`, `haptics`, or
+`none` when nothing was offered: speech off, or a scene description holding the floor) and `result`:
+
+- a sentence: `accepted` (own speech took it), `published` (the screen reader took it) or `refused`;
+- a rhythm: `requested` when asked of the motor, `played` when it started, `cancelled` when withdrawn
+  before it started.
+
+`at` is wall clock, for lining records up with frames; `elapsedMs` is elapsed realtime. `seq` numbers
+the session's alert records from 1.
+
+### The window a trace observes
+
+Records reach a trace only while its session is open. `session_start.openedElapsedMs` and
+`session_summary.closedElapsedMs` bound that window in elapsed realtime; an alert outside it is in no
+trace. `session_summary.guidanceAlertCount` is how many alert records the session queued, so a
+complete trace holds every `seq` from 1 to it.
+
+### `qualificationFrames`
+
+Traced frames per qualification level; `none` counts frames written before the field existed. Frames
+follow the trace sampling, except that a frame that offered a prompt is always kept.
+
+### `alertsInWindow`
+
+Alert records per kind, and whether they are all there. The counts are counts within the trace's
+window, not every alert of the run.
+
+- `complete`: every `seq` from 1 to `guidanceAlertCount` is there.
+- `incomplete (missing n)`: a gap, a first `seq` above 1, or fewer records than counted. The trace
+  queue drops the oldest entries when it overflows, so a busy trace can lose some.
+- `possibly_incomplete`: none found missing, but there is no count (the process died before the
+  summary, or the summary itself was dropped), so the last ones could be missing. A gap found without
+  the count is a lower bound.
+- `not_recorded`: the trace was written before alert records existed.
 
 ## Quick diagnosis paths
 

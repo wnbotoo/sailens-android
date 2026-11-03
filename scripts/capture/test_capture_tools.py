@@ -21,6 +21,7 @@ import contact_sheet  # noqa: E402
 import timing_align  # noqa: E402
 from sailens_capture import (  # noqa: E402
     CLASS_MAP_HEADER, CLASS_MAP_MAGIC, SEALED_MARKER, UnsupportedCapture, find_captures, is_sealed, load_capture,
+    load_trace,
 )
 
 START_NS = 5_000_000_000
@@ -255,6 +256,33 @@ class StatsTest(unittest.TestCase):
             directory = write_capture(root, "s", stats={"framesOffered": 3, "framesEncoded": 1, "framesDroppedByEncoder": 0})
             problems = capture_stats.summarize(directory)["counterProblems"]
             self.assertTrue(any("framesOffered 3" in p for p in problems))
+
+
+class TraceTest(unittest.TestCase):
+    def test_alert_records_are_kept_in_order_and_unknown_types_still_ignored(self):
+        def alert(seq, result):
+            return {"type": "guidance_alert", "sessionId": "s", "seq": seq, "at": START_WALL + seq, "elapsedMs": 9_000 + seq,
+                    "source": "vision", "kind": "fault_rhythm", "haptic": "vision_unreliable", "priority": "critical",
+                    "channel": "haptics", "result": result}
+
+        with tempfile.TemporaryDirectory() as root:
+            path = os.path.join(root, "trace_s.jsonl")
+            with open(path, "w") as f:
+                for record in (
+                    {"type": "session_start", "sessionId": "s", "openedElapsedMs": 9_000},
+                    {"type": "frame", "sequenceNumber": 3, "qualification": "unqualified", "qualificationReasons": ["camera_obstructed"]},
+                    alert(1, "requested"),
+                    {"type": "prompt_outcome", "eventId": "e1", "sourceSequenceNumber": 3},
+                    {"type": "a_later_record"},
+                    alert(2, "played"),
+                ):
+                    f.write(json.dumps(record) + "\n")
+
+            trace = load_trace(path)
+            self.assertEqual([(a["seq"], a["result"]) for a in trace.alerts], [(1, "requested"), (2, "played")])
+            self.assertEqual([o["eventId"] for o in trace.prompt_outcomes], ["e1"])
+            self.assertEqual(trace.frames_by_seq[3]["qualification"], "unqualified")
+            self.assertEqual(trace.warnings, [])
 
 
 class ContactSheetTest(unittest.TestCase):

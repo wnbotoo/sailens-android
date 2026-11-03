@@ -99,6 +99,17 @@ class ExportPromptLabelsTest(unittest.TestCase):
         self.assertEqual(rows[0]["ground_recognition"], "")
         self.assertIn("frame 8", stderr)
 
+    def test_alert_records_and_qualification_fields_change_no_row(self):
+        records = self.session() + [outcome("e1", 7)]
+        _, plain, _ = self.run_export(records)
+        alert = {"type": "guidance_alert", "sessionId": "s", "seq": 1, "at": START + 2_000, "elapsedMs": 9_000,
+                 "source": "vision", "kind": "fault_notice", "messageKey": "event_camera_blocked",
+                 "priority": "critical", "channel": "speech", "result": "accepted"}
+        newer = [dict(r, qualification="qualified", qualificationReasons=[]) if r["type"] == "frame" else r for r in records]
+        code, rows, _ = self.run_export(newer[:2] + [alert] + newer[2:])
+        self.assertEqual(code, 0)
+        self.assertEqual(rows, plain)
+
     def test_a_trace_from_before_prompt_outcomes_gives_no_rows_and_a_warning(self):
         code, rows, stderr = self.run_export(self.session())
         self.assertEqual((code, rows), (0, []))
