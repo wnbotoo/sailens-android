@@ -56,7 +56,7 @@ class EventGenerator(
         )
     }
 
-    /** The det-first switches this generator's config carries. */
+    /** The policy switches this generator's config carries. */
     val detFirst: DetFirstConfig get() = config.detFirst
 
     /**
