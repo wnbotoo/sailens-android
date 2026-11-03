@@ -109,6 +109,7 @@ class EventMerger {
             relatedZones = allZones,
             distance = nearestDistance,
             directionHint = directionHint,
+            components = events.flatMap { it.components },
         )
     }
 

@@ -52,8 +52,14 @@ interface RegressionRecorder {
     /** The decided events of [frame], highest priority first, or the [failure] that stopped it. */
     fun endFrame(frame: ImageFrame, events: List<SceneEvent>, failure: Throwable?) {}
 
-    /** A revoked cooldown entry, applied after [decisionsBefore] decisions. */
-    fun onRevoke(eventId: UUID, decisionsBefore: Long) {}
+    /** A revoked cooldown entry, applied after [decisionsBefore] decisions. [reason] is one of `PromptRevokeReasons`. */
+    fun onRevoke(eventId: UUID, decisionsBefore: Long, reason: String? = null) {}
+
+    /** A prompt cut off without being taken back, after [decisionsBefore] decisions. */
+    fun onCutKept(eventId: UUID, decisionsBefore: Long) {}
+
+    /** A prompt judged cut off that the engine then said it finished, after [decisionsBefore] decisions. */
+    fun onHeardAfterCut(eventId: UUID, decisionsBefore: Long) {}
 
     /**
      * A speech-lifecycle event of an utterance submitted in the session [sessionId]. Comes from any

@@ -1,4 +1,4 @@
-package com.sailens.shell.guidance.screen
+package com.sailens.guidance.delivery
 
 import com.sailens.guidance.model.trace.PromptDeliveryChannels.HAPTICS
 import com.sailens.guidance.model.trace.PromptDeliveryChannels.SCREEN_READER

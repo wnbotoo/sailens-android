@@ -104,6 +104,8 @@ data class DistanceEstimate(
     val contact: GroundContactEstimate,
     /** The level of the contact interval's lower bound; null without an interval. */
     val contactLevel: DistanceLevel?,
+    /** Where the phone height behind [contact] came from; null without geometry. */
+    val heightSource: HeightSource? = null,
 ) {
     init {
         require(used.value <= today.value) { "fusion made $today into the farther $used" }

@@ -155,7 +155,7 @@ class RegressionReplayRoundTripTest {
                 }
             }
         }
-        override fun onRevoke(eventId: UUID, decisionsBefore: Long) {
+        override fun onRevoke(eventId: UUID, decisionsBefore: Long, reason: String?) {
             revokes += RegressionRevokeRecord(eventId.toString(), decisionsBefore, 0)
         }
     }
@@ -411,6 +411,33 @@ class RegressionReplayRoundTripTest {
         val asRecorded = recorder.frames.filter { it.failure == null }.map { frame -> frame.events.map(EventRecord::withoutId) }
         assertEquals(asRecorded, counterfactual(RegressionReplay.CounterfactualDelivery.UNCHANGED_AS_RECORDED))
         assertTrue(asRecorded != counterfactual(RegressionReplay.CounterfactualDelivery.ALL_DELIVERED))
+    }
+
+    @Test
+    fun `the scenes of a run that does not decide are those the decisions were made on`() {
+        val session = runSession(record = true)
+        val recorder = session.recorder!!
+        val decided = mutableListOf<RegressionReplay.FrameOutcome>()
+        RegressionReplay(session.activeConfig, analysisConfig, semantics).replay(
+            frames = recorder.frames,
+            revokes = recorder.revokes,
+            classMap = { recorder.classMaps[it.seq] },
+            onFrame = { _, outcome -> decided += outcome },
+            trackIds = com.sailens.guidance.evaluation.BirthOrderTrackIds(),
+        )
+        val scenes = mutableListOf<RegressionReplay.SceneFrame>()
+        val report = RegressionReplay(session.activeConfig, analysisConfig, semantics).replayScenes(
+            frames = recorder.frames,
+            classMap = { recorder.classMaps[it.seq] },
+            trackIds = com.sailens.guidance.evaluation.BirthOrderTrackIds(),
+            onScene = { scenes += it },
+        )
+        assertNull(report.firstMismatch?.toString(), report.firstMismatch)
+        assertEquals(recorder.frames.count { it.failure == null }, scenes.size)
+        assertEquals(decided.map { it.decidedAt }, scenes.map { it.decidedAt })
+        assertEquals(decided.map { it.obstacles.map { o -> o.id to o.distance } }, scenes.map { it.obstacles.map { o -> o.id to o.distance } })
+        assertEquals(decided.map { it.snapshot!!.connectivity }, scenes.map { it.snapshot.connectivity })
+        assertEquals(decided.map { it.snapshot!!.frameQuality }, scenes.map { it.snapshot.frameQuality })
     }
 
     @Test

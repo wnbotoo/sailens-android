@@ -1,5 +1,6 @@
 package com.sailens.shell.guidance.screen
 
+import com.sailens.guidance.delivery.GuidanceDeliveryResult
 import com.sailens.guidance.model.common.EventCategory
 import com.sailens.guidance.model.common.EventPriority
 import com.sailens.guidance.model.scene.SceneEvent

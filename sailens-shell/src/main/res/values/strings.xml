@@ -333,6 +333,7 @@
     <string name="event_camera_restored">Camera is clear again</string>
     <string name="event_light_restored">Light is back to normal</string>
     <string name="event_ground_recognized">Ground recognized again, path alerts are back</string>
+    <string name="event_mode_obstacles_and_blocked">Now alerting for obstacles and blocked paths only</string>
     <!-- Camera permission rationale. The copy lives here, not in sailens-camera: it is product
          voice, and capture must not depend on the shell. -->
     <string name="permission_camera_title">Camera access needed</string>

@@ -2,6 +2,7 @@ package com.sailens.shell.di
 
 import com.sailens.shell.guidance.settings.PhoneGeometryStore
 import com.sailens.core.log.LogService
+import com.sailens.guidance.config.AnalysisConfig
 import com.sailens.guidance.geometry.CameraFactsSource
 import com.sailens.shell.FileLogService
 import com.sailens.shell.guidance.geometry.CameraFactsAdapter
@@ -125,6 +126,10 @@ val shellModule = module {
             traceService = get(),
             sceneOverlayConfig = get(),
             guidanceSettingsStore = get(),
+            detFirst = get<AnalysisConfig>().detFirst,
+            reportCutPrompt = get(),
+            reportHeardAfterCut = get(),
+            acceptedPrompt = get(),
             guidanceDiagnosticsStore = get(),
             accessibilityStatusProvider = get(),
             textResolver = get(),

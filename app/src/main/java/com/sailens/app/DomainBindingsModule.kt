@@ -2,6 +2,7 @@ package com.sailens.app
 
 import com.sailens.shell.guidance.settings.PhoneGeometryStore
 import com.sailens.BuildConfig
+import com.sailens.guidance.config.AnalysisConfig
 import com.sailens.guidance.geometry.CameraFactsSource
 import com.sailens.guidance.repository.DeviceSensorRepository
 import com.sailens.guidance.processor.analysis.ConnectivityAnalysisProcessor
@@ -23,7 +24,10 @@ import com.sailens.guidance.processor.perception.PerceptionProfileManager
 import com.sailens.guidance.processor.perception.SegmentationAnalysisProcessor
 import com.sailens.guidance.processor.perception.SegmentationAnalyzer
 import com.sailens.guidance.usecase.decision.DecideEventsUseCase
+import com.sailens.guidance.usecase.decision.AcceptedPromptUseCase
 import com.sailens.guidance.usecase.decision.ConfirmDeliveredEventUseCase
+import com.sailens.guidance.usecase.decision.ReportCutPromptUseCase
+import com.sailens.guidance.usecase.decision.ReportHeardAfterCutUseCase
 import com.sailens.guidance.usecase.decision.RevokeUndeliveredEventUseCase
 import com.sailens.guidance.usecase.perception.AnalyzeSceneUseCase
 import com.sailens.guidance.usecase.perception.ProcessFrameUseCase
@@ -83,9 +87,12 @@ val domainBindingsModule = module {
         )
     }
     single { EventGenerator(config = get()) }
-    single { EventConflictResolver() }
+    single { EventConflictResolver(keepBlockedWithObstacle = get<AnalysisConfig>().detFirst.keepBlockedWithObstacle) }
     single { EventMerger() }
-    single { CooldownManager() }
+    single {
+        val detFirst = get<AnalysisConfig>().detFirst
+        CooldownManager(proximityEscalation = detFirst.proximityEscalation, retryInterrupted = detFirst.retryInterrupted)
+    }
 
     // Use cases — new instance per resolution.
     // ProcessFrameUseCase is the exception: it holds per-session frame state (cached semantic
@@ -132,6 +139,9 @@ val domainBindingsModule = module {
     }
     factory { ConfirmDeliveredEventUseCase(cooldownManager = get()) }
     factory { RevokeUndeliveredEventUseCase(cooldownManager = get(), regressionRecorder = regressionRecorder()) }
+    factory { ReportCutPromptUseCase(cooldownManager = get(), regressionRecorder = regressionRecorder()) }
+    factory { ReportHeardAfterCutUseCase(cooldownManager = get(), regressionRecorder = regressionRecorder()) }
+    factory { AcceptedPromptUseCase(cooldownManager = get()) }
     factory {
         StartSceneAnalysisUseCase(
             profileManager = get(),

@@ -4,8 +4,8 @@ import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
-import com.sailens.guidance.model.common.EventPriority
 import com.sailens.guidance.model.scene.SceneEvent
+import com.sailens.guidance.processor.decision.SpeechScale
 import com.sailens.output.HapticPlayer
 
 /**
@@ -37,9 +37,31 @@ class HapticManager(context: Context) {
      */
     fun trigger(event: SceneEvent): Boolean {
         val haptic = GuidanceHaptic.forEvent(event)
-        if (!arbiter.tryClaim(event.priority.value, haptic.durationMs)) return false
+        if (!arbiter.tryClaim(SpeechScale.of(event), haptic.durationMs)) return false
         player.play(timings = haptic.timings, amplitude = GuidanceHaptic.amplitudeFor(event))
         return true
+    }
+
+    /**
+     * Plays the rhythm for [event] when vibration is its only channel. Refused by a protected pattern, an alarm
+     * or a fault rhythm, it waits for the motor rather than for the next frame, whose distance from now has
+     * nothing to do with how soon the motor is free.
+     *
+     * @param onQueuedResult for [NavigationClaim.QUEUED], on the main thread: whether it played. Not called after a stop.
+     */
+    fun triggerOrQueue(event: SceneEvent, onQueuedResult: (played: Boolean) -> Unit): NavigationClaim {
+        val haptic = GuidanceHaptic.forEvent(event)
+        val claim = arbiter.claimOrQueueNavigation(
+            priority = SpeechScale.of(event),
+            durationMs = haptic.durationMs,
+            expiresAtMs = event.expiresAt,
+            start = {
+                player.play(timings = haptic.timings, amplitude = GuidanceHaptic.amplitudeFor(event))
+            },
+            onQueuedResult = onQueuedResult,
+        )
+        if (claim == NavigationClaim.QUEUED) scheduleReserved()
+        return claim
     }
 
     /**
@@ -49,10 +71,11 @@ class HapticManager(context: Context) {
      * that pattern ends, ahead of any rhythm asked for after it -- on the main thread, with or without new
      * frames. Once started nothing cuts it. One reservation at a time: a newer one replaces it.
      *
+     * @param speechPriority on [SpeechScale], as the navigation rhythms it competes with.
      * @param onPlayed called on the main thread when it starts, which may be before this returns.
      */
-    fun playOrReserve(haptic: GuidanceHaptic, priority: EventPriority, amplitude: Int, onPlayed: () -> Unit) {
-        val started = arbiter.claimOrReserve(priority.value, haptic.durationMs) {
+    fun playOrReserve(haptic: GuidanceHaptic, speechPriority: Int, amplitude: Int, onPlayed: () -> Unit) {
+        val started = arbiter.claimOrReserve(speechPriority, haptic.durationMs) {
             player.play(timings = haptic.timings, amplitude = amplitude)
             onPlayed()
         }
@@ -86,14 +109,15 @@ class HapticManager(context: Context) {
      * reserved one still starts when the motor is free.
      */
     fun cancelNavigation() {
+        arbiter.dropQueuedNavigation()
         if (arbiter.releaseNavigation()) player.cancel()
         arbiter.startReservedIfFree()
     }
 
     /** Guidance stopped: stops whatever plays and drops a reserved rhythm. */
     fun cancel() {
-        cancelReservation()
-        arbiter.clear()
+        mainHandler.removeCallbacks(startReserved)
+        arbiter.stop()
         player.cancel()
     }
 
@@ -103,6 +127,9 @@ class HapticManager(context: Context) {
 }
 
 private val GuidanceHaptic.durationMs: Long get() = timings.sum()
+
+/** What became of a navigation rhythm asked for by [HapticManager.triggerOrQueue]. */
+enum class NavigationClaim { STARTED, QUEUED, REFUSED }
 
 /**
  * Which vibration pattern owns the motor right now. Pure, so the rule is testable on the JVM:
@@ -117,8 +144,49 @@ internal class HapticArbiter(private val clock: () -> Long) {
     private var activePriority: Int? = null
     private var activeUntilMs: Long = 0L
     private var reserved: Reservation? = null
+    private var queuedNavigation: QueuedNavigation? = null
 
     private class Reservation(val durationMs: Long, val start: () -> Unit)
+
+    private class QueuedNavigation(
+        val priority: Int,
+        val durationMs: Long,
+        val expiresAtMs: Long,
+        val start: () -> Unit,
+        val onResult: (played: Boolean) -> Unit,
+    )
+
+    /**
+     * A navigation rhythm that is its prompt's only channel: as [tryClaim], except that held off by a protected
+     * pattern it waits for the motor, behind the reservation. One waits at a time. A valid one of strictly
+     * higher priority keeps its place and the new one is refused; otherwise the new one takes the place, and the
+     * old one's result is that it did not play. Held off by another navigation rhythm it is refused, as ever.
+     */
+    @Synchronized
+    fun claimOrQueueNavigation(priority: Int, durationMs: Long, expiresAtMs: Long, start: () -> Unit, onQueuedResult: (played: Boolean) -> Unit): NavigationClaim {
+        val now = clock()
+        startReservedIfFree(now)
+        val active = activePriority
+        if (active != null && now < activeUntilMs && priority <= active) {
+            if (active != Int.MAX_VALUE) return NavigationClaim.REFUSED
+            val waiting = queuedNavigation
+            if (waiting != null && now <= waiting.expiresAtMs && waiting.priority > priority) return NavigationClaim.REFUSED
+            queuedNavigation = QueuedNavigation(priority, durationMs, expiresAtMs, start, onQueuedResult)
+            waiting?.onResult?.invoke(false)
+            return NavigationClaim.QUEUED
+        }
+        activePriority = priority
+        activeUntilMs = now + durationMs
+        start()
+        return NavigationClaim.STARTED
+    }
+
+    @Synchronized
+    fun dropQueuedNavigation() {
+        val waiting = queuedNavigation ?: return
+        queuedNavigation = null
+        waiting.onResult(false)
+    }
 
     @Synchronized
     fun tryClaim(priority: Int, durationMs: Long): Boolean {
@@ -160,20 +228,32 @@ internal class HapticArbiter(private val clock: () -> Long) {
         return true
     }
 
-    /** Starts the reserved pattern if the motor is free. @return whether it started. */
+    /** Starts what waits for the motor if it is free: the reservation first. @return whether anything started. */
     @Synchronized
     fun startReservedIfFree(now: Long = clock()): Boolean {
-        val waiting = reserved ?: return false
         if (activePriority != null && now < activeUntilMs) return false
-        reserved = null
-        protect(now, waiting.durationMs)
-        waiting.start()
+        reserved?.let { waiting ->
+            reserved = null
+            protect(now, waiting.durationMs)
+            waiting.start()
+            return true
+        }
+        val navigation = queuedNavigation ?: return false
+        queuedNavigation = null
+        if (now > navigation.expiresAtMs) {
+            navigation.onResult(false)
+            return false
+        }
+        activePriority = navigation.priority
+        activeUntilMs = now + navigation.durationMs
+        navigation.start()
+        navigation.onResult(true)
         return true
     }
 
-    /** When the motor will be free for the reserved pattern; null when none waits. */
+    /** When the motor will be free for what waits for it; null when nothing does. */
     @Synchronized
-    fun reservationFreeAtMs(): Long? = reserved?.let { activeUntilMs }
+    fun reservationFreeAtMs(): Long? = if (reserved != null || queuedNavigation != null) activeUntilMs else null
 
     @Synchronized
     fun cancelReservation() {
@@ -189,6 +269,14 @@ internal class HapticArbiter(private val clock: () -> Long) {
     fun clear() {
         activePriority = null
         activeUntilMs = 0L
+    }
+
+    /** Guidance stopped: what waits goes, and nobody is told, as its cooldown is being cleared. */
+    @Synchronized
+    fun stop() {
+        reserved = null
+        queuedNavigation = null
+        clear()
     }
 
     /**

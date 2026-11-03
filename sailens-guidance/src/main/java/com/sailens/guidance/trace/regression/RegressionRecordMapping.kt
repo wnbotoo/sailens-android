@@ -60,6 +60,7 @@ fun SceneEvent.toRecord(): EventRecord = EventRecord(
     relatedZones = relatedZones.map { it.name },
     distance = distance?.name,
     directionHint = directionHint?.name,
+    rank = rank,
 )
 
 fun EventRecord.toSceneEvent(): SceneEvent = SceneEvent(
@@ -78,6 +79,7 @@ fun EventRecord.toSceneEvent(): SceneEvent = SceneEvent(
     relatedZones = relatedZones.map(DirectionZone::valueOf),
     distance = distance?.let(DistanceLevel::valueOf),
     directionHint = directionHint?.let(DirectionBias::valueOf),
+    rank = rank,
 )
 
 /**

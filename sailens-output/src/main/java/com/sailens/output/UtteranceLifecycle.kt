@@ -73,6 +73,12 @@ public enum class UtteranceEventKind(public val wireName: String) {
 
     /** Still without any outcome when its session ended or its engine was shut down. */
     UNKNOWN_TERMINAL("unknown_terminal"),
+
+    /**
+     * The caller waiting for its outcome ([UtteranceOutcome]) gave up: the callback the engine owed did not
+     * come in time. Says nothing about the attempt itself, which may still report back.
+     */
+    OUTCOME_TIMEOUT("outcome_timeout"),
 }
 
 /** Values of [UtteranceEvent.reason]. */
@@ -354,6 +360,12 @@ internal class UtteranceLifecycle(private val nanoClock: () -> Long) {
                 errorCode = errorCode,
             ),
         )
+    }
+
+    /** See [UtteranceEventKind.OUTCOME_TIMEOUT]. Leaves the attempt open: it has no outcome of its own yet. */
+    fun outcomeTimedOut(attemptId: String) = emit {
+        val attempt = attempts[attemptId] ?: return@emit emptyList()
+        listOf(event(UtteranceEventKind.OUTCOME_TIMEOUT, attemptId, attempt, nanoClock()))
     }
 
     private fun settleOpen(reason: String, which: (Attempt) -> Boolean): List<UtteranceEvent> {

@@ -10,6 +10,7 @@ import com.sailens.guidance.semantics.NavigationSemantics
 import com.sailens.vision.taxonomy.CityscapesTaxonomy
 import com.sailens.vision.taxonomy.Taxonomy
 import com.sailens.guidance.model.perception.ObstacleDetection
+import com.sailens.guidance.model.perception.ObstacleSource
 import com.sailens.guidance.model.perception.RawObstacle
 import com.sailens.guidance.model.perception.SegmentationAnalysis
 import com.sailens.guidance.model.perception.SegmentationMask
@@ -81,6 +82,7 @@ class ObstacleExtractor(
                     confidence = 1.0f,
                     areaRatio = areaRatio,
                     distanceEstimate = distance,
+                    source = ObstacleSource.SEMANTIC,
                 )
             }
             .sortedByDescending { it.areaRatio }

@@ -111,6 +111,8 @@ data class AnalysisConfig(
     /** 面积等效：原 0.08 x letterbox mask 面积（填充不是道路，道路占比按 16/9 放大）。 */
     val trafficLightMinRoadRatio: Float = 0.142f,
     val rawVehicleOnRoadDebounceFrames: Int = 3,
+
+    val detFirst: DetFirstConfig = DetFirstConfig(),
 )
 
 /**

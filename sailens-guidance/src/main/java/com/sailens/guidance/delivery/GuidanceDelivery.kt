@@ -1,6 +1,5 @@
-package com.sailens.shell.guidance.screen
+package com.sailens.guidance.delivery
 
-import com.sailens.guidance.model.common.EventPriority
 import com.sailens.guidance.model.scene.SceneEvent
 import com.sailens.guidance.model.trace.PromptDeliveryChannels
 import com.sailens.guidance.model.trace.PromptOutcomeTrace
@@ -11,7 +10,7 @@ import com.sailens.guidance.model.trace.PromptRevokeReasons
  * no one. This is the evidence the trace records: the output *settings* cannot say whether a prompt
  * was heard or only felt.
  */
-internal data class GuidanceDeliveryResult(val channels: List<String>) {
+data class GuidanceDeliveryResult(val channels: List<String>) {
     val delivered: Boolean get() = channels.isNotEmpty()
 
     /**
@@ -94,24 +93,6 @@ internal inline fun deliverGuidanceEvent(
 }
 
 /**
- * Whether a Guidance prompt waits for a scene description instead of cutting it off.
- *
- * The user asked for the description, usually standing still. A prompt that is not urgent —
- * a traffic light, a side obstacle, "path alerts paused" — is worth less than the answer they are
- * listening to, and cutting a description off leaves them with half a sentence about where they
- * are. So below [GUIDANCE_PREEMPTS_DESCRIPTION_AT] the prompt waits: it is not delivered, its
- * cooldown record is revoked, and it is offered again on a later frame, after the description has
- * finished, if it still holds. At or above it — a vehicle or person ahead, a blocked path, a
- * covered lens — Guidance preempts as before.
- */
-internal fun guidanceWaitsForDescription(
-    priority: EventPriority,
-    descriptionHoldsTheFloor: Boolean,
-): Boolean = descriptionHoldsTheFloor && priority < GUIDANCE_PREEMPTS_DESCRIPTION_AT
-
-internal val GUIDANCE_PREEMPTS_DESCRIPTION_AT: EventPriority = EventPriority.HIGH
-
-/**
  * Offers the frame's primary Guidance prompt, and keeps the cooldown honest either way.
  *
  * DecideEventsUseCase has already recorded the prompt in the cooldown, provisionally. Only a prompt
@@ -119,8 +100,9 @@ internal val GUIDANCE_PREEMPTS_DESCRIPTION_AT: EventPriority = EventPriority.HIG
  * it cannot be taken back), and every path that does not deliver revokes it, so the prompt is offered
  * again on a later frame while its condition still holds:
  *
- * 1. A description holds the floor and the prompt is not urgent ([guidanceWaitsForDescription]):
- *    wait. The description is left alone and nothing is delivered.
+ * 1. A description holds the floor and this prompt is to wait for it ([waitsForDescription], which is
+ *    the shell's policy; see [GuidanceDescriptionPort]): the description is left alone and nothing is
+ *    delivered.
  * 2. Otherwise the description gives way first ([preemptDescription]) — before the prompt is
  *    spoken, so no clause of it can be left in front of the prompt or behind it.
  * 3. No enabled output channel accepted it (see [deliverGuidanceEvent]: speech outranked or still
@@ -137,8 +119,7 @@ internal val GUIDANCE_PREEMPTS_DESCRIPTION_AT: EventPriority = EventPriority.HIG
  * @return the channels that accepted it; empty when it was not delivered.
  */
 internal inline fun offerGuidancePrompt(
-    priority: EventPriority,
-    descriptionHoldsTheFloor: Boolean,
+    waitsForDescription: Boolean,
     toldByVisionFaultAlerts: Boolean,
     preemptDescription: () -> Unit,
     deliver: () -> GuidanceDeliveryResult,
@@ -149,7 +130,7 @@ internal inline fun offerGuidancePrompt(
         confirm()
         return GuidanceDeliveryResult(listOf(PromptDeliveryChannels.VISION_ALERTS))
     }
-    if (guidanceWaitsForDescription(priority, descriptionHoldsTheFloor)) {
+    if (waitsForDescription) {
         revoke(PromptRevokeReasons.WAITING_FOR_DESCRIPTION)
         return GuidanceDeliveryResult.NOT_DELIVERED
     }
@@ -164,7 +145,7 @@ internal inline fun offerGuidancePrompt(
 }
 
 /** The output settings at the moment a prompt is offered; recorded as context, not as evidence. */
-internal data class GuidanceOutputSettings(
+data class GuidanceOutputSettings(
     val speechEnabled: Boolean,
     val screenReaderActive: Boolean,
     val hapticsEnabled: Boolean,
@@ -179,32 +160,31 @@ internal data class GuidanceOutputSettings(
  *
  * @param now wall-clock milliseconds, the clock of the frame trace's `pipelineCompletedAt`.
  * @param confirm makes the provisional cooldown record final.
- * @param revoke takes back the provisional cooldown record.
+ * @param revoke takes back the provisional cooldown record, for one of [PromptRevokeReasons].
  * @return which channels took the prompt; none when it was not delivered.
  */
 internal inline fun offerAndTraceGuidancePrompt(
     event: SceneEvent,
     sourceSequenceNumber: Long,
     outputs: GuidanceOutputSettings,
-    descriptionHoldsTheFloor: Boolean,
+    waitsForDescription: Boolean,
     now: () -> Long,
     preemptDescription: () -> Unit,
     deliver: () -> GuidanceDeliveryResult,
     confirm: () -> Unit,
-    revoke: () -> Unit,
+    revoke: (reason: String) -> Unit,
     record: (PromptOutcomeTrace) -> Unit,
 ): GuidanceDeliveryResult {
     var revokeReason: String? = null
     val result = offerGuidancePrompt(
-        priority = event.priority,
-        descriptionHoldsTheFloor = descriptionHoldsTheFloor,
+        waitsForDescription = waitsForDescription,
         toldByVisionFaultAlerts = event.isToldByVisionFaultAlerts(),
         preemptDescription = preemptDescription,
         deliver = deliver,
         confirm = confirm,
         revoke = { reason ->
             revokeReason = reason
-            revoke()
+            revoke(reason)
         },
     )
     val at = now()

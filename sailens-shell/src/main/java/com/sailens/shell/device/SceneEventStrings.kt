@@ -19,6 +19,7 @@ internal object SceneEventStrings {
         "event_camera_restored" to R.string.event_camera_restored,
         "event_ground_change" to R.string.event_ground_change,
         "event_ground_recognized" to R.string.event_ground_recognized,
+        "event_mode_obstacles_and_blocked" to R.string.event_mode_obstacles_and_blocked,
         "event_ground_to_indoor" to R.string.event_ground_to_indoor,
         "event_ground_to_road" to R.string.event_ground_to_road,
         "event_ground_to_sidewalk" to R.string.event_ground_to_sidewalk,

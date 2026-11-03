@@ -25,6 +25,6 @@ class DefaultDepthRepository(
             enabled = frame.config.enabled,
             heightSource = frame.geometry?.phone?.source,
         )
-        return DistanceEstimate(used, today, contact, contactLevel)
+        return DistanceEstimate(used, today, contact, contactLevel, frame.geometry?.phone?.source)
     }
 }

@@ -114,9 +114,9 @@ The initial target is **9 library modules + 1 reference app**:
 | sailens-vision | segmentation and detection runners, dataset taxonomies, default postprocessors |
 | sailens-vlm | VLM engine contract: frame + complete prompt → streamed text; no product prompt policy |
 | sailens-output | TTS, audio focus, screen-reader detection, haptic primitive, speech-routing mechanism, clause buffering |
-| sailens-guidance | navigation logic: NavigationSemantics, fused semantic kernel, connectivity, safety analysis, events, cooldown, tracking, depth, sensors, trace/replay |
+| sailens-guidance | navigation logic: NavigationSemantics, fused semantic kernel, connectivity, safety analysis, events, cooldown, tracking, depth, sensors, trace/replay, delivery protocol (every output behind a port in Guidance's own types) |
 | sailens-describe | Describe product logic: prompt policy, snapshot freshness, request scheduling, use cases/controller |
-| sailens-shell | reusable Sailens presentation and composition: root Compose, navigation, settings, design system, Guidance UI, future Describe UI, diagnostics/about, DI aggregation |
+| sailens-shell | reusable Sailens presentation and composition: root Compose, navigation, settings, design system, Guidance UI, future Describe UI, diagnostics/about, DI aggregation, the Android side of the delivery ports |
 | app | A's thin Android host: Application, MainActivity, manifest/window ownership, identity and edition config |
 
 There is **no separate sailens-ux or sailens-guidance-ui Gradle module**. Their boundaries remain as
@@ -503,6 +503,13 @@ It must not know what Guidance or Describe are.
 The product policy that a Guidance safety alert outranks Describe information belongs in
 sailens-shell / edition composition. Guidance emits typed events/urgency; Describe emits information
 results; the shell maps them onto output priorities.
+
+What happens to a frame's decisions on the way out is Guidance's own logic and lives in
+sailens-guidance (`GuidanceOutputProtocol`, `VisionFaultAlerts`), so an evaluation can run the code
+that ships. It reaches speech, the motor, the screen reader and the description through ports in
+Guidance's own types and does not depend on sailens-output. The policy stays behind those ports, in
+the shell (`GuidanceOutputWiring`): the protocol asks whether a prompt at this urgency waits for the
+description, and hands over an event, not a priority number.
 
 Preemption is more than flushing the speech queue. Flushing removes what is already queued, but the
 VLM keeps decoding, so the description resumes behind the alert and the person hears half a sentence

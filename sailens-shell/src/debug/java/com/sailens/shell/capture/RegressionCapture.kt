@@ -1,5 +1,6 @@
 package com.sailens.shell.capture
 
+import com.sailens.guidance.processor.decision.SpeechScale
 import com.sailens.guidance.geometry.CameraGeometry
 import com.sailens.core.frame.ImageFrame
 import com.sailens.core.frame.Yuv420FrameData
@@ -13,11 +14,14 @@ import com.sailens.guidance.model.scene.SceneEvent
 import com.sailens.guidance.model.trace.PromptDeliveryChannels
 import com.sailens.guidance.model.trace.PromptOutcomeTrace
 import com.sailens.guidance.processor.analysis.FrameQualityResult
+import com.sailens.guidance.trace.capture.CaptureRecord
 import com.sailens.guidance.trace.capture.CaptureSchema
 import com.sailens.guidance.trace.capture.ClassMapStore
 import com.sailens.guidance.trace.capture.FrameEncoding
 import com.sailens.guidance.trace.capture.RegressionFrameRecord
 import com.sailens.guidance.trace.capture.RegressionManifest
+import com.sailens.guidance.trace.capture.RegressionCutKeptRecord
+import com.sailens.guidance.trace.capture.RegressionHeardAfterCutRecord
 import com.sailens.guidance.trace.capture.RegressionRevokeRecord
 import com.sailens.guidance.trace.capture.RegressionStats
 import com.sailens.guidance.trace.capture.RegressionUtteranceRecord
@@ -119,7 +123,7 @@ internal class RegressionCapture(
     }
 
     /** The manifest block written when the capture starts; counters are filled in by [finish]. */
-    fun manifestBlock(): RegressionManifest = manifestBase().copy(utteranceLifecycle = speechSessions != null)
+    fun manifestBlock(): RegressionManifest = manifestBase().copy(utteranceLifecycle = speechSessions != null, speechPriorityScale = SpeechScale.FACTOR)
 
     /** The session directory exists now: the writer may start. Writer-thread caller. */
     fun attach(sessionId: String, directory: File) {
@@ -232,7 +236,15 @@ internal class RegressionCapture(
     override fun endFrame(frame: ImageFrame, events: List<SceneEvent>, failure: Throwable?) =
         guarded("endFrame") { it.endFrame(frame, events, failure) }
 
-    override fun onRevoke(eventId: UUID, decisionsBefore: Long) = guarded("onRevoke") { it.onRevoke(eventId, decisionsBefore) }
+    override fun onRevoke(eventId: UUID, decisionsBefore: Long, reason: String?) = guarded("onRevoke") { it.onRevoke(eventId, decisionsBefore, reason) }
+
+    override fun onCutKept(eventId: UUID, decisionsBefore: Long) = guarded("onCutKept") {
+        it.onReceipt(RegressionCutKeptRecord(eventId.toString(), decisionsBefore, clock.elapsedRealtimeNanos()))
+    }
+
+    override fun onHeardAfterCut(eventId: UUID, decisionsBefore: Long) = guarded("onHeardAfterCut") {
+        it.onReceipt(RegressionHeardAfterCutRecord(eventId.toString(), decisionsBefore, clock.elapsedRealtimeNanos()))
+    }
 
     // Not guarded(): a lost lifecycle event is counted against the lifecycle, never against a frame.
     // An event that is not taken here is not counted here either: the session's drops are reconciled
@@ -259,7 +271,7 @@ internal class RegressionCapture(
 
     private sealed interface Item {
         class Frame(val record: RegressionFrameRecord, val classIds: IntArray?, val width: Int, val height: Int) : Item
-        class Revoke(val record: RegressionRevokeRecord) : Item
+        class Revoke(val record: CaptureRecord) : Item
         class Window(val copy: YuvCopy, val trigger: String, val triggerRef: String?) : Item
     }
 
@@ -381,11 +393,13 @@ internal class RegressionCapture(
             lose(lost.seq, lost.why)
         }
 
-        fun onRevoke(eventId: UUID, decisionsBefore: Long) {
-            val record = RegressionRevokeRecord(eventId.toString(), decisionsBefore, clock.elapsedRealtimeNanos())
+        fun onRevoke(eventId: UUID, decisionsBefore: Long, reason: String?) =
+            onReceipt(RegressionRevokeRecord(eventId.toString(), decisionsBefore, clock.elapsedRealtimeNanos(), reason))
+
+        fun onReceipt(record: CaptureRecord) {
             if (queue.trySend(Item.Revoke(record)).isFailure) {
-                // A lost revoke changes later decisions as surely as a lost frame does.
-                lose(lastSeq, "revoke of $eventId could not be queued")
+                // A lost receipt changes later decisions as surely as a lost frame does.
+                lose(lastSeq, "$record could not be queued")
             }
         }
 

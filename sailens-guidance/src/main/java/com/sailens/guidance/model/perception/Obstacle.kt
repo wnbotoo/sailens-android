@@ -8,6 +8,9 @@ import com.sailens.guidance.model.common.ObstacleCategory
 import com.sailens.guidance.model.common.UrgencyLevel
 import java.util.UUID
 
+/** Which path found an obstacle. All of a session's come from one path. */
+enum class ObstacleSource { DETECTION, SEMANTIC }
+
 /**
  * 原始障碍物（未跟踪）
  */
@@ -21,6 +24,7 @@ data class RawObstacle(
     val areaRatio: Float,
     /** The evidence behind [distance]; null where no estimate was made. */
     val distanceEstimate: DistanceEstimate? = null,
+    val source: ObstacleSource = ObstacleSource.DETECTION,
 )
 
 /**
@@ -42,6 +46,7 @@ data class DetectedObstacle(
     val distanceEstimate: DistanceEstimate? = null,
     /** The frame whose detection last updated this track; null where the tracker was not told. */
     val measurement: ObstacleMeasurement? = null,
+    val source: ObstacleSource = ObstacleSource.DETECTION,
 ) {
     fun isStable(minFrames: Int = 3): Boolean = stableFrames >= minFrames
 

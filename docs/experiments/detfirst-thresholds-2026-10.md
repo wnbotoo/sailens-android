@@ -14,6 +14,10 @@ set (C) only**; no tool that shows results has opened S.
 > through R6. S still may not be opened: under R7 / Q14, PR-1b / PR-2 / PR-3's code and parameters must all be frozen first and
 > the assignment file's "parameter freeze" line filled in, and PR-1b's closed loop and its full rehearsal on C must be done
 > before that.
+>
+> **Revision 6 (an R6 revision, 2026-11-02):** changes §4.1 R10 and §4.2 M5; the reasons and C evidence are at the end of §4.2. No
+> threshold value changes, and the files section 3.4 lists do not change: they stay as at `5418a35`. The GPT review is a Go (round 5,
+> no P0–P2 findings) and the user agreed (2026-11-02); this commit's id is in the "threshold freeze" line of the assignment file.
 
 ## 1. Data and conventions
 
@@ -350,7 +354,7 @@ reason.
     new in the experiment arm, reported apart and bound by M4, are checked only for part of their
     false-alarm behaviour; it **does not show their recall or lead time**, and the acceptance record
     says so rather than counting it as evidence of a pass.
-- **R10 The experiment arm's completions are judged robustly (revision 4).** Every sentence's
+- **R10 Completions are judged robustly (revision 4; paired across the two arms since revision 6).** Every sentence's
   predicted end carries an error (C, leave one out: |done| p95 70 ms, p99 137 ms, max 752 ms). A
   sentence that ends a few tens of milliseconds before the next prompt arrives is "spoken to the end"
   for the model and may be cut off for real -- or, the other way round, may block the sentence after
@@ -361,37 +365,68 @@ reason.
   sentence**:
   - each sentence's end is an interval [nominal − ε, nominal + ε], ε = 150 ms, independent of every
     other sentence's; for a wording on the D1.7 fallback, ε = 300 ms.
-  - The speaker model's arbitration is run forward. Wherever a step compares a time with a sentence's
-    end and the interval straddles that time ("already ended" and "still speaking" both possible),
-    the run splits in two, each carrying the narrowed interval on. Every outcome any independent
-    error within ε can reach is reached that way (`SpeakerRobustness`).
-  - A stage of the experiment arm counts as spoken to the end only if it is spoken to the end in
-    **every branch**; each metric's deadline is frozen on its own (revision 5, review round 4 P1-2):
-    - **M5**: kept only if spoken to the end before t_dev + 0.5 s in every branch; otherwise
-      undeterminable (§4.2, counted as a regression).
-    - **M1** (C1–C3): **the latest completion over all branches** is classified by `LeadTime`'s own
-      definition; only "before" (BEFORE) is a success.
+  - **The arms are paired.** Each arm decides for itself on every frame, and both run forward in one
+    joint branch. The same sentence (same frame, same wording) has the same end error in both arms, and
+    a frame's lateness δ is the same in both. These two are modelling assumptions, since on a device the
+    two arms cannot run at once; latency a policy itself adds is not in δ and needs its own check when
+    the production protocol is wired in.
+  - **Branches.** The speaker model's arbitration is run forward. Wherever a step compares a time with a
+    sentence's end and the interval straddles that time ("already ended" and "still speaking" both
+    possible), the run splits in two, each carrying the narrowed interval on. Frames, frames + δ, stage
+    deadlines and queued inputs' times are all such comparisons. Every outcome any error within ε can
+    reach is reached that way (`PairedBranchRun`).
+  - **The two arms split together only when their concrete values are provably the same.** Equal bounds
+    are not enough: a queued sentence behind different sentences can have equal bounds and end apart. It
+    is provable in two cases only: they were the same a moment ago and their state is still equal; or
+    their state is equal and the first sentence on the speaker has a known start. Otherwise each arm
+    splits for itself, except that a sentence both have, with a known start and all ahead of it the same,
+    has one outcome.
+  - **The joint run alone decides: no enumeration of faults, no samples.** It over-approximates and never
+    under-approximates: a queued sentence's interval does not narrow once what is ahead of it ends, and
+    two arms apart share no δ and no sentence with an unknown start, so a branch may stand for no real
+    realization. That can block an arm with no real regression, which is accepted as the conservative
+    direction.
+  - A stage counts as spoken to the end only if it is spoken to the end in **every branch**; refused or
+    cut off in one branch, it does not count. Each metric's deadline is frozen on its own (revision 5,
+    review round 4 P1-2):
+    - **M5**: looks at both arms within one realization; the rules are in §4.2.
+    - **M1** (C1, C2): **the latest completion over all branches** is classified by `LeadTime`'s own
+      definition; only "before" (BEFORE) is a success. An absolute threshold: not paired, nothing exempt.
     - **M2** (B1–B3): its completion-rate contract stays -- the NEAR wording of the same hazard spoken
       to the end in every branch is a success, **with no distance or crossing condition** (Q4: M2 is
-      judged on completion, not lead time). Spoken to the end only after the crossing still counts.
-    Refused or cut off in one branch, it does not count.
-  - Branches with equal state merge. More than 64 branches at once, and every stage involved is
-    undeterminable. Open loop, C's 2 372 offers never reach that limit at ε = 150/300 ms (checked by
-    review round 4); the closed loop is rehearsed in full on C, and reaching the limit still blocks --
-    it is not tuned after looking at S.
-  - Closed loop (the counterfactual arms) re-runs the decisions in every branch (cooldown records,
-    revokes and the offers after them), and branches merge only when the speaker state **and** the
-    cooldown state are equal. That part comes with PR-1b, with the A/B/P counterexample as a
-    closed-loop test (P must not be kept). The open-loop core and the A/B/P open-loop test are in this
-    PR (`SpeakerRobustness`, `SpeakerRobustnessTest`).
+      judged on completion, not lead time). Spoken to the end only after the crossing still counts. An
+      absolute threshold: not paired, nothing exempt.
+    - **B5, C3** (relative thresholds): both arms use the same every-branch rule. **The baseline's numbers
+      come from the run of the baseline against an arm that changes nothing**, and that run must settle, or
+      B5 and C3 are not judged. A paired run that stops has no answer for the baseline either, which would
+      lower the baseline and make a relative threshold easier to pass.
+    - The stages of M1, M2, B5 and C3 close after the hazard's last frame, once every sentence and pending
+      result on the speaker for the stage has ended. A sentence offered for a stage after it closed
+      fails the run.
+  - **Merging.** Branches merge only when speaker state, live cooldown state and target marks are all
+    equal. A merge keeps the worst history, and "provably the same" holds only if it holds on both sides.
+    The live cooldown leaves out only records past their key's longest cooldown and emissions outside
+    the storm window; **the confirmed summary is not trimmed while a write is open**, because a revoke
+    folds the other writes onto it again.
+  - **The limits are two counts:** live branches, and branch-frames (live branches summed over the
+    frames). No clock, so the same input has one answer on any machine. Both are set on C and written into
+    the "parameter freeze" line of the assignment file, and cannot change once S opens. **Past a limit, the
+    stages already judged stand, and the rest are undeterminable and count; one ahead fails.** Rerunning,
+    another machine or a higher limit cannot resolve it.
+  - **Standing checks** run with every run, and any failure voids it: the path with no error matches the
+    frozen nominal model stage by stage, with one branch per arm; an arm that changes nothing settles,
+    scores no regression, undeterminable or fragile stage, and answers its stages as the baseline does;
+    on settled captures the baseline's answers do not depend on the arm it is paired with; the two
+    control arms (vehicles muted, timed interruptions) exceed the M5 limit; no sentence is offered for a stage after
+    it closed.
+  - The A/B/P counterexample and the reviews' counterexamples with several faults, queues and frame
+    lateness are closed-loop tests (`PairedBranchRunTest`). The open-loop core and the A/B/P open-loop
+    test stay in `SpeakerRobustness` and `SpeakerRobustnessTest`.
   - **ε is a coverage, not an upper bound on the error.** Of the 472 sentences both sides spoke to the
     end on C, 4 (0.8%) missed the device's end by more than 150 ms; A13 checks the same on S. A sentence
     erring beyond ε can still make a stage look kept when it was not; that remaining risk is written
     into the acceptance record. A13 is a conditional gate on timing drift; it **does not mean "98% of
     prompts or hazards are protected by R10"**, and it exempts no known real regression.
-  - The baseline arm does not branch: it only decides whether the model reproduces the device, and a
-    stage it cannot reproduce is undeterminable anyway. This can only make the experiment look worse;
-    the thresholds stay.
 
 ### 4.2 M5, no regression (for the shipped combination)
 
@@ -405,25 +440,21 @@ both arms does not guarantee that the errors cancel. Hence the rules below.
   camera), plus front persons' first stage (a front person's first prompt is at least HIGH but not
   necessarily CRITICAL). Hazards and stages follow R9's reference cohort; a stage's completion time
   t_dev = the device's first completion. Whatever the model judges, no stage leaves P.
-- For each stage of P, both arms run closed loop on the model (R3):
-  - **the baseline arm reproduces** it: the baseline arm speaks it to the end, first completion within
-    0.5 s of t_dev;
-  - **the experiment arm keeps** it: the experiment arm speaks it to the end **robustly** (R10), that is,
-    with its first completion ≤ t_dev + 0.5 s in every branch.
-  - Experiment arm keeps it → **kept**.
-  - Experiment arm does not keep it, baseline arm reproduces it → **regression** (the model
-    reproduces the device here, so the difference can only come from the experiment).
-  - Experiment arm does not keep it, baseline arm does not reproduce it either → **undeterminable**:
-    the model cannot be trusted here. The only way to resolve it: there is a time t0 (no later than
-    the stage's first offer in the device record) at which the device, the baseline arm and the
-    experiment arm all have an idle speaker, and from t0 to t_dev + 0.5 s **every input** all three
-    give the speaker is the same one for one: each prompt's time, wording, priority, expiry and speaker
-    rank (after PR-1b), and every notice, description, cancellation, requeue and engine readiness
-    change (on the device's side, as its lifecycle records them). Then the experiment changed nothing
-    on the speaker in that time, the device's outcome is the experiment arm's, and it counts as kept.
-    If any of these cannot be shown equal from the records, it is not resolved (review round 2 P2-1:
-    comparing only time, wording and priority, a different expiry can reverse the outcome). **Every other
-    undeterminable stage counts as a regression** (blocking); a manual review cannot resolve it.
+- For each stage of P, both arms run closed loop on the model (R3). **The baseline arm reproduces** it = with no
+  error the baseline arm speaks it to the end, first completion within 0.5 s of t_dev. Over all realizations
+  under R10, **spoken** means first completion ≤ t_dev + 0.5 s:
+
+  | Case | Verdict | Counts |
+  |---|---|---|
+  | The experiment arm speaks it in every realization | kept | no |
+  | Some realization has the baseline speaking it and the experiment arm not | **regression** | yes |
+  | The run passed a limit before judging this stage | undeterminable | yes (as a regression) |
+  | Wherever the experiment arm did not speak it the baseline did not either, the last row does not hold, the baseline arm does not reproduce it | undeterminable | yes (as a regression) |
+  | Wherever the experiment arm did not speak it the baseline did not either, the last row does not hold, the baseline arm reproduces it | fragile | no, reported only |
+  | In every realization where the experiment arm did not speak it, there is a t0 no later than **the stage's first appearance on the device** from which to the deadline the two arms' state and every input are the same one for one | not caused by the experiment | no, reported only |
+
+  The last row is the only way to resolve a stage. It replaces revision 5's rule of device, baseline and
+  experiment all being the same (reasons at the end of this section). A manual review cannot resolve one.
 - A stage that was only received does not count; neither does another hazard or an earlier ordinary
   prompt (plan §4).
 - **Threshold M5**:
@@ -432,11 +463,41 @@ both arms does not guarantee that the errors cancel. Hence the rules below.
   - over the whole scope: regressions ≤ max(2, 1% of |P|);
   - every regression and every undeterminable stage is reviewed by hand on a contact sheet and written
     into the acceptance record; the review is for understanding the cause and **exempts nothing**.
-- All counts are reported: kept, regressed, undeterminable (resolved / counted as regressions). The
-  same comparison of "the model's baseline arm vs the experiment arm" is reported, not judged.
-- Directions: the model thinking "not spoken to the end" in the experiment arm only adds regressions
-  (conservative); thinking "spoken to the end" hides one, which A4 and A7 bound; a miss in the
-  baseline arm only adds undeterminable stages (conservative).
+- All counts are reported: kept, regressed, undeterminable (not settled / baseline not reproducing), fragile, not
+  caused by the experiment; the same comparison with no error is reported too, not judged.
+- Directions: the run's over-approximation only adds regressions (conservative); the model thinking "spoken to the
+  end" hides one, which A4 and A7 bound; a miss in the baseline arm only turns a regression into an
+  undeterminable stage, which still counts.
+
+**Revision 6's reasons and C evidence (R6).**
+
+- **Revision 5 fails an arm that changes nothing.** An experiment arm behaving as today, under revision 5's closed loop
+  (baseline not branching, every branch of the experiment arm must speak it), hits the 64-branch limit on 11 of 14
+  captures; with no limit it still scores 37 regressions (6 ahead), against limits of 6 and 0. The two arms are judged
+  asymmetrically: only the experiment arm sees all realizations. Revision 5's resolving rule does not help: it
+  needs the device and both arms the same, while R4 has the arms at 1.15 m and the device recorded at 1.2 m, and an arm that
+  changes nothing has 16 stages (7 ahead) that cannot pass it.
+- **Enumerating and sampling are not enough.** Enumerating single and double faults plus samples can always be broken
+  by a counterexample with one fault more, and the threshold ahead is zero. So a joint run covers all
+  realizations, and what it cannot settle blocks as undeterminable.
+- **No threshold value changes**; nor do the definitions of P, t_dev and the baseline reproducing.
+- Results on C (14 captures, 1.15 m, legacy output path, leave-one-out durations, |P| = 609, limits 6 in all and 0 ahead,
+  branch limit 4 000 000, branch-frame limit 2 000 000 000). These are stand-in arms, not real policies, and their
+  counts do not predict PR-2. Stages counted under M5 (ahead):
+
+  | Stand-in arm | Captures settled | No error | All realizations within ε | Of those regressions | Of those undeterminable | Reported only: fragile / not caused by the experiment |
+  |---|---|---|---|---|---|---|
+  | No change | 14 / 14 | 0 (0) | **0 (0)** | 0 (0) | 0 (0) | 0 (0) / 74 |
+  | Early prompt | 13 / 14 | 47 (16) | 88 (29) | 55 (17) | 33 (12) | 12 (2) / 26 |
+  | Vehicles muted | 14 / 14 | 228 (48) | 229 (48) | 224 (48) | 5 (0) | 2 (0) / 35 |
+  | Timed interruptions | 13 / 14 | 95 (29) | 180 (53) | 148 (40) | 32 (13) | 12 (0) / 12 |
+
+  The capture the early-prompt and timed-interruption arms cannot settle is the same one (C-P-02), with 27 stages each
+  undeterminable because of it. Four times the branch limit gives that capture only 8% more branch-frames.
+- **Known costs and limits:** a real policy that cannot be settled cannot pass, even with no real problem, and this
+  shows only when it is rehearsed on C; the over-approximation has not been measured; the every-branch rule of M1 and
+  M2 dates from revision 4, and on an arm that changes nothing it takes B1 from 19/57 with no error to 16/57, and C1
+  from 2/41 to 1/41.
 
 ### 4.3 PR-1b (D3a-2 approach escalation, D3b speaker ranking, D3c remove neither)
 

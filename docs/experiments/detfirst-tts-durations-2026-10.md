@@ -52,6 +52,24 @@ Observations (no decision is taken here):
   prompts take 1 354–2 313 ms, all but one longer. The speaker model should use the per-sentence
   durations of this table once calibration starts (D1.4).
 
+## Supplement: the new sentences (2026-11-02)
+
+Four sentences newer than the recordings, in neither them nor the tables below. The same phone, engine and speech
+rate 1.30, three plays each; the tool measured all 75 sentences again, with no failure.
+
+| key | text | duration ms (3 plays) | median |
+|---|---|---|---|
+| `event_camera_restored` | 镜头恢复正常 | 1443 / 1481 / 1450 | 1450 |
+| `event_light_restored` | 光线恢复正常 | 1434 / 1437 / 1455 | 1437 |
+| `event_ground_recognized` | 已识别到地面，恢复通行判断 | 2649 / 2635 / 2655 | 2649 |
+| `event_mode_obstacles_and_blocked` | 现在只提示障碍物和前方不通 | 2698 / 2695 / 2695 | 2695 |
+
+**The conditions have not changed:** measured again, the first table's 71 sentences differ from its medians by a median
+of −1 ms, between −28 and +19 ms, none by more than 30 ms.
+
+These four are in `SupplementaryTtsDurations` and hold for Chinese on this engine and rate only; English was not
+measured. The speaker model uses them as fallback wordings (ε = 300 ms).
+
 ## Appendix: the tables as the tool wrote them
 
 ### TTS durations, zh-CN

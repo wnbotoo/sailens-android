@@ -11,6 +11,7 @@ import com.sailens.guidance.depth.ImagePositionDepthEstimator
 import com.sailens.guidance.geometry.CameraGeometry
 import com.sailens.guidance.model.analysis.ConnectivityStats
 import com.sailens.guidance.model.analysis.SceneSnapshot
+import com.sailens.guidance.model.analysis.VisionFaults
 import com.sailens.guidance.model.perception.DetectedObstacle
 import com.sailens.guidance.model.perception.ObstacleModelOutput
 import com.sailens.guidance.model.perception.SegmentationMask
@@ -199,6 +200,75 @@ class RegressionReplay(
         return Report(replayed, decisions, null, approximate, null)
     }
 
+    /**
+     * What one frame hands to the decision step, before any decision is made: perception, scene
+     * analysis and frame quality do not depend on delivery, so a closed-loop evaluation can run them
+     * once and share the result between its runs.
+     *
+     * @param decidedAt the time the decision read on the device.
+     * @param stationary the motion state the decision read on the device.
+     */
+    data class SceneFrame(
+        val record: RegressionFrameRecord,
+        val snapshot: SceneSnapshot,
+        val obstacles: List<DetectedObstacle>,
+        val visionFaults: VisionFaults,
+        val decidedAt: Long,
+        val stationary: Boolean,
+    )
+
+    /**
+     * The real path up to the decision step, for a caller that decides for itself: every check of
+     * [replay] but the decided events, and no revoke, because there is no cooldown here.
+     *
+     * @param onScene each successfully processed frame, in order.
+     */
+    fun replayScenes(
+        frames: List<RegressionFrameRecord>,
+        classMap: (RegressionFrameRecord) -> IntArray?,
+        firstLostSeq: Long? = null,
+        geometryOf: (RegressionFrameRecord) -> CameraGeometry? = { it.geometry?.toGeometry() },
+        trackIds: ObstacleTracker.TrackIdSource = ObstacleTracker.TrackIdSource.RANDOM,
+        onScene: (SceneFrame) -> Unit,
+    ): Report {
+        val world = World(classMap, trackIds)
+        val generator = EventGenerator(config = analysisConfig)
+        var scenes = 0
+        var replayed = 0
+        val approximate = mutableListOf<Long>()
+        for (record in frames) {
+            if (firstLostSeq != null && record.seq >= firstLostSeq) {
+                return Report(replayed, scenes, null, approximate, firstLostSeq)
+            }
+            val outcome = try {
+                world.load(record)
+                val result = runBlocking { world.processFrame(record.frame(), geometryOf(record)) }
+                if (result.isFailure != (record.failure != null)) {
+                    throw Divergence("frame failure", record.failure ?: "success", result.exceptionOrNull()?.toString() ?: "success")
+                }
+                if (result.isSuccess) {
+                    val quality = world.frameQuality.analyzeMeasured(record.quality?.measurement()).stabilized
+                    val snapshot = world.analyzeScene(result.getOrThrow()).copy(frameQuality = quality)
+                    val decidedAt = world.takeDecisionTime()
+                    scenes++
+                    onScene(
+                        SceneFrame(
+                            record, snapshot, result.getOrThrow().obstacles, generator.visionFaults(snapshot),
+                            decidedAt, record.stationary ?: false,
+                        ),
+                    )
+                }
+                world.finishFrame()
+            } catch (d: Divergence) {
+                Mismatch(record.seq, d.what, d.expected, d.actual)
+            }
+            if (outcome is Mismatch) return Report(replayed, scenes, outcome, approximate, null)
+            if (world.approximate) approximate += record.seq
+            replayed++
+        }
+        return Report(replayed, scenes, null, approximate, null)
+    }
+
     companion object {
         /**
          * Which replayed event each recorded event's revoke reaches, by recorded id: in exact replay
@@ -261,7 +331,7 @@ class RegressionReplay(
             private set
 
         val stationary = MutableStateFlow(false)
-        val cooldown = CooldownManager()
+        val cooldown = CooldownManager(proximityEscalation = analysisConfig.detFirst.proximityEscalation, retryInterrupted = analysisConfig.detFirst.retryInterrupted)
         val frameQuality = FrameQualityAnalyzer()
 
         private val repository = object : PerceptionRepository {
@@ -334,12 +404,15 @@ class RegressionReplay(
         /** What the decision clock will return next, without consuming it. */
         fun nextDecisionTime(): Long? = tapes.getValue(RegressionClocks.DECIDE).peek()
 
+        /** Uses up the decision clock's reading, for a run that does not decide. */
+        fun takeDecisionTime(): Long = tapes.getValue(RegressionClocks.DECIDE).next()
+
         /** The decision clock's last reading: the `now` of the latest decision. */
         var decidedAt: Long? = null
             private set
         val decide = DecideEventsUseCase(
             eventGenerator = EventGenerator(config = analysisConfig),
-            conflictResolver = EventConflictResolver(),
+            conflictResolver = EventConflictResolver(analysisConfig.detFirst.keepBlockedWithObstacle),
             eventMerger = EventMerger(),
             cooldownManager = cooldown,
             deviceSensorRepository = sensors,

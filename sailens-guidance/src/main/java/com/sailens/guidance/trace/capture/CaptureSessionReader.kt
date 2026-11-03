@@ -21,6 +21,10 @@ data class CaptureSession(
     val regressionFrames: List<RegressionFrameRecord> = emptyList(),
     /** `model_regression` only: revoked prompts, in the order they were applied. */
     val revokes: List<RegressionRevokeRecord> = emptyList(),
+    /** `model_regression` only: prompts cut off and kept (schema 1.6). */
+    val cutKept: List<RegressionCutKeptRecord> = emptyList(),
+    /** `model_regression` only: prompts judged cut off, then heard (schema 1.6). */
+    val heardAfterCut: List<RegressionHeardAfterCutRecord> = emptyList(),
     /** `model_regression` only: full-resolution event-window frames. */
     val windowFrames: List<WindowFrameRecord> = emptyList(),
     /**
@@ -111,6 +115,8 @@ object CaptureSessionReader {
                 warnings = warnings,
                 regressionFrames = records.filterIsInstance<RegressionFrameRecord>(),
                 revokes = records.filterIsInstance<RegressionRevokeRecord>(),
+                cutKept = records.filterIsInstance<RegressionCutKeptRecord>(),
+                heardAfterCut = records.filterIsInstance<RegressionHeardAfterCutRecord>(),
                 windowFrames = records.filterIsInstance<WindowFrameRecord>(),
                 utterances = records.filterIsInstance<RegressionUtteranceRecord>(),
             ),
@@ -171,7 +177,7 @@ object CaptureSessionReader {
 
     private val KNOWN_TYPES = setOf(
         "frame", "sensor", "clock_anchor", "marker", "regression_frame", "regression_revoke", "window_frame",
-        "regression_utterance",
+        "regression_utterance", "regression_cut_kept", "regression_heard_after_cut",
     )
     private const val SCHEMA_MAJOR = "schemaMajor"
     private const val SCHEMA_MINOR = "schemaMinor"

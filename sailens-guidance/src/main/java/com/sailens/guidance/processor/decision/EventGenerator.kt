@@ -1,6 +1,7 @@
 package com.sailens.guidance.processor.decision
 
 import com.sailens.guidance.config.AnalysisConfig
+import com.sailens.guidance.config.DetFirstConfig
 import com.sailens.guidance.model.analysis.FrameQuality
 import com.sailens.guidance.model.analysis.GroundRecognition
 import com.sailens.guidance.model.analysis.GroundTypeChange
@@ -15,6 +16,8 @@ import com.sailens.guidance.model.common.GroundType
 import com.sailens.guidance.model.common.ObstacleCategory
 import com.sailens.guidance.model.common.Severity
 import com.sailens.guidance.model.common.UrgencyLevel
+import com.sailens.guidance.model.scene.EventComponent
+import com.sailens.guidance.model.scene.HazardRef
 import com.sailens.guidance.model.scene.SceneEvent
 import com.sailens.guidance.model.scene.SceneEventMessageKeys
 import com.sailens.guidance.model.perception.DetectedObstacle
@@ -52,6 +55,9 @@ class EventGenerator(
             "chair",
         )
     }
+
+    /** The policy switches this generator's config carries. */
+    val detFirst: DetFirstConfig get() = config.detFirst
 
     /**
      * The states [generate] makes the SENSOR_QUALITY and GROUND_UNRECOGNIZED events for, by the same
@@ -370,8 +376,27 @@ class EventGenerator(
             cooldownKeys = obstacleCooldownKeys(listOf(group.zone)),
             relatedZones = listOf(group.zone),
             distance = group.nearestDistance.takeIf { config.enableProximityPrefix },
+            components = listOf(componentOf(group)),
         )
     }
+
+    /** What [group]'s event can speak for. */
+    internal fun componentOf(group: ObstacleZoneGroup): EventComponent = EventComponent(
+        zone = group.zone,
+        priority = group.priority,
+        primaryTrackId = group.primary.id,
+        cooldownKeys = obstacleCooldownKeys(listOf(group.zone)),
+        hazards = group.obstacles.map { obstacle ->
+            HazardRef(
+                trackId = obstacle.id,
+                category = obstacle.category,
+                todayNear = obstacle.distance == DistanceLevel.NEAR,
+                speechNear = obstacle.distance == DistanceLevel.NEAR,
+                ownPriority = ownObstaclePriority(obstacle),
+                source = obstacle.source,
+            )
+        },
+    )
 
     private fun obstacleMessageKey(
         zone: DirectionZone,
@@ -381,26 +406,8 @@ class EventGenerator(
         suffix = obstacleCategorySuffix(category),
     )
 
-    /**
-     * 播报用的类别词，比感知类别更粗。返回 null 表示不带类别后缀（"前方有障碍"）。
-     *
-     * 按**用户的处置动作**归并，而不是按模型类别：
-     * - 自行车/摩托车与汽车归到"车"：两者都是停下让行，而模型分不清一辆自行车是停在路边
-     *   还是正骑过来——归到更保守的那一侧。
-     * - 静态障碍与未知归到无后缀：原先 `_static` 那组文案和无后缀组逐字相同，纯属重复。
-     *
-     * 注意这里只影响措辞。[ObstacleCategory.BICYCLE] 在感知侧仍然独立存在，
-     * 因为 RoadSafetyAnalyzer 依赖它——停在路边的自行车不该触发机动车道警告。
-     */
-    internal fun obstacleCategorySuffix(category: ObstacleCategory): String? {
-        return when (category) {
-            ObstacleCategory.PERSON -> SceneEventMessageKeys.SUFFIX_PERSON
-            ObstacleCategory.BICYCLE,
-            ObstacleCategory.VEHICLE -> SceneEventMessageKeys.SUFFIX_VEHICLE
-            ObstacleCategory.STATIC_OBSTACLE,
-            ObstacleCategory.UNKNOWN -> null
-        }
-    }
+    /** See [obstacleSpeechWord]. */
+    internal fun obstacleCategorySuffix(category: ObstacleCategory): String? = obstacleSpeechWord(category)
 
     private fun obstacleCategoryPriority(category: ObstacleCategory): Int {
         return when (category) {

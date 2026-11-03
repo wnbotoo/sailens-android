@@ -1,4 +1,4 @@
-package com.sailens.shell.guidance.screen
+package com.sailens.guidance.delivery
 
 import com.sailens.guidance.model.analysis.FrameQuality
 import com.sailens.guidance.model.analysis.GroundRecognition
@@ -65,7 +65,8 @@ class GuidancePromptOfferTest {
             event = primary,
             sourceSequenceNumber = sequence,
             outputs = outputs,
-            descriptionHoldsTheFloor = describing,
+            // The shell's rule, GuidanceWaitsForDescriptionTest there guards the real one.
+            waitsForDescription = describing && primary.priority < EventPriority.HIGH,
             now = { WALL_CLOCK_BASE + now },
             preemptDescription = { calls += "preempt" },
             deliver = { calls += "deliver:${primary.messageKey}"; delivery },
@@ -172,7 +173,7 @@ class GuidancePromptOfferTest {
             event = primary,
             sourceSequenceNumber = 1,
             outputs = outputs,
-            descriptionHoldsTheFloor = false,
+            waitsForDescription = false,
             now = { WALL_CLOCK_BASE + now },
             preemptDescription = {},
             deliver = { GuidanceDeliveryResult(listOf(SPEECH)) },

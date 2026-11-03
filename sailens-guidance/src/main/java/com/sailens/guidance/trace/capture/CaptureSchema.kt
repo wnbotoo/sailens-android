@@ -45,8 +45,10 @@ object CaptureSchema {
      * 3: the `model_regression` mode -- `regression.jsonl`, `classmaps.bin`, `windows.jsonl`,
      * `CaptureManifest.regression`, `group`, `sceneLabel`. 4: `RegressionFrameRecord.geometry`.
      * 5: `RegressionUtteranceRecord`, `RegressionManifest.utteranceLifecycle` and its counters.
+     * 6: `EventRecord.rank`, `RegressionRevokeRecord.reason`, `RegressionManifest.speechPriorityScale`,
+     * `RegressionCutKeptRecord`, `RegressionHeardAfterCutRecord`.
      */
-    const val MINOR: Int = 5
+    const val MINOR: Int = 6
 
     const val MANIFEST_FILE: String = "manifest.json"
     const val FRAMES_FILE: String = "frames.jsonl"

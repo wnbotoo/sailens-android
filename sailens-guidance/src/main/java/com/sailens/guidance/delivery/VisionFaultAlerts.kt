@@ -1,4 +1,4 @@
-package com.sailens.shell.guidance.screen
+package com.sailens.guidance.delivery
 
 import com.sailens.guidance.model.analysis.FrameQuality
 import com.sailens.guidance.model.analysis.VisionFaults
@@ -76,7 +76,7 @@ import java.util.UUID
  * @param noticeIdPrefix distinct per instance: the speech engine is shared, so a late completion of an
  *   earlier instance's notice must never match this one's.
  */
-internal class VisionFaultAlerts(
+class VisionFaultAlerts(
     private val outputs: Outputs,
     private val timing: Timing = Timing(),
     private val noticeIdPrefix: String = "$NOTICE_ID_PREFIX${UUID.randomUUID()}_",
@@ -425,6 +425,6 @@ internal class VisionFaultAlerts(
     }
 }
 
-/** Events whose state [VisionFaultAlerts] tells the user about: the shell does not speak them itself. */
+/** Events whose state [VisionFaultAlerts] tells the user about: they are not offered as prompts. */
 internal fun SceneEvent.isToldByVisionFaultAlerts(): Boolean =
     category == EventCategory.SENSOR_QUALITY || category == EventCategory.GROUND_UNRECOGNIZED

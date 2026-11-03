@@ -41,6 +41,11 @@ data class RegressionManifest(
      * lifecycle evidence at all, which is not the same as "nothing failed".
      */
     val utteranceLifecycle: Boolean = false,
+    /**
+     * What a lifecycle record's `priority` is scaled by: the factor of `SpeechScale`, or null for a record
+     * made before there was one, whose priorities are `EventPriority.value` (schema 1.6).
+     */
+    val speechPriorityScale: Int? = null,
 ) {
     companion object {
         const val RECORDER_VERSION: Int = 1
@@ -298,6 +303,8 @@ data class EventRecord(
     val relatedZones: List<String> = emptyList(),
     val distance: String? = null,
     val directionHint: String? = null,
+    /** Its standing within its band (schema 1.6); 0 in an older record, as the switches off would make it. */
+    val rank: Int = 0,
 )
 
 /**
@@ -308,6 +315,32 @@ data class EventRecord(
 @Serializable
 @SerialName("regression_revoke")
 data class RegressionRevokeRecord(
+    val eventId: String,
+    val decisionsBefore: Long,
+    val elapsedRealtimeNanos: Long,
+    /** Why, one of `PromptRevokeReasons` (schema 1.6). Replay does not read it. */
+    val reason: String? = null,
+) : CaptureRecord
+
+/**
+ * A prompt cut off that the cooldown kept rather than took back (schema 1.6): it marks this one write as not
+ * heard to the end. Applied like a revoke, before decision number [decisionsBefore].
+ */
+@Serializable
+@SerialName("regression_cut_kept")
+data class RegressionCutKeptRecord(
+    val eventId: String,
+    val decisionsBefore: Long,
+    val elapsedRealtimeNanos: Long,
+) : CaptureRecord
+
+/**
+ * A prompt judged cut off whose `onDone` arrived after all (schema 1.6): this one write was heard. Applied
+ * like a revoke, before decision number [decisionsBefore].
+ */
+@Serializable
+@SerialName("regression_heard_after_cut")
+data class RegressionHeardAfterCutRecord(
     val eventId: String,
     val decisionsBefore: Long,
     val elapsedRealtimeNanos: Long,

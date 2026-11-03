@@ -39,6 +39,9 @@ object SceneEventMessageKeys {
     /** The floor is recognised again and path prompts are back (the end of [GROUND_UNRECOGNIZED]). */
     const val GROUND_RECOGNIZED = "event_ground_recognized"
 
+    /** Said when Guidance starts with path-complex prompts off: what it will and will not tell the user. */
+    const val MODE_OBSTACLES_AND_BLOCKED = "event_mode_obstacles_and_blocked"
+
     private const val OBSTACLE_PREFIX = "event_obstacle_"
 
     /** Category suffixes an obstacle key may carry; null is "no category" (static/unknown). */
@@ -77,6 +80,7 @@ object SceneEventMessageKeys {
                 TRAFFIC_LIGHT, ROAD_WARNING, ROAD_WARNING_VEHICLE, GROUND_TO_ROAD,
                 GROUND_TO_TERRAIN, GROUND_TO_SIDEWALK, GROUND_TO_INDOOR, GROUND_CHANGE,
                 GROUND_UNRECOGNIZED, CAMERA_RESTORED, LIGHT_RESTORED, GROUND_RECOGNIZED,
+                MODE_OBSTACLES_AND_BLOCKED,
             )
         )
         val zoneParts = DirectionZone.entries.map(::zonePart) + MERGED_ZONE_PARTS

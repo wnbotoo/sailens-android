@@ -9,6 +9,7 @@ import com.sailens.guidance.model.common.ObstacleCategory
 import com.sailens.guidance.model.common.UrgencyLevel
 import com.sailens.guidance.model.perception.DetectedObstacle
 import com.sailens.guidance.model.perception.ObstacleMeasurement
+import com.sailens.guidance.model.perception.ObstacleSource
 import com.sailens.guidance.model.perception.ObstacleSourceFrame
 import com.sailens.guidance.model.perception.RawObstacle
 import java.util.UUID
@@ -51,6 +52,7 @@ class ObstacleTracker(
         var missedFrames: Int,
         var areaRatio: Float,
         var lastSeen: Long,
+        val source: ObstacleSource = ObstacleSource.DETECTION,
         /** The detection that last updated this track; observation only (see [ObstacleMeasurement]). */
         var measurement: ObstacleMeasurement? = null,
     )
@@ -107,6 +109,7 @@ class ObstacleTracker(
                     missedFrames = 0,
                     areaRatio = detection.areaRatio,
                     lastSeen = timestamp,
+                    source = detection.source,
                     measurement = measurement,
                 )
                 tracks[newTrack.id] = newTrack
@@ -145,6 +148,7 @@ class ObstacleTracker(
                     zone = track.zone,
                     distance = track.distance,
                     distanceEstimate = track.distanceEstimate,
+                    source = track.source,
                     urgency = calculateUrgency(track),
                     confidence = track.confidence * 0.9f,  // 预测时降低置信度
                     stableFrames = track.stableFrames,
@@ -188,6 +192,7 @@ class ObstacleTracker(
                     zone = track.zone,
                     distance = track.distance,
                     distanceEstimate = track.distanceEstimate,
+                    source = track.source,
                     urgency = calculateUrgency(track),
                     confidence = track.confidence,
                     stableFrames = track.stableFrames,
