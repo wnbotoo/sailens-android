@@ -460,7 +460,7 @@ class DetFirstPairedRehearsalTest {
      * machine with the captures.
      */
     private fun labelList(results: List<CaptureResult>): String = buildString {
-        appendLine("session,hazard,stage,class,ahead,track_lived,appeared_s,track_ended_s,device_finished_s,nearest_m,readings")
+        appendLine("session,hazard,stage,class,ahead,track_lived,appeared_s,track_ended_s,device_finished_s,nearest_m,readings,heard_ahead")
         for (r in results) {
             val rowOf = r.device.stages.associateBy { StageKey(it.hazard, it.stage) }
             val readings = LinkedHashMap<StageKey, MutableList<String>>()
@@ -476,8 +476,27 @@ class DetFirstPairedRehearsalTest {
                 val row = rowOf.getValue(key)
                 fun s(ms: Long) = String.format(Locale.ROOT, "%.1f", (ms - r.firstAt) / 1000.0)
                 val nearest = r.samples[key.hazard].orEmpty().mapNotNull { it.validPointM }.minOrNull()?.let { String.format(Locale.ROOT, "%.1f", it) }.orEmpty()
-                appendLine("${r.id},${key.hazard},${key.stage},${row.hazardClass},${key in aheadKeys},${r.deadlines.getValue(key) - 500 <= row.endAt},${s(row.appearedAt)},${s(row.endAt)},${s(r.deadlines.getValue(key) - 500)},$nearest,${seen.joinToString(" ")}")
+                val heard = if (seen.any { it.startsWith("nominal:") }) heardAheadWithin(r, key).toString() else ""
+                appendLine("${r.id},${key.hazard},${key.stage},${row.hazardClass},${key in aheadKeys},${r.deadlines.getValue(key) - 500 <= row.endAt},${s(row.appearedAt)},${s(row.endAt)},${s(r.deadlines.getValue(key) - 500)},$nearest,${seen.joinToString(" ")},$heard")
             }
+        }
+    }
+
+    /**
+     * With no error, whether another warning ahead, as strong as the sentence the device said for [key], ended between the
+     * hazard appearing and the end of the stage's tolerance. A warning about the way ahead may be about another object: it
+     * says the user was told to stop, not that this hazard was named.
+     */
+    private fun heardAheadWithin(r: CaptureResult, key: StageKey): Boolean {
+        val a = r.arms.getValue(LAUNCH)
+        val level = a.nominalBase.offered.values.filter { it.endAtMs != null && key in a.nominalBase.credits[it.id].orEmpty() }.mapNotNull { it.event?.priority }.maxOrNull() ?: return false
+        val from = r.device.stages.first { StageKey(it.hazard, it.stage) == key }.appearedAt
+        val to = r.deadlines.getValue(key) + Loss.BOUND_MS
+        return a.nominalArm.offered.values.any { o ->
+            val end = o.endAtMs
+            val event = o.event
+            end != null && event != null && end in from..to && event.priority >= level &&
+                (event.category == EventCategory.BLOCKED || (event.category == EventCategory.OBSTACLE && DirectionZone.CENTER in event.relatedZones))
         }
     }
 
