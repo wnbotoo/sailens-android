@@ -1,0 +1,201 @@
+1 decided [e1={"id":"","timestamp":100000,"category":"OBSTACLE","priority":"MEDIUM","messageKey":"event_obstacle_right_person","messageParams":{"count":"1"},"expiresAt":103000,"dedupeKey":"obstacle_RIGHT","cooldownKeys":["obstacle_PRIMARY_SIDE","obstacle_RIGHT"],"cooldownGroups":[],"confidence":1.0,"severity":"MODERATE","relatedZones":["RIGHT"],"distance":"MEDIUM","rank":0}]
+1 description_waits MEDIUM -> true
+1 receipt revoke e1 waiting_for_description
+1 outcome PromptOutcomeTrace(sessionId=, eventId=e1, sourceSequenceNumber=1, messageKey=event_obstacle_right_person, category=obstacle, priority=medium, deliveredAt=null, revokedAt=100000, revokeReason=waiting_for_description, deliveredVia=[], speechEnabled=true, screenReaderActive=false, hapticsEnabled=true)
+2 decided [e2={"id":"","timestamp":100100,"category":"OBSTACLE","priority":"MEDIUM","messageKey":"event_obstacle_right_person","messageParams":{"count":"1"},"expiresAt":103100,"dedupeKey":"obstacle_RIGHT","cooldownKeys":["obstacle_PRIMARY_SIDE","obstacle_RIGHT"],"cooldownGroups":[],"confidence":1.0,"severity":"MODERATE","relatedZones":["RIGHT"],"distance":"MEDIUM","rank":0}]
+2 description_waits MEDIUM -> true
+2 receipt revoke e2 waiting_for_description
+2 outcome PromptOutcomeTrace(sessionId=, eventId=e2, sourceSequenceNumber=2, messageKey=event_obstacle_right_person, category=obstacle, priority=medium, deliveredAt=null, revokedAt=100100, revokeReason=waiting_for_description, deliveredVia=[], speechEnabled=true, screenReaderActive=false, hapticsEnabled=true)
+3 decided [e3={"id":"","timestamp":100200,"category":"OBSTACLE","priority":"MEDIUM","messageKey":"event_obstacle_right_person","messageParams":{"count":"1"},"expiresAt":103200,"dedupeKey":"obstacle_RIGHT","cooldownKeys":["obstacle_PRIMARY_SIDE","obstacle_RIGHT"],"cooldownGroups":[],"confidence":1.0,"severity":"MODERATE","relatedZones":["RIGHT"],"distance":"MEDIUM","rank":0}]
+3 description_waits MEDIUM -> true
+3 receipt revoke e3 waiting_for_description
+3 outcome PromptOutcomeTrace(sessionId=, eventId=e3, sourceSequenceNumber=3, messageKey=event_obstacle_right_person, category=obstacle, priority=medium, deliveredAt=null, revokedAt=100200, revokeReason=waiting_for_description, deliveredVia=[], speechEnabled=true, screenReaderActive=false, hapticsEnabled=true)
+4 decided [e4={"id":"","timestamp":100300,"category":"OBSTACLE","priority":"MEDIUM","messageKey":"event_obstacle_right_person","messageParams":{"count":"1"},"expiresAt":103300,"dedupeKey":"obstacle_RIGHT","cooldownKeys":["obstacle_PRIMARY_SIDE","obstacle_RIGHT"],"cooldownGroups":[],"confidence":1.0,"severity":"MODERATE","relatedZones":["RIGHT"],"distance":"MEDIUM","rank":0}]
+4 description_waits MEDIUM -> true
+4 receipt revoke e4 waiting_for_description
+4 outcome PromptOutcomeTrace(sessionId=, eventId=e4, sourceSequenceNumber=4, messageKey=event_obstacle_right_person, category=obstacle, priority=medium, deliveredAt=null, revokedAt=100300, revokeReason=waiting_for_description, deliveredVia=[], speechEnabled=true, screenReaderActive=false, hapticsEnabled=true)
+5 decided [e5={"id":"","timestamp":100400,"category":"OBSTACLE","priority":"MEDIUM","messageKey":"event_obstacle_right_person","messageParams":{"count":"1"},"expiresAt":103400,"dedupeKey":"obstacle_RIGHT","cooldownKeys":["obstacle_PRIMARY_SIDE","obstacle_RIGHT"],"cooldownGroups":[],"confidence":1.0,"severity":"MODERATE","relatedZones":["RIGHT"],"distance":"MEDIUM","rank":0}]
+5 description_waits MEDIUM -> true
+5 receipt revoke e5 waiting_for_description
+5 outcome PromptOutcomeTrace(sessionId=, eventId=e5, sourceSequenceNumber=5, messageKey=event_obstacle_right_person, category=obstacle, priority=medium, deliveredAt=null, revokedAt=100400, revokeReason=waiting_for_description, deliveredVia=[], speechEnabled=true, screenReaderActive=false, hapticsEnabled=true)
+6 decided [e6={"id":"","timestamp":100500,"category":"OBSTACLE","priority":"MEDIUM","messageKey":"event_obstacle_right_person","messageParams":{"count":"1"},"expiresAt":103500,"dedupeKey":"obstacle_RIGHT","cooldownKeys":["obstacle_PRIMARY_SIDE","obstacle_RIGHT"],"cooldownGroups":[],"confidence":1.0,"severity":"MODERATE","relatedZones":["RIGHT"],"distance":"MEDIUM","rank":0}]
+6 description_waits MEDIUM -> true
+6 receipt revoke e6 waiting_for_description
+6 outcome PromptOutcomeTrace(sessionId=, eventId=e6, sourceSequenceNumber=6, messageKey=event_obstacle_right_person, category=obstacle, priority=medium, deliveredAt=null, revokedAt=100500, revokeReason=waiting_for_description, deliveredVia=[], speechEnabled=true, screenReaderActive=false, hapticsEnabled=true)
+7 decided [e7={"id":"","timestamp":100600,"category":"OBSTACLE","priority":"MEDIUM","messageKey":"event_obstacle_right_person","messageParams":{"count":"1"},"expiresAt":103600,"dedupeKey":"obstacle_RIGHT","cooldownKeys":["obstacle_PRIMARY_SIDE","obstacle_RIGHT"],"cooldownGroups":[],"confidence":1.0,"severity":"MODERATE","relatedZones":["RIGHT"],"distance":"MEDIUM","rank":0}]
+7 description_waits MEDIUM -> true
+7 receipt revoke e7 waiting_for_description
+7 outcome PromptOutcomeTrace(sessionId=, eventId=e7, sourceSequenceNumber=7, messageKey=event_obstacle_right_person, category=obstacle, priority=medium, deliveredAt=null, revokedAt=100600, revokeReason=waiting_for_description, deliveredVia=[], speechEnabled=true, screenReaderActive=false, hapticsEnabled=true)
+8 decided [e8={"id":"","timestamp":100700,"category":"OBSTACLE","priority":"MEDIUM","messageKey":"event_obstacle_right_person","messageParams":{"count":"1"},"expiresAt":103700,"dedupeKey":"obstacle_RIGHT","cooldownKeys":["obstacle_PRIMARY_SIDE","obstacle_RIGHT"],"cooldownGroups":[],"confidence":1.0,"severity":"MODERATE","relatedZones":["RIGHT"],"distance":"MEDIUM","rank":0}]
+8 description_waits MEDIUM -> true
+8 receipt revoke e8 waiting_for_description
+8 outcome PromptOutcomeTrace(sessionId=, eventId=e8, sourceSequenceNumber=8, messageKey=event_obstacle_right_person, category=obstacle, priority=medium, deliveredAt=null, revokedAt=100700, revokeReason=waiting_for_description, deliveredVia=[], speechEnabled=true, screenReaderActive=false, hapticsEnabled=true)
+9 decided [e9={"id":"","timestamp":100800,"category":"OBSTACLE","priority":"MEDIUM","messageKey":"event_obstacle_right_person","messageParams":{"count":"1"},"expiresAt":103800,"dedupeKey":"obstacle_RIGHT","cooldownKeys":["obstacle_PRIMARY_SIDE","obstacle_RIGHT"],"cooldownGroups":[],"confidence":1.0,"severity":"MODERATE","relatedZones":["RIGHT"],"distance":"MEDIUM","rank":0}]
+9 description_waits MEDIUM -> true
+9 receipt revoke e9 waiting_for_description
+9 outcome PromptOutcomeTrace(sessionId=, eventId=e9, sourceSequenceNumber=9, messageKey=event_obstacle_right_person, category=obstacle, priority=medium, deliveredAt=null, revokedAt=100800, revokeReason=waiting_for_description, deliveredVia=[], speechEnabled=true, screenReaderActive=false, hapticsEnabled=true)
+10 decided [e10={"id":"","timestamp":100900,"category":"OBSTACLE","priority":"MEDIUM","messageKey":"event_obstacle_right_person","messageParams":{"count":"1"},"expiresAt":103900,"dedupeKey":"obstacle_RIGHT","cooldownKeys":["obstacle_PRIMARY_SIDE","obstacle_RIGHT"],"cooldownGroups":[],"confidence":1.0,"severity":"MODERATE","relatedZones":["RIGHT"],"distance":"MEDIUM","rank":0}]
+10 description_waits MEDIUM -> true
+10 receipt revoke e10 waiting_for_description
+10 outcome PromptOutcomeTrace(sessionId=, eventId=e10, sourceSequenceNumber=10, messageKey=event_obstacle_right_person, category=obstacle, priority=medium, deliveredAt=null, revokedAt=100900, revokeReason=waiting_for_description, deliveredVia=[], speechEnabled=true, screenReaderActive=false, hapticsEnabled=true)
+11 decided [e11={"id":"","timestamp":101000,"category":"OBSTACLE","priority":"MEDIUM","messageKey":"event_obstacle_right_person","messageParams":{"count":"1"},"expiresAt":104000,"dedupeKey":"obstacle_RIGHT","cooldownKeys":["obstacle_PRIMARY_SIDE","obstacle_RIGHT"],"cooldownGroups":[],"confidence":1.0,"severity":"MODERATE","relatedZones":["RIGHT"],"distance":"MEDIUM","rank":0}]
+11 description_waits MEDIUM -> true
+11 receipt revoke e11 waiting_for_description
+11 outcome PromptOutcomeTrace(sessionId=, eventId=e11, sourceSequenceNumber=11, messageKey=event_obstacle_right_person, category=obstacle, priority=medium, deliveredAt=null, revokedAt=101000, revokeReason=waiting_for_description, deliveredVia=[], speechEnabled=true, screenReaderActive=false, hapticsEnabled=true)
+12 decided [e12={"id":"","timestamp":101100,"category":"OBSTACLE","priority":"MEDIUM","messageKey":"event_obstacle_right_person","messageParams":{"count":"1"},"expiresAt":104100,"dedupeKey":"obstacle_RIGHT","cooldownKeys":["obstacle_PRIMARY_SIDE","obstacle_RIGHT"],"cooldownGroups":[],"confidence":1.0,"severity":"MODERATE","relatedZones":["RIGHT"],"distance":"MEDIUM","rank":0}]
+12 description_waits MEDIUM -> true
+12 receipt revoke e12 waiting_for_description
+12 outcome PromptOutcomeTrace(sessionId=, eventId=e12, sourceSequenceNumber=12, messageKey=event_obstacle_right_person, category=obstacle, priority=medium, deliveredAt=null, revokedAt=101100, revokeReason=waiting_for_description, deliveredVia=[], speechEnabled=true, screenReaderActive=false, hapticsEnabled=true)
+13 decided [e13={"id":"","timestamp":101200,"category":"OBSTACLE","priority":"MEDIUM","messageKey":"event_obstacle_right_person","messageParams":{"count":"1"},"expiresAt":104200,"dedupeKey":"obstacle_RIGHT","cooldownKeys":["obstacle_PRIMARY_SIDE","obstacle_RIGHT"],"cooldownGroups":[],"confidence":1.0,"severity":"MODERATE","relatedZones":["RIGHT"],"distance":"MEDIUM","rank":0}]
+13 description_waits MEDIUM -> true
+13 receipt revoke e13 waiting_for_description
+13 outcome PromptOutcomeTrace(sessionId=, eventId=e13, sourceSequenceNumber=13, messageKey=event_obstacle_right_person, category=obstacle, priority=medium, deliveredAt=null, revokedAt=101200, revokeReason=waiting_for_description, deliveredVia=[], speechEnabled=true, screenReaderActive=false, hapticsEnabled=true)
+14 decided [e14={"id":"","timestamp":101300,"category":"OBSTACLE","priority":"MEDIUM","messageKey":"event_obstacle_right_person","messageParams":{"count":"1"},"expiresAt":104300,"dedupeKey":"obstacle_RIGHT","cooldownKeys":["obstacle_PRIMARY_SIDE","obstacle_RIGHT"],"cooldownGroups":[],"confidence":1.0,"severity":"MODERATE","relatedZones":["RIGHT"],"distance":"MEDIUM","rank":0}]
+14 description_waits MEDIUM -> true
+14 receipt revoke e14 waiting_for_description
+14 outcome PromptOutcomeTrace(sessionId=, eventId=e14, sourceSequenceNumber=14, messageKey=event_obstacle_right_person, category=obstacle, priority=medium, deliveredAt=null, revokedAt=101300, revokeReason=waiting_for_description, deliveredVia=[], speechEnabled=true, screenReaderActive=false, hapticsEnabled=true)
+15 decided [e15={"id":"","timestamp":101400,"category":"OBSTACLE","priority":"MEDIUM","messageKey":"event_obstacle_right_person","messageParams":{"count":"1"},"expiresAt":104400,"dedupeKey":"obstacle_RIGHT","cooldownKeys":["obstacle_PRIMARY_SIDE","obstacle_RIGHT"],"cooldownGroups":[],"confidence":1.0,"severity":"MODERATE","relatedZones":["RIGHT"],"distance":"MEDIUM","rank":0}]
+15 description_waits MEDIUM -> true
+15 receipt revoke e15 waiting_for_description
+15 outcome PromptOutcomeTrace(sessionId=, eventId=e15, sourceSequenceNumber=15, messageKey=event_obstacle_right_person, category=obstacle, priority=medium, deliveredAt=null, revokedAt=101400, revokeReason=waiting_for_description, deliveredVia=[], speechEnabled=true, screenReaderActive=false, hapticsEnabled=true)
+16 decided [e16={"id":"","timestamp":101500,"category":"OBSTACLE","priority":"MEDIUM","messageKey":"event_obstacle_right_person","messageParams":{"count":"1"},"expiresAt":104500,"dedupeKey":"obstacle_RIGHT","cooldownKeys":["obstacle_PRIMARY_SIDE","obstacle_RIGHT"],"cooldownGroups":[],"confidence":1.0,"severity":"MODERATE","relatedZones":["RIGHT"],"distance":"MEDIUM","rank":0}]
+16 description_waits MEDIUM -> true
+16 receipt revoke e16 waiting_for_description
+16 outcome PromptOutcomeTrace(sessionId=, eventId=e16, sourceSequenceNumber=16, messageKey=event_obstacle_right_person, category=obstacle, priority=medium, deliveredAt=null, revokedAt=101500, revokeReason=waiting_for_description, deliveredVia=[], speechEnabled=true, screenReaderActive=false, hapticsEnabled=true)
+17 decided [e17={"id":"","timestamp":101600,"category":"OBSTACLE","priority":"MEDIUM","messageKey":"event_obstacle_right_person","messageParams":{"count":"1"},"expiresAt":104600,"dedupeKey":"obstacle_RIGHT","cooldownKeys":["obstacle_PRIMARY_SIDE","obstacle_RIGHT"],"cooldownGroups":[],"confidence":1.0,"severity":"MODERATE","relatedZones":["RIGHT"],"distance":"MEDIUM","rank":0}]
+17 description_waits MEDIUM -> true
+17 receipt revoke e17 waiting_for_description
+17 outcome PromptOutcomeTrace(sessionId=, eventId=e17, sourceSequenceNumber=17, messageKey=event_obstacle_right_person, category=obstacle, priority=medium, deliveredAt=null, revokedAt=101600, revokeReason=waiting_for_description, deliveredVia=[], speechEnabled=true, screenReaderActive=false, hapticsEnabled=true)
+18 decided [e18={"id":"","timestamp":101700,"category":"OBSTACLE","priority":"MEDIUM","messageKey":"event_obstacle_right_person","messageParams":{"count":"1"},"expiresAt":104700,"dedupeKey":"obstacle_RIGHT","cooldownKeys":["obstacle_PRIMARY_SIDE","obstacle_RIGHT"],"cooldownGroups":[],"confidence":1.0,"severity":"MODERATE","relatedZones":["RIGHT"],"distance":"MEDIUM","rank":0}]
+18 description_waits MEDIUM -> true
+18 receipt revoke e18 waiting_for_description
+18 outcome PromptOutcomeTrace(sessionId=, eventId=e18, sourceSequenceNumber=18, messageKey=event_obstacle_right_person, category=obstacle, priority=medium, deliveredAt=null, revokedAt=101700, revokeReason=waiting_for_description, deliveredVia=[], speechEnabled=true, screenReaderActive=false, hapticsEnabled=true)
+19 decided [e19={"id":"","timestamp":101800,"category":"OBSTACLE","priority":"MEDIUM","messageKey":"event_obstacle_right_person","messageParams":{"count":"1"},"expiresAt":104800,"dedupeKey":"obstacle_RIGHT","cooldownKeys":["obstacle_PRIMARY_SIDE","obstacle_RIGHT"],"cooldownGroups":[],"confidence":1.0,"severity":"MODERATE","relatedZones":["RIGHT"],"distance":"MEDIUM","rank":0}]
+19 description_waits MEDIUM -> true
+19 receipt revoke e19 waiting_for_description
+19 outcome PromptOutcomeTrace(sessionId=, eventId=e19, sourceSequenceNumber=19, messageKey=event_obstacle_right_person, category=obstacle, priority=medium, deliveredAt=null, revokedAt=101800, revokeReason=waiting_for_description, deliveredVia=[], speechEnabled=true, screenReaderActive=false, hapticsEnabled=true)
+20 decided [e20={"id":"","timestamp":101900,"category":"OBSTACLE","priority":"MEDIUM","messageKey":"event_obstacle_right_person","messageParams":{"count":"1"},"expiresAt":104900,"dedupeKey":"obstacle_RIGHT","cooldownKeys":["obstacle_PRIMARY_SIDE","obstacle_RIGHT"],"cooldownGroups":[],"confidence":1.0,"severity":"MODERATE","relatedZones":["RIGHT"],"distance":"MEDIUM","rank":0}]
+20 description_waits MEDIUM -> true
+20 receipt revoke e20 waiting_for_description
+20 outcome PromptOutcomeTrace(sessionId=, eventId=e20, sourceSequenceNumber=20, messageKey=event_obstacle_right_person, category=obstacle, priority=medium, deliveredAt=null, revokedAt=101900, revokeReason=waiting_for_description, deliveredVia=[], speechEnabled=true, screenReaderActive=false, hapticsEnabled=true)
+21 decided [e21={"id":"","timestamp":102000,"category":"OBSTACLE","priority":"MEDIUM","messageKey":"event_obstacle_right_person","messageParams":{"count":"1"},"expiresAt":105000,"dedupeKey":"obstacle_RIGHT","cooldownKeys":["obstacle_PRIMARY_SIDE","obstacle_RIGHT"],"cooldownGroups":[],"confidence":1.0,"severity":"MODERATE","relatedZones":["RIGHT"],"distance":"MEDIUM","rank":0}]
+21 description_waits MEDIUM -> true
+21 receipt revoke e21 waiting_for_description
+21 outcome PromptOutcomeTrace(sessionId=, eventId=e21, sourceSequenceNumber=21, messageKey=event_obstacle_right_person, category=obstacle, priority=medium, deliveredAt=null, revokedAt=102000, revokeReason=waiting_for_description, deliveredVia=[], speechEnabled=true, screenReaderActive=false, hapticsEnabled=true)
+22 decided [e22={"id":"","timestamp":102100,"category":"OBSTACLE","priority":"MEDIUM","messageKey":"event_obstacle_right_person","messageParams":{"count":"1"},"expiresAt":105100,"dedupeKey":"obstacle_RIGHT","cooldownKeys":["obstacle_PRIMARY_SIDE","obstacle_RIGHT"],"cooldownGroups":[],"confidence":1.0,"severity":"MODERATE","relatedZones":["RIGHT"],"distance":"MEDIUM","rank":0}]
+22 description_waits MEDIUM -> true
+22 receipt revoke e22 waiting_for_description
+22 outcome PromptOutcomeTrace(sessionId=, eventId=e22, sourceSequenceNumber=22, messageKey=event_obstacle_right_person, category=obstacle, priority=medium, deliveredAt=null, revokedAt=102100, revokeReason=waiting_for_description, deliveredVia=[], speechEnabled=true, screenReaderActive=false, hapticsEnabled=true)
+23 decided [e23={"id":"","timestamp":102200,"category":"OBSTACLE","priority":"MEDIUM","messageKey":"event_obstacle_right_person","messageParams":{"count":"1"},"expiresAt":105200,"dedupeKey":"obstacle_RIGHT","cooldownKeys":["obstacle_PRIMARY_SIDE","obstacle_RIGHT"],"cooldownGroups":[],"confidence":1.0,"severity":"MODERATE","relatedZones":["RIGHT"],"distance":"MEDIUM","rank":0}]
+23 description_waits MEDIUM -> true
+23 receipt revoke e23 waiting_for_description
+23 outcome PromptOutcomeTrace(sessionId=, eventId=e23, sourceSequenceNumber=23, messageKey=event_obstacle_right_person, category=obstacle, priority=medium, deliveredAt=null, revokedAt=102200, revokeReason=waiting_for_description, deliveredVia=[], speechEnabled=true, screenReaderActive=false, hapticsEnabled=true)
+24 decided [e24={"id":"","timestamp":102300,"category":"OBSTACLE","priority":"MEDIUM","messageKey":"event_obstacle_right_person","messageParams":{"count":"1"},"expiresAt":105300,"dedupeKey":"obstacle_RIGHT","cooldownKeys":["obstacle_PRIMARY_SIDE","obstacle_RIGHT"],"cooldownGroups":[],"confidence":1.0,"severity":"MODERATE","relatedZones":["RIGHT"],"distance":"MEDIUM","rank":0}]
+24 description_waits MEDIUM -> true
+24 receipt revoke e24 waiting_for_description
+24 outcome PromptOutcomeTrace(sessionId=, eventId=e24, sourceSequenceNumber=24, messageKey=event_obstacle_right_person, category=obstacle, priority=medium, deliveredAt=null, revokedAt=102300, revokeReason=waiting_for_description, deliveredVia=[], speechEnabled=true, screenReaderActive=false, hapticsEnabled=true)
+25 decided [e25={"id":"","timestamp":102400,"category":"OBSTACLE","priority":"MEDIUM","messageKey":"event_obstacle_right_person","messageParams":{"count":"1"},"expiresAt":105400,"dedupeKey":"obstacle_RIGHT","cooldownKeys":["obstacle_PRIMARY_SIDE","obstacle_RIGHT"],"cooldownGroups":[],"confidence":1.0,"severity":"MODERATE","relatedZones":["RIGHT"],"distance":"MEDIUM","rank":0}]
+25 description_waits MEDIUM -> true
+25 receipt revoke e25 waiting_for_description
+25 outcome PromptOutcomeTrace(sessionId=, eventId=e25, sourceSequenceNumber=25, messageKey=event_obstacle_right_person, category=obstacle, priority=medium, deliveredAt=null, revokedAt=102400, revokeReason=waiting_for_description, deliveredVia=[], speechEnabled=true, screenReaderActive=false, hapticsEnabled=true)
+26 decided [e26={"id":"","timestamp":102500,"category":"OBSTACLE","priority":"MEDIUM","messageKey":"event_obstacle_right_person","messageParams":{"count":"1"},"expiresAt":105500,"dedupeKey":"obstacle_RIGHT","cooldownKeys":["obstacle_PRIMARY_SIDE","obstacle_RIGHT"],"cooldownGroups":[],"confidence":1.0,"severity":"MODERATE","relatedZones":["RIGHT"],"distance":"MEDIUM","rank":0}]
+26 description_waits MEDIUM -> true
+26 receipt revoke e26 waiting_for_description
+26 outcome PromptOutcomeTrace(sessionId=, eventId=e26, sourceSequenceNumber=26, messageKey=event_obstacle_right_person, category=obstacle, priority=medium, deliveredAt=null, revokedAt=102500, revokeReason=waiting_for_description, deliveredVia=[], speechEnabled=true, screenReaderActive=false, hapticsEnabled=true)
+27 decided [e27={"id":"","timestamp":102600,"category":"OBSTACLE","priority":"MEDIUM","messageKey":"event_obstacle_right_person","messageParams":{"count":"1"},"expiresAt":105600,"dedupeKey":"obstacle_RIGHT","cooldownKeys":["obstacle_PRIMARY_SIDE","obstacle_RIGHT"],"cooldownGroups":[],"confidence":1.0,"severity":"MODERATE","relatedZones":["RIGHT"],"distance":"MEDIUM","rank":0}]
+27 description_waits MEDIUM -> true
+27 receipt revoke e27 waiting_for_description
+27 outcome PromptOutcomeTrace(sessionId=, eventId=e27, sourceSequenceNumber=27, messageKey=event_obstacle_right_person, category=obstacle, priority=medium, deliveredAt=null, revokedAt=102600, revokeReason=waiting_for_description, deliveredVia=[], speechEnabled=true, screenReaderActive=false, hapticsEnabled=true)
+28 decided [e28={"id":"","timestamp":102700,"category":"OBSTACLE","priority":"MEDIUM","messageKey":"event_obstacle_right_person","messageParams":{"count":"1"},"expiresAt":105700,"dedupeKey":"obstacle_RIGHT","cooldownKeys":["obstacle_PRIMARY_SIDE","obstacle_RIGHT"],"cooldownGroups":[],"confidence":1.0,"severity":"MODERATE","relatedZones":["RIGHT"],"distance":"MEDIUM","rank":0}]
+28 description_waits MEDIUM -> true
+28 receipt revoke e28 waiting_for_description
+28 outcome PromptOutcomeTrace(sessionId=, eventId=e28, sourceSequenceNumber=28, messageKey=event_obstacle_right_person, category=obstacle, priority=medium, deliveredAt=null, revokedAt=102700, revokeReason=waiting_for_description, deliveredVia=[], speechEnabled=true, screenReaderActive=false, hapticsEnabled=true)
+29 decided [e29={"id":"","timestamp":102800,"category":"OBSTACLE","priority":"MEDIUM","messageKey":"event_obstacle_right_person","messageParams":{"count":"1"},"expiresAt":105800,"dedupeKey":"obstacle_RIGHT","cooldownKeys":["obstacle_PRIMARY_SIDE","obstacle_RIGHT"],"cooldownGroups":[],"confidence":1.0,"severity":"MODERATE","relatedZones":["RIGHT"],"distance":"MEDIUM","rank":0}]
+29 description_waits MEDIUM -> true
+29 receipt revoke e29 waiting_for_description
+29 outcome PromptOutcomeTrace(sessionId=, eventId=e29, sourceSequenceNumber=29, messageKey=event_obstacle_right_person, category=obstacle, priority=medium, deliveredAt=null, revokedAt=102800, revokeReason=waiting_for_description, deliveredVia=[], speechEnabled=true, screenReaderActive=false, hapticsEnabled=true)
+30 decided [e30={"id":"","timestamp":102900,"category":"OBSTACLE","priority":"MEDIUM","messageKey":"event_obstacle_right_person","messageParams":{"count":"1"},"expiresAt":105900,"dedupeKey":"obstacle_RIGHT","cooldownKeys":["obstacle_PRIMARY_SIDE","obstacle_RIGHT"],"cooldownGroups":[],"confidence":1.0,"severity":"MODERATE","relatedZones":["RIGHT"],"distance":"MEDIUM","rank":0}]
+30 description_waits MEDIUM -> true
+30 receipt revoke e30 waiting_for_description
+30 outcome PromptOutcomeTrace(sessionId=, eventId=e30, sourceSequenceNumber=30, messageKey=event_obstacle_right_person, category=obstacle, priority=medium, deliveredAt=null, revokedAt=102900, revokeReason=waiting_for_description, deliveredVia=[], speechEnabled=true, screenReaderActive=false, hapticsEnabled=true)
+31 decided [e31={"id":"","timestamp":103000,"category":"OBSTACLE","priority":"HIGH","messageKey":"event_obstacle_center_right_person","messageParams":{"zones":"center,right","count":"2"},"expiresAt":106000,"dedupeKey":"obstacle_PRIMARY_CENTER","cooldownKeys":["obstacle_CENTER","obstacle_PRIMARY_CENTER","obstacle_PRIMARY_SIDE","obstacle_RIGHT"],"cooldownGroups":[["obstacle_PRIMARY_SIDE","obstacle_RIGHT"],["obstacle_CENTER","obstacle_PRIMARY_CENTER"]],"confidence":1.0,"severity":"MODERATE","relatedZones":["CENTER","RIGHT"],"distance":"NEAR","rank":0}]
+31 description_waits HIGH -> false
+31 preempt_description event_obstacle_center_right_person
+31 speak e31 key=event_obstacle_center_right_person scale=16 -> taken
+31 vibrate_alone e31 -> Played
+31 receipt confirm e31
+31 outcome PromptOutcomeTrace(sessionId=, eventId=e31, sourceSequenceNumber=31, messageKey=event_obstacle_center_right_person, category=obstacle, priority=high, deliveredAt=103000, revokedAt=null, revokeReason=null, deliveredVia=[speech, haptics], speechEnabled=true, screenReaderActive=false, hapticsEnabled=true)
+31 reached e31
+32 decided []
+33 decided []
+34 decided []
+35 decided []
+36 decided []
+37 decided []
+38 decided []
+39 decided []
+40 decided []
+41 decided []
+42 decided []
+43 decided []
+44 decided []
+45 decided []
+46 decided []
+47 decided []
+48 decided []
+49 decided []
+50 decided []
+51 decided []
+51 spoken speak e31
+52 decided []
+53 decided []
+54 decided []
+55 decided []
+56 decided []
+57 decided []
+58 decided []
+59 decided [e32={"id":"","timestamp":105800,"category":"GROUND_UNRECOGNIZED","priority":"LOW","messageKey":"event_ground_unrecognized","messageParams":{},"expiresAt":110800,"dedupeKey":"ground_unrecognized","cooldownKeys":[],"cooldownGroups":[],"confidence":1.0,"severity":"MODERATE","relatedZones":[],"rank":0}]
+59 description_waits LOW -> true
+59 receipt confirm e32
+59 outcome PromptOutcomeTrace(sessionId=, eventId=e32, sourceSequenceNumber=59, messageKey=event_ground_unrecognized, category=ground_unrecognized, priority=low, deliveredAt=105800, revokedAt=null, revokeReason=null, deliveredVia=[vision_alerts], speechEnabled=true, screenReaderActive=false, hapticsEnabled=true)
+59 description_waits LOW -> true
+59 vibrate_fault LOW
+60 decided []
+61 decided []
+62 decided []
+63 decided []
+64 decided []
+64 description_waits LOW -> true
+65 decided []
+66 decided []
+67 decided []
+68 decided []
+69 decided []
+69 description_waits LOW -> true
+70 decided []
+71 decided []
+72 decided []
+73 decided []
+74 decided []
+74 description_waits LOW -> true
+75 decided []
+76 decided []
+77 decided []
+78 decided []
+79 decided []
+79 description_waits LOW -> false
+79 preempt_description event_ground_unrecognized
+79 speak_notice fingerprint_notice_107800_event_ground_unrecognized key=event_ground_unrecognized scale=0 -> taken
+80 decided []
+81 decided []
+82 decided []
+83 decided []
+84 decided []
+85 decided []
+86 decided []
+87 decided []
+88 decided []
+89 decided []
+90 decided []
+90 spoken speak_notice fingerprint_notice_107800_event_ground_unrecognized
+90 stop
