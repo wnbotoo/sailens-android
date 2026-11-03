@@ -22,6 +22,7 @@ data class SettingsUiState(
     val feedbackSettings: GuidanceFeedbackSettings,
     val perceptionProfile: PerceptionProfile,
     val diagnostics: GuidanceDiagnosticsState,
+    val pathComplexOff: Boolean = false,
 )
 
 class SettingsViewModel(
@@ -32,6 +33,8 @@ class SettingsViewModel(
     private val guidanceDiagnosticsStore: GuidanceDiagnosticsStore,
     private val speechManager: SpeechManager,
     private val hapticManager: HapticManager,
+    /** This build's choice: path-complex prompts are off, and the settings say so. */
+    private val pathComplexOff: Boolean = false,
 ) : ViewModel() {
 
     val uiState: StateFlow<SettingsUiState> = combine(
@@ -39,7 +42,7 @@ class SettingsViewModel(
         perceptionSettingsStore.profile,
         guidanceDiagnosticsStore.state,
     ) { settings, perceptionProfile, diagnostics ->
-        SettingsUiState(appInfo, settings, perceptionProfile, diagnostics)
+        SettingsUiState(appInfo, settings, perceptionProfile, diagnostics, pathComplexOff)
     }
         .stateIn(
             scope = viewModelScope,

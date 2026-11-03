@@ -12,6 +12,7 @@ import com.sailens.guidance.model.scene.HazardRef
 import com.sailens.guidance.model.scene.SceneEvent
 import com.sailens.guidance.model.scene.SceneEventMessageKeys
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.UUID
@@ -61,10 +62,12 @@ class SpeechRanksTest {
     @Test
     fun `the table`() {
         assertEquals(7, SpeechRanks.of(event(EventCategory.SENSOR_QUALITY), on))
-        assertEquals(5, SpeechRanks.of(obstacle(near = true), on))
+        assertEquals("level with the rest of its band on the speaker", 4, SpeechRanks.of(obstacle(near = true), on))
         assertEquals(4, SpeechRanks.of(obstacle(near = false), on))
         assertEquals(4, SpeechRanks.of(event(EventCategory.BLOCKED), on))
-        assertEquals("a semantic-source obstacle stays level with BLOCKED", 4, SpeechRanks.of(obstacle(near = true, source = ObstacleSource.SEMANTIC), on))
+        assertEquals(4, SpeechRanks.of(obstacle(near = true, source = ObstacleSource.SEMANTIC), on))
+        assertTrue(SpeechRanks.saysNearOfADetectedHazard(obstacle(near = true)))
+        assertFalse(SpeechRanks.saysNearOfADetectedHazard(obstacle(near = true, source = ObstacleSource.SEMANTIC)))
         assertEquals(0, SpeechRanks.of(event(EventCategory.PATH_COMPLEX), on))
         assertEquals(0, SpeechRanks.of(event(EventCategory.GROUND_UNRECOGNIZED), on))
         assertEquals(0, SpeechRanks.of(event(EventCategory.TRAFFIC_LIGHT), on))
@@ -76,9 +79,9 @@ class SpeechRanksTest {
     }
 
     @Test
-    fun `a NEAR prefix that speaks ambiguously for a hazard earns no rank`() {
+    fun `a NEAR prefix that speaks ambiguously for a hazard does not count as saying NEAR`() {
         // The word says person, the NEAR one is a vehicle: the prefix is not credited to it.
-        assertEquals(4, SpeechRanks.of(obstacle(near = true, category = ObstacleCategory.VEHICLE), on))
+        assertFalse(SpeechRanks.saysNearOfADetectedHazard(obstacle(near = true, category = ObstacleCategory.VEHICLE)))
     }
 
     @Test
@@ -91,11 +94,11 @@ class SpeechRanksTest {
     }
 
     @Test
-    fun `a blocked path gives way to an obstacle saying NEAR, and leads one that does not by generation order`() {
+    fun `no sentence cuts another of its band for saying NEAR, and blocked stays level with it`() {
         val blocked = event(EventCategory.BLOCKED, EventPriority.CRITICAL).let { it.copy(rank = SpeechRanks.of(it, on)) }
         val near = obstacle(near = true).copy(priority = EventPriority.CRITICAL).let { it.copy(rank = SpeechRanks.of(it, on)) }
         val notNear = obstacle(near = false).copy(priority = EventPriority.CRITICAL).let { it.copy(rank = SpeechRanks.of(it, on)) }
-        assertEquals(listOf(near, blocked), listOf(blocked, near).sortedByDescending { SpeechScale.of(it) })
-        assertEquals(listOf(blocked, notNear), listOf(blocked, notNear).sortedByDescending { SpeechScale.of(it) })
+        assertEquals(SpeechScale.of(blocked), SpeechScale.of(near))
+        assertEquals(SpeechScale.of(notNear), SpeechScale.of(near))
     }
 }

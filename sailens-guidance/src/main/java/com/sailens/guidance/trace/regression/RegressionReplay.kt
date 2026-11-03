@@ -43,6 +43,8 @@ import com.sailens.guidance.trace.capture.ConnectivityRecord
 import com.sailens.guidance.trace.capture.EventRecord
 import com.sailens.guidance.trace.capture.RegressionClocks
 import com.sailens.guidance.trace.capture.RegressionFrameRecord
+import com.sailens.guidance.trace.capture.RegressionCutKeptRecord
+import com.sailens.guidance.trace.capture.RegressionHeardAfterCutRecord
 import com.sailens.guidance.trace.capture.RegressionRevokeRecord
 import com.sailens.guidance.trace.capture.SemanticRuns
 import com.sailens.guidance.usecase.decision.DecideEventsUseCase
@@ -152,9 +154,13 @@ class RegressionReplay(
         onFrame: (RegressionFrameRecord, FrameOutcome) -> Unit = { _, _ -> },
         counterfactual: CounterfactualDelivery? = null,
         trackIds: ObstacleTracker.TrackIdSource = ObstacleTracker.TrackIdSource.RANDOM,
+        cutKept: List<RegressionCutKeptRecord> = emptyList(),
+        heardAfterCut: List<RegressionHeardAfterCutRecord> = emptyList(),
     ): Report {
         val world = World(classMap, trackIds)
         val revokesByDecision = revokes.groupBy { it.decisionsBefore }
+        val cutKeptByDecision = cutKept.groupBy { it.decisionsBefore }
+        val heardAfterCutByDecision = heardAfterCut.groupBy { it.decisionsBefore }
         val replayedIdOf = HashMap<String, UUID>()
         var decisions = 0
         var replayed = 0
@@ -179,6 +185,12 @@ class RegressionReplay(
                     // differently) has nothing to revoke.
                     revokesByDecision[decisions.toLong()]?.forEach { revoke ->
                         replayedIdOf[revoke.eventId]?.let(world.cooldown::revoke)
+                    }
+                    cutKeptByDecision[decisions.toLong()]?.forEach { kept ->
+                        replayedIdOf[kept.eventId]?.let(world.cooldown::markNotHeard)
+                    }
+                    heardAfterCutByDecision[decisions.toLong()]?.forEach { heard ->
+                        replayedIdOf[heard.eventId]?.let(world.cooldown::reportHeardAfterCut)
                     }
                     world.stationary.value = record.stationary ?: false
                     // Read-only, before the decision changes it; the clock is peeked, not consumed.
@@ -331,7 +343,9 @@ class RegressionReplay(
             private set
 
         val stationary = MutableStateFlow(false)
-        val cooldown = CooldownManager(proximityEscalation = analysisConfig.detFirst.proximityEscalation, retryInterrupted = analysisConfig.detFirst.retryInterrupted)
+        val cooldown = analysisConfig.detFirst.let {
+            CooldownManager(proximityEscalation = it.proximityEscalation, retryInterrupted = it.retryInterrupted, metricOnlyRepeatMs = it.metricGate?.metricOnlyRepeatMs ?: 6_000L)
+        }
         val frameQuality = FrameQualityAnalyzer()
 
         private val repository = object : PerceptionRepository {

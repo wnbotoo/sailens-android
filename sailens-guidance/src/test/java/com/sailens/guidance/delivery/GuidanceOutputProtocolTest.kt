@@ -49,7 +49,11 @@ class GuidanceOutputProtocolTest {
     private var onOutcome: ((SpeechOutcome) -> Unit)? = null
     private var rhythmGoesWithIt = true
 
-    private fun protocolWith(retryInterrupted: Boolean) = GuidanceOutputProtocol(
+    private val modeAttempts = mutableListOf<Long>()
+    private var modeAccepts = true
+    private var modeOutcome: ((SpeechOutcome) -> Unit)? = null
+
+    private fun protocolWith(retryInterrupted: Boolean, pathComplexOff: Boolean = false) = GuidanceOutputProtocol(
         speech = object : GuidanceSpeechPort {
             override val isReady: Boolean get() = engineReady
 
@@ -63,6 +67,13 @@ class GuidanceOutputProtocolTest {
                 frameTimes += atMs
                 if (speechAccepts) this@GuidanceOutputProtocolTest.onOutcome = onOutcome
                 return speechAccepts
+            }
+
+            override fun speakModeNotice(id: String, messageKey: String, atMs: Long, expiresAtMs: Long, onOutcome: (SpeechOutcome) -> Unit): Boolean {
+                calls += "mode"
+                modeAttempts += now
+                if (modeAccepts) this@GuidanceOutputProtocolTest.modeOutcome = onOutcome
+                return modeAccepts
             }
 
             override fun speakNotice(notice: VisionFaultAlerts.Notice, atMs: Long?, onSpoken: () -> Unit): Boolean {
@@ -153,6 +164,7 @@ class GuidanceOutputProtocolTest {
         onReachedUser = { reached += it },
         wallClock = { WALL_CLOCK },
         retryInterrupted = retryInterrupted,
+        pathComplexOff = pathComplexOff,
     )
 
     private val protocol = protocolWith(retryInterrupted = false)
@@ -259,6 +271,111 @@ class GuidanceOutputProtocolTest {
         calls.clear()
         motorAnswer!!(true)
         assertEquals(emptyList<String>(), calls)
+    }
+
+    private fun modeFrames(on: GuidanceOutputProtocol, untilMs: Long, stepMs: Long = 100) {
+        while (now < untilMs) {
+            on.onFrame(emptyList(), 1, VisionFaults.NONE)
+            now += stepMs
+        }
+    }
+
+    @Test
+    fun `the mode notice is said at the start, once heard no more, and not at all with the switch off`() {
+        val on = protocolWith(retryInterrupted = true, pathComplexOff = true)
+        on.onFrame(emptyList(), 1, VisionFaults.NONE)
+        assertEquals(listOf(now), modeAttempts)
+        now += 100
+        on.onFrame(emptyList(), 2, VisionFaults.NONE)
+        assertEquals("still saying it", 1, modeAttempts.size)
+        modeOutcome!!(SpeechOutcome.SPOKEN)
+        modeFrames(on, now + 20_000)
+        assertEquals(1, modeAttempts.size)
+
+        protocol.onFrame(emptyList(), 1, VisionFaults.NONE)
+        assertEquals(1, modeAttempts.size)
+    }
+
+    @Test
+    fun `refused it is offered again at most every 500 ms`() {
+        val on = protocolWith(retryInterrupted = true, pathComplexOff = true)
+        modeAccepts = false
+        val start = now
+        modeFrames(on, start + 1_600)
+        assertEquals(listOf(start, start + 500, start + 1_000, start + 1_500), modeAttempts)
+    }
+
+    @Test
+    fun `cut off it backs off by doubling up to 8 s, with no limit, until heard`() {
+        val on = protocolWith(retryInterrupted = true, pathComplexOff = true)
+        val start = now
+        on.onFrame(emptyList(), 1, VisionFaults.NONE)
+        val gaps = mutableListOf<Long>()
+        var at = start
+        repeat(5) {
+            modeOutcome!!(SpeechOutcome.CUT)
+            val count = modeAttempts.size
+            while (modeAttempts.size == count) {
+                now += 100
+                on.onFrame(emptyList(), 1, VisionFaults.NONE)
+            }
+            gaps += modeAttempts.last() - at
+            at = modeAttempts.last()
+        }
+        assertEquals(listOf(2_000L, 4_000L, 8_000L, 8_000L, 8_000L), gaps)
+        modeOutcome!!(SpeechOutcome.HEARD_AFTER_CUT)
+        modeFrames(on, now + 20_000)
+        assertEquals(6, modeAttempts.size)
+    }
+
+    @Test
+    fun `a screen reader takes it once, with speech off it is not said, and a stop starts it over`() {
+        val reader = protocolWith(retryInterrupted = true, pathComplexOff = true)
+        screenReaderActive = true
+        modeFrames(reader, now + 1_000)
+        assertEquals(1, calls.count { it == "readerNotice:${SceneEventMessageKeys.MODE_OBSTACLES_AND_BLOCKED}" })
+        assertEquals(0, modeAttempts.size)
+
+        screenReaderActive = false
+        speechEnabled = false
+        val silent = protocolWith(retryInterrupted = true, pathComplexOff = true)
+        modeFrames(silent, now + 1_000)
+        assertEquals(0, modeAttempts.size)
+
+        speechEnabled = true
+        val restarted = protocolWith(retryInterrupted = true, pathComplexOff = true)
+        restarted.onFrame(emptyList(), 1, VisionFaults.NONE)
+        val first = modeOutcome!!
+        restarted.reset()
+        now += 100
+        restarted.onFrame(emptyList(), 1, VisionFaults.NONE)
+        assertEquals("a new run says it again", 2, modeAttempts.size)
+        first(SpeechOutcome.SPOKEN)
+        now += 100
+        restarted.onFrame(emptyList(), 1, VisionFaults.NONE)
+        assertEquals("the old run's end does not count", 2, modeAttempts.size)
+    }
+
+    @Test
+    fun `it waits for a description, as a MEDIUM prompt does`() {
+        val on = protocolWith(retryInterrupted = true, pathComplexOff = true)
+        descriptionWaitsBelow = EventPriority.HIGH
+        modeFrames(on, now + 600)
+        assertEquals(0, modeAttempts.size)
+        descriptionWaitsBelow = null
+        modeFrames(on, now + 600)
+        assertEquals(1, modeAttempts.size)
+    }
+
+    @Test
+    fun `its place on the scale is the same with ranks on and off`() {
+        val scale = com.sailens.guidance.processor.decision.SpeechRanks.MODE_NOTICE_SCALE
+        val s = com.sailens.guidance.processor.decision.SpeechScale
+        assertEquals(15, s.of(EventPriority.MEDIUM, 7))
+        assertEquals(15, scale)
+        assertTrue("below any HIGH", scale < s.of(EventPriority.HIGH, 0))
+        assertTrue("above any MEDIUM obstacle, rank on", scale > s.of(EventPriority.MEDIUM, 5))
+        assertTrue("above any MEDIUM obstacle, rank off", scale > s.of(EventPriority.MEDIUM, 0))
     }
 
     @Test

@@ -134,9 +134,12 @@ android {
     buildTypes {
         debug {
             buildConfigField("boolean", "SHOW_DIAGNOSTICS", "true")
+            // -PdetFirst=launch: DetFirstConfig.LAUNCH, for device tests. Debug only.
+            buildConfigField("boolean", "DET_FIRST_LAUNCH", (providers.gradleProperty("detFirst").orNull == "launch").toString())
         }
         release {
             buildConfigField("boolean", "SHOW_DIAGNOSTICS", "false")
+            buildConfigField("boolean", "DET_FIRST_LAUNCH", "false")
             // R8 relies on the default native-methods keep rule plus the JNI keeps in
             // sailens-runtime/vision/guidance consumer-rules.pro. Smoke-test a release build on
             // device before relying on it: name-based JNI / reflection break at runtime, not build.

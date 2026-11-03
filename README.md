@@ -125,6 +125,7 @@ Every document below has a Chinese version alongside it (`*.zh-CN.md`), linked f
 | [`docs/trace_metrics_guide.md`](docs/trace_metrics_guide.md) | [中文](docs/trace_metrics_guide.zh-CN.md) | Trace / replay metric definitions |
 | [`docs/trace_replay_workflow.md`](docs/trace_replay_workflow.md) | [中文](docs/trace_replay_workflow.zh-CN.md) | Observe → replay → evaluate loop |
 | [`docs/geometry.md`](docs/geometry.md) | [中文](docs/geometry.zh-CN.md) | Camera geometry, ground-contact distance, depth ground fit, simulator |
+| [`docs/guidance-operating-envelope.md`](docs/guidance-operating-envelope.md) | [中文](docs/guidance-operating-envelope.zh-CN.md) | What Guidance cannot see or judge, and how to read having no prompt |
 | [`docs/field-capture.md`](docs/field-capture.md) | [中文](docs/field-capture.zh-CN.md) | Field capture format, model-regression record and replay, prompt labelling |
 
 `AGENTS.md` is the repo guide for coding agents (English only — it is read by tools, not people).

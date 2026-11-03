@@ -27,8 +27,8 @@ import java.util.IdentityHashMap
  * frames, the run stops: what it settled before that stands, and the rest is [Result.undeterminable]. Both are
  * counts, so a run has one answer on any machine.
  *
- * An arm with more state than a speaker and a cooldown (a delivery protocol) has to add it to [Arm], or two
- * branches that differ there merge.
+ * An arm with more state than a speaker and a cooldown (a delivery protocol) keeps it in [Arm.extra], by way of
+ * its [FrameDriver], or two branches that differ there would merge.
  *
  * @param watches stages asked of each arm on its own, whatever the other does (M1, M2, B5, C3).
  */
@@ -38,8 +38,16 @@ internal class PairedBranchRun(
     queued: List<SpeakerModel.Queued>,
     watches: List<Watch> = emptyList(),
     private val liveCooldown: (CooldownManager.Canonical, Long) -> CooldownManager.Canonical = ::liveCooldown,
+    /** The cooldown both arms start from, when it is configured; each arm's own switches are its driver's, so it has to be the arm's. */
+    private val startCooldown: (arm: Boolean) -> CooldownManager = { CooldownManager() },
     private val maxBranches: Int = 4_096,
     private val maxBranchFrames: Long = Long.MAX_VALUE,
+    /** The arm's own queued inputs, when they stand differently on its speaker; the times and ids must be the same. */
+    queuedForArm: List<SpeakerModel.Queued>? = null,
+    /** The state an arm starts with besides speaker and cooldown; a value, compared to merge branches. */
+    startExtra: Any? = null,
+    /** The arm's own, when it differs: a protocol with more to do starts in another state. */
+    startArmExtra: Any? = startExtra,
 ) {
     /** @param appearedAtMs when the stage first appeared on the device, before anything could be offered for it. */
     class Target(val key: StageKey, val deadlineMs: Long, val appearedAtMs: Long)
@@ -55,6 +63,32 @@ internal class PairedBranchRun(
     /** One arm's answer for this frame from this cooldown; it may write to the cooldown it is given. */
     fun interface Decider {
         fun decide(cooldown: CooldownManager): Decision?
+    }
+
+    /** One way a frame can go for one arm. */
+    class FrameResult(
+        val speaker: ClosedLoopSpeakerBranches.Speaker,
+        val outcomes: List<ClosedLoopSpeakerBranches.Outcome>,
+        val cooldown: CooldownManager,
+        val extra: Any?,
+        /** What it gave the speaker: two arms giving the same have had the same inputs. */
+        val inputs: List<SpeakerModel.Input>,
+        val note: String?,
+    )
+
+    /** What an arm does on a frame, with whatever state it keeps. Everything it returns is a value: nothing given to it may be written. */
+    interface FrameDriver {
+        /** The stages each sentence it gave speaks for, by sentence. */
+        val credits: Map<String, List<StageKey>>
+
+        /** The cooldown it is given is read-only: it copies it first. */
+        fun frame(t: Long, speaker: ClosedLoopSpeakerBranches.Speaker, cooldown: CooldownManager, live: CooldownManager.Canonical, extra: Any?): List<FrameResult>
+
+        /** What the speaker reported reaches the arm. Null when it changes nothing. */
+        fun onOutcomes(outcomes: List<ClosedLoopSpeakerBranches.Outcome>, cooldown: CooldownManager, extra: Any?): Pair<CooldownManager, Any?>?
+
+        /** A result still to come that changes nothing is no state. */
+        fun waitsFor(outcome: ClosedLoopSpeakerBranches.Outcome): Boolean
     }
 
     /** One arm's answers to the [Watch]es. */
@@ -100,13 +134,14 @@ internal class PairedBranchRun(
         val live: CooldownManager.Canonical,
         val kept: Set<StageKey>,
         val heard: Set<StageKey>,
+        val extra: Any?,
     ) {
-        private val hash = 31 * (31 * (31 * speaker.hashCode() + live.hashCode()) + kept.hashCode()) + heard.hashCode()
+        private val hash = 31 * (31 * (31 * (31 * speaker.hashCode() + live.hashCode()) + kept.hashCode()) + heard.hashCode()) + extra.hashCode()
 
         override fun hashCode() = hash
 
         override fun equals(other: Any?) = this === other ||
-            (other is Arm && hash == other.hash && speaker == other.speaker && live == other.live && kept == other.kept && heard == other.heard)
+            (other is Arm && hash == other.hash && speaker == other.speaker && live == other.live && kept == other.kept && heard == other.heard && extra == other.extra)
     }
 
     /** One realization's choices so far, shared with the branches it split into. */
@@ -142,7 +177,7 @@ internal class PairedBranchRun(
     }
 
     /** One way an arm can go on from here. */
-    private class Move(val arm: Arm, val spoken: Set<String>, val note: String?, val offer: SpeakerModel.Offer? = null)
+    private class Move(val arm: Arm, val spoken: Set<String>, val note: String?, val inputs: List<SpeakerModel.Input> = emptyList())
 
     /** A frame's decision from one cooldown, and what comes of it. Cooldowns are not written after this, so branches share them. */
     private class Decided(val cooldown: CooldownManager, val decision: Decision?) {
@@ -155,6 +190,8 @@ internal class PairedBranchRun(
     private val pending = targets.associateBy { it.key }.toMutableMap()
     private val all = pending.keys.toSet()
     private val pendingQueued = ArrayDeque(queued.sortedBy { it.atMs })
+    private val armQueued = queuedForArm?.associateBy { it.id }
+    private val drivers = arrayOfNulls<FrameDriver>(2)
     private val open = watches.associateBy { it.key }.toMutableMap()
     private val allWatched = open.keys.toSet()
 
@@ -186,18 +223,36 @@ internal class PairedBranchRun(
         moves.forEach { it.clear() }
     }
 
-    private fun arm(speaker: ClosedLoopSpeakerBranches.Speaker, cooldown: CooldownManager, kept: Set<StageKey>, heard: Set<StageKey>): Arm {
+    private fun arm(speaker: ClosedLoopSpeakerBranches.Speaker, cooldown: CooldownManager, kept: Set<StageKey>, heard: Set<StageKey>, extra: Any?): Arm {
         val live = liveOf.getOrPut(cooldown) { liveCooldown(cooldown.canonicalState(), now) }
-        val made = Arm(speaker, cooldown, live, kept, heard)
+        val made = Arm(speaker, cooldown, live, kept, heard, extra)
         return interned.getOrPut(made) { made }
     }
 
-    private fun after(from: Arm, step: ClosedLoopSpeakerBranches.Step, side: Int, cooldown: CooldownManager = from.cooldown): Arm {
+    private fun creditsOf(side: Int, id: String): List<StageKey>? = drivers[side]?.credits?.get(id) ?: credits[side][id]
+
+    private fun after(
+        from: Arm,
+        step: ClosedLoopSpeakerBranches.Step,
+        side: Int,
+        givenCooldown: CooldownManager = from.cooldown,
+        givenExtra: Any? = from.extra,
+        deliver: Boolean = true,
+    ): Arm {
         var marks = from.kept
         var heard = from.heard
+        var cooldown = givenCooldown
+        var extra = givenExtra
+        val driver = drivers[side]
+        if (deliver && driver != null && step.outcomes.isNotEmpty()) {
+            driver.onOutcomes(step.outcomes, cooldown, extra)?.let { (c, x) ->
+                cooldown = c
+                extra = x
+            }
+        }
         for (outcome in step.outcomes) {
             if (outcome !is ClosedLoopSpeakerBranches.Spoken) continue
-            for (key in credits[side][outcome.id].orEmpty()) {
+            for (key in creditsOf(side, outcome.id).orEmpty()) {
                 val target = pending[key]
                 if (target != null && outcome.endAtMs <= target.deadlineMs) marks = marks + key
                 if (key in open && key !in heard) {
@@ -209,14 +264,15 @@ internal class PairedBranchRun(
         // A result still to come that can mark nothing is no state: without this, a flush's three variants stay apart.
         val speaker = step.speaker.copy(
             deferred = step.speaker.deferred.filter { d ->
+                if (driver != null && driver.waitsFor(d.outcome)) return@filter true
                 val spoken = d.outcome as? ClosedLoopSpeakerBranches.Spoken ?: return@filter false
-                credits[side][spoken.id].orEmpty().any { key ->
+                creditsOf(side, spoken.id).orEmpty().any { key ->
                     val target = pending[key]
                     (target != null && key !in marks && spoken.endAtMs <= target.deadlineMs) || (key in open && key !in heard)
                 }
             },
         )
-        return arm(speaker, cooldown, marks, heard)
+        return arm(speaker, cooldown, marks, heard, extra)
     }
 
     private fun movesOf(from: Arm, side: Int, by: (ClosedLoopSpeakerBranches.Speaker) -> List<ClosedLoopSpeakerBranches.Step>): List<Move> =
@@ -277,8 +333,18 @@ internal class PairedBranchRun(
             if (overLimit()) return false
             while (pendingQueued.firstOrNull()?.let { it.atMs == cut } == true) {
                 val q = pendingQueued.removeFirst()
+                val own = armQueued?.getValue(q.id) ?: q
                 enter(cut)
-                branches = merged(branches.flatMap { joint -> split(joint) { kernel.submit(it, q) } })
+                branches = merged(
+                    branches.flatMap { joint ->
+                        if (own == q) {
+                            split(joint) { kernel.submit(it, q) }
+                        } else {
+                            // Standing apart on the two speakers, it is still one sentence with one error; only what follows it differs.
+                            listOf(Joint(after(joint.base, kernel.submit(joint.base.speaker, q).single(), 0), after(joint.arm, kernel.submit(joint.arm.speaker, own).single(), 1), joint.choices, joint.coupled, joint.sameSince))
+                        }
+                    },
+                )
             }
         }
         return true
@@ -286,12 +352,31 @@ internal class PairedBranchRun(
 
     private var branches = listOf(
         run {
-            val start = arm(kernel.start(), CooldownManager(), emptySet(), emptySet())
-            Joint(start, start, null, true, Long.MIN_VALUE)
+            val base = arm(kernel.start(), startCooldown(false), emptySet(), emptySet(), startExtra)
+            val other = arm(kernel.start(), startCooldown(true), emptySet(), emptySet(), startArmExtra)
+            Joint(base, other, null, true, Long.MIN_VALUE)
         },
     )
 
     fun onFrame(t: Long, baseline: Decider, experimental: Decider) {
+        onFrame(t, deciderMoves(baseline, 0, t), deciderMoves(experimental, 1, t))
+    }
+
+    /** Runs a frame with what each arm does given by a driver, and what the speaker reports going back through it. */
+    fun onFrame(t: Long, baseline: FrameDriver, experimental: FrameDriver) {
+        drivers[0] = baseline
+        drivers[1] = experimental
+        onFrame(t, driverMoves(baseline, 0, t), driverMoves(experimental, 1, t))
+    }
+
+    private fun driverMoves(driver: FrameDriver, side: Int, t: Long): (Arm) -> List<Move> = { from ->
+        driver.frame(t, from.speaker, from.cooldown, from.live, from.extra).map { result ->
+            val step = ClosedLoopSpeakerBranches.Step(result.speaker, result.outcomes)
+            Move(after(from, step, side, result.cooldown, result.extra, deliver = false), emptySet(), result.note, result.inputs)
+        }
+    }
+
+    private fun onFrame(t: Long, baseline: (Arm) -> List<Move>, experimental: (Arm) -> List<Move>) {
         if (capHit || !advanceTo(t)) return
         enter(t)
         branches = merged(branches.flatMap { joint -> split(joint) { kernel.settle(it, t) } })
@@ -301,9 +386,9 @@ internal class PairedBranchRun(
         offered.forEach { it.clear() }
         val next = ArrayList<Joint>(branches.size)
         for (joint in branches) {
-            val bases = decided(joint.base, 0, baseline, t)
-            val arms = decided(joint.arm, 1, experimental, t)
-            val inStep = joint.coupled && bases.first().offer == arms.first().offer
+            val bases = offered[0].getOrPut(joint.base) { baseline(joint.base) }
+            val arms = offered[1].getOrPut(joint.arm) { experimental(joint.arm) }
+            val inStep = joint.coupled && bases.size == arms.size && bases.indices.all { bases[it].inputs == arms[it].inputs }
             if (inStep) {
                 for (i in bases.indices) next += framed(joint, bases[i], arms[i], t)
             } else {
@@ -317,7 +402,7 @@ internal class PairedBranchRun(
     }
 
     private fun framed(joint: Joint, b: Move, a: Move, t: Long): Joint {
-        val same = b.offer == a.offer && b.arm == a.arm
+        val same = b.inputs == a.inputs && b.arm == a.arm
         return Joint(b.arm, a.arm, noted(noted(joint.choices, b.note), a.note.takeIf { it != b.note }), joint.coupled, if (same) joint.sameSince ?: t else null)
     }
 
@@ -329,12 +414,12 @@ internal class PairedBranchRun(
     }
 
     /** Every result of this arm's decision on this frame. */
-    private fun decided(from: Arm, side: Int, decider: Decider, t: Long): List<Move> = offered[side].getOrPut(from) {
+    private fun deciderMoves(decider: Decider, side: Int, t: Long): (Arm) -> List<Move> = moves@{ from ->
         val memo = decisions[side].getOrPut(from.live) {
             val fresh = from.cooldown.copy()
             Decided(fresh, decider.decide(fresh))
         }
-        val decision = memo.decision ?: return@getOrPut listOf(Move(arm(from.speaker, memo.cooldown, from.kept, from.heard), emptySet(), null))
+        val decision = memo.decision ?: return@moves listOf(Move(arm(from.speaker, memo.cooldown, from.kept, from.heard, from.extra), emptySet(), null))
         val id = decision.offer.id
         val known = credits[side].getOrPut(id) { decision.credits }
         check(known == decision.credits) { "$id speaks for different stages in one arm" }
@@ -342,7 +427,7 @@ internal class PairedBranchRun(
         val steps = kernel.submit(from.speaker, decision.offer)
         steps.mapIndexed { i, step ->
             val accepted = step.outcomes.any { it is ClosedLoopSpeakerBranches.Accepted && it.id == id }
-            Move(after(from, step, side, if (accepted) memo.accepted else memo.refused), emptySet(), "$id outcome $i of ${steps.size} at $t".takeIf { steps.size > 1 }, decision.offer)
+            Move(after(from, step, side, if (accepted) memo.accepted else memo.refused), emptySet(), "$id outcome $i of ${steps.size} at $t".takeIf { steps.size > 1 }, listOf(decision.offer))
         }
     }
 
@@ -384,7 +469,7 @@ internal class PairedBranchRun(
         closedTargets.forEach(pending::remove)
         if (closedTargets.isEmpty() && closedWatches.isEmpty()) return
         val stripped = IdentityHashMap<Arm, Arm>()
-        fun strip(a: Arm) = stripped.getOrPut(a) { arm(a.speaker, a.cooldown, a.kept - closedTargets, a.heard - closedWatches) }
+        fun strip(a: Arm) = stripped.getOrPut(a) { arm(a.speaker, a.cooldown, a.kept - closedTargets, a.heard - closedWatches, a.extra) }
         branches = merged(branches.map { j -> Joint(strip(j.base), strip(j.arm), j.choices, j.coupled, j.sameSince) })
     }
 
@@ -396,8 +481,8 @@ internal class PairedBranchRun(
             for (j in branches) {
                 val a = if (side == 0) j.base else j.arm
                 if (seen.put(a, Unit) != null) continue
-                for (item in a.speaker.queue) credits[side][item.id]?.let(stages::addAll)
-                for (d in a.speaker.deferred) credits[side][d.outcome.id]?.let(stages::addAll)
+                for (item in a.speaker.queue) creditsOf(side, item.id)?.let(stages::addAll)
+                for (d in a.speaker.deferred) creditsOf(side, d.outcome.id)?.let(stages::addAll)
             }
         }
         return stages

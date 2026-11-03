@@ -50,4 +50,7 @@ data class SceneEvent(
     fun isExpired(now: Long): Boolean = now > expiresAt
 
     val isNear: Boolean get() = distance == DistanceLevel.NEAR
+
+    /** Only its measured distance admitted it. It says what any obstacle prompt says, but it keeps no cooldown key and stands behind them. */
+    val isMetricOnly: Boolean get() = components.any { it.admission == Admission.METRIC_ONLY }
 }

@@ -35,6 +35,9 @@ class GuidanceOutputProtocol(
     private val onReachedUser: (SceneEvent) -> Unit,
     private val wallClock: () -> Long = Timestamp::now,
     private val retryInterrupted: Boolean = false,
+    pathComplexOff: Boolean = false,
+    /** Fixed only by an evaluation in which two runs have to name a notice alike. */
+    noticeIdPrefix: String? = null,
 ) {
     /** The running frame's time, while one runs. */
     private var frameAtMs: Long? = null
@@ -54,7 +57,11 @@ class GuidanceOutputProtocol(
 
             override fun cancelVibration() = motor.cancelVisionFaultVibration()
         },
+        noticeIdPrefix = noticeIdPrefix ?: VisionFaultAlerts.newNoticeIdPrefix(),
     )
+
+    /** Says that path-complex prompts are off; null when they are not. */
+    private val modeNotice = if (pathComplexOff) ModeNotice(::offerModeNotice) else null
 
     /**
      * One frame's output.
@@ -69,6 +76,7 @@ class GuidanceOutputProtocol(
         visionFaultAlerts.observe(frameAt, visionFaults, settings.visionFaults())
         onSceneEvents(events, sequenceNumber)
         visionFaultAlerts.act(frameAt, settings.visionFaults())
+        modeNotice?.act(frameAt)
         frameAtMs = null
     }
 
@@ -81,6 +89,18 @@ class GuidanceOutputProtocol(
     fun reset() {
         run++
         visionFaultAlerts.reset()
+        modeNotice?.reset()
+    }
+
+    /** Everything that decides what this protocol does next, for an evaluation that follows several possible futures. */
+    internal data class State(val alerts: VisionFaultAlerts.State, val mode: ModeNotice.State?, val run: Long)
+
+    internal fun state(): State = State(visionFaultAlerts.state(), modeNotice?.state(), run)
+
+    internal fun restore(state: State) {
+        visionFaultAlerts.restore(state.alerts)
+        state.mode?.let { modeNotice?.restore(it) }
+        run = state.run
     }
 
     /**
@@ -99,6 +119,19 @@ class GuidanceOutputProtocol(
         }
         val accepted = speech.speakNotice(notice, frameAtMs, onSpoken = { visionFaultAlerts.onSpoken(notice.id) })
         return if (accepted) VisionFaultAlerts.Offer.ACCEPTED else VisionFaultAlerts.Offer.REFUSED
+    }
+
+    private fun offerModeNotice(id: String, messageKey: String, atMs: Long, expiresAtMs: Long, onOutcome: (SpeechOutcome) -> Unit): ModeNotice.Offer {
+        val current = settings.output()
+        if (!current.speechEnabled) return ModeNotice.Offer.REFUSED
+        if (description.waits(EventPriority.MEDIUM)) return ModeNotice.Offer.REFUSED
+        if (current.screenReaderActive) {
+            screenReader.announceNotice(messageKey)
+            return ModeNotice.Offer.PUBLISHED
+        }
+        val thisRun = run
+        val taken = speech.speakModeNotice(id, messageKey, atMs, expiresAtMs) { outcome -> if (thisRun == run) onOutcome(outcome) }
+        return if (taken) ModeNotice.Offer.ACCEPTED else ModeNotice.Offer.REFUSED
     }
 
     private fun onSceneEvents(events: List<SceneEvent>, sequenceNumber: Long) {

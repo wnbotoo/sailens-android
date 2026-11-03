@@ -140,6 +140,10 @@ fun SettingsScreen(
                 }
                 SettingsGroupDivider()
                 SettingsInlineNote(text = stringResource(R.string.settings_perception_apply_hint))
+                if (state.pathComplexOff) {
+                    SettingsGroupDivider()
+                    SettingsInlineNote(text = stringResource(R.string.settings_path_complex_off_note))
+                }
             }
 
             if (state.diagnostics.showDiagnostics) {

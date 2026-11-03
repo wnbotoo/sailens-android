@@ -2,6 +2,9 @@ package com.sailens.guidance.processor.decision
 
 import com.sailens.guidance.config.AnalysisConfig
 import com.sailens.guidance.config.DetFirstConfig
+import com.sailens.guidance.config.MetricGateConfig
+import com.sailens.guidance.depth.ContactValidity
+import com.sailens.guidance.geometry.HeightSource
 import com.sailens.guidance.model.analysis.FrameQuality
 import com.sailens.guidance.model.analysis.GroundRecognition
 import com.sailens.guidance.model.analysis.GroundTypeChange
@@ -16,11 +19,13 @@ import com.sailens.guidance.model.common.GroundType
 import com.sailens.guidance.model.common.ObstacleCategory
 import com.sailens.guidance.model.common.Severity
 import com.sailens.guidance.model.common.UrgencyLevel
+import com.sailens.guidance.model.scene.Admission
 import com.sailens.guidance.model.scene.EventComponent
 import com.sailens.guidance.model.scene.HazardRef
 import com.sailens.guidance.model.scene.SceneEvent
 import com.sailens.guidance.model.scene.SceneEventMessageKeys
 import com.sailens.guidance.model.perception.DetectedObstacle
+import com.sailens.guidance.model.perception.ObstacleSource
 
 /**
  * 事件生成器
@@ -93,7 +98,7 @@ class EventGenerator(
         if (pathJudgementReliable && snapshot.connectivity.isBlocked) {
             if (isHardBlocked(snapshot)) {
                 events.add(createBlockedEvent(snapshot, now))
-            } else {
+            } else if (!config.detFirst.pathComplexOff) {
                 events.add(createPathComplexEvent(snapshot, now))
             }
         }
@@ -337,29 +342,96 @@ class EventGenerator(
      * Pure, so an evaluation can ask which obstacles an obstacle prompt speaks for by calling the very
      * code that decided it.
      */
-    internal fun announcedObstacleGroups(obstacles: List<DetectedObstacle>): List<ObstacleZoneGroup> =
-        obstacles.filter(::shouldAnnounceObstacle).groupBy { it.zone }.map { (zone, zoneObstacles) ->
-            val primaryObstacle = zoneObstacles.maxWithOrNull(
-                compareBy<DetectedObstacle> { it.urgency.value }
-                    .thenBy { obstacleCategoryPriority(it.category) }
-                    .thenBy { it.confidence }
-                    .thenBy { it.areaRatio }
-            ) ?: zoneObstacles.first()
-            val maxUrgency = zoneObstacles.maxOf { it.urgency }
-            ObstacleZoneGroup(
-                zone = zone,
-                obstacles = zoneObstacles,
-                primary = primaryObstacle,
-                priority = obstacleEventPriority(primaryObstacle, maxUrgency),
-                // 用该方位里**最近**的那个障碍物定紧迫度：主障碍物是按紧急度/类别选出来的，
-                // 未必是离得最近的，而"要不要立刻停下"取决于最近的那个。
-                nearestDistance = zoneObstacles.minOf { it.distance },
-            )
+    internal fun announcedObstacleGroups(obstacles: List<DetectedObstacle>): List<ObstacleZoneGroup> {
+        val today = obstacles.filter(::shouldAnnounceObstacle).groupBy { it.zone }
+        val gate = config.detFirst.metricGate
+        // A zone with anything today's gates admit says what it says today: a car far off does not change its word.
+        val metricOnly = if (gate == null) emptyMap() else obstacles.filter { it.zone !in today && passesMetricGate(it, gate) }.groupBy { it.zone }
+        return today.map { (zone, zoneObstacles) -> zoneGroup(zone, zoneObstacles, metricOnly = false) } +
+            metricOnly.map { (zone, zoneObstacles) -> zoneGroup(zone, zoneObstacles, metricOnly = true) }
+    }
+
+    private fun zoneGroup(zone: DirectionZone, zoneObstacles: List<DetectedObstacle>, metricOnly: Boolean): ObstacleZoneGroup {
+        val primaryObstacle = zoneObstacles.maxWithOrNull(
+            compareBy<DetectedObstacle> { it.urgency.value }
+                .thenBy { obstacleCategoryPriority(it.category) }
+                .thenBy { it.confidence }
+                .thenBy { it.areaRatio }
+        ) ?: zoneObstacles.first()
+        val maxUrgency = zoneObstacles.maxOf { it.urgency }
+        return ObstacleZoneGroup(
+            zone = zone,
+            obstacles = zoneObstacles,
+            primary = primaryObstacle,
+            priority = obstacleEventPriority(primaryObstacle, maxUrgency),
+            // 用该方位里**最近**的那个障碍物定紧迫度：主障碍物是按紧急度/类别选出来的，
+            // 未必是离得最近的，而"要不要立刻停下"取决于最近的那个。
+            nearestDistance = if (zoneObstacles.any(::speechNear)) DistanceLevel.NEAR else zoneObstacles.minOf { it.distance },
+            metricOnly = metricOnly,
+        )
+    }
+
+    /**
+     * Whether the measured distance is one to act on: a detected box with a valid ground contact, at a phone
+     * height someone stated. Predicted frames keep the estimate of the last match.
+     */
+    private fun hasMeasuredDistance(obstacle: DetectedObstacle): Boolean {
+        val estimate = obstacle.distanceEstimate ?: return false
+        return obstacle.source == ObstacleSource.DETECTION &&
+            estimate.contact.validity == ContactValidity.VALID &&
+            (estimate.heightSource == HeightSource.PRESET || estimate.heightSource == HeightSource.CALIBRATED) &&
+            estimate.contact.lowerM != null
+    }
+
+    /**
+     * Admits what today's gates hold back only for being high in the image or FAR: its measured distance stands
+     * in for those two. Everything else today asks of an obstacle it asks too. It does not read [speechNear], so
+     * changing [DetFirstConfig.nearMeters] cannot change what is admitted.
+     */
+    private fun passesMetricGate(obstacle: DetectedObstacle, gate: MetricGateConfig): Boolean = metricGateHold(obstacle, gate) == null
+
+    /** What holds [obstacle] at the metric gate, for a report of why; null when nothing does. */
+    internal fun metricGateHold(obstacle: DetectedObstacle, gate: MetricGateConfig): String? {
+        if (!obstacle.isStable(minFrames = gate.minStableFrames)) return "not stable"
+        if (obstacle.confidence < MIN_OBSTACLE_CONFIDENCE_TO_ANNOUNCE) return "low confidence"
+        if (!hasMeasuredDistance(obstacle)) return "no measured distance"
+        if (obstacle.distanceEstimate!!.contact.lowerM!! > metricThresholdM(obstacle, gate)) return "farther than the gate"
+        val evidence = when (obstacle.zone) {
+            DirectionZone.CENTER -> obstacle.urgency >= UrgencyLevel.CRITICAL ||
+                obstacle.distance == DistanceLevel.NEAR ||
+                obstacle.areaRatio >= centerAreaThreshold(obstacle)
+            else -> hasEnoughSideObstacleEvidence(obstacle)
         }
+        return if (evidence) null else if (obstacle.zone == DirectionZone.CENTER) "too small ahead" else "too little evidence at the side"
+    }
+
+    /** Whether today's gates admit [obstacle], for a report of why. */
+    internal fun passesTodaysGates(obstacle: DetectedObstacle): Boolean = shouldAnnounceObstacle(obstacle)
+
+    private fun metricThresholdM(obstacle: DetectedObstacle, gate: MetricGateConfig): Float {
+        val ahead = isForwardZone(obstacle.zone)
+        return when (obstacle.category) {
+            ObstacleCategory.BICYCLE,
+            ObstacleCategory.VEHICLE -> if (ahead) gate.vehicleAheadM else gate.vehicleSideM
+            ObstacleCategory.PERSON -> if (ahead) gate.personAheadM else gate.personSideM
+            ObstacleCategory.STATIC_OBSTACLE,
+            ObstacleCategory.UNKNOWN -> if (obstacle.className.lowercase() in ROADSIDE_STATIC_CLASS_NAMES) gate.roadsideStaticM else gate.staticM
+        }
+    }
+
+    /** NEAR as a prompt says it, after admission: today's, or by measured distance within [DetFirstConfig.nearMeters]. */
+    private fun speechNear(obstacle: DetectedObstacle): Boolean {
+        if (obstacle.distance == DistanceLevel.NEAR) return true
+        val nearMeters = config.detFirst.nearMeters ?: return false
+        return hasMeasuredDistance(obstacle) && obstacle.distanceEstimate!!.contact.lowerM!! < nearMeters
+    }
 
     /** The priority [obstacle]'s event would take were it alone in its zone. */
     internal fun ownObstaclePriority(obstacle: DetectedObstacle): EventPriority =
         obstacleEventPriority(obstacle, obstacle.urgency)
+
+    /** The events [groups] make, for a check of what they say. */
+    internal fun obstacleEventsFor(groups: List<ObstacleZoneGroup>, now: Long): List<SceneEvent> = createObstacleEvents(groups, now)
 
     private fun createObstacleEvents(
         groups: List<ObstacleZoneGroup>,
@@ -372,8 +444,8 @@ class EventGenerator(
             messageKey = obstacleMessageKey(group.zone, group.primary.category),
             messageParams = mapOf("count" to group.obstacles.size.toString()),
             expiresAt = now + 3000,
-            dedupeKey = "obstacle_${group.zone.name}",
-            cooldownKeys = obstacleCooldownKeys(listOf(group.zone)),
+            dedupeKey = if (group.metricOnly) "obstacle_metric_${group.zone.name}" else "obstacle_${group.zone.name}",
+            cooldownKeys = if (group.metricOnly) emptySet() else obstacleCooldownKeys(listOf(group.zone)),
             relatedZones = listOf(group.zone),
             distance = group.nearestDistance.takeIf { config.enableProximityPrefix },
             components = listOf(componentOf(group)),
@@ -385,13 +457,14 @@ class EventGenerator(
         zone = group.zone,
         priority = group.priority,
         primaryTrackId = group.primary.id,
-        cooldownKeys = obstacleCooldownKeys(listOf(group.zone)),
+        cooldownKeys = if (group.metricOnly) emptySet() else obstacleCooldownKeys(listOf(group.zone)),
+        admission = if (group.metricOnly) Admission.METRIC_ONLY else Admission.TODAY,
         hazards = group.obstacles.map { obstacle ->
             HazardRef(
                 trackId = obstacle.id,
                 category = obstacle.category,
                 todayNear = obstacle.distance == DistanceLevel.NEAR,
-                speechNear = obstacle.distance == DistanceLevel.NEAR,
+                speechNear = speechNear(obstacle),
                 ownPriority = ownObstaclePriority(obstacle),
                 source = obstacle.source,
             )
@@ -557,4 +630,6 @@ internal data class ObstacleZoneGroup(
     val primary: DetectedObstacle,
     val priority: EventPriority,
     val nearestDistance: DistanceLevel,
+    /** Nothing in [zone] passes today's gates: these pass by measured distance alone. */
+    val metricOnly: Boolean = false,
 )

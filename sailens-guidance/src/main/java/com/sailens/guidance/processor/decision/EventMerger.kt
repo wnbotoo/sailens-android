@@ -20,9 +20,13 @@ class EventMerger {
             if (event.id in processed) continue
 
             when (event.category) {
-                EventCategory.OBSTACLE -> {
+                // 仅公制的提示不合并：合并事件要写下全部组成方位的 key，而它们不该碰任何方位 key。
+                EventCategory.OBSTACLE -> if (event.isMetricOnly) {
+                    result.add(event)
+                    processed.add(event.id)
+                } else {
                     val obstacleEvents = events.filter {
-                        it.category == EventCategory.OBSTACLE && it.id !in processed
+                        it.category == EventCategory.OBSTACLE && !it.isMetricOnly && it.id !in processed
                     }
                     if (obstacleEvents.size > 1) {
                         result.addAll(mergeObstacleEventGroup(obstacleEvents))

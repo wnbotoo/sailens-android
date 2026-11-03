@@ -100,6 +100,7 @@
     <string name="btn_overlay_passable_area_mask">可行走区域 Mask</string>
     <string name="btn_overlay_semantic_class_mask">语义类别 Mask</string>
     <string name="btn_overlay_detection_boxes">物体框</string>
+    <string name="settings_path_complex_off_note">路况复杂提示已关闭：只提示障碍物和前方不通（语音和震动都是）。原因：它没有方向、难以行动，而且会和障碍物提示抢喇叭。"前方"震动里，原来有一部分来自路况复杂，现在不再有了。</string>
     <string name="settings_section_perception">感知</string>
     <string name="label_perception_profile_basic">基础</string>
     <string name="settings_perception_basic_supporting">仅可通行区域与方向提示，最稳定省电</string>

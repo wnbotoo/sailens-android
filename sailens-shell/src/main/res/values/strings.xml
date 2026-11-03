@@ -102,6 +102,7 @@
     <string name="btn_overlay_passable_area_mask">Passable area mask</string>
     <string name="btn_overlay_semantic_class_mask">Semantic class mask</string>
     <string name="btn_overlay_detection_boxes">Detection boxes</string>
+    <string name="settings_path_complex_off_note">Complex-path alerts are off: only obstacles and blocked paths are announced, in speech and vibration. They have no direction to act on, and they compete with obstacle alerts for the speaker. Some of the "ahead" vibrations used to come from them, and no longer do.</string>
     <string name="settings_section_perception">Perception</string>
     <string name="label_perception_profile_basic">Basic</string>
     <string name="settings_perception_basic_supporting">Walkable-area and direction guidance only. Most stable and battery-friendly.</string>
