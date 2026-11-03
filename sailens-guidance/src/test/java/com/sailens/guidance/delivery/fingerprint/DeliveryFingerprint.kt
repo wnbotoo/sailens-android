@@ -34,6 +34,8 @@ import com.sailens.guidance.trace.regression.withoutId
 import com.sailens.guidance.usecase.decision.DecideEventsUseCase
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import java.io.File
+import java.nio.file.Files
 import java.util.UUID
 
 /** One frame as the decision step receives it: from a replayed capture, or built by a boundary script. */
@@ -109,13 +111,25 @@ internal sealed interface MotorAnswer {
  *
  * The outputs:
  * - speech takes a sentence unless it expired, the engine is not ready, or the sentence being spoken stands as high
- *   or higher on [SpeechScale]; a higher one cuts the current one off. A wording lasts [durationMs]. What ended or was
- *   cut is reported at the next [GuidanceSpeechPort.settleFrame], in time order, as the speech engine does;
+ *   or higher on [SpeechScale]; a higher one cuts the current one off. A wording lasts [durationMs]. As the speech
+ *   engine's settlement does (`UtteranceSettlement.flushIn` and `removed`), the sentence a new one flushes, and the one
+ *   a stop ends, is told it was cut on the spot, inside that call; what the engine ends by itself -- a sentence heard
+ *   to the end, or heard after it was cut -- is reported at the next [GuidanceSpeechPort.settleFrame], in time order;
  * - the screen reader takes every line; the motor starts at once unless the script says otherwise;
  * - a description holds the floor only where the script says, and a prompt below HIGH waits for it, as the shell's
  *   policy has it;
  * - the clock is the frame's decision time, and nothing random reaches a line: event ids are numbered by first
  *   appearance, track ids come from the replay's birth order, notice ids have a fixed prefix.
+ *
+ * A port is handed the event itself, and an output reads more of it than its id (the text, the priority a rhythm
+ * claims the motor with), so each port line names the event by its number when it is the event as decided, and
+ * writes the whole record when it is not ([argument]). Speech lines carry the frame time and the expiry they were
+ * offered with.
+ *
+ * Not modelled, so not covered here: the log, a switch changed mid-session (`settingsChanged`), a speech engine that
+ * fails while speaking, the motor's reservations and priorities, the screen reader's buffer, and real asynchronous
+ * timing. The fingerprint shows equal delivery for fixed inputs under this model; the alert characterization tests
+ * and the device timeline cover the rest.
  *
  * Every line starts with the frame's seq. Lines starting with [QUALIFICATION_PREFIX] are not delivery and are left out
  * of a comparison: what Guidance observed about the frame (its qualification) and about the alerts (their trace
@@ -160,8 +174,17 @@ internal class FingerprintPipeline(
     private val ids = HashMap<UUID, String>()
     private val idsByText = HashMap<String, String>()
 
+    /** What each event was decided as, by id: what a port is expected to be handed. */
+    private val decided = HashMap<UUID, String>()
+
     private fun name(event: SceneEvent): String = ids.getOrPut(event.id) {
         "e${ids.size + 1}".also { idsByText[event.id.toString()] = it }
+    }
+
+    /** [event] as a port line names it: its number when it is the event as decided, and its whole record when not. */
+    internal fun argument(event: SceneEvent): String {
+        val record = record(event)
+        return if (decided[event.id] == record) name(event) else "${name(event)} as=$record"
     }
 
     private val due = Due()
@@ -179,10 +202,11 @@ internal class FingerprintPipeline(
             }
 
             override fun speak(event: SceneEvent, atMs: Long?, onOutcome: ((SpeechOutcome) -> Unit)?): Boolean =
-                speaker.offer("speak ${name(event)}", event.messageKey, SpeechScale.of(event), event.expiresAt, atMs, onOutcome, null)
+                speaker.offer("speak", argument(event), event.messageKey, SpeechScale.of(event), event.expiresAt, atMs, onOutcome, null)
 
             override fun speakNotice(notice: VisionFaultAlerts.Notice, atMs: Long?, onSpoken: () -> Unit): Boolean = speaker.offer(
-                "speak_notice ${notice.id}",
+                "speak_notice",
+                "${notice.id} priority=${notice.priority.name}",
                 notice.messageKey,
                 SpeechScale.of(notice.priority, SpeechRanks.ofNotice(notice.messageKey, detFirst)),
                 notice.expiresAtMs,
@@ -192,21 +216,21 @@ internal class FingerprintPipeline(
             )
 
             override fun speakModeNotice(id: String, messageKey: String, atMs: Long, expiresAtMs: Long, onOutcome: (SpeechOutcome) -> Unit): Boolean =
-                speaker.offer("speak_mode $id", messageKey, SpeechRanks.MODE_NOTICE_SCALE, expiresAtMs, atMs, onOutcome, null)
+                speaker.offer("speak_mode", id, messageKey, SpeechRanks.MODE_NOTICE_SCALE, expiresAtMs, atMs, onOutcome, null)
         },
         screenReader = object : GuidanceScreenReaderPort {
-            override fun announce(event: SceneEvent) = line("screen_reader", name(event))
+            override fun announce(event: SceneEvent) = line("screen_reader", argument(event))
 
             override fun announceNotice(messageKey: String) = line("screen_reader_notice", messageKey)
         },
         motor = object : GuidanceMotorPort {
             override fun vibrate(event: SceneEvent): Boolean {
-                line("vibrate", name(event))
+                line("vibrate", argument(event))
                 return true
             }
 
             override fun vibrateAlone(event: SceneEvent, onQueuedResult: (played: Boolean) -> Unit): MotorOffer =
-                motor.alone(name(event), onQueuedResult)
+                motor.alone(argument(event), onQueuedResult)
 
             override fun vibrateVisionFault(priority: EventPriority, onPlayed: () -> Unit) {
                 line("vibrate_fault", priority.name)
@@ -266,13 +290,18 @@ internal class FingerprintPipeline(
         recordAlert = { alert -> observed("alert", alert.toString()) },
     )
 
+    /** The events the last frame decided. */
+    var lastDecided: List<SceneEvent> = emptyList()
+        private set
+
     fun onFrame(frame: FingerprintFrame) {
         seq = frame.seq
         now = frame.decidedAt
         stationary.value = frame.stationary
         speaker.ready = !(condition.engineOutage && inOutage(frame.seq))
         val events = decide(frame.snapshot)
-        line("decided", events.joinToString(prefix = "[", postfix = "]") { "${name(it)}=${record(it)}" })
+        lastDecided = events
+        line("decided", events.joinToString(prefix = "[", postfix = "]") { event -> "${name(event)}=${record(event).also { decided[event.id] = it }}" })
         val qualification = decide.qualification(frame.snapshot)
         // The projection is lossless: what the shell is told equals what the generator tested, on every frame.
         check(qualification.visionFaults() == frame.visionFaults) {
@@ -317,8 +346,16 @@ internal class FingerprintPipeline(
         out += "$QUALIFICATION_PREFIX$seq $kind $detail"
     }
 
-    private fun record(event: SceneEvent): String =
-        CaptureSchema.json.encodeToString(EventRecord.serializer(), event.toRecord().withoutId())
+    /**
+     * Every field of [event] but its random id: the regression record, and its components, which the record leaves
+     * out but which decide a metric-only prompt's speech band and what the cooldown credits.
+     */
+    private fun record(event: SceneEvent): String {
+        val components = event.components.joinToString(prefix = "[", postfix = "]") { c ->
+            "${c.zone}/${c.priority}/${c.primaryTrackId}/${c.cooldownKeys.sorted()}/${c.admission}/${c.hazards}"
+        }
+        return CaptureSchema.json.encodeToString(EventRecord.serializer(), event.toRecord().withoutId()) + " components=$components"
+    }
 
     private fun outcome(trace: PromptOutcomeTrace): String {
         return trace.copy(eventId = idsByText[trace.eventId] ?: trace.eventId).toString()
@@ -368,8 +405,13 @@ internal class FingerprintPipeline(
 
         private var current: Utterance? = null
 
+        /**
+         * One offer. Its line, [kind] and [what] with what it was offered with and the answer, is written when the call
+         * returns, after whatever the call itself reported.
+         */
         fun offer(
-            label: String,
+            kind: String,
+            what: String,
             messageKey: String,
             scale: Int,
             expiresAtMs: Long,
@@ -385,29 +427,30 @@ internal class FingerprintPipeline(
                 playing != null && playing.scale >= scale -> "outranked"
                 else -> null
             }
-            line(label.substringBefore(' '), "${label.substringAfter(' ')} key=$messageKey scale=$scale -> ${refusal ?: "taken"}")
-            if (refusal != null) return false
-            playing?.let { cutOff(it, at) }
-            val utterance = Utterance(label, scale, at + durationMs(messageKey), onOutcome, onSpoken)
-            current = utterance
-            due.schedule(utterance.endAtMs) {
-                if (!utterance.cut) {
-                    if (current === utterance) current = null
-                    line("spoken", utterance.label)
-                    utterance.onSpoken?.invoke()
-                    utterance.onOutcome?.invoke(SpeechOutcome.SPOKEN)
+            if (refusal == null) {
+                val utterance = Utterance("$kind $what", scale, at + durationMs(messageKey), onOutcome, onSpoken)
+                // The new sentence is taken first, then the flush tells the one it took off that it was cut.
+                current = utterance
+                playing?.let { cutOff(it, at) }
+                due.schedule(utterance.endAtMs) {
+                    if (!utterance.cut) {
+                        if (current === utterance) current = null
+                        line("spoken", utterance.label)
+                        utterance.onSpoken?.invoke()
+                        utterance.onOutcome?.invoke(SpeechOutcome.SPOKEN)
+                    }
                 }
             }
-            return true
+            line(kind, "$what key=$messageKey scale=$scale at=$at expires=$expiresAtMs -> ${refusal ?: "taken"}")
+            return refusal == null
         }
 
+        /** Told it was cut on the spot. When the script says so, the engine reports later that it was heard after all. */
         private fun cutOff(utterance: Utterance, atMs: Long) {
             utterance.cut = true
             if (current === utterance) current = null
-            due.schedule(atMs) {
-                line("cut", utterance.label)
-                utterance.onOutcome?.invoke(SpeechOutcome.CUT)
-            }
+            line("cut", utterance.label)
+            utterance.onOutcome?.invoke(SpeechOutcome.CUT)
             script.heardAfterCut(atMs)?.let { heardAt ->
                 due.schedule(heardAt) {
                     line("heard_after_cut", utterance.label)
@@ -416,9 +459,12 @@ internal class FingerprintPipeline(
             }
         }
 
-        /** What the engine had in progress ends now, cut off. */
+        /**
+         * What the engine was still saying is cut now. One that has already ended is not: its end is reported as
+         * heard, at the next settlement.
+         */
         fun stop() {
-            current?.takeIf { !it.cut }?.let { cutOff(it, now) }
+            current?.takeIf { !it.cut && it.endAtMs > now }?.let { cutOff(it, now) }
         }
     }
 
@@ -481,6 +527,48 @@ internal class FingerprintPipeline(
 
         /** How long a wording takes: fixed per message key, so that a longer sentence holds the speaker longer. */
         fun durationMs(messageKey: String): Long = 600L + 40L * messageKey.length
+    }
+}
+
+/**
+ * What keeps a replay from being a fingerprint of the whole capture, or null: a mismatch, an approximate frame, a stop
+ * before a lost frame, or fewer frames replayed than recorded. A prefix is not a baseline.
+ */
+internal fun replayProblem(report: RegressionReplay.Report, recordedFrames: Int): String? = when {
+    report.firstMismatch != null -> "first mismatch at seq ${report.firstMismatch.seq}"
+    report.approximateFrames.isNotEmpty() -> "${report.approximateFrames.size} approximate frames"
+    report.stoppedAtLostSeq != null -> "stopped before lost frame ${report.stoppedAtLostSeq}"
+    report.framesReplayed != recordedFrames -> "replayed ${report.framesReplayed} of $recordedFrames frames"
+    else -> null
+}
+
+/**
+ * Fingerprint files: written to [out], and each compared first with the file of the same name in [baseline] when
+ * there is one. A baseline that is [out] itself is refused before anything is written, since writing would replace
+ * the baseline with what it is compared with.
+ */
+internal class FingerprintFiles(private val out: File, private val baseline: File?) {
+    init {
+        require(baseline == null || !sameDirectory(out, baseline)) {
+            "-PfingerprintBaseline is the output directory ${out.path}: copy the baseline elsewhere first"
+        }
+        out.mkdirs()
+    }
+
+    /** @return where [lines] first differ from the baseline's [name], or null when they do not or there is no baseline. */
+    fun record(name: String, lines: List<String>): String? {
+        val difference = baseline?.let { directory ->
+            val expected = File(directory, name)
+            if (expected.isFile) FingerprintComparison.firstDifference(expected.readLines(), lines) else "no baseline file"
+        }
+        File(out, name).writeText(lines.joinToString("\n", postfix = "\n"))
+        return difference
+    }
+
+    private companion object {
+        fun sameDirectory(a: File, b: File): Boolean =
+            a.canonicalFile == b.canonicalFile ||
+                (a.exists() && b.exists() && runCatching { Files.isSameFile(a.toPath(), b.toPath()) }.getOrDefault(false))
     }
 }
 

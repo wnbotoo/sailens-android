@@ -1,7 +1,7 @@
 # V1 drained
 1 decided []
 1 description_waits MEDIUM -> false
-1 speak_mode mode-notice-100000 key=event_mode_obstacles_and_blocked scale=15 -> taken
+1 speak_mode mode-notice-100000 key=event_mode_obstacles_and_blocked scale=15 at=100000 expires=105000 -> taken
 2 decided []
 3 decided []
 4 decided []
@@ -30,10 +30,10 @@
 26 decided []
 27 decided []
 28 decided []
-29 decided [e1={"id":"","timestamp":102800,"category":"OBSTACLE","priority":"HIGH","messageKey":"event_obstacle_center_person","messageParams":{"count":"1"},"expiresAt":105800,"dedupeKey":"obstacle_CENTER","cooldownKeys":["obstacle_CENTER","obstacle_PRIMARY_CENTER"],"cooldownGroups":[],"confidence":1.0,"severity":"MODERATE","relatedZones":["CENTER"],"distance":"NEAR","rank":4}]
+29 decided [e1={"id":"","timestamp":102800,"category":"OBSTACLE","priority":"HIGH","messageKey":"event_obstacle_center_person","messageParams":{"count":"1"},"expiresAt":105800,"dedupeKey":"obstacle_CENTER","cooldownKeys":["obstacle_CENTER","obstacle_PRIMARY_CENTER"],"cooldownGroups":[],"confidence":1.0,"severity":"MODERATE","relatedZones":["CENTER"],"distance":"NEAR","rank":4} components=[CENTER/HIGH/00000000-0000-0000-0000-000000000001/[obstacle_CENTER, obstacle_PRIMARY_CENTER]/TODAY/[HazardRef(trackId=00000000-0000-0000-0000-000000000001, category=PERSON, todayNear=true, speechNear=true, ownPriority=HIGH, source=DETECTION)]]]
 29 description_waits HIGH -> false
 29 preempt_description event_obstacle_center_person
-29 speak e1 key=event_obstacle_center_person scale=20 -> taken
+29 speak e1 key=event_obstacle_center_person scale=20 at=102800 expires=105800 -> taken
 29 receipt accepted e1 rhythm=true
 29 vibrate e1
 29 outcome PromptOutcomeTrace(sessionId=, eventId=e1, sourceSequenceNumber=29, messageKey=event_obstacle_center_person, category=obstacle, priority=high, deliveredAt=102800, revokedAt=null, revokeReason=null, deliveredVia=[speech, haptics], speechEnabled=true, screenReaderActive=false, hapticsEnabled=true)
@@ -45,7 +45,7 @@
 # V1 stopped
 1 decided []
 1 description_waits MEDIUM -> false
-1 speak_mode mode-notice-100000 key=event_mode_obstacles_and_blocked scale=15 -> taken
+1 speak_mode mode-notice-100000 key=event_mode_obstacles_and_blocked scale=15 at=100000 expires=105000 -> taken
 2 decided []
 3 decided []
 4 decided []
@@ -74,10 +74,10 @@
 26 decided []
 27 decided []
 28 decided []
-29 decided [e1={"id":"","timestamp":102800,"category":"OBSTACLE","priority":"HIGH","messageKey":"event_obstacle_center_person","messageParams":{"count":"1"},"expiresAt":105800,"dedupeKey":"obstacle_CENTER","cooldownKeys":["obstacle_CENTER","obstacle_PRIMARY_CENTER"],"cooldownGroups":[],"confidence":1.0,"severity":"MODERATE","relatedZones":["CENTER"],"distance":"NEAR","rank":4}]
+29 decided [e1={"id":"","timestamp":102800,"category":"OBSTACLE","priority":"HIGH","messageKey":"event_obstacle_center_person","messageParams":{"count":"1"},"expiresAt":105800,"dedupeKey":"obstacle_CENTER","cooldownKeys":["obstacle_CENTER","obstacle_PRIMARY_CENTER"],"cooldownGroups":[],"confidence":1.0,"severity":"MODERATE","relatedZones":["CENTER"],"distance":"NEAR","rank":4} components=[CENTER/HIGH/00000000-0000-0000-0000-000000000001/[obstacle_CENTER, obstacle_PRIMARY_CENTER]/TODAY/[HazardRef(trackId=00000000-0000-0000-0000-000000000001, category=PERSON, todayNear=true, speechNear=true, ownPriority=HIGH, source=DETECTION)]]]
 29 description_waits HIGH -> false
 29 preempt_description event_obstacle_center_person
-29 speak e1 key=event_obstacle_center_person scale=20 -> taken
+29 speak e1 key=event_obstacle_center_person scale=20 at=102800 expires=105800 -> taken
 29 receipt accepted e1 rhythm=true
 29 vibrate e1
 29 outcome PromptOutcomeTrace(sessionId=, eventId=e1, sourceSequenceNumber=29, messageKey=event_obstacle_center_person, category=obstacle, priority=high, deliveredAt=102800, revokedAt=null, revokeReason=null, deliveredVia=[speech, haptics], speechEnabled=true, screenReaderActive=false, hapticsEnabled=true)
@@ -114,7 +114,7 @@
 26 decided []
 27 decided []
 28 decided []
-29 decided [e1={"id":"","timestamp":102800,"category":"OBSTACLE","priority":"HIGH","messageKey":"event_obstacle_center_person","messageParams":{"count":"1"},"expiresAt":105800,"dedupeKey":"obstacle_CENTER","cooldownKeys":["obstacle_CENTER","obstacle_PRIMARY_CENTER"],"cooldownGroups":[],"confidence":1.0,"severity":"MODERATE","relatedZones":["CENTER"],"distance":"NEAR","rank":4}]
+29 decided [e1={"id":"","timestamp":102800,"category":"OBSTACLE","priority":"HIGH","messageKey":"event_obstacle_center_person","messageParams":{"count":"1"},"expiresAt":105800,"dedupeKey":"obstacle_CENTER","cooldownKeys":["obstacle_CENTER","obstacle_PRIMARY_CENTER"],"cooldownGroups":[],"confidence":1.0,"severity":"MODERATE","relatedZones":["CENTER"],"distance":"NEAR","rank":4} components=[CENTER/HIGH/00000000-0000-0000-0000-000000000001/[obstacle_CENTER, obstacle_PRIMARY_CENTER]/TODAY/[HazardRef(trackId=00000000-0000-0000-0000-000000000001, category=PERSON, todayNear=true, speechNear=true, ownPriority=HIGH, source=DETECTION)]]]
 29 description_waits HIGH -> false
 29 preempt_description event_obstacle_center_person
 29 vibrate_alone e1 -> Queued(atMs=103300, plays=true)
@@ -154,7 +154,7 @@
 26 decided []
 27 decided []
 28 decided []
-29 decided [e1={"id":"","timestamp":102800,"category":"OBSTACLE","priority":"HIGH","messageKey":"event_obstacle_center_person","messageParams":{"count":"1"},"expiresAt":105800,"dedupeKey":"obstacle_CENTER","cooldownKeys":["obstacle_CENTER","obstacle_PRIMARY_CENTER"],"cooldownGroups":[],"confidence":1.0,"severity":"MODERATE","relatedZones":["CENTER"],"distance":"NEAR","rank":4}]
+29 decided [e1={"id":"","timestamp":102800,"category":"OBSTACLE","priority":"HIGH","messageKey":"event_obstacle_center_person","messageParams":{"count":"1"},"expiresAt":105800,"dedupeKey":"obstacle_CENTER","cooldownKeys":["obstacle_CENTER","obstacle_PRIMARY_CENTER"],"cooldownGroups":[],"confidence":1.0,"severity":"MODERATE","relatedZones":["CENTER"],"distance":"NEAR","rank":4} components=[CENTER/HIGH/00000000-0000-0000-0000-000000000001/[obstacle_CENTER, obstacle_PRIMARY_CENTER]/TODAY/[HazardRef(trackId=00000000-0000-0000-0000-000000000001, category=PERSON, todayNear=true, speechNear=true, ownPriority=HIGH, source=DETECTION)]]]
 29 description_waits HIGH -> false
 29 preempt_description event_obstacle_center_person
 29 vibrate_alone e1 -> Queued(atMs=103300, plays=true)
