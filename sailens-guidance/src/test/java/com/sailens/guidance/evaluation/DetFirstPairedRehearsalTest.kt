@@ -103,16 +103,14 @@ class DetFirstPairedRehearsalTest {
             "undeterminable $undeterminable (ahead $undeterminableFront); reported only: fragile $fragile (ahead $fragileFront), same inputs $same"
     }
 
-    /** @param forgiven what no longer counts as lost, for a reading with a longer tolerance. */
     private fun counted(
         result: PairedBranchRun.Result,
         reproduction: ProtectedStages.Reproduction,
         unmodeled: Set<StageKey> = emptySet(),
-        forgiven: (StageKey) -> Boolean = { false },
     ): Counted {
-        val regressions = reproduction.m5Of(result.regressions.filterNotTo(HashSet(), forgiven) - unmodeled)
-        val apart = reproduction.m5Of(result.bothLostApart.filterNotTo(HashSet(), forgiven) - unmodeled)
-        val stopped = reproduction.m5Of(result.undeterminable.filterNotTo(HashSet(), forgiven) + (unmodeled intersect (result.kept + result.regressions + result.bothLostApart)))
+        val regressions = reproduction.m5Of(result.regressions - unmodeled)
+        val apart = reproduction.m5Of(result.bothLostApart - unmodeled)
+        val stopped = reproduction.m5Of(result.undeterminable + (unmodeled intersect (result.kept + result.regressions + result.bothLostApart)))
         return Counted(
             regressions.regressions + regressions.undeterminable,
             regressions.regressionsFront + regressions.undeterminableFront,
@@ -181,22 +179,26 @@ class DetFirstPairedRehearsalTest {
         val preset = PhoneGeometrySettings(PRESET_HEIGHT_M, HeightSource.PRESET)
         val frozen = PromptPolicyCaptureEvaluation(preset)
         val evaluated = split.open.mapNotNull { dir ->
-            frozen.evaluate(CaptureSessionReader.read(dir).orThrow())?.takeIf { D18Sets.of(it.id) == D18Sets.Group.CALIBRATION }?.let { dir to it }
+            frozen.evaluate(CaptureSessionReader.read(dir).orThrow())?.takeIf { D18Sets.of(it.id) != null }?.let { dir to it }
         }
         val measured = evaluated.associate { (_, r) -> r.id to r.speaker?.measured.orEmpty() }
         val results = mutableListOf<CaptureResult>()
         val started = System.currentTimeMillis()
         for ((dir, result) in evaluated) {
-            val durations = SpeakerDurations.pooled(measured.filterKeys { it != result.id }.values.flatten(), OTHER_C)
-            results += rehearse(CaptureSessionReader.read(dir).orThrow(), result, durations, preset)
+            // A calibration capture is timed by the others; a sealed one by the table frozen from all of them.
+            val (durations, label) = when (D18Sets.of(result.id)) {
+                D18Sets.Group.SEALED -> SpeakerDurations.FROZEN_C to C_TABLE
+                else -> SpeakerDurations.pooled(measured.filterKeys { it != result.id }.values.flatten(), OTHER_C) to OTHER_C
+            }
+            results += rehearse(CaptureSessionReader.read(dir).orThrow(), result, durations, label, preset)
             File(out, "detfirst-paired.txt").writeText("${results.size} of ${evaluated.size} captures, ${(System.currentTimeMillis() - started) / 60_000} min\n" + report(results))
         }
         println(report(results))
         File(out, "detfirst-label-list.csv").writeText(labelList(results))
         File(out, "detfirst-label-frames.csv").writeText(labelFrames(results))
+        File(out, "detfirst-c8-list.csv").writeText(metricOnlyLabelList(results))
         assertTrue(results.isNotEmpty())
-        if (nominalOnly) return
-        val failed = standingChecks(results)
+        val failed = if (nominalOnly) nominalChecks(results) else standingChecks(results)
         assertTrue("standing checks failed:\n${failed.joinToString("\n")}", failed.isEmpty())
     }
 
@@ -242,13 +244,127 @@ class DetFirstPairedRehearsalTest {
         }
     }
 
+    /** What must hold for a reading with no error to say anything at all. */
+    private fun nominalChecks(results: List<CaptureResult>): List<String> = buildList {
+        val (disagree, off) = nominalAgainstFrozen(results)
+        if (disagree != 0 || off != 0) add("the nominal path differs from the frozen nominal model: $disagree stages, $off beyond 1 ms")
+        val unchanged = results.map { counted(it.arms.getValue(NO_CHANGE).nominal, it.production) }.reduce(Counted::plus)
+        if (unchanged.total + unchanged.fragile != 0) add("an arm that changes nothing scored: $unchanged")
+        for (r in results) {
+            val nominal = r.arms.getValue(NO_CHANGE).nominal
+            if (nominal.baseline.everywhere != nominal.arm.everywhere || nominal.baseline.latestEndMs != nominal.arm.latestEndMs) add("${r.id}: an arm that changes nothing answers its stages differently from the baseline")
+            if (r.arms.values.any { it.nominal.maxBranches != 1 }) add("${r.id}: with no error there is more than one branch")
+            val late = r.arms.values.sumOf { it.nominal.creditedAfterClose.size }
+            if (late != 0) add("${r.id}: $late stages were offered for after their watches closed")
+        }
+        for (name in listOf(MUTED, CHATTER)) {
+            val caught = seriousAhead(results, name).size
+            if (caught <= LABELLED_NEEDED_AHEAD_MAX) add("$name must be caught, but lost $caught stages ahead")
+        }
+    }
+
+    /** @param passed null when it is not judged here: it waits for labels, or is reported at this height. */
+    private class Verdict(val name: String, val reading: String, val passed: Boolean?, val awaitsLabels: Boolean = false)
+
+    /** The serious losses ahead of an arm with no error: the list a person labels. */
+    private fun seriousAhead(results: List<CaptureResult>, arm: String): List<Pair<String, Boolean>> = results.flatMap { r ->
+        val ahead = r.production.p.filter { it.frontCritical }.mapTo(HashSet()) { it.key }
+        lossesIn(r, r.arms.getValue(arm).nominal).filter { (key, loss) -> key in ahead && loss != Loss.BOUNDED_DELAY }.keys
+            .map { key -> "${r.id}|${key.hazard}|${key.stage}" to (arm == LAUNCH && heardAheadWithin(r, key)) }
+    }
+
+    /** The frozen thresholds (docs/experiments/detfirst-thresholds-2026-10.md §4.7), on the launch arm with no error. */
+    private fun acceptance(results: List<CaptureResult>): List<Verdict> = buildList {
+        fun percent(n: Int, of: Int) = String.format(Locale.ROOT, "%d/%d = %.1f%%", n, of, 100.0 * n / maxOf(of, 1))
+        fun times(x: Double) = String.format(Locale.ROOT, "%.2f", x)
+        val arm = results.map { lines(it, it.arms.getValue(LAUNCH).nominal.arm) }.reduce(Lines::plus)
+        val base = results.map { lines(it, it.arms.getValue(NO_CHANGE).nominal.baseline) }.reduce(Lines::plus)
+        fun spoken(of: Lines, line: String) = of.spoken[line] ?: 0
+        fun total(of: Lines, line: String) = of.of[line] ?: 0
+        fun rate(of: Lines, line: String) = spoken(of, line).toDouble() / maxOf(total(of, line), 1)
+
+        val listed = seriousAhead(results, LAUNCH)
+        val labels = LABELS
+        if (labels == null) {
+            add(Verdict("a1, a2 serious losses ahead, to be labelled", "${listed.size}; not heard ahead ${listed.count { !it.second }}", null, awaitsLabels = true))
+        } else {
+            val missing = listed.count { it.first !in labels }
+            val needed = listed.filter { labels[it.first] in setOf("need", "unknown") }
+            val notHeard = needed.count { !it.second }
+            add(Verdict("a1 needed and no warning ahead heard", "$notHeard, at most $LABELLED_NOT_HEARD_MAX; not labelled $missing", notHeard <= LABELLED_NOT_HEARD_MAX && missing == 0))
+            add(Verdict("a2 needed", "${needed.size}, at most $LABELLED_NEEDED_AHEAD_MAX; not labelled $missing", needed.size <= LABELLED_NEEDED_AHEAD_MAX && missing == 0))
+        }
+
+        var live = 0
+        var liveAhead = 0
+        var bounded = 0
+        var boundedAhead = 0
+        var serious = 0
+        var seriousOfAhead = 0
+        for (r in results) {
+            val ends = r.device.stages.associate { StageKey(it.hazard, it.stage) to it.endAt }
+            val losses = lossesIn(r, r.arms.getValue(LAUNCH).nominal)
+            for (stage in r.production.p) {
+                if (r.deadlines.getValue(stage.key) - 500 > ends.getValue(stage.key)) continue
+                live++
+                if (stage.frontCritical) liveAhead++
+                val loss = losses[stage.key] ?: continue
+                if (loss == Loss.BOUNDED_DELAY) {
+                    bounded++
+                    if (stage.frontCritical) boundedAhead++
+                } else {
+                    serious++
+                    if (stage.frontCritical) seriousOfAhead++
+                }
+            }
+        }
+        add(Verdict("b bounded delay, of stages finished while the track lived", "${percent(bounded, live)}; ahead ${percent(boundedAhead, liveAhead)}; at most 30%, 35%", bounded * 100 <= live * 30 && boundedAhead * 100 <= liveAhead * 35))
+        add(Verdict("c serious loss, of stages finished while the track lived", "${percent(serious, live)}; ahead ${percent(seriousOfAhead, liveAhead)}; at most 5%, 7%", serious * 100 <= live * 5 && seriousOfAhead * 100 <= liveAhead * 7))
+
+        fun atLeast(name: String, min: Int) = add(Verdict(name, "${percent(spoken(arm, name), total(arm, name))}, at least $min%", spoken(arm, name) * 100 >= total(arm, name) * min))
+        atLeast("B1 near person", 55)
+        atLeast("B2 near vehicle", 55)
+        atLeast("B3 near all", 55)
+        for (line in listOf("B5 critical person", "B5 critical vehicle")) {
+            add(Verdict(line, "${percent(spoken(arm, line), total(arm, line))}, baseline ${percent(spoken(base, line), total(base, line))}", rate(arm, line) >= rate(base, line)))
+        }
+        for (line in listOf("C3 clearly missed, person", "C3 clearly missed, vehicle")) {
+            add(Verdict(line, "${percent(spoken(arm, line), total(arm, line))}, baseline ${percent(spoken(base, line), total(base, line))}", rate(arm, line) <= rate(base, line)))
+        }
+        val judgedHere = PRESET_HEIGHT_M == 1.15f
+        for ((name, line, min) in listOf(Triple("C1 before, person", "C1-2 before, person", 20), Triple("C2 before, vehicle", "C1-2 before, vehicle", 15))) {
+            add(Verdict(name, "${percent(spoken(arm, line), total(arm, line))}, at least $min%", if (judgedHere) spoken(arm, line) * 100 >= total(arm, line) * min else null))
+        }
+
+        val armCounts = results.map { countsOf(it, it.arms.getValue(LAUNCH).nominalArm) }.reduce(PromptCounts.Counts::plus)
+        val baseCounts = results.map { countsOf(it, it.arms.getValue(NO_CHANGE).nominalBase) }.reduce(PromptCounts.Counts::plus)
+        val moving = armCounts.perMinute / baseCounts.perMinute
+        val still = armCounts.stationaryPerMinute / baseCounts.stationaryPerMinute
+        add(Verdict("B6 per minute against the baseline", "${times(moving)}, at most $RATE_MAX", moving <= RATE_MAX))
+        add(Verdict("C7 per stationary minute against the baseline", "${times(still)}, at most $RATE_MAX", still <= RATE_MAX))
+        add(Verdict("B7 regiven sentences", "${percent(armCounts.regivenSentences, armCounts.completed)}, at most 30%", armCounts.regivenSentences * 100 <= armCounts.completed * 30))
+        add(Verdict("B7 regives of one stage", "${armCounts.mostRegivesOfAStage}, at most 1", armCounts.mostRegivesOfAStage <= 1))
+        add(Verdict("B4 NEAR or CRITICAL removed", "${results.sumOf { it.removedNearOrCritical.getValue(LAUNCH).first }} frames, must be 0", results.all { it.removedNearOrCritical.getValue(LAUNCH).first == 0 }))
+        add(Verdict("C4 metric-only never within 2.0 m", "${times(armCounts.neverWithin2mPerMinute)} per minute, at most $METRIC_ONLY_FAR_MAX", armCounts.neverWithin2mPerMinute <= METRIC_ONLY_FAR_MAX))
+        add(Verdict("C5 metric-only on a track under 1 s", "${percent(armCounts.metricOnlyShortLived, armCounts.metricOnlyCompleted)}, at most 5%", armCounts.metricOnlyShortLived * 100 <= armCounts.metricOnlyCompleted * 5))
+        add(Verdict("C6 repeats", "${armCounts.repeat}, must be 0", armCounts.repeat == 0))
+        add(Verdict("D1 path-complex prompts", "${armCounts.pathComplexOffered}, must be 0", armCounts.pathComplexOffered == 0))
+    }
+
     private fun report(results: List<CaptureResult>): String {
         return buildString {
             val p = results.sumOf { it.production.p.size }
             val limit = maxOf(2, p / 100)
             appendLine("Paired M5 over ${results.size} calibration captures, production protocol, $PRESET_HEIGHT_M m; both arms decide for themselves on every frame")
-            appendLine("M5 limit: at most $limit of |P| = $p; ahead CRITICAL and blocked: 0. Stop at $MAX_BRANCHES branches or $MAX_BRANCH_FRAMES branch-frames.")
+            appendLine("Reported only, the older limit on every realization: at most $limit of |P| = $p; ahead CRITICAL and blocked: 0. Stop at $MAX_BRANCHES branches or $MAX_BRANCH_FRAMES branch-frames.")
             appendLine()
+            if (LAUNCH in results.first().arms) {
+                appendLine("Acceptance, launch arm with no error, at $PRESET_HEIGHT_M m. C8 and the device cases are judged apart:")
+                val verdicts = acceptance(results)
+                for (v in verdicts) appendLine("  ${when (v.passed) { true -> "pass"; false -> "FAIL"; null -> if (v.awaitsLabels) "open" else "report" }} ${v.name}: ${v.reading}")
+                appendLine("  judged here: ${if (verdicts.any { it.passed == false }) "FAIL" else "pass"}; waiting for labels: ${verdicts.count { it.awaitsLabels }}")
+                appendLine()
+            }
             appendLine("The legacy path with no error against the frozen nominal model (stages of P):")
             val (disagree, offByMoreThan1Ms) = nominalAgainstFrozen(results)
             appendLine("  stages kept by one and not the other: $disagree; kept by both with first completion more than 1 ms apart: $offByMoreThan1Ms")
@@ -264,7 +380,6 @@ class DetFirstPairedRehearsalTest {
                 appendLine("  no error:      ${rows.map { (r, a) -> counted(a.nominal, r.production) }.reduce(Counted::plus)}")
                 val full = rows.map { (r, a) -> counted(a.full, r.production, unmodeledOf(r)) }.reduce(Counted::plus)
                 appendLine("  within epsilon: $full")
-                appendLine("  M5 ${if (full.total <= limit && full.totalFront == 0) "passes" else "fails"}")
                 appendLine("  what is lost with no error, by class and stage (never / late, in s past t_dev + 0.5):")
                 val lost = HashMap<String, MutableList<Double?>>()
                 for ((r, a) in rows) {
@@ -384,11 +499,11 @@ class DetFirstPairedRehearsalTest {
         fun f(x: Double) = String.format(Locale.ROOT, "%.2f", x)
         appendLine("  the counting lines, with no error (${f(arm.minutes)} min, stationary ${f(arm.stationaryMinutes)} min):")
         appendLine("    B4 NEAR or CRITICAL removed by conflict resolution: this arm ${captures.sumOf { it.removedNearOrCritical.getValue(name).first }} frames, ${captures.sumOf { it.removedNearOrCritical.getValue(name).second }} hazards; baseline ${captures.sumOf { it.removedNearOrCritical.getValue(NO_CHANGE).first }} frames, ${captures.sumOf { it.removedNearOrCritical.getValue(NO_CHANGE).second }} hazards (must be 0)")
-        appendLine("    B6, C7 completed per minute: this arm ${f(arm.perMinute)} (${arm.completed}), baseline ${f(base.perMinute)} (${base.completed}), ratio ${f(arm.perMinute / base.perMinute)} (at most 1.25)")
-        appendLine("    C7 completed per stationary minute: this arm ${f(arm.stationaryPerMinute)} (${arm.completedStationary}), baseline ${f(base.stationaryPerMinute)} (${base.completedStationary}), ratio ${f(arm.stationaryPerMinute / base.stationaryPerMinute)} (at most 1.25)")
-        appendLine("    B7 regives: stages ${arm.regivenStages}, ${f(100.0 * arm.regivenStages / maxOf(arm.completed, 1))}% of completed (at most 15%); most of one stage ${arm.mostRegivesOfAStage} (at most 1). Sentences ${arm.regivenSentences}, ${f(100.0 * arm.regivenSentences / maxOf(arm.completed, 1))}%")
+        appendLine("    B6, C7 completed per minute: this arm ${f(arm.perMinute)} (${arm.completed}), baseline ${f(base.perMinute)} (${base.completed}), ratio ${f(arm.perMinute / base.perMinute)} (at most $RATE_MAX)")
+        appendLine("    C7 completed per stationary minute: this arm ${f(arm.stationaryPerMinute)} (${arm.completedStationary}), baseline ${f(base.stationaryPerMinute)} (${base.completedStationary}), ratio ${f(arm.stationaryPerMinute / base.stationaryPerMinute)} (at most $RATE_MAX)")
+        appendLine("    B7 regives: sentences ${arm.regivenSentences}, ${f(100.0 * arm.regivenSentences / maxOf(arm.completed, 1))}% of completed (at most 30%); most of one stage ${arm.mostRegivesOfAStage} (at most 1). Stages, reported only: ${arm.regivenStages}, ${f(100.0 * arm.regivenStages / maxOf(arm.completed, 1))}%")
         appendLine("    metric-only prompts: offered ${arm.metricOnlyOffered}, completed ${arm.metricOnlyCompleted}")
-        appendLine("    C4 metric-only never within 2.0 m: ${arm.metricOnlyNeverWithin2m}, ${f(arm.neverWithin2mPerMinute)} per minute (at most 1.0)")
+        appendLine("    C4 metric-only never within 2.0 m: ${arm.metricOnlyNeverWithin2m}, ${f(arm.neverWithin2mPerMinute)} per minute (at most $METRIC_ONLY_FAR_MAX)")
         appendLine("    C5 metric-only on a track under 1 s: ${arm.metricOnlyShortLived}, ${f(100.0 * arm.metricOnlyShortLived / maxOf(arm.metricOnlyCompleted, 1))}% (at most 5%)")
         appendLine("    C6 by the revised count: repeats ${arm.repeat} (must be 0); overlaps ${arm.overlap}, periodic repeats ${arm.periodic} (reported only). By the frozen count: ${arm.stagesCreditedAgain} stages in ${arm.promptsCreditedAgain} prompts")
         appendLine("    D1 path-complex prompts offered: ${arm.pathComplexOffered} (must be 0 with its switch on)")
@@ -500,10 +615,28 @@ class DetFirstPairedRehearsalTest {
         }
     }
 
-    /** Where the frames of the label list are: each capture's times, and the boxes of the tracks on the list. */
+    /** The prompts of the launch arm with no error that only the metric gate let in and that were said to the end, in the order of [C8_SEED]. */
+    private fun metricOnlyPrompts(results: List<CaptureResult>): List<Pair<CaptureResult, ProtocolDriver.Offered>> =
+        results.flatMap { r -> r.arms.getValue(LAUNCH).nominalArm.offered.values.filter { it.endAtMs != null && it.event?.isMetricOnly == true }.sortedBy { it.atMs }.map { r to it } }
+            .shuffled(java.util.Random(C8_SEED))
+
+    /** C8's list in the form of the label list: all of them up to [C8_SAMPLE], above that the first [C8_SAMPLE] of the seeded order. */
+    private fun metricOnlyLabelList(results: List<CaptureResult>): String = buildString {
+        appendLine("session,hazard,stage,class,ahead,track_lived,appeared_s,track_ended_s,device_finished_s,nearest_m,readings,heard_ahead")
+        for ((r, o) in metricOnlyPrompts(results).take(C8_SAMPLE)) {
+            val event = o.event!!
+            val hazard = event.components.first().primaryTrackId.toString()
+            fun s(ms: Long) = String.format(Locale.ROOT, "%.1f", (ms - r.firstAt) / 1000.0)
+            val lastSeen = r.gateFrames[hazard].orEmpty().lastOrNull()?.first ?: o.endAtMs!!
+            val nearest = r.samples[hazard].orEmpty().mapNotNull { it.validPointM }.minOrNull()?.let { String.format(Locale.ROOT, "%.1f", it) }.orEmpty()
+            appendLine("${r.id},$hazard,prompt at ${s(o.atMs)},${event.messageKey},${DirectionZone.CENTER in event.relatedZones},${o.endAtMs!! <= lastSeen},${s(o.atMs)},${s(lastSeen)},${s(o.endAtMs!!)},$nearest,metric only,")
+        }
+    }
+
+    /** Where the frames of the label lists are: each capture's times, and the boxes of the tracks on them. */
     private fun labelFrames(results: List<CaptureResult>): String = buildString {
         appendLine("session,seq,t_s,hazard,x,y,w,h")
-        val listed = labelList(results).lineSequence().drop(1).filter { it.isNotBlank() }.map { it.split(',') }.map { it[0] to it[1] }.toSet()
+        val listed = (labelList(results).lineSequence().drop(1) + metricOnlyLabelList(results).lineSequence().drop(1)).filter { it.isNotBlank() }.map { it.split(',') }.map { it[0] to it[1] }.toSet()
         for (r in results) {
             for ((seq, t) in r.frameTimes) appendLine(String.format(Locale.ROOT, "%s,%d,%.3f,,,,,", r.id, seq, (t - r.firstAt) / 1000.0))
             for ((hazard, boxes) in r.trackBoxes) {
@@ -630,6 +763,7 @@ class DetFirstPairedRehearsalTest {
         session: CaptureSession,
         result: PromptPolicyCaptureEvaluation.Result,
         durations: SpeakerDurations,
+        measuredLabel: String,
         preset: PhoneGeometrySettings,
     ): CaptureResult {
         val device = checkNotNull(result.evaluation) { "${result.id}: not evaluable" }
@@ -655,7 +789,7 @@ class DetFirstPairedRehearsalTest {
         val overruns = frameOverruns(session)
         val targets = ProtectedStages.of(device).map { PairedBranchRun.Target(StageKey(it.hazard, it.stage), it.completedAtNanos!! / 1_000_000 + 500, it.appearedAt) }
         val watches = device.stages.filter { !it.ambiguousOnly }.map { PairedBranchRun.Watch(StageKey(it.hazard, it.stage), it.endAt) }
-        val sentences = SentenceDurations(durations, OTHER_C)
+        val sentences = SentenceDurations(durations, measuredLabel)
         val arms = listOf(
             Arm(NO_CHANGE, DetFirstConfig()),
             Arm(LAUNCH, DetFirstConfig.LAUNCH),
@@ -663,7 +797,7 @@ class DetFirstPairedRehearsalTest {
             Arm(CHATTER, DetFirstConfig()) { Chatter(firing) },
         ) + SINGLE_SWITCHES.map { (name, config) -> Arm(name, config) }
         val stressRuns = (0 until STRESS_TRACES).map { trace ->
-            val traced = SentenceDurations(durations, OTHER_C, errorTrace = trace)
+            val traced = SentenceDurations(durations, measuredLabel, errorTrace = trace)
             val kernel = ClosedLoopSpeakerBranches({ 0 }, heldAfterDone = false, frameSkewMs = 0)
             val off = ProtocolDriver(kernel, analysis, traced)
             val on = ProtocolDriver(kernel, analysis.copy(detFirst = DetFirstConfig.LAUNCH), traced)
@@ -821,7 +955,22 @@ class DetFirstPairedRehearsalTest {
         /** What walking 1.2 m/s covers in the time to take in a warning and stop: below it a warning comes too late to act on. */
         const val USEFUL_WARNING_M = 1.0f
         const val OTHER_C = "other C captures"
+        const val C_TABLE = "c table"
         const val M1_THRESHOLD_M = 2.0f
+        const val LABELLED_NOT_HEARD_MAX = 3
+        const val LABELLED_NEEDED_AHEAD_MAX = 8
+        const val RATE_MAX = 1.40
+        const val METRIC_ONLY_FAR_MAX = 1.5
+        const val C8_SAMPLE = 60
+        const val C8_SEED = 20_261_103L
+
+        /** The labels a person gave the label list, by its id, when `-PreplayLabels` names the exported file. */
+        val LABELS: Map<String, String>? = System.getProperty("sailens.replay.labels").orEmpty().takeIf { it.isNotBlank() }?.let { path ->
+            File(path).readLines().drop(1).filter { it.isNotBlank() }.associate { line ->
+                val fields = line.split(',')
+                fields[0].removeSurrounding("\"") to fields[5]
+            }
+        }
         const val FIRST_SENTENCE_MS = 1_250L
         val NOMINAL_ONLY = System.getProperty("sailens.replay.singleSwitches") in setOf("nominal", "launch", "without")
         val MAX_BRANCHES = if (NOMINAL_ONLY) 1 else 1_000_000
