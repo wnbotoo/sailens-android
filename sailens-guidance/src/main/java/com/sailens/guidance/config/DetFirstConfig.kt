@@ -33,7 +33,10 @@ data class DetFirstConfig(
     }
 
     companion object {
-        /** The combination that is meant to ship. Off by default; a switch alone is for diagnosis. */
+        /**
+         * The combination evaluated for shipping. It did not pass its acceptance on the sealed recordings
+         * (docs/experiments/detfirst-acceptance-2026-11.md), so only a debug build asks for it. A switch alone is for diagnosis.
+         */
         val LAUNCH: DetFirstConfig = DetFirstConfig(
             proximityEscalation = true,
             speechRank = true,
