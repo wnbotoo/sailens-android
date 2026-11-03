@@ -27,6 +27,7 @@ import com.sailens.guidance.processor.decision.SpeechScale
 import com.sailens.guidance.repository.DeviceSensorRepository
 import com.sailens.guidance.trace.capture.CaptureSchema
 import com.sailens.guidance.trace.capture.EventRecord
+import com.sailens.guidance.trace.capture.RegressionStats
 import com.sailens.guidance.trace.regression.RegressionReplay
 import com.sailens.guidance.trace.regression.toRecord
 import com.sailens.guidance.trace.regression.withoutId
@@ -121,9 +122,9 @@ internal sealed interface MotorAnswer {
  *   appearance, track ids come from the replay's birth order, notice ids have a fixed prefix.
  *
  * A port is handed the event itself, and an output reads more of it than its id (the text, the priority a rhythm
- * claims the motor with), so each port line names the event by its number when it is the event as decided, and
- * writes the whole record when it is not ([argument]). Speech lines carry the frame time and the expiry they were
- * offered with.
+ * claims the motor with), so each port line -- and the line for a prompt that reached the user, whose whole event the
+ * shell keeps -- names the event by its number when it is the event as decided, and writes the whole record when it
+ * is not ([argument]). Speech lines carry the frame time and the expiry they were offered with.
  *
  * Not modelled, so not covered here: the log, a switch changed mid-session (`settingsChanged`), a speech engine that
  * fails while speaking, the motor's reservations and priorities, the screen reader's buffer, and real asynchronous
@@ -280,12 +281,18 @@ internal class FingerprintPipeline(
         },
         logger = SilentLog,
         recordOutcome = { trace -> line("outcome", outcome(trace)) },
-        onReachedUser = { event -> line("reached", name(event)) },
+        onReachedUser = ::onReachedUser,
         wallClock = { now },
         retryInterrupted = detFirst.retryInterrupted,
         pathComplexOff = detFirst.pathComplexOff,
         noticeIdPrefix = NOTICE_ID_PREFIX,
     )
+
+    /**
+     * The prompt the user heard or felt. The shell keeps the whole event for "say it again", so the line is by
+     * [argument], as a port's is.
+     */
+    internal fun onReachedUser(event: SceneEvent) = line("reached", argument(event))
 
     /** The events the last frame decided. */
     var lastDecided: List<SceneEvent> = emptyList()
@@ -517,14 +524,20 @@ internal class FingerprintPipeline(
 }
 
 /**
- * What keeps a replay from being a fingerprint of the whole capture, or null: a mismatch, an approximate frame, a stop
- * before a lost frame, or fewer frames replayed than recorded. A prefix is not a baseline.
+ * What keeps a replay from being a fingerprint of the whole capture, or null. A prefix is not a baseline, so this asks
+ * the manifest as well as the replay: a capture that lost a frame anywhere (even after the last one kept, which the
+ * replay never reaches), a file with other than the frames the manifest counts, a mismatch, an approximate frame, a stop
+ * before a lost frame, or fewer frames replayed than read.
+ *
+ * @param readFrames the frames read from the capture's file.
  */
-internal fun replayProblem(report: RegressionReplay.Report, recordedFrames: Int): String? = when {
+internal fun replayProblem(report: RegressionReplay.Report, readFrames: Int, stats: RegressionStats): String? = when {
+    stats.framesLost > 0 || stats.firstLostSeq != null -> "the capture lost ${stats.framesLost} frame(s), the first at seq ${stats.firstLostSeq}"
+    stats.framesRecorded != readFrames.toLong() -> "the manifest counts ${stats.framesRecorded} frames, the file has $readFrames"
     report.firstMismatch != null -> "first mismatch at seq ${report.firstMismatch.seq}"
     report.approximateFrames.isNotEmpty() -> "${report.approximateFrames.size} approximate frames"
     report.stoppedAtLostSeq != null -> "stopped before lost frame ${report.stoppedAtLostSeq}"
-    report.framesReplayed != recordedFrames -> "replayed ${report.framesReplayed} of $recordedFrames frames"
+    report.framesReplayed != readFrames -> "replayed ${report.framesReplayed} of $readFrames frames"
     else -> null
 }
 

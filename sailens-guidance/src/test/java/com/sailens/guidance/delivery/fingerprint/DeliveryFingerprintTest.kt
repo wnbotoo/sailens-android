@@ -76,7 +76,7 @@ class DeliveryFingerprintTest {
                     val frame = FingerprintFrame.of(scene)
                     for (pipeline in pipelines.values) pipeline.onFrame(frame)
                 }
-                replayProblem(report, session.regressionFrames.size)?.let { problem ->
+                replayProblem(report, session.regressionFrames.size, block.stats)?.let { problem ->
                     failures += "${manifest.sessionId} $label: the path up to the decision did not replay the whole capture exactly: $problem"
                 }
                 if (label == CONFIGS.first().first) frames += report.framesReplayed
