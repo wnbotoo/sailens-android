@@ -1,4 +1,4 @@
-1 decided [e1={"id":"","timestamp":100000,"category":"OBSTACLE","priority":"HIGH","messageKey":"event_obstacle_center_person","messageParams":{"count":"1"},"expiresAt":103000,"dedupeKey":"obstacle_CENTER","cooldownKeys":["obstacle_CENTER","obstacle_PRIMARY_CENTER"],"cooldownGroups":[],"confidence":1.0,"severity":"MODERATE","relatedZones":["CENTER"],"distance":"NEAR","rank":0}]
+1 decided [e1={"id":"","timestamp":100000,"category":"OBSTACLE","priority":"HIGH","messageKey":"event_obstacle_center_person","messageParams":{"count":"1"},"expiresAt":103000,"dedupeKey":"obstacle_CENTER","cooldownKeys":["obstacle_CENTER","obstacle_PRIMARY_CENTER"],"cooldownGroups":[],"confidence":1.0,"severity":"MODERATE","relatedZones":["CENTER"],"distance":"NEAR","rank":0} components=[CENTER/HIGH/00000000-0000-0000-0000-000000000001/[obstacle_CENTER, obstacle_PRIMARY_CENTER]/TODAY/[HazardRef(trackId=00000000-0000-0000-0000-000000000001, category=PERSON, todayNear=true, speechNear=true, ownPriority=HIGH, source=DETECTION)]]]
 1 description_waits HIGH -> false
 1 preempt_description event_obstacle_center_person
 1 vibrate_alone e1 -> Queued(atMs=100300, plays=true)
@@ -45,7 +45,7 @@
 38 decided []
 39 decided []
 40 decided []
-41 decided [e2={"id":"","timestamp":104000,"category":"OBSTACLE","priority":"CRITICAL","messageKey":"event_obstacle_center_vehicle","messageParams":{"count":"1"},"expiresAt":107000,"dedupeKey":"obstacle_CENTER","cooldownKeys":["obstacle_CENTER","obstacle_PRIMARY_CENTER"],"cooldownGroups":[],"confidence":1.0,"severity":"MODERATE","relatedZones":["CENTER"],"distance":"NEAR","rank":0}]
+41 decided [e2={"id":"","timestamp":104000,"category":"OBSTACLE","priority":"CRITICAL","messageKey":"event_obstacle_center_vehicle","messageParams":{"count":"1"},"expiresAt":107000,"dedupeKey":"obstacle_CENTER","cooldownKeys":["obstacle_CENTER","obstacle_PRIMARY_CENTER"],"cooldownGroups":[],"confidence":1.0,"severity":"MODERATE","relatedZones":["CENTER"],"distance":"NEAR","rank":0} components=[CENTER/CRITICAL/00000000-0000-0000-0000-000000000002/[obstacle_CENTER, obstacle_PRIMARY_CENTER]/TODAY/[HazardRef(trackId=00000000-0000-0000-0000-000000000002, category=VEHICLE, todayNear=true, speechNear=true, ownPriority=CRITICAL, source=DETECTION)]]]
 41 description_waits CRITICAL -> false
 41 preempt_description event_obstacle_center_vehicle
 41 vibrate_alone e2 -> Queued(atMs=104300, plays=false)
@@ -55,7 +55,7 @@
 44 motor_answered e2 played=false
 44 receipt revoke e2 haptic_dropped
 44 outcome PromptOutcomeTrace(sessionId=, eventId=e2, sourceSequenceNumber=41, messageKey=event_obstacle_center_vehicle, category=obstacle, priority=critical, deliveredAt=null, revokedAt=104300, revokeReason=haptic_dropped, deliveredVia=[], speechEnabled=false, screenReaderActive=false, hapticsEnabled=true)
-45 decided [e3={"id":"","timestamp":104400,"category":"OBSTACLE","priority":"CRITICAL","messageKey":"event_obstacle_center_vehicle","messageParams":{"count":"1"},"expiresAt":107400,"dedupeKey":"obstacle_CENTER","cooldownKeys":["obstacle_CENTER","obstacle_PRIMARY_CENTER"],"cooldownGroups":[],"confidence":1.0,"severity":"MODERATE","relatedZones":["CENTER"],"distance":"NEAR","rank":0}]
+45 decided [e3={"id":"","timestamp":104400,"category":"OBSTACLE","priority":"CRITICAL","messageKey":"event_obstacle_center_vehicle","messageParams":{"count":"1"},"expiresAt":107400,"dedupeKey":"obstacle_CENTER","cooldownKeys":["obstacle_CENTER","obstacle_PRIMARY_CENTER"],"cooldownGroups":[],"confidence":1.0,"severity":"MODERATE","relatedZones":["CENTER"],"distance":"NEAR","rank":0} components=[CENTER/CRITICAL/00000000-0000-0000-0000-000000000002/[obstacle_CENTER, obstacle_PRIMARY_CENTER]/TODAY/[HazardRef(trackId=00000000-0000-0000-0000-000000000002, category=VEHICLE, todayNear=true, speechNear=true, ownPriority=CRITICAL, source=DETECTION)]]]
 45 description_waits CRITICAL -> false
 45 preempt_description event_obstacle_center_vehicle
 45 vibrate_alone e3 -> Queued(atMs=164400, plays=true)
@@ -98,7 +98,7 @@
 82 decided []
 83 decided []
 84 decided []
-85 decided [e4={"id":"","timestamp":108400,"category":"OBSTACLE","priority":"HIGH","messageKey":"event_obstacle_center","messageParams":{"count":"1"},"expiresAt":111400,"dedupeKey":"obstacle_CENTER","cooldownKeys":["obstacle_CENTER","obstacle_PRIMARY_CENTER"],"cooldownGroups":[],"confidence":1.0,"severity":"MODERATE","relatedZones":["CENTER"],"distance":"NEAR","rank":0}]
+85 decided [e4={"id":"","timestamp":108400,"category":"OBSTACLE","priority":"HIGH","messageKey":"event_obstacle_center","messageParams":{"count":"1"},"expiresAt":111400,"dedupeKey":"obstacle_CENTER","cooldownKeys":["obstacle_CENTER","obstacle_PRIMARY_CENTER"],"cooldownGroups":[],"confidence":1.0,"severity":"MODERATE","relatedZones":["CENTER"],"distance":"NEAR","rank":0} components=[CENTER/HIGH/00000000-0000-0000-0000-000000000003/[obstacle_CENTER, obstacle_PRIMARY_CENTER]/TODAY/[HazardRef(trackId=00000000-0000-0000-0000-000000000003, category=STATIC_OBSTACLE, todayNear=true, speechNear=true, ownPriority=HIGH, source=DETECTION)]]]
 85 description_waits HIGH -> false
 85 preempt_description event_obstacle_center
 85 vibrate_alone e4 -> Queued(atMs=168400, plays=true)

@@ -27,9 +27,10 @@ import java.io.File
  * ```
  *
  * Fingerprints go to `sailens-guidance/build/fingerprint/<sessionId>.<off|launch>.<v1..v5>.txt` and stay on this
- * machine. With a baseline directory (a copy of an earlier run's), each is compared with the file of the same name
- * there, and the test fails at the first difference, naming only the capture, the frame and the kind of line. A
- * sealed capture is skipped ([SealedCaptures]).
+ * machine. With a baseline directory (a copy of an earlier run's, never the output directory itself), each is compared
+ * with the file of the same name there, and the test fails at the first difference, naming only the capture, the frame
+ * and the kind of line. A capture whose path up to the decision does not replay whole and exact fails too
+ * ([replayProblem]). A sealed capture is skipped ([SealedCaptures]).
  */
 class DeliveryFingerprintTest {
 
@@ -39,8 +40,9 @@ class DeliveryFingerprintTest {
         assumeTrue("set -PreplayCapture=<capture dir> to fingerprint captures", path.isNotBlank())
         val split = SealedCaptures.forMetrics(File(path))
         assumeTrue(SealedCaptures.refusalMessage(path, split.sealed.size), split.open.isNotEmpty())
-        val out = File(System.getProperty("sailens.fingerprint.out").orEmpty().ifBlank { "build/fingerprint" }).apply { mkdirs() }
+        val out = File(System.getProperty("sailens.fingerprint.out").orEmpty().ifBlank { "build/fingerprint" })
         val baseline = System.getProperty("sailens.fingerprint.baseline").orEmpty().takeIf { it.isNotBlank() }?.let(::File)
+        val files = FingerprintFiles(out, baseline)
 
         val failures = mutableListOf<String>()
         var captures = 0
@@ -74,24 +76,14 @@ class DeliveryFingerprintTest {
                     val frame = FingerprintFrame.of(scene)
                     for (pipeline in pipelines.values) pipeline.onFrame(frame)
                 }
-                if (report.firstMismatch != null || report.approximateFrames.isNotEmpty()) {
-                    failures += "${manifest.sessionId} $label: the path up to the decision did not replay exactly " +
-                        "(first mismatch at seq ${report.firstMismatch?.seq}, ${report.approximateFrames.size} approximate)"
+                replayProblem(report, session.regressionFrames.size)?.let { problem ->
+                    failures += "${manifest.sessionId} $label: the path up to the decision did not replay the whole capture exactly: $problem"
                 }
                 if (label == CONFIGS.first().first) frames += report.framesReplayed
                 for ((condition, pipeline) in pipelines) {
                     pipeline.finish()
                     val name = "${manifest.sessionId}.$label.${condition.name.lowercase()}.txt"
-                    File(out, name).writeText(pipeline.lines.joinToString("\n", postfix = "\n"))
-                    if (baseline != null) {
-                        val expected = File(baseline, name)
-                        val difference = if (expected.isFile) {
-                            FingerprintComparison.firstDifference(expected.readLines(), pipeline.lines)
-                        } else {
-                            "no baseline file"
-                        }
-                        if (difference != null) failures += "${manifest.sessionId} $label ${condition.name}: $difference"
-                    }
+                    files.record(name, pipeline.lines)?.let { failures += "${manifest.sessionId} $label ${condition.name}: $it" }
                 }
             }
             println("${manifest.sessionId}: ${session.regressionFrames.size} frames, ${(System.nanoTime() - started) / 1_000_000} ms")
