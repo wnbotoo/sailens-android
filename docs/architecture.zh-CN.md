@@ -824,26 +824,22 @@ runtime/vision/Guidance native 拆分后，在同一目标设备验证：
 - preprocessing cache 仍然命中 same-frame reuse；
 - 没有新增完整 semantic tensor 的额外读取。
 
-**实测状态（SM8850，本地 BYO 权重）。**本轮返工后重新测过，与 G3 退出时的结果一致。
+**实测状态。**以下红线全部成立。条件：OnePlus CPH2747（SM8850，Android 16），LiteRT 2.1.5 GPU，
+`sailens-app` 发行版的 debug 包（钉住平台提交 `1a99f6e`），模型是 Ultralytics LiteRT w8a32 NCHW 导出
+（`docs/models.zh-CN.md`"加速器结果一致性"一节）：
 
 | 红线 | 状态 |
 |---|---|
-| sem postprocessBackend = native_score | **成立** |
-| sem outputReadTimeMs ≈ 0 | **不成立** —— 15/22/64 ms（最小/中位/最大） |
-| det postprocessBackend = native_bbox_nms_float_handle | **不成立** —— 报的是 `native_bbox_nms`，数组路径 |
-| det outputReadTimeMs | 2/10/28 ms |
-| preprocessing cache same-frame reuse | **不成立** —— 两个模型都报 `native_yuv`，从没出现过 `shared_native_yuv` |
+| sem postprocessBackend = native_score | **成立** —— 547 次运行全部是 |
+| sem outputReadTimeMs ≈ 0 | **成立** —— 547 次运行全部是 0 ms |
+| det postprocessBackend = native_bbox_nms_float_handle | **成立** —— 599 次运行全部是 |
+| det outputReadTimeMs | 599 次运行全部是 0 ms |
+| preprocessing cache same-frame reuse | **成立** —— 每一帧都有一个模型报 `shared_native_yuv` |
 | 没有新增完整 semantic tensor 的额外读取 | 成立 |
+| handle 路径与数组路径输出一致 | **成立** —— `sailens-app` 的仪器测试 `ZeroCopyEquivalenceTest` 在 GPU 上 5/5 通过 |
 
-这三项失效都是**既有状态，不是重构引入的回归**。两条 zero-copy 红线在同一台机器上用重构前的
-commit 重新构建对跑过，结果完全一致；那次构建的 trace 里两个模型同样都是 `native_yuv`，说明
-same-frame cache 也从来没命中过。handle 路径只是一直没在跑：`libLiteRt.so` 确实导出了
-lock/unlock 符号，TensorBuffer 的 handle 反射在 LiteRT 2.1.5 上也合法，所以原因更靠里；
-dlsym 外面那层 `std::call_once` 是嫌疑但未证实。cache 是另一回事：sem 和 det 是并发起跑的，
-谁也读不到对方的条目，这条红线要的复用需要把两次预处理排成先后而不是并行。
-
-无论恢复哪一条，都会改变检测后处理和帧预算，属于产品决策，不在本次重构范围内。因此这几条
-应当视为"待恢复的目标"，而不是"已保住的性质"。
+同一个 debug 包换成 legacy onnx2tf float16 NHWC 导出（2285 帧），这些红线也全部成立。所以红线与
+模型无关，成立靠的是下面的修复。本仓库不带权重，所以要用真实模型跑的等价性测试放在发行版里。
 
 **根因与修复。**zero-copy 这对红线其实有三个独立的错，任何一个都足以
 让 handle 路径永远不跑（它们互相遮蔽，所以从没暴露）：
@@ -861,13 +857,13 @@ dlsym 外面那层 `std::call_once` 是嫌疑但未证实。cache 是另一回�
    布局一旦变化会直接崩溃而不是回退。LiteRT 版本已钉死，升级时 `LiteRtVersionPinTest` 会失败，
    必须上真机重新验证。
 
-cache 改为"同帧只转换一次"：先到的一方认领并转换，另一方至多等 50 ms 后直接复制
+同帧 cache 不命中是另一个原因：sem 和 det 并发做预处理，cache 只存转换完成的条目时，谁也读不到
+对方的条目。现在改为"同帧只转换一次"：先到的一方认领并转换，另一方至多等 50 ms 后直接复制
 （`InputPreprocessCache.awaitOrClaim`）。
 
-以上都在主机上验证过（真实 kernel 源码 + 带 2.1.5 签名的假 `libLiteRt.so`，以 RTLD_LOCAL 加载），
-**真机数值尚未复测**：合入前要在目标设备上确认 `sem outputReadTimeMs ≈ 0`、det 报
-`native_bbox_nms_float_handle`、两个模型之一报 `shared_native_yuv`，并确认 handle 路径与数组
-路径的输出一致。
+主机验证用真实 kernel 源码 + 带 2.1.5 签名的假 `libLiteRt.so`（以 RTLD_LOCAL 加载）；真机验证就是
+上面那张表。因为第 3 条的 ABI 依赖，升级 LiteRT 时要在真机上重做这项检查，包括
+`ZeroCopyEquivalenceTest`。
 
 ### 12.4 Session 对比
 
