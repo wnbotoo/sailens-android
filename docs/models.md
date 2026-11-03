@@ -161,7 +161,8 @@ det:  postprocessBackend = "native_bbox_nms_float_handle"
 ```
 
 **No change should break them.** Note they only hold under a **float, single-tensor** contract:
-uint8 outputs or multi-tensor outputs fall back to the Kotlin decode path.
+uint8 outputs or multi-tensor outputs fall back to the Kotlin decode path. Their measured state on a
+target device, with its conditions, is in [architecture.md](architecture.md) §12.3.
 
 ## 🔴 Accelerator result consistency
 
@@ -173,9 +174,18 @@ The sem and det exports this repository had been developed against (onnx2tf, flo
 NHWC) ran on the LiteRT GPU accelerator on SM8850 and SM8450 with no error, and answered wrongly:
 indoor floors and pale paving came out as `building`, and an office chair the CPU detected at 92% on
 every frame was never detected. Forcing FP32, LiteRT 2.3.0, the resize filter and the zero-copy read
-were all ruled out. Other exports of the same models (Ultralytics v0.6.6, litert-torch, NCHW) were
-correct on the same GPUs. The cause is in how a particular graph meets the accelerator, so it can
-reappear with any new model file, LiteRT version or device.
+were all ruled out. A different export of the same models answers correctly: `yolo26n-sem_w8a32.tflite`
+and `yolo26n_w8a32.tflite` from release v0.6.6 of `ultralytics/yolo-flutter-app`, exported by
+Ultralytics 8.4.104 with `format=litert` and `quantize=w8a32` (NCHW). On a OnePlus CPH2747 (SM8850,
+Android 16, LiteRT 2.1.5 GPU) the check below gives:
+
+| Export | sem pixel agreement (average / lowest frame) | det: CPU detections → found on GPU, extra | Result |
+|---|---|---|---|
+| Ultralytics w8a32 NCHW | 96.4% / 93.3% | 16 → 16 (recall 1.0), 0 extra | PASS |
+| onnx2tf float16 NHWC | 39.1% average | 21 → 0 | fails |
+
+The cause is in how a particular graph meets the accelerator, so it can reappear with any new model
+file, LiteRT version or device.
 
 **Check** with the debug build: Settings → Diagnostics → **Model consistency check**. Hold the phone
 still, pointed at the floor with an object in view (a chair, a person). Each model runs twice on 8
@@ -207,6 +217,16 @@ that ships models is responsible for running it on the devices it supports.
 NCHW exports with a float32 I/O wrapper cost a per-frame host transpose and fragment on the GPU/NPU
 delegates, so an NHWC graph is usually faster. Speed only counts after the accelerator consistency
 check passes: the fast NHWC exports above were the ones that computed wrongly on the GPU.
+
+What correctness costs, on the same OnePlus CPH2747 (SM8850, Android 16, LiteRT 2.1.5 GPU) with the
+same debug build and both models on the GPU:
+
+| Exports (sem + det) | Pipeline median (p90) | Frames out per second | Camera frames dropped | sem postprocess median |
+|---|---|---|---|---|
+| Ultralytics w8a32 NCHW (correct) | 43 ms (58 ms) | 22 | 27% | 26 ms |
+| onnx2tf float16 NHWC (wrong on the GPU) | 28 ms (37 ms) | 29 | 0.3% | 15 ms |
+
+The gap is in the sem postprocess, which waits for the GPU's result.
 
 ## Backend selection
 

@@ -884,30 +884,23 @@ After runtime/vision/Guidance native extraction, validate on the same target dev
 - preprocessing cache still reports same-frame reuse;
 - no extra full semantic-tensor read is introduced.
 
-**Measured state (SM8850, local BYO weights).** Re-measured after the rework; unchanged from the
-G3 exit measurement.
+**Measured state.** All lines hold on a OnePlus CPH2747 (SM8850, Android 16), LiteRT 2.1.5 on the
+GPU, in a debug build of the `sailens-app` distribution pinned to platform commit `1a99f6e`, with
+the Ultralytics LiteRT w8a32 NCHW exports (`docs/models.md`, "Accelerator result consistency"):
 
 | Red line | State |
 |---|---|
-| sem postprocessBackend = native_score | **holds** |
-| sem outputReadTimeMs ≈ 0 | **does not hold** — 15/22/64 ms (min/median/max) |
-| det postprocessBackend = native_bbox_nms_float_handle | **does not hold** — reports `native_bbox_nms`, the array path |
-| det outputReadTimeMs | 2/10/28 ms |
-| preprocessing cache same-frame reuse | **does not hold** — both models report `native_yuv`, never `shared_native_yuv` |
+| sem postprocessBackend = native_score | **holds** — all 547 runs |
+| sem outputReadTimeMs ≈ 0 | **holds** — 0 ms on all 547 runs |
+| det postprocessBackend = native_bbox_nms_float_handle | **holds** — all 599 runs |
+| det outputReadTimeMs | 0 ms on all 599 runs |
+| preprocessing cache same-frame reuse | **holds** — on every frame one of the two models reports `shared_native_yuv` |
 | no extra full semantic-tensor read | holds |
+| handle path and array path give identical output | **holds** — `sailens-app`'s instrumented `ZeroCopyEquivalenceTest` on the GPU, 5/5 |
 
-All three failures are **pre-existing, not refactor regressions**. The zero-copy pair was verified
-against a build of the pre-migration commit on the same device and is identical there; the traces
-from that build also show `native_yuv` on both models, so the same-frame cache has never been
-hitting either. The handle path has simply not been running: `libLiteRt.so` does export the
-lock/unlock symbols and the TensorBuffer handle reflection is valid for LiteRT 2.1.5, so the cause
-is further in, and the `std::call_once` around the dlsym is a suspect that is not confirmed. The
-cache is a separate matter: sem and det start concurrently, so neither finds the other's entry, and
-the reuse the line asks for would need the two preprocess steps ordered rather than raced.
-
-Restoring either changes the detection postprocess and the frame budget, so both are product
-decisions rather than part of this refactor. Treat these lines as targets to restore, not as
-properties that were preserved.
+The same debug build with the legacy onnx2tf float16 NHWC exports (2285 frames) meets every line
+too, so the lines do not depend on the model: they hold because of the fixes below. This
+repository ships no weights, so the model-backed equivalence test lives in the distribution.
 
 **Root cause and fix.** The zero-copy pair had three independent bugs, any
 one of which keeps the handle path from ever running (they masked each other, which is why none
@@ -927,14 +920,14 @@ surfaced):
    first), not a contract: a changed layout would crash rather than fall back. The LiteRT version
    is pinned and `LiteRtVersionPinTest` fails on upgrade, which must be re-verified on a device.
 
-The cache now converts once per frame: the first caller claims the key and converts, the other
-waits at most 50 ms and copies (`InputPreprocessCache.awaitOrClaim`).
+The same-frame cache missed for a separate reason: sem and det preprocess concurrently, so a cache
+that only held finished conversions never had the other model's entry yet. It converts once per
+frame: the first caller claims the key and converts, the other waits at most 50 ms and copies
+(`InputPreprocessCache.awaitOrClaim`).
 
-All of this is verified on the host (the real kernel sources against a fake `libLiteRt.so` with
-the 2.1.5 signatures, loaded RTLD_LOCAL). **The device numbers have not been re-measured**: before
-merging, confirm on the target device that `sem outputReadTimeMs ≈ 0`, det reports
-`native_bbox_nms_float_handle`, one of the two models reports `shared_native_yuv`, and the handle
-and array paths produce identical output.
+The host check runs the real kernel sources against a fake `libLiteRt.so` with the 2.1.5
+signatures, loaded RTLD_LOCAL; the device check is the table above. Because of the ABI dependency
+in 3, a LiteRT upgrade repeats the device check, `ZeroCopyEquivalenceTest` included.
 
 ### 12.4 Session comparison
 
