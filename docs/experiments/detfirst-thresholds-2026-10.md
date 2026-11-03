@@ -18,6 +18,9 @@ set (C) only**; no tool that shows results has opened S.
 > **Revision 6 (an R6 revision, 2026-11-02):** changes §4.1 R10 and §4.2 M5; the reasons and C evidence are at the end of §4.2. No
 > threshold value changes, and the files section 3.4 lists do not change: they stay as at `5418a35`. The GPT review is a Go (round 5,
 > no P0–P2 findings) and the user agreed (2026-11-02); this commit's id is in the "threshold freeze" line of the assignment file.
+>
+> **Revision 7 (an R6 revision, 2026-11-03):** changes only how §4.4 counts C6; the threshold is still 0, and the reasons and C
+> evidence are at the end of §4.4. The GPT second review is a Go and the user agreed (2026-11-03).
 
 ## 1. Data and conventions
 
@@ -528,7 +531,7 @@ both arms does not guarantee that the errors cancel. Hence the rules below.
 | C3 | M1: "clearly missed" as a share of bracketed, front persons and front vehicles | each not above the baseline arm | 17% / 27% |
 | C4 | M4: prompts admitted by the metric threshold only, on hazards that leave without ever coming within 2.0 m (fresh point estimate) | ≤ 1.0 per minute | — |
 | C5 | M4: prompts admitted by the metric threshold only, on tracks living < 1 s | ≤ 5% | — |
-| C6 | M4: the same stage spoken again when the same hazard turns from "metric only" into today's admission (D2-4) | = 0 | — |
+| C6 | M4: a prompt of today's admission, spoken to the end, replaying without new information a stage the metric gate already said (D2-4; how it is counted is at the end of this section, revision 7) | = 0 | — |
 | C7 | M4: prompts spoken to the end per minute; prompts per minute while stationary | each ≤ baseline arm × 1.25 | 9.1 / min; "stationary" is defined in PR-2's detailed design and frozen with the parameters |
 | C8 | Labels: prompts admitted by the metric threshold only and spoken to the end, labelled real or not by the user (all of them up to 60; above that, 60 drawn with a random seed fixed in advance) | real hazards ≥ 80% | — |
 
@@ -542,6 +545,25 @@ both arms does not guarantee that the errors cancel. Hence the rules below.
   under this estimator only. Denominators follow R9's reference cohort.
 - Static obstacles get no distance threshold (coverage 0–25% on C, undeterminable); only M4 and M5
   bind them.
+- **How C6 is counted (revision 7, R6).** e is a prompt of today's admission spoken to the end, K the (hazard, stage)
+  pairs it is credited with; H is every (hazard, stage) any prompt spoke to the end before e ended, H_m those the metric
+  gate alone spoke. own(h) is hazard h's own priority in e's event; p(h) and p_m(h) are h's highest priority in H and
+  H_m. Where K meets H_m, e falls into the first of:
+  1. **Overlap** (new information, reported only): something in K is not in H, or some h has own(h) > p(h).
+  2. **Repeat** (counts for C6, threshold 0): not class 1, K ⊆ H_m, and own(h) ≤ p_m(h) for every h.
+  3. **Periodic repeat** (an explicit exemption, reported only): the rest. No new information, but the sentence holds a
+     stage or hazard only today's admission said, or the hazard's priority is already above what the metric gate said.
+
+  **Why**: the earlier count took every (hazard, stage) credited again as a repeat, including the NEAR escalation that
+  must pass and a new hazard on the same bearing, so it could not reach 0 by construction and the shipped combination
+  could never pass C6. Class 3 is an exemption, not "new information": a hazard that never went through the metric gate
+  repeats at today's rhythm too, and blocking it would leave a very near hazard unmentioned for longer than the baseline
+  does. B6 and C7 bound the total; classes 1 and 3 get no threshold of their own.
+
+  **C evidence** (shipped combination, no error, 1.05 / 1.15 / 1.25 m): repeats 0 / 0 / 0; overlaps 35 / 34 / 27;
+  periodic repeats 1 / 2 / 5. The earlier count, still reported: 53 stages in 36 prompts, 51 stages in 36 prompts, 53
+  stages in 32 prompts. Both counts are reported on S. The threshold value, the credit rules and the files of section
+  3.4 do not change.
 
 ### 4.5 PR-3 (D4a: PATH_COMPLEX off by default under the det-first switch)
 
