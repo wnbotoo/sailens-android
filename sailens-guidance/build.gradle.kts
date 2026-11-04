@@ -53,6 +53,10 @@ android {
         unitTests.all { test ->
             test.systemProperty("sailens.replay.capture", project.findProperty("replayCapture")?.toString().orEmpty())
             test.systemProperty("sailens.replay.out", layout.buildDirectory.dir("replay").get().asFile.path)
+            // Delivery fingerprints of those captures (DeliveryFingerprintTest) are written here and, with
+            // -PfingerprintBaseline=<an earlier run's copy>, compared with it.
+            test.systemProperty("sailens.fingerprint.out", layout.buildDirectory.dir("fingerprint").get().asFile.path)
+            test.systemProperty("sailens.fingerprint.baseline", project.findProperty("fingerprintBaseline")?.toString().orEmpty())
             // The phone height the capture evaluations assume, metres (GroundContactCaptureEvaluationTest,
             // PromptPolicyBaselineTest).
             test.systemProperty("sailens.m3a.phoneHeight", project.findProperty("m3aPhoneHeight")?.toString().orEmpty())
@@ -68,6 +72,8 @@ android {
             // Simulator scenario goldens: -PupdateGoldens rewrites them in the source tree.
             test.systemProperty("sailens.updateGoldens", project.hasProperty("updateGoldens").toString())
             test.systemProperty("sailens.goldens.dir", file("src/test/resources/scenarios").absolutePath)
+            // The delivery boundary scripts' fingerprints (DeliveryBoundaryScriptsTest), rewritten by the same flag.
+            test.systemProperty("sailens.fingerprints.dir", file("src/test/resources/fingerprints").absolutePath)
             if (project.hasProperty("updateGoldens")) test.outputs.upToDateWhen { false }
         }
     }

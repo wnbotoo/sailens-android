@@ -1,0 +1,78 @@
+1 decided [e1={"id":"","timestamp":100000,"category":"OBSTACLE","priority":"HIGH","messageKey":"event_obstacle_right_person","messageParams":{"count":"1"},"expiresAt":103000,"dedupeKey":"obstacle_RIGHT","cooldownKeys":["obstacle_PRIMARY_SIDE","obstacle_RIGHT"],"cooldownGroups":[],"confidence":1.0,"severity":"MODERATE","relatedZones":["RIGHT"],"distance":"MEDIUM","rank":0} components=[RIGHT/HIGH/00000000-0000-0000-0000-000000000001/[obstacle_PRIMARY_SIDE, obstacle_RIGHT]/TODAY/[HazardRef(trackId=00000000-0000-0000-0000-000000000001, category=PERSON, todayNear=false, speechNear=false, ownPriority=HIGH, source=DETECTION)]]]
+1 description_waits HIGH -> false
+1 preempt_description event_obstacle_right_person
+1 speak e1 key=event_obstacle_right_person scale=16 at=100000 expires=103000 -> taken
+1 vibrate_alone e1 -> Played
+1 receipt confirm e1
+1 outcome PromptOutcomeTrace(sessionId=, eventId=e1, sourceSequenceNumber=1, messageKey=event_obstacle_right_person, category=obstacle, priority=high, deliveredAt=100000, revokedAt=null, revokeReason=null, deliveredVia=[speech, haptics], speechEnabled=true, screenReaderActive=false, hapticsEnabled=true)
+1 reached e1
+2 decided []
+3 decided []
+4 decided [e2={"id":"","timestamp":100300,"category":"OBSTACLE","priority":"CRITICAL","messageKey":"event_obstacle_center_vehicle","messageParams":{"count":"1"},"expiresAt":103300,"dedupeKey":"obstacle_CENTER","cooldownKeys":["obstacle_CENTER","obstacle_PRIMARY_CENTER"],"cooldownGroups":[],"confidence":1.0,"severity":"MODERATE","relatedZones":["CENTER"],"distance":"NEAR","rank":0} components=[CENTER/CRITICAL/00000000-0000-0000-0000-000000000002/[obstacle_CENTER, obstacle_PRIMARY_CENTER]/TODAY/[HazardRef(trackId=00000000-0000-0000-0000-000000000002, category=VEHICLE, todayNear=true, speechNear=true, ownPriority=CRITICAL, source=DETECTION)]]]
+4 description_waits CRITICAL -> false
+4 preempt_description event_obstacle_center_vehicle
+4 cut speak e1
+4 speak e2 key=event_obstacle_center_vehicle scale=24 at=100300 expires=103300 -> taken
+4 vibrate_alone e2 -> Played
+4 receipt confirm e2
+4 outcome PromptOutcomeTrace(sessionId=, eventId=e2, sourceSequenceNumber=4, messageKey=event_obstacle_center_vehicle, category=obstacle, priority=critical, deliveredAt=100300, revokedAt=null, revokeReason=null, deliveredVia=[speech, haptics], speechEnabled=true, screenReaderActive=false, hapticsEnabled=true)
+4 reached e2
+5 decided []
+6 decided []
+6 heard_after_cut speak e1
+7 decided []
+8 decided []
+9 decided []
+10 decided []
+11 decided []
+12 decided []
+13 decided []
+14 decided []
+15 decided []
+16 decided []
+17 decided []
+18 decided []
+19 decided []
+20 decided []
+21 decided []
+22 decided []
+22 spoken speak e2
+23 decided []
+24 decided []
+25 decided []
+26 decided []
+27 decided []
+28 decided []
+29 decided []
+30 decided []
+31 decided []
+32 decided []
+33 decided []
+34 decided []
+35 decided []
+36 decided []
+37 decided []
+38 decided []
+39 decided []
+40 decided []
+41 decided []
+42 decided []
+43 decided []
+44 decided []
+45 decided []
+46 decided []
+47 decided []
+48 decided []
+49 decided []
+50 decided []
+51 decided []
+52 decided []
+53 decided []
+54 decided []
+55 decided []
+56 decided []
+57 decided []
+58 decided []
+59 decided []
+60 decided []
+60 stop

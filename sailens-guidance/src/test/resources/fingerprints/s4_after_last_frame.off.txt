@@ -1,0 +1,156 @@
+# V1 drained
+1 decided []
+2 decided []
+3 decided []
+4 decided []
+5 decided []
+6 decided []
+7 decided []
+8 decided []
+9 decided []
+10 decided []
+11 decided []
+12 decided []
+13 decided []
+14 decided []
+15 decided []
+16 decided []
+17 decided []
+18 decided []
+19 decided []
+20 decided []
+21 decided []
+22 decided []
+23 decided []
+24 decided []
+25 decided []
+26 decided []
+27 decided []
+28 decided []
+29 decided [e1={"id":"","timestamp":102800,"category":"OBSTACLE","priority":"HIGH","messageKey":"event_obstacle_center_person","messageParams":{"count":"1"},"expiresAt":105800,"dedupeKey":"obstacle_CENTER","cooldownKeys":["obstacle_CENTER","obstacle_PRIMARY_CENTER"],"cooldownGroups":[],"confidence":1.0,"severity":"MODERATE","relatedZones":["CENTER"],"distance":"NEAR","rank":0} components=[CENTER/HIGH/00000000-0000-0000-0000-000000000001/[obstacle_CENTER, obstacle_PRIMARY_CENTER]/TODAY/[HazardRef(trackId=00000000-0000-0000-0000-000000000001, category=PERSON, todayNear=true, speechNear=true, ownPriority=HIGH, source=DETECTION)]]]
+29 description_waits HIGH -> false
+29 preempt_description event_obstacle_center_person
+29 speak e1 key=event_obstacle_center_person scale=16 at=102800 expires=105800 -> taken
+29 vibrate_alone e1 -> Queued(atMs=103300, plays=true)
+29 receipt confirm e1
+29 reached e1
+30 decided []
+30 motor_answered e1 played=true
+30 receipt confirm e1
+30 reached e1
+30 outcome PromptOutcomeTrace(sessionId=, eventId=e1, sourceSequenceNumber=29, messageKey=event_obstacle_center_person, category=obstacle, priority=high, deliveredAt=103300, revokedAt=null, revokeReason=null, deliveredVia=[haptics], speechEnabled=true, screenReaderActive=false, hapticsEnabled=true)
+30 spoken speak e1
+30 stop
+# V1 stopped
+1 decided []
+2 decided []
+3 decided []
+4 decided []
+5 decided []
+6 decided []
+7 decided []
+8 decided []
+9 decided []
+10 decided []
+11 decided []
+12 decided []
+13 decided []
+14 decided []
+15 decided []
+16 decided []
+17 decided []
+18 decided []
+19 decided []
+20 decided []
+21 decided []
+22 decided []
+23 decided []
+24 decided []
+25 decided []
+26 decided []
+27 decided []
+28 decided []
+29 decided [e1={"id":"","timestamp":102800,"category":"OBSTACLE","priority":"HIGH","messageKey":"event_obstacle_center_person","messageParams":{"count":"1"},"expiresAt":105800,"dedupeKey":"obstacle_CENTER","cooldownKeys":["obstacle_CENTER","obstacle_PRIMARY_CENTER"],"cooldownGroups":[],"confidence":1.0,"severity":"MODERATE","relatedZones":["CENTER"],"distance":"NEAR","rank":0} components=[CENTER/HIGH/00000000-0000-0000-0000-000000000001/[obstacle_CENTER, obstacle_PRIMARY_CENTER]/TODAY/[HazardRef(trackId=00000000-0000-0000-0000-000000000001, category=PERSON, todayNear=true, speechNear=true, ownPriority=HIGH, source=DETECTION)]]]
+29 description_waits HIGH -> false
+29 preempt_description event_obstacle_center_person
+29 speak e1 key=event_obstacle_center_person scale=16 at=102800 expires=105800 -> taken
+29 vibrate_alone e1 -> Queued(atMs=103300, plays=true)
+29 receipt confirm e1
+29 reached e1
+30 decided []
+30 stop
+30 cut speak e1
+# V3 drained
+1 decided []
+2 decided []
+3 decided []
+4 decided []
+5 decided []
+6 decided []
+7 decided []
+8 decided []
+9 decided []
+10 decided []
+11 decided []
+12 decided []
+13 decided []
+14 decided []
+15 decided []
+16 decided []
+17 decided []
+18 decided []
+19 decided []
+20 decided []
+21 decided []
+22 decided []
+23 decided []
+24 decided []
+25 decided []
+26 decided []
+27 decided []
+28 decided []
+29 decided [e1={"id":"","timestamp":102800,"category":"OBSTACLE","priority":"HIGH","messageKey":"event_obstacle_center_person","messageParams":{"count":"1"},"expiresAt":105800,"dedupeKey":"obstacle_CENTER","cooldownKeys":["obstacle_CENTER","obstacle_PRIMARY_CENTER"],"cooldownGroups":[],"confidence":1.0,"severity":"MODERATE","relatedZones":["CENTER"],"distance":"NEAR","rank":0} components=[CENTER/HIGH/00000000-0000-0000-0000-000000000001/[obstacle_CENTER, obstacle_PRIMARY_CENTER]/TODAY/[HazardRef(trackId=00000000-0000-0000-0000-000000000001, category=PERSON, todayNear=true, speechNear=true, ownPriority=HIGH, source=DETECTION)]]]
+29 description_waits HIGH -> false
+29 preempt_description event_obstacle_center_person
+29 vibrate_alone e1 -> Queued(atMs=103300, plays=true)
+30 decided []
+30 motor_answered e1 played=true
+30 receipt confirm e1
+30 reached e1
+30 outcome PromptOutcomeTrace(sessionId=, eventId=e1, sourceSequenceNumber=29, messageKey=event_obstacle_center_person, category=obstacle, priority=high, deliveredAt=103300, revokedAt=null, revokeReason=null, deliveredVia=[haptics], speechEnabled=false, screenReaderActive=false, hapticsEnabled=true)
+30 stop
+# V3 stopped
+1 decided []
+2 decided []
+3 decided []
+4 decided []
+5 decided []
+6 decided []
+7 decided []
+8 decided []
+9 decided []
+10 decided []
+11 decided []
+12 decided []
+13 decided []
+14 decided []
+15 decided []
+16 decided []
+17 decided []
+18 decided []
+19 decided []
+20 decided []
+21 decided []
+22 decided []
+23 decided []
+24 decided []
+25 decided []
+26 decided []
+27 decided []
+28 decided []
+29 decided [e1={"id":"","timestamp":102800,"category":"OBSTACLE","priority":"HIGH","messageKey":"event_obstacle_center_person","messageParams":{"count":"1"},"expiresAt":105800,"dedupeKey":"obstacle_CENTER","cooldownKeys":["obstacle_CENTER","obstacle_PRIMARY_CENTER"],"cooldownGroups":[],"confidence":1.0,"severity":"MODERATE","relatedZones":["CENTER"],"distance":"NEAR","rank":0} components=[CENTER/HIGH/00000000-0000-0000-0000-000000000001/[obstacle_CENTER, obstacle_PRIMARY_CENTER]/TODAY/[HazardRef(trackId=00000000-0000-0000-0000-000000000001, category=PERSON, todayNear=true, speechNear=true, ownPriority=HIGH, source=DETECTION)]]]
+29 description_waits HIGH -> false
+29 preempt_description event_obstacle_center_person
+29 vibrate_alone e1 -> Queued(atMs=103300, plays=true)
+30 decided []
+30 stop
