@@ -137,7 +137,7 @@ det:  postprocessBackend = "native_bbox_nms_float_handle"
 ```
 
 **任何改动都不应破坏它们。** 注意这两条只在 **float 单张量**契约下成立：uint8 输出或多张量输出
-会掉回 Kotlin 解码路径。
+会掉回 Kotlin 解码路径。目标设备上的实测状态和测量条件见 [architecture.zh-CN.md](architecture.zh-CN.md) §12.3。
 
 ## 🔴 加速器结果一致性
 
@@ -147,8 +147,17 @@ det:  postprocessBackend = "native_bbox_nms_float_handle"
 本仓库一直用来开发的那两份 sem 和 det 导出（onnx2tf、float16、NHWC）在 SM8850 和
 SM8450 的 LiteRT GPU 加速器上运行没有任何报错，但答案是错的：室内地板和浅色铺装被判成 `building`，
 CPU 每帧都以 92% 检出的办公椅从未被检出。强制 FP32、LiteRT 2.3.0、缩放方式、zero-copy 读取都已排除。
-同一批模型的另一种导出（Ultralytics v0.6.6，litert-torch，NCHW）在同样的 GPU 上是对的。原因在于
-某个具体的计算图和加速器之间的相互作用，所以换任何新模型文件、LiteRT 版本或设备都可能再次出现。
+同一批模型的另一种导出答案是对的：`ultralytics/yolo-flutter-app` release v0.6.6 的
+`yolo26n-sem_w8a32.tflite` 和 `yolo26n_w8a32.tflite`，由 Ultralytics 8.4.104 以 `format=litert`、
+`quantize=w8a32` 导出（NCHW）。在 OnePlus CPH2747（SM8850，Android 16，LiteRT 2.1.5 GPU）上，下面的
+检查结果是：
+
+| 导出 | sem 像素一致率（平均 / 最低一帧） | det：CPU 检出 → GPU 也检出，多检 | 结果 |
+|---|---|---|---|
+| Ultralytics w8a32 NCHW | 96.4% / 93.3% | 16 → 16（召回率 1.0），多检 0 | 通过 |
+| onnx2tf float16 NHWC | 平均 39.1% | 21 → 0 | 不一致 |
+
+原因在于某个具体的计算图和加速器之间的相互作用，所以换任何新模型文件、LiteRT 版本或设备都可能再次出现。
 
 **检查方法**：用 debug 版，设置 → 诊断 → **模型一致性检查**。拿稳手机，对着地面，并让画面里有物体
 （椅子、行人）。每个模型在 8 帧相机画面上各跑两次，一次在配置的加速器上，一次在 CPU 上，然后比对
@@ -175,6 +184,16 @@ CPU 每帧都以 92% 检出的办公椅从未被检出。强制 FP32、LiteRT 2.
 NCHW 导出 + float32 I/O wrapper 会带来每帧的 host transpose，并在 GPU / NPU delegate 上碎片化，所以
 NHWC 图通常更快。但速度只有在加速器一致性检查通过之后才有意义：上面那两份快的 NHWC 导出，正是在
 GPU 上算错的那两份。
+
+正确的代价：同一台 OnePlus CPH2747（SM8850，Android 16，LiteRT 2.1.5 GPU）、同一个 debug 包，两个模型
+都在 GPU 上：
+
+| 导出（sem + det） | 管线中位数（p90） | 每秒输出帧数 | 丢弃的相机帧 | sem 后处理中位数 |
+|---|---|---|---|---|
+| Ultralytics w8a32 NCHW（结果正确） | 43 ms（58 ms） | 22 | 27% | 26 ms |
+| onnx2tf float16 NHWC（在 GPU 上算错） | 28 ms（37 ms） | 29 | 0.3% | 15 ms |
+
+差别在 sem 后处理，它要等 GPU 的结果。
 
 ## Backend 选择
 
