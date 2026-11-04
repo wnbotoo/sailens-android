@@ -135,7 +135,7 @@ data class TraceReplayReport(
 
 /** How far a trace's alert records are all the alerts within its window. */
 enum class AlertRecordCompleteness {
-    /** The trace was written before alerts were recorded. */
+    /** The trace was written before alerts were recorded: nothing it kept, not even a frame's qualification, is newer. */
     NOT_RECORDED,
 
     /** Every `seq` from 1 up to the session's [SessionTraceSummary.guidanceAlertCount] is there. */

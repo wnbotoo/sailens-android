@@ -839,7 +839,9 @@ window, not every alert of the run.
 - `possibly_incomplete`: none found missing, but there is no count (the process died before the
   summary, or the summary itself was dropped), so the last ones could be missing. A gap found without
   the count is a lower bound.
-- `not_recorded`: the trace was written before alert records existed.
+- `not_recorded`: the trace was written before alert records existed. A trace that kept anything
+  newer (the count, the start's window, an alert, or a frame's `qualification`) is never this, even
+  when the queue dropped its start and every alert.
 
 ## Quick diagnosis paths
 

@@ -218,11 +218,16 @@ class BuildTraceReplayReportUseCase {
      * Whether the alert records are every alert within the trace's window, and how many are known missing:
      * `seq` must run from 1 without a gap up to the session's count. Without the count only the first two
      * can be checked, and a gap found then is a lower bound.
+     *
+     * Anything the trace kept from a build that records alerts says they were recorded: the summary's count, the
+     * start's window, an alert, or a frame's qualification. The bound can drop the start and every alert, and a
+     * process that dies writes no summary, but each frame such a build traces carries its qualification.
      */
     private fun alertCompleteness(session: TraceReplaySession): Pair<AlertRecordCompleteness, Long> {
         val count = session.summary?.guidanceAlertCount
         val seqs = session.guidanceAlerts.mapTo(HashSet()) { it.seq }
-        val written = count != null || session.metadata?.openedElapsedMs != null || seqs.isNotEmpty()
+        val written = count != null || session.metadata?.openedElapsedMs != null || seqs.isNotEmpty() ||
+            session.frames.any { it.qualification != null }
         if (!written) return AlertRecordCompleteness.NOT_RECORDED to 0
         val highest = maxOf(seqs.maxOrNull() ?: 0L, count ?: 0L)
         val missing = highest - seqs.count { it in 1..highest }

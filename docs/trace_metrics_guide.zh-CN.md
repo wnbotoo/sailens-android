@@ -671,7 +671,7 @@ bbox 接地带（det∩sem 交叉验证）从 sem 可行走区抠除后的占比
 - `complete`：`seq` 从 1 到 `guidanceAlertCount` 一条不缺。
 - `incomplete (missing n)`：有缺号、第一条 `seq` 大于 1，或者记录比计数少。trace 队列溢出时会丢最旧的条目，所以繁忙的 trace 可能丢掉一些。
 - `possibly_incomplete`：没发现缺失，但没有计数（进程在写摘要之前被杀，或摘要本身被丢），最后几条可能缺。没有计数时发现的缺号只是下限。
-- `not_recorded`：这份 trace 写于告警记录出现之前。
+- `not_recorded`：这份 trace 写于告警记录出现之前。只要留下了任何较新的内容（计数、起始的窗口、一条告警，或者一帧的 `qualification`），就不会是这一项，即使队列丢掉了起始和全部告警。
 
 ## 快速诊断路径
 
