@@ -39,10 +39,9 @@ internal object SafetyTimelineBuilder {
         if (first == null || last == null) {
             missing += count ?: 0L
         } else {
-            if (first.seq > 1) {
-                missing += first.seq - 1
-                if (start != null) unknown += Interval(start, maxOf(start, first.stateSinceElapsedMs))
-            }
+            // Before the first record kept, no record covers the window, and time no record covers is unknown (below):
+            // so the head of a trace that lost its first records needs no interval of its own, only its count.
+            if (first.seq > 1) missing += first.seq - 1
             records.zipWithNext { a, b ->
                 if (b.seq > a.seq + 1) {
                     missing += b.seq - a.seq - 1
