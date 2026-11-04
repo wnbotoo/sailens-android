@@ -446,6 +446,14 @@ private fun TraceReplayReportDetail(
             )
             TraceMetricLine(stringResource(R.string.trace_report_blockage_reasons, blockageReasons))
             TraceMetricLine(stringResource(R.string.trace_report_message_keys, messageKeys))
+            TraceMetricLine(stringResource(R.string.trace_report_qualification_frames, report.qualificationFrameCounts.countsOrNone()))
+            TraceMetricLine(
+                stringResource(
+                    R.string.trace_report_guidance_alerts,
+                    report.guidanceAlertCounts.countsOrNone(),
+                    report.alertCompletenessText(),
+                )
+            )
 
             Spacer(modifier = Modifier.height(4.dp))
 

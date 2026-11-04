@@ -31,7 +31,8 @@ import com.sailens.guidance.model.perception.ObstacleSource
  * 事件生成器
  */
 class EventGenerator(
-    private val config: AnalysisConfig = AnalysisConfig(),
+    /** Internal so that the qualification is derived from the config this generator decides with. */
+    internal val config: AnalysisConfig = AnalysisConfig(),
 ) {
     private companion object {
         private const val MIN_HARD_BLOCKED_CONFIDENCE = 0.75f

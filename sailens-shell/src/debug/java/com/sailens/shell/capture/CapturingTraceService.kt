@@ -1,6 +1,7 @@
 package com.sailens.shell.capture
 
 import com.sailens.guidance.model.trace.FrameTrace
+import com.sailens.guidance.model.trace.GuidanceAlertTrace
 import com.sailens.guidance.model.trace.PromptOutcomeTrace
 import com.sailens.guidance.model.trace.SessionTraceMetadata
 import com.sailens.guidance.model.trace.SessionTraceSummary
@@ -34,6 +35,7 @@ internal class CapturingTraceService(
 
     // Explicit so the delegation of the other calls is visible in review.
     override fun recordFrame(frameTrace: FrameTrace) = base.recordFrame(frameTrace)
+    override fun recordGuidanceAlert(alert: GuidanceAlertTrace) = base.recordGuidanceAlert(alert)
     override fun recordPromptOutcome(outcome: PromptOutcomeTrace) {
         base.recordPromptOutcome(outcome)
         // A delivered prompt opens an event window in a model_regression capture.

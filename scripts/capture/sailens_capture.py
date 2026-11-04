@@ -215,6 +215,8 @@ class Trace:
     path: str
     frames_by_seq: dict = field(default_factory=dict)
     prompt_outcomes: list = field(default_factory=list)
+    # guidance_alert records, in file order: what the user was told or offered within the trace's window.
+    alerts: list = field(default_factory=list)
     warnings: list = field(default_factory=list)
 
 
@@ -235,6 +237,8 @@ def load_trace(path: str) -> Trace:
                 trace.frames_by_seq[record["sequenceNumber"]] = record
             elif kind == "prompt_outcome":
                 trace.prompt_outcomes.append(record)
+            elif kind == "guidance_alert":
+                trace.alerts.append(record)
     return trace
 
 

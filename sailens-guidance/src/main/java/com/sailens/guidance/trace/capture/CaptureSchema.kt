@@ -47,8 +47,9 @@ object CaptureSchema {
      * 5: `RegressionUtteranceRecord`, `RegressionManifest.utteranceLifecycle` and its counters.
      * 6: `EventRecord.rank`, `RegressionRevokeRecord.reason`, `RegressionManifest.speechPriorityScale`,
      * `RegressionCutKeptRecord`, `RegressionHeardAfterCutRecord`.
+     * 7: `RegressionFrameRecord.qualification`, `RegressionManifest.qualificationRecorded`.
      */
-    const val MINOR: Int = 6
+    const val MINOR: Int = 7
 
     const val MANIFEST_FILE: String = "manifest.json"
     const val FRAMES_FILE: String = "frames.jsonl"

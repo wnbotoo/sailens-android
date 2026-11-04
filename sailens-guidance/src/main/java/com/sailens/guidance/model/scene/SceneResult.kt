@@ -3,6 +3,7 @@ package com.sailens.guidance.model.scene
 import com.sailens.guidance.geometry.CameraGeometry
 import com.sailens.guidance.model.analysis.VisionFaults
 import com.sailens.guidance.motion.MotionState
+import com.sailens.guidance.safety.GuidanceQualification
 import com.sailens.core.mask.BinaryMask
 import com.sailens.guidance.model.perception.ObstacleDetection
 import com.sailens.guidance.model.perception.DetectedObstacle
@@ -24,4 +25,6 @@ data class SceneResult(
     val motion: MotionState? = null,
     /** What Guidance cannot judge in this frame; the shell tells the user. */
     val visionFaults: VisionFaults = VisionFaults.NONE,
+    /** Whether this frame let Guidance judge the way ahead, and how the optional inputs stood. Observed, not acted on. */
+    val qualification: GuidanceQualification = GuidanceQualification.QUALIFIED,
 )

@@ -46,6 +46,12 @@ data class RegressionManifest(
      * made before there was one, whose priorities are `EventPriority.value` (schema 1.6).
      */
     val speechPriorityScale: Int? = null,
+    /**
+     * True when the recorder writes [RegressionFrameRecord.qualification] (schema 1.7): then every frame
+     * that did not fail carries one, and one without it is an incomplete record. False -- every older
+     * record -- means there is nothing to compare, not that every frame was qualified.
+     */
+    val qualificationRecorded: Boolean = false,
 ) {
     companion object {
         const val RECORDER_VERSION: Int = 1
@@ -96,6 +102,8 @@ data class RegressionStats(
  *   records, which replay without it unless the caller supplies one.
  * @param events the decided events, highest priority first (the first is the one offered).
  * @param failure set when processing the frame failed; the frame then decided nothing.
+ * @param qualification the frame's baseline qualification (schema 1.7), compared on replay like the
+ *   events; absent in older records and on failed frames.
  */
 @Serializable
 @SerialName("regression_frame")
@@ -114,7 +122,20 @@ data class RegressionFrameRecord(
     val geometry: GeometryRecord? = null,
     val events: List<EventRecord> = emptyList(),
     val failure: String? = null,
+    val qualification: QualificationRecord? = null,
 ) : CaptureRecord
+
+/**
+ * `BaselineQualification` as recorded. [level] is a closed set -- "qualified", "degraded", "unqualified" --
+ * that a minor version cannot extend: a new level needs a new field or a major version. [reasons] are
+ * open strings, lower-case reason names, the reason a frame is unqualified first; new reasons may be
+ * added in a minor version.
+ */
+@Serializable
+data class QualificationRecord(
+    val level: String,
+    val reasons: List<String> = emptyList(),
+)
 
 /**
  * `CameraGeometry` as resolved for a frame, enums by name. Recorded rather than re-resolved

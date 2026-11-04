@@ -182,6 +182,7 @@ class SceneAnalysisViewModel(
         recordOutcome = traceService::recordPromptOutcome,
         onReachedUser = { event -> _uiState.update { it.copy(lastAnnouncedEvent = event) } },
         detFirst = detFirst,
+        recordAlert = { alert -> traceService.recordGuidanceAlert(alert.toTrace(at = System.currentTimeMillis(), elapsedMs = clock())) },
     )
     private var releaseJob: Job? = null
     private var overlayRenderJob: Job? = null

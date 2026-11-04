@@ -11,14 +11,18 @@ import com.sailens.guidance.delivery.GuidanceSettingsPort
 import com.sailens.guidance.delivery.GuidanceSpeechPort
 import com.sailens.guidance.delivery.MotorOffer
 import com.sailens.guidance.delivery.SpeechOutcome
+import com.sailens.guidance.delivery.VisionAlert
 import com.sailens.guidance.delivery.VisionFaultAlerts
 import com.sailens.guidance.config.DetFirstConfig
 import com.sailens.guidance.model.common.EventPriority
 import com.sailens.guidance.model.scene.SceneEvent
+import com.sailens.guidance.model.trace.GuidanceAlertSources
+import com.sailens.guidance.model.trace.GuidanceAlertTrace
 import com.sailens.guidance.model.trace.PromptOutcomeTrace
 import com.sailens.guidance.processor.decision.SpeechRanks
 import com.sailens.guidance.processor.decision.SpeechScale
 import com.sailens.output.Announcement
+import com.sailens.shell.device.GuidanceHaptic
 import com.sailens.shell.device.NavigationClaim
 import com.sailens.output.UtteranceOutcome
 
@@ -40,6 +44,22 @@ internal fun guidanceWaitsForDescription(
 
 internal val GUIDANCE_PREEMPTS_DESCRIPTION_AT: EventPriority = EventPriority.HIGH
 
+/**
+ * [this] as its `guidance_alert` trace record, at [at] (wall clock, the frame trace's) and [elapsedMs]
+ * (elapsed realtime). A rhythm is [GuidanceHaptic.VISION_UNRELIABLE]: the only one vision-fault alerts play.
+ */
+internal fun VisionAlert.toTrace(at: Long, elapsedMs: Long): GuidanceAlertTrace = GuidanceAlertTrace(
+    at = at,
+    elapsedMs = elapsedMs,
+    source = GuidanceAlertSources.VISION,
+    kind = kind,
+    messageKey = messageKey,
+    haptic = if (messageKey == null) GuidanceHaptic.VISION_UNRELIABLE.name.lowercase() else null,
+    priority = priority.name.lowercase(),
+    channel = channel,
+    result = result,
+)
+
 private fun UtteranceOutcome.toSpeechOutcome(): SpeechOutcome = when (this) {
     UtteranceOutcome.SPOKEN -> SpeechOutcome.SPOKEN
     UtteranceOutcome.CUT -> SpeechOutcome.CUT
@@ -59,6 +79,7 @@ private fun UtteranceOutcome.toSpeechOutcome(): SpeechOutcome = when (this) {
  * @param noticeText the copy of a [VisionFaultAlerts] notice or recovery, by message key.
  * @param announceToScreenReader the shell's one route to the screen reader: with the Describe screen on
  *   top this screen's UI is not composed at all, and collecting here would silently drop the line.
+ * @param recordAlert each vision-fault notice and rhythm and what became of it, for the trace.
  */
 internal class GuidanceOutputWiring(
     speakOwn: (Announcement, onSpoken: (() -> Unit)?, onOutcome: ((UtteranceOutcome) -> Unit)?, atMs: Long?) -> Boolean,
@@ -87,6 +108,7 @@ internal class GuidanceOutputWiring(
     recordOutcome: (PromptOutcomeTrace) -> Unit,
     onReachedUser: (SceneEvent) -> Unit,
     detFirst: DetFirstConfig = DetFirstConfig(),
+    recordAlert: (VisionAlert) -> Unit = {},
 ) {
     val protocol = GuidanceOutputProtocol(
         speech = object : GuidanceSpeechPort {
@@ -170,6 +192,7 @@ internal class GuidanceOutputWiring(
         onReachedUser = onReachedUser,
         retryInterrupted = detFirst.retryInterrupted,
         pathComplexOff = detFirst.pathComplexOff,
+        recordAlert = recordAlert,
     )
 
     /**

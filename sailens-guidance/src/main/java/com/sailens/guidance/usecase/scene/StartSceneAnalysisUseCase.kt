@@ -21,6 +21,10 @@ import com.sailens.guidance.model.scene.SceneDebugInfo
 import com.sailens.guidance.model.perception.SegmentationMask
 import com.sailens.guidance.model.scene.SceneResult
 import com.sailens.guidance.processor.analysis.FrameQualityAnalyzer
+import com.sailens.guidance.safety.GuidanceQualification
+import com.sailens.guidance.safety.GuidanceQualifier
+import com.sailens.guidance.safety.receiptToDecisionMs
+import com.sailens.guidance.safety.withQualification
 import com.sailens.guidance.repository.ObstacleProvider
 import com.sailens.guidance.repository.PerceptionRepository
 import com.sailens.core.log.LogService
@@ -219,6 +223,9 @@ class StartSceneAnalysisUseCase(
 
                 // 决策事件
                 val events = decideEventsUseCase(sceneSnapshot)
+                // Observed only: nothing decides on it. Recorded before the frame ends, as an output of it.
+                val baseline = decideEventsUseCase.qualification(sceneSnapshot)
+                if (recording) regressionRecorder.onQualification(baseline)
                 if (recording) regressionRecorder.endFrame(frame, events, null)
                 val decideCompletedAt = Timestamp.now()
 
@@ -227,6 +234,15 @@ class StartSceneAnalysisUseCase(
                 val motion = orientationSource.motionState(
                     geometry.frameTimeNanos ?: frame.receivedElapsedRealtimeNanos,
                     isStationary(),
+                )
+                val qualification = GuidanceQualification(
+                    baseline = baseline,
+                    capabilities = GuidanceQualifier.capabilities(
+                        geometry = geometry,
+                        motion = motion,
+                        orientationConfigured = orientationSource !== NoOrientationSource,
+                        groundContact = perceptionConfig.groundContact,
+                    ),
                 )
 
                 val droppedFrames = lastSequenceNumber?.let { previousSequence ->
@@ -360,7 +376,9 @@ class StartSceneAnalysisUseCase(
                     obstacleAcceleratorSelection = perceptionResult.obstacleRuntimeInfo.acceleratorSelection,
                     obstaclePreprocessBackend = perceptionResult.obstacleRuntimeInfo.preprocessBackend,
                     obstaclePostprocessBackend = perceptionResult.obstacleRuntimeInfo.postprocessBackend,
-                ).withGeometry(geometry, motion).withObstacleDistances(perceptionResult.obstacles, perceptionConfig.groundContact.enabled)
+                ).withGeometry(geometry, motion)
+                    .withObstacleDistances(perceptionResult.obstacles, perceptionConfig.groundContact.enabled)
+                    .withQualification(quality, qualification, receiptToDecisionMs(frame, decideEventsUseCase.lastDecisionAtMs))
                 val runtimeStats = runtimeWindow.record(frameTrace, pipelineBudget)
 
                 return@mapNotNullReleasing PipelineFrameResult(
@@ -436,6 +454,7 @@ class StartSceneAnalysisUseCase(
                         cameraGeometry = geometry,
                         motion = motion,
                         visionFaults = decideEventsUseCase.visionFaults(sceneSnapshot),
+                        qualification = qualification,
                     ),
                     frameTrace = frameTrace,
                 )

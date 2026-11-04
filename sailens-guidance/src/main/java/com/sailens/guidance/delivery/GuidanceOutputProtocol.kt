@@ -4,12 +4,18 @@ import com.sailens.core.log.LogService
 import com.sailens.guidance.model.analysis.VisionFaults
 import com.sailens.guidance.model.common.EventPriority
 import com.sailens.guidance.model.scene.SceneEvent
+import com.sailens.guidance.model.trace.GuidanceAlertChannels
+import com.sailens.guidance.model.trace.GuidanceAlertKinds
+import com.sailens.guidance.model.trace.GuidanceAlertResults
 import com.sailens.guidance.model.trace.PromptDeliveryChannels
 import com.sailens.guidance.model.trace.PromptOutcomeTrace
 import com.sailens.guidance.model.trace.PromptRevokeReasons
 import com.sailens.guidance.util.Timestamp
 
 private const val TAG = "GuidanceOutputProtocol"
+
+/** What [VisionFaultAlerts] says when a state is over; every other notice tells of a state that holds. */
+private val RECOVERY_KEYS: Set<String> = VisionFaultAlerts.Fault.entries.mapTo(HashSet()) { it.recoveryKey }
 
 /**
  * What happens to a frame's decisions on their way to the user: the primary prompt is offered, the
@@ -22,6 +28,9 @@ private const val TAG = "GuidanceOutputProtocol"
  * @param wallClock wall-clock milliseconds, the clock of the frame trace's `pipelineCompletedAt`.
  * @param retryInterrupted a prompt own speech took is confirmed once heard, and one cut off goes to
  *   [GuidanceCooldownPort.reportCut]. Off, it is confirmed when taken, and nobody asks what became of it.
+ * @param recordAlert receives, for the trace, every vision-fault sentence offered (once the output answered)
+ *   and every rhythm as it is asked for, starts and is withdrawn. Observation only: it changes nothing the
+ *   outputs do.
  */
 class GuidanceOutputProtocol(
     private val speech: GuidanceSpeechPort,
@@ -38,12 +47,17 @@ class GuidanceOutputProtocol(
     pathComplexOff: Boolean = false,
     /** Fixed only by an evaluation in which two runs have to name a notice alike. */
     noticeIdPrefix: String? = null,
+    private val recordAlert: (VisionAlert) -> Unit = {},
 ) {
     /** The running frame's time, while one runs. */
     private var frameAtMs: Long? = null
 
     /** Outcomes of a stopped run find nothing to report to: its cooldown was cleared. */
     private var run = 0L
+
+    /** The vision-fault rhythm asked for and not yet played or withdrawn, for the trace; and its request. */
+    private var pendingRhythm: EventPriority? = null
+    private var rhythmRequest = 0L
 
     /** Everything said and felt about a covered lens, low light and an unrecognised floor; see [VisionFaultAlerts]. */
     private val visionFaultAlerts = VisionFaultAlerts(
@@ -52,10 +66,24 @@ class GuidanceOutputProtocol(
 
             // No switch here: VisionFaultAlerts has applied it, and its fallback ignores it. The motor still
             // decides when: an obstacle rhythm of equal or higher priority is not cut short, only waited for.
-            override fun vibrate(priority: EventPriority, onPlayed: () -> Unit) =
-                motor.vibrateVisionFault(priority, onPlayed)
+            // Traced as requested before the motor is asked: the motor may start it, and say so, before it returns.
+            override fun vibrate(priority: EventPriority, onPlayed: () -> Unit) {
+                val request = ++rhythmRequest
+                pendingRhythm = priority
+                recordAlert(rhythm(priority, GuidanceAlertResults.REQUESTED))
+                motor.vibrateVisionFault(priority) {
+                    if (request == rhythmRequest) pendingRhythm = null
+                    recordAlert(rhythm(priority, GuidanceAlertResults.PLAYED))
+                    onPlayed()
+                }
+            }
 
-            override fun cancelVibration() = motor.cancelVisionFaultVibration()
+            override fun cancelVibration() {
+                pendingRhythm?.let { recordAlert(rhythm(it, GuidanceAlertResults.CANCELLED)) }
+                pendingRhythm = null
+                rhythmRequest++
+                motor.cancelVisionFaultVibration()
+            }
         },
         noticeIdPrefix = noticeIdPrefix ?: VisionFaultAlerts.newNoticeIdPrefix(),
     )
@@ -101,6 +129,7 @@ class GuidanceOutputProtocol(
         visionFaultAlerts.restore(state.alerts)
         state.mode?.let { modeNotice?.restore(it) }
         run = state.run
+        pendingRhythm = null
     }
 
     /**
@@ -110,16 +139,37 @@ class GuidanceOutputProtocol(
      */
     private fun speakVisionNotice(notice: VisionFaultAlerts.Notice): VisionFaultAlerts.Offer {
         val current = settings.output()
-        if (!current.speechEnabled) return VisionFaultAlerts.Offer.REFUSED
-        if (description.waits(notice.priority)) return VisionFaultAlerts.Offer.REFUSED
+        if (!current.speechEnabled) return told(notice, GuidanceAlertChannels.NONE, VisionFaultAlerts.Offer.REFUSED)
+        if (description.waits(notice.priority)) return told(notice, GuidanceAlertChannels.NONE, VisionFaultAlerts.Offer.REFUSED)
         description.preempt(notice.messageKey)
         if (current.screenReaderActive) {
             screenReader.announceNotice(notice.messageKey)
-            return VisionFaultAlerts.Offer.PUBLISHED
+            return told(notice, GuidanceAlertChannels.SCREEN_READER, VisionFaultAlerts.Offer.PUBLISHED)
         }
         val accepted = speech.speakNotice(notice, frameAtMs, onSpoken = { visionFaultAlerts.onSpoken(notice.id) })
-        return if (accepted) VisionFaultAlerts.Offer.ACCEPTED else VisionFaultAlerts.Offer.REFUSED
+        return told(notice, GuidanceAlertChannels.SPEECH, if (accepted) VisionFaultAlerts.Offer.ACCEPTED else VisionFaultAlerts.Offer.REFUSED)
     }
+
+    /** Traces what became of [notice] and returns it unchanged. */
+    private fun told(notice: VisionFaultAlerts.Notice, channel: String, offer: VisionFaultAlerts.Offer): VisionFaultAlerts.Offer {
+        recordAlert(
+            VisionAlert(
+                kind = if (notice.messageKey in RECOVERY_KEYS) GuidanceAlertKinds.FAULT_RECOVERY else GuidanceAlertKinds.FAULT_NOTICE,
+                messageKey = notice.messageKey,
+                priority = notice.priority,
+                channel = channel,
+                result = when (offer) {
+                    VisionFaultAlerts.Offer.REFUSED -> GuidanceAlertResults.REFUSED
+                    VisionFaultAlerts.Offer.ACCEPTED -> GuidanceAlertResults.ACCEPTED
+                    VisionFaultAlerts.Offer.PUBLISHED -> GuidanceAlertResults.PUBLISHED
+                },
+            ),
+        )
+        return offer
+    }
+
+    private fun rhythm(priority: EventPriority, result: String) =
+        VisionAlert(GuidanceAlertKinds.FAULT_RHYTHM, messageKey = null, priority = priority, channel = GuidanceAlertChannels.HAPTICS, result = result)
 
     private fun offerModeNotice(id: String, messageKey: String, atMs: Long, expiresAtMs: Long, onOutcome: (SpeechOutcome) -> Unit): ModeNotice.Offer {
         val current = settings.output()

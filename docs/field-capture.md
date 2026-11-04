@@ -46,7 +46,8 @@ Captures never enter this repository or CI.
   through with a warning). It may not remove or rename a required field or change a field's meaning or
   type; that is a major version. Closed enums inside records are not extended in a minor version.
   Minor versions have added build provenance (1.2), the model-regression record (1.3), recorded
-  geometry (1.4) and the speech lifecycle (1.5).
+  geometry (1.4), the speech lifecycle (1.5), speech ranks and cut receipts (1.6) and the frame's
+  qualification (1.7).
 - Sensor cadence is computed from event timestamps; `SENSOR_DELAY_GAME` is only the requested rate.
 - **Counters** are separate from Guidance's dropped frames, so a gap can be explained. For a complete
   capture they account for everything the engine received: `framesOffered` = `framesEncoded` +
@@ -193,6 +194,17 @@ everything else — `ProcessFrameUseCase` → `AnalyzeSceneUseCase` → frame-qu
 | revocations (UI thread) | event id + number of decisions made before it, read under the cooldown lock | applied before that decision; ids mapped to replayed events by position |
 | configs | `PerceptionConfig` / `AnalysisConfig` in full, taxonomy, depth source | decoded leniently |
 | decisions | every decided event, all fields | the expected output; compared without the random id |
+| qualification (schema 1.7) | the frame's baseline qualification: `level` and `reasons` | an expected output like the events: a different value ends exact replay ("qualification") |
+
+**Qualification (schema 1.7).** `RegressionFrameRecord.qualification` holds `level` -- a closed set,
+`qualified` / `degraded` / `unqualified`, that a minor version cannot extend -- and `reasons`, open
+lower-case strings, the reason a frame is unqualified first, to which a minor version may add. It is
+recorded after the decision and before the frame ends. A recorder that writes it sets
+`RegressionManifest.qualificationRecorded`; then every frame that did not fail must carry one, and a
+frame without it ends exact replay ("qualification missing") instead of passing unchecked. A failed
+frame carries none. Older records (the flag false) are not compared. A hook failure loses the frame
+like any other hook's, so it is never mistaken for a perception failure or a successful frame without
+the field.
 
 Replay is exact only over an unbroken run of frames: the first frame the record loses
 (`RegressionStats.firstLostSeq`) ends it, because smoothers and trackers cannot be resumed.

@@ -27,6 +27,10 @@ import com.sailens.guidance.trace.capture.UtteranceRecordEvents
 import com.sailens.guidance.model.trace.PromptDeliveryChannels
 import com.sailens.output.UtteranceEvent
 import com.sailens.output.UtteranceEventKind
+import com.sailens.guidance.safety.BaselineQualification
+import com.sailens.guidance.safety.DegradeReason
+import com.sailens.guidance.safety.UnqualifiedReason
+import com.sailens.guidance.trace.capture.QualificationRecord
 import com.sailens.guidance.trace.capture.SemanticRuns
 import com.sailens.guidance.trace.capture.WindowTriggers
 import com.sailens.guidance.trace.capture.orThrow
@@ -105,7 +109,12 @@ class RegressionCaptureTest {
     private val person = ObstacleDetection(0, "person", 0.81f, NormalizedRect(0.1f, 0.2f, 0.3f, 0.6f), ObstacleCategory.values().first())
 
     /** One processed frame through every hook, as Guidance calls them. */
-    private fun RegressionCapture.process(seq: Long, semanticRan: Boolean = true, events: List<SceneEvent> = listOf(event(seq))) {
+    private fun RegressionCapture.process(
+        seq: Long,
+        semanticRan: Boolean = true,
+        events: List<SceneEvent> = listOf(event(seq)),
+        qualification: BaselineQualification = BaselineQualification.Qualified,
+    ) {
         val frame = yuvFrame(seq)
         beginFrame(frame)
         onClock(RegressionClocks.PERCEPTION, 100 * seq)
@@ -121,6 +130,7 @@ class RegressionCaptureTest {
         onFrameQuality(quality)
         onStationary(seq % 2 == 0L)
         onClock(RegressionClocks.DECIDE, 100 * seq + 9)
+        onQualification(qualification)
         endFrame(frame, events, null)
     }
 
@@ -145,7 +155,7 @@ class RegressionCaptureTest {
         assertTrue(capture.isRecording)
         // Frames before the directory exists wait in the queue.
         capture.process(1)
-        capture.process(2, semanticRan = false, events = emptyList())
+        capture.process(2, semanticRan = false, events = emptyList(), qualification = BaselineQualification.Unqualified(UnqualifiedReason.TOO_DARK, setOf(DegradeReason.GROUND_UNRECOGNIZED)))
         capture.attach("s1", sessionDir("s1"))
         capture.process(3)
         val stats = capture.finish("s1")!!
@@ -171,6 +181,9 @@ class RegressionCaptureTest {
         // Compared without the random id, as replay compares decisions.
         assertEquals(listOf(event(1).toRecord().withoutId()), first.events.map { it.withoutId() })
         assertEquals(emptyList<Any>(), frames[1].events)
+        assertEquals(QualificationRecord("qualified"), first.qualification)
+        assertEquals(QualificationRecord("unqualified", listOf("too_dark", "ground_unrecognized")), frames[1].qualification)
+        assertTrue("the manifest says every decided frame carries one", capture.manifestBlock().qualificationRecorded)
     }
 
     @Test

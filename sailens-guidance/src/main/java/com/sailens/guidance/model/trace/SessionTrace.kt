@@ -7,6 +7,12 @@ data class SessionTraceMetadata(
     val startedAt: Long,
     val pipelineMode: String,
     val targetHardwareProfile: String,
+    /**
+     * When the trace session really opened, elapsed-realtime milliseconds: the start of the window the
+     * trace can observe. Set by the trace service, not the caller. Not [startedAt], which is wall clock
+     * and taken before the models initialise. Null in traces written before it existed.
+     */
+    val openedElapsedMs: Long? = null,
 )
 
 data class FrameTrace(
@@ -110,6 +116,34 @@ data class FrameTrace(
     val groundContactEnabled: Boolean = false,
     /** Per tracked obstacle, today's level, the ground-contact estimate and the level used. */
     val obstacleDistances: List<ObstacleDistanceTrace> = emptyList(),
+    /**
+     * Frame quality after debouncing, whether or not sensor-quality events are on, and the frame's own
+     * classification before debouncing: `FrameQuality` names, lower case. Null in traces written before
+     * they existed.
+     */
+    val frameQuality: String? = null,
+    val frameQualityClassified: String? = null,
+    /**
+     * The frame's qualification ("qualified" / "degraded" / "unqualified") and its reasons, lower case,
+     * the reason it is unqualified first; see [com.sailens.guidance.safety.BaselineQualification]. Null
+     * in traces written before it existed.
+     */
+    val qualification: String? = null,
+    val qualificationReasons: List<String> = emptyList(),
+    /** Per optional input, by [com.sailens.guidance.safety.GuidanceCapability] name in lower case, how it stood. */
+    val capabilities: Map<String, CapabilityTrace> = emptyMap(),
+    /**
+     * Milliseconds from the frame source receiving the frame to the decision, both elapsed realtime. Not
+     * the frame's whole age: exposure to receipt is not in it. Null when the source did not record the
+     * receipt.
+     */
+    val receiptToDecisionMs: Double? = null,
+)
+
+/** One optional input's status ("not_configured" / "available" / "degraded" / "unavailable") and issues, lower case. */
+data class CapabilityTrace(
+    val status: String,
+    val issues: List<String> = emptyList(),
 )
 
 /**
@@ -247,6 +281,103 @@ object PromptDeliveryChannels {
     val all: Set<String> = setOf(SPEECH, SCREEN_READER, HAPTICS, STATUS_CARD, VISION_ALERTS)
 }
 
+/**
+ * One alert the user was given or offered: a sentence or a rhythm about a fault, and what the output did
+ * with it. A sentence carries [messageKey], a rhythm [haptic]; exactly one of them.
+ *
+ * Records reach the trace only while a session is open: an alert outside that window is in no trace and
+ * not counted, so [seq] and [SessionTraceSummary.guidanceAlertCount] prove a trace complete within its
+ * window, not every alert of a Guidance run.
+ *
+ * @param sessionId and [seq] are filled in by the trace service: callers leave them.
+ * @param at wall-clock milliseconds, the clock of [FrameTrace.pipelineCompletedAt]; for lining up only.
+ * @param elapsedMs elapsed-realtime milliseconds when it happened.
+ * @param seq 1 for the session's first alert record, and one more for each after it.
+ * @param priority an `EventPriority` name, lower case.
+ */
+data class GuidanceAlertTrace(
+    val sessionId: String = "",
+    val seq: Long = 0,
+    val at: Long,
+    val elapsedMs: Long,
+    val source: String,
+    val kind: String,
+    val messageKey: String? = null,
+    val haptic: String? = null,
+    val priority: String,
+    val channel: String,
+    val result: String,
+) {
+    init {
+        require((messageKey == null) != (haptic == null)) {
+            "An alert is a sentence or a rhythm: messageKey=$messageKey haptic=$haptic"
+        }
+        require(source in GuidanceAlertSources.all) { "Unknown alert source '$source'" }
+        require(kind in GuidanceAlertKinds.all) { "Unknown alert kind '$kind'" }
+        require(channel in GuidanceAlertChannels.all) { "Unknown alert channel '$channel'" }
+        require(result in GuidanceAlertResults.all) { "Unknown alert result '$result'" }
+    }
+}
+
+/** The closed set of [GuidanceAlertTrace.source] values. */
+object GuidanceAlertSources {
+    /** A covered lens, low light or an unrecognised floor, told by Guidance's delivery protocol. */
+    const val VISION = "vision"
+
+    /** A stall, a failure, an interruption or speech going unavailable, told by the shell. */
+    const val SYSTEM = "system"
+
+    val all: Set<String> = setOf(VISION, SYSTEM)
+}
+
+/** The closed set of [GuidanceAlertTrace.kind] values. */
+object GuidanceAlertKinds {
+    const val FAULT_NOTICE = "fault_notice"
+    const val FAULT_RECOVERY = "fault_recovery"
+    const val FAULT_RHYTHM = "fault_rhythm"
+    const val FAILED = "failed"
+    const val STALLED = "stalled"
+    const val INTERRUPTED = "interrupted"
+    const val SPEECH_UNAVAILABLE = "speech_unavailable"
+
+    val all: Set<String> = setOf(FAULT_NOTICE, FAULT_RECOVERY, FAULT_RHYTHM, FAILED, STALLED, INTERRUPTED, SPEECH_UNAVAILABLE)
+}
+
+/** The closed set of [GuidanceAlertTrace.channel] values: where the alert was offered. */
+object GuidanceAlertChannels {
+    const val SPEECH = "speech"
+    const val SCREEN_READER = "screen_reader"
+    const val HAPTICS = "haptics"
+
+    /** Offered to no output: speech is off, or a scene description holds the floor. */
+    const val NONE = "none"
+
+    val all: Set<String> = setOf(SPEECH, SCREEN_READER, HAPTICS, NONE)
+}
+
+/** The closed set of [GuidanceAlertTrace.result] values. */
+object GuidanceAlertResults {
+    /** Own speech took it; whether it was heard to the end is not recorded here. */
+    const val ACCEPTED = "accepted"
+
+    /** Handed to the screen reader, which reports no completion. */
+    const val PUBLISHED = "published"
+
+    /** Nothing took it. */
+    const val REFUSED = "refused"
+
+    /** A rhythm asked of the motor, which plays it at once or as soon as a rhythm it may not cut ends. */
+    const val REQUESTED = "requested"
+
+    /** The rhythm started. */
+    const val PLAYED = "played"
+
+    /** A requested rhythm withdrawn before it started. */
+    const val CANCELLED = "cancelled"
+
+    val all: Set<String> = setOf(ACCEPTED, PUBLISHED, REFUSED, REQUESTED, PLAYED, CANCELLED)
+}
+
 data class SessionTraceSummary(
     val sessionId: String,
     val startedAt: Long,
@@ -261,6 +392,13 @@ data class SessionTraceSummary(
     val avgInferenceMs: Double,
     val p95TotalPipelineMs: Long,
     val maxTotalPipelineMs: Long,
+    /** When the trace session closed, elapsed-realtime milliseconds; set by the trace service. Null in older traces. */
+    val closedElapsedMs: Long? = null,
+    /**
+     * How many [GuidanceAlertTrace] records this session queued: the highest `seq` a complete trace holds.
+     * Set by the trace service; null in older traces.
+     */
+    val guidanceAlertCount: Long? = null,
 )
 
 class SessionTraceAccumulator(

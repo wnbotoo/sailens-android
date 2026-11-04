@@ -1,28 +1,49 @@
 package com.sailens.guidance.trace
 
 import android.content.Context
+import android.os.SystemClock
 import com.sailens.guidance.config.TraceRuntimeConfig
 import com.sailens.guidance.model.trace.FrameTrace
+import com.sailens.guidance.model.trace.GuidanceAlertTrace
 import com.sailens.guidance.model.trace.PromptOutcomeTrace
 import com.sailens.guidance.model.trace.SessionTraceMetadata
 import com.sailens.guidance.model.trace.SessionTraceSummary
 import com.sailens.core.log.LogService
 import com.sailens.guidance.service.TraceService
-import org.json.JSONObject
 import java.io.File
 import java.io.FileWriter
-import java.util.concurrent.ConcurrentLinkedQueue
+import java.io.Writer
 import java.util.concurrent.Executors
-import java.util.concurrent.atomic.AtomicInteger
 
-class FileTraceService(
-    private val context: Context,
+/**
+ * @param directory where the trace files go.
+ * @param elapsedClock elapsed-realtime milliseconds, for the window a session's trace observes.
+ * @param appendEntry encodes one entry onto the open file.
+ */
+class FileTraceService internal constructor(
+    private val directory: () -> File,
     private val logService: LogService,
-    private val traceRuntimeConfig: TraceRuntimeConfig = TraceRuntimeConfig(enabled = true),
+    private val traceRuntimeConfig: TraceRuntimeConfig,
+    private val elapsedClock: () -> Long,
+    private val appendEntry: (Writer, TraceQueueEntry) -> Unit,
 ) : TraceService {
+    constructor(
+        context: Context,
+        logService: LogService,
+        traceRuntimeConfig: TraceRuntimeConfig = TraceRuntimeConfig(enabled = true),
+    ) : this(
+        directory = { File(context.filesDir, "traces") },
+        logService = logService,
+        traceRuntimeConfig = traceRuntimeConfig,
+        elapsedClock = SystemClock::elapsedRealtime,
+        appendEntry = { writer, entry -> writer.appendLine(entry.encode().toString()) },
+    )
+
     private val executor = Executors.newSingleThreadExecutor()
-    private val queue = ConcurrentLinkedQueue<TraceQueueEntry>()
-    private val queuedEntries = AtomicInteger(0)
+    private val queue = CountedTraceQueue<TraceQueueEntry>()
+
+    /** The alert records, ordered against the session's opening and closing without this object's lock. */
+    private val ledger = SafetyTraceLedger(queue)
 
     @Volatile
     private var isRunning = true
@@ -47,7 +68,8 @@ class FileTraceService(
             flushToDisk()
             activeSessionId = metadata.sessionId
             traceFile = createTraceFile(metadata.sessionId)
-            enqueue(TraceQueueEntry.SessionStart(metadata))
+            ledger.attach(metadata.copy(openedElapsedMs = elapsedClock()))
+            trim()
         }
     }
 
@@ -90,10 +112,16 @@ class FileTraceService(
         enqueue(TraceQueueEntry.Error(sessionId, stage, throwable))
     }
 
+    /** Never takes this object's lock, which a flush holds while it writes to disk. */
+    override fun recordGuidanceAlert(alert: GuidanceAlertTrace) {
+        if (ledger.recordAlert(alert)) trim()
+    }
+
     override fun finishSession(summary: SessionTraceSummary) {
         synchronized(this) {
             if (summary.sessionId != activeSessionId) return
-            enqueue(TraceQueueEntry.SessionSummary(summary))
+            ledger.detach(summary.copy(closedElapsedMs = elapsedClock()))
+            trim()
             flushToDisk()
             activeSessionId = null
             traceFile = null
@@ -130,10 +158,9 @@ class FileTraceService(
 
         try {
             FileWriter(file, true).use { writer ->
-                while (queue.isNotEmpty()) {
-                    val entry = queue.poll() ?: break
-                    queuedEntries.decrementAndGet()
-                    writer.appendLine(entry.encode().toString())
+                while (true) {
+                    val entry = queue.pollCounted() ?: break
+                    appendEntry(writer, entry)
                 }
             }
         } catch (error: Exception) {
@@ -142,82 +169,16 @@ class FileTraceService(
     }
 
     private fun createTraceFile(sessionId: String): File {
-        val dir = File(context.filesDir, "traces")
+        val dir = directory()
         if (!dir.exists()) dir.mkdirs()
         return File(dir, "trace_$sessionId.jsonl")
     }
 
     private fun enqueue(entry: TraceQueueEntry) {
-        queue.offer(entry)
-        queuedEntries.incrementAndGet()
-        trimQueueIfNeeded()
+        queue.offerCounted(entry)
+        trim()
     }
 
-    private fun trimQueueIfNeeded() {
-        while (queuedEntries.get() > traceRuntimeConfig.maxQueuedEntries) {
-            if (queue.poll() == null) {
-                queuedEntries.set(0)
-                return
-            }
-            queuedEntries.decrementAndGet()
-        }
-    }
-
-    private sealed interface TraceQueueEntry {
-        fun encode(): JSONObject
-
-        data class SessionStart(
-            val metadata: SessionTraceMetadata,
-        ) : TraceQueueEntry {
-            override fun encode(): JSONObject = TraceJsonEncoder.encodeSessionStart(metadata)
-        }
-
-        data class Frame(
-            val frameTrace: FrameTrace,
-        ) : TraceQueueEntry {
-            override fun encode(): JSONObject = TraceJsonEncoder.encodeFrame(frameTrace)
-        }
-
-        data class OverlayRender(
-            val sessionId: String,
-            val renderedAt: Long,
-            val renderMs: Long,
-            val overlayMode: String,
-            val bitmapRendered: Boolean,
-            val sourceSequenceNumber: Long,
-            val sourcePipelineCompletedAt: Long,
-            val sourceAgeMs: Long,
-        ) : TraceQueueEntry {
-            override fun encode(): JSONObject = TraceJsonEncoder.encodeOverlayRender(
-                sessionId = sessionId,
-                renderedAt = renderedAt,
-                renderMs = renderMs,
-                overlayMode = overlayMode,
-                bitmapRendered = bitmapRendered,
-                sourceSequenceNumber = sourceSequenceNumber,
-                sourcePipelineCompletedAt = sourcePipelineCompletedAt,
-                sourceAgeMs = sourceAgeMs,
-            )
-        }
-
-        data class PromptOutcome(
-            val outcome: PromptOutcomeTrace,
-        ) : TraceQueueEntry {
-            override fun encode(): JSONObject = TraceJsonEncoder.encodePromptOutcome(outcome)
-        }
-
-        data class Error(
-            val sessionId: String,
-            val stage: String,
-            val throwable: Throwable,
-        ) : TraceQueueEntry {
-            override fun encode(): JSONObject = TraceJsonEncoder.encodeError(sessionId, stage, throwable)
-        }
-
-        data class SessionSummary(
-            val summary: SessionTraceSummary,
-        ) : TraceQueueEntry {
-            override fun encode(): JSONObject = TraceJsonEncoder.encodeSessionSummary(summary)
-        }
-    }
+    /** Drops the oldest entries beyond the bound. Outside the ledger's lock, always. */
+    private fun trim() = queue.trimIfNeeded(traceRuntimeConfig.maxQueuedEntries)
 }

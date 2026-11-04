@@ -40,6 +40,16 @@ import com.sailens.guidance.repository.ObstacleProvider
 import com.sailens.guidance.repository.PerceptionRepository
 import com.sailens.guidance.semantics.CityscapesNavigationSemantics
 import com.sailens.guidance.trace.NoOpTraceService
+import com.sailens.guidance.depth.GroundContactDistanceConfig
+import com.sailens.guidance.geometry.HeightSource
+import com.sailens.guidance.geometry.PhoneGeometrySettings
+import com.sailens.guidance.model.trace.FrameTrace
+import com.sailens.guidance.safety.GuidanceCapability
+import com.sailens.guidance.safety.GuidanceQualification
+import com.sailens.guidance.safety.traceLevel
+import com.sailens.guidance.safety.traceReasons
+import com.sailens.guidance.safety.visionFaults
+import com.sailens.guidance.service.TraceService
 import com.sailens.guidance.usecase.decision.DecideEventsUseCase
 import com.sailens.guidance.usecase.perception.AnalyzeSceneUseCase
 import com.sailens.guidance.usecase.perception.ProcessFrameUseCase
@@ -49,6 +59,7 @@ import kotlinx.coroutines.flow.asFlow
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
@@ -174,12 +185,78 @@ class StartSceneAnalysisFailureTest {
         assertEquals(listOf("start", "stop"), calls)
     }
 
+    // Not a failure case either: the qualification and its trace fields, over a whole session.
+    @Test
+    fun `each frame carries its qualification, traced with the frame quality and the receipt-to-decision time`() {
+        val traced = mutableListOf<FrameTrace>()
+        val trace = object : TraceService by NoOpTraceService {
+            override fun recordFrame(frameTrace: FrameTrace) {
+                traced += frameTrace
+            }
+        }
+        // Flat frames read as a covered lens: classified at once, debounced after a few frames.
+        val received = 900_000_000L
+        val results = runBlocking {
+            useCase(ScriptedRepository(List(10) { true }), maxFailures = 3, trace = trace)(
+                frames(10, receivedAt = { seq -> if (seq % 2L == 0L) received else 0L }),
+                releaseFrame = {},
+                semanticMaskSnapshot = { false },
+            ).toList()
+        }
+
+        assertEquals(10, traced.size)
+        val levels = results.map { it.qualification.baseline.traceLevel }
+        assertTrue("$levels", "qualified" in levels && "unqualified" in levels)
+        results.zip(traced).forEach { (result, frame) ->
+            assertEquals(result.visionFaults, result.qualification.baseline.visionFaults())
+            assertEquals(result.qualification.baseline.traceLevel, frame.qualification)
+            assertEquals(result.qualification.baseline.traceReasons, frame.qualificationReasons)
+            assertEquals("obstructed", frame.frameQualityClassified)
+            assertEquals(result.visionFaults.frameQuality.name.lowercase(), frame.frameQuality)
+            assertEquals(GuidanceCapability.entries.map { it.name.lowercase() }.toSet(), frame.capabilities.keys)
+            // Received at 900 ms by the elapsed clock, decided at its 1 000 ms; unknown when the source did not say.
+            if (frame.sequenceNumber % 2L == 0L) {
+                assertEquals(100.0, frame.receiptToDecisionMs!!, 1e-9)
+            } else {
+                assertNull(frame.receiptToDecisionMs)
+            }
+        }
+    }
+
+    @Test
+    fun `the optional inputs change the capabilities, never the baseline`() {
+        fun run(orientation: OrientationSource, groundContact: Boolean, phone: PhoneGeometrySettings): List<GuidanceQualification> = runBlocking {
+            useCase(
+                ScriptedRepository(List(8) { true }),
+                maxFailures = 3,
+                orientation = orientation,
+                groundContact = GroundContactDistanceConfig(enabled = groundContact),
+                phone = phone,
+            )(frames(8), releaseFrame = {}, semanticMaskSnapshot = { false }).toList().map { it.qualification }
+        }
+
+        val turning = object : OrientationSource by NoOrientationSource {}
+        val runs = listOf(NoOrientationSource, turning).flatMap { orientation ->
+            listOf(true, false).flatMap { groundContact ->
+                listOf(PhoneGeometrySettings.DEFAULT, PhoneGeometrySettings(1.15f, HeightSource.PRESET)).map { phone ->
+                    run(orientation, groundContact, phone)
+                }
+            }
+        }
+        val baselines = runs.map { qualifications -> qualifications.map { it.baseline } }
+        assertTrue(baselines.all { it == baselines.first() })
+        assertTrue("the inputs did change something", runs.map { q -> q.map { it.capabilities } }.distinct().size > 1)
+    }
+
     private fun useCase(
         repository: PerceptionRepository,
         maxFailures: Int,
         orientation: OrientationSource = NoOrientationSource,
+        trace: TraceService = NoOpTraceService,
+        groundContact: GroundContactDistanceConfig = GroundContactDistanceConfig(),
+        phone: PhoneGeometrySettings = PhoneGeometrySettings.DEFAULT,
     ): StartSceneAnalysisUseCase {
-        val perceptionConfig = PerceptionConfig(profile = PerceptionProfile.BASIC)
+        val perceptionConfig = PerceptionConfig(profile = PerceptionProfile.BASIC, groundContact = groundContact)
         val analysisConfig = AnalysisConfig()
         val semantics = CityscapesNavigationSemantics
         val cooldown = CooldownManager()
@@ -223,14 +300,15 @@ class StartSceneAnalysisFailureTest {
             ),
             frameQualityAnalyzer = FrameQualityAnalyzer(),
             logService = SilentLog,
-            traceService = NoOpTraceService,
-            traceRuntimeConfig = TraceRuntimeConfig(enabled = false),
+            traceService = trace,
+            traceRuntimeConfig = TraceRuntimeConfig(enabled = trace !== NoOpTraceService),
             pipelineBudget = PipelinePerformanceBudget(maxConsecutiveFrameFailures = maxFailures),
             orientationSource = orientation,
+            phoneGeometry = { phone },
         )
     }
 
-    private fun frames(count: Int) = (1..count).map { index ->
+    private fun frames(count: Int, receivedAt: (Long) -> Long = { 0L }) = (1..count).map { index ->
         ImageFrame(
             width = 4,
             height = 4,
@@ -239,6 +317,7 @@ class StartSceneAnalysisFailureTest {
             timestamp = index * 33_000_000L,
             rotationDegrees = 0,
             sequenceNumber = index.toLong(),
+            receivedElapsedRealtimeNanos = receivedAt(index.toLong()),
         )
     }.asFlow()
 

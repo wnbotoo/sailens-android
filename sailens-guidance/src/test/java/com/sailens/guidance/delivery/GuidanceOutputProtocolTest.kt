@@ -7,6 +7,9 @@ import com.sailens.guidance.model.common.EventCategory
 import com.sailens.guidance.model.common.EventPriority
 import com.sailens.guidance.model.scene.SceneEvent
 import com.sailens.guidance.model.scene.SceneEventMessageKeys
+import com.sailens.guidance.model.trace.GuidanceAlertChannels
+import com.sailens.guidance.model.trace.GuidanceAlertKinds
+import com.sailens.guidance.model.trace.GuidanceAlertResults
 import com.sailens.guidance.model.trace.PromptDeliveryChannels
 import com.sailens.guidance.model.trace.PromptOutcomeTrace
 import com.sailens.guidance.model.trace.PromptRevokeReasons
@@ -52,6 +55,8 @@ class GuidanceOutputProtocolTest {
     private val modeAttempts = mutableListOf<Long>()
     private var modeAccepts = true
     private var modeOutcome: ((SpeechOutcome) -> Unit)? = null
+
+    private val alerts = mutableListOf<VisionAlert>()
 
     private fun protocolWith(retryInterrupted: Boolean, pathComplexOff: Boolean = false) = GuidanceOutputProtocol(
         speech = object : GuidanceSpeechPort {
@@ -165,6 +170,7 @@ class GuidanceOutputProtocolTest {
         wallClock = { WALL_CLOCK },
         retryInterrupted = retryInterrupted,
         pathComplexOff = pathComplexOff,
+        recordAlert = { alerts += it },
     )
 
     private val protocol = protocolWith(retryInterrupted = false)
@@ -674,6 +680,116 @@ class GuidanceOutputProtocolTest {
         framesUntil(now + 3_000, VisionFaults.NONE)
 
         assertEquals(emptyList<String>(), calls)
+    }
+
+    // ---- the alert trace: what was said and felt about a fault, as the outputs answered it
+
+    private fun notice(key: String, priority: EventPriority, channel: String, result: String, kind: String = GuidanceAlertKinds.FAULT_NOTICE) =
+        VisionAlert(kind, key, priority, channel, result)
+
+    private fun rhythm(priority: EventPriority, result: String) =
+        VisionAlert(GuidanceAlertKinds.FAULT_RHYTHM, null, priority, GuidanceAlertChannels.HAPTICS, result)
+
+    @Test
+    fun `a covered lens is traced as its notice, then its rhythm asked for and played`() {
+        frame(faults = COVERED)
+        assertEquals(
+            listOf(
+                notice(SceneEventMessageKeys.CAMERA_BLOCKED, EventPriority.CRITICAL, GuidanceAlertChannels.SPEECH, GuidanceAlertResults.ACCEPTED),
+                rhythm(EventPriority.CRITICAL, GuidanceAlertResults.REQUESTED),
+                rhythm(EventPriority.CRITICAL, GuidanceAlertResults.PLAYED),
+            ),
+            alerts,
+        )
+    }
+
+    @Test
+    fun `a rhythm waiting for the motor is traced as played when it starts, and as withdrawn when its reason goes first`() {
+        motorStartsAtOnce = false
+        frame(faults = COVERED)
+        reservedRhythm!!()
+        assertEquals(
+            listOf(GuidanceAlertResults.REQUESTED, GuidanceAlertResults.PLAYED),
+            alerts.filter { it.kind == GuidanceAlertKinds.FAULT_RHYTHM }.map { it.result },
+        )
+
+        alerts.clear()
+        protocol.reset()
+        frame(faults = COVERED)
+        now += 100
+        // Clear again while the rhythm still waits: it is withdrawn, and never played.
+        frame(faults = VisionFaults.NONE)
+        assertEquals(
+            listOf(GuidanceAlertResults.REQUESTED, GuidanceAlertResults.CANCELLED),
+            alerts.filter { it.kind == GuidanceAlertKinds.FAULT_RHYTHM }.map { it.result },
+        )
+        assertEquals(null, reservedRhythm)
+    }
+
+    @Test
+    fun `a notice is traced on the channel it was offered to, or none when nothing was offered`() {
+        screenReaderActive = true
+        frame(faults = COVERED)
+        assertEquals(
+            notice(SceneEventMessageKeys.CAMERA_BLOCKED, EventPriority.CRITICAL, GuidanceAlertChannels.SCREEN_READER, GuidanceAlertResults.PUBLISHED),
+            alerts.first(),
+        )
+
+        alerts.clear()
+        protocol.reset()
+        screenReaderActive = false
+        descriptionWaitsBelow = EventPriority.HIGH
+        frame(faults = FLOOR)
+        assertEquals(
+            notice(SceneEventMessageKeys.GROUND_UNRECOGNIZED, EventPriority.LOW, GuidanceAlertChannels.NONE, GuidanceAlertResults.REFUSED),
+            alerts.first(),
+        )
+
+        alerts.clear()
+        protocol.reset()
+        descriptionWaitsBelow = null
+        speechAccepts = false
+        frame(faults = DARK)
+        assertEquals(
+            notice(SceneEventMessageKeys.LOW_LIGHT, EventPriority.HIGH, GuidanceAlertChannels.SPEECH, GuidanceAlertResults.REFUSED),
+            alerts.first(),
+        )
+    }
+
+    @Test
+    fun `a recovery is traced as a recovery`() {
+        frame(faults = COVERED)
+        now += 100
+        framesUntil(now + 2_200, VisionFaults.NONE)
+        assertEquals(
+            listOf(notice(SceneEventMessageKeys.CAMERA_RESTORED, EventPriority.LOW, GuidanceAlertChannels.SPEECH, GuidanceAlertResults.ACCEPTED, GuidanceAlertKinds.FAULT_RECOVERY)),
+            alerts.filter { it.kind == GuidanceAlertKinds.FAULT_RECOVERY },
+        )
+    }
+
+    @Test
+    fun `over a long run every notice and rhythm call has its one record, and nothing else does`() {
+        motorStartsAtOnce = false
+        framesUntil(now + 9_000, COVERED)
+        reservedRhythm?.invoke()
+        speechAccepts = false
+        framesUntil(now + 3_000, DARK)
+        speechAccepts = true
+        framesUntil(now + 3_000, VisionFaults.NONE)
+        screenReaderActive = true
+        framesUntil(now + 12_000, FLOOR)
+        protocol.reset()
+
+        assertEquals(calls.count { it.startsWith("notice:") }, alerts.count { it.channel == GuidanceAlertChannels.SPEECH })
+        assertEquals(calls.count { it.startsWith("readerNotice:") }, alerts.count { it.channel == GuidanceAlertChannels.SCREEN_READER })
+        assertEquals(calls.count { it.startsWith("faultRhythm:") }, alerts.count { it.result == GuidanceAlertResults.REQUESTED })
+        assertEquals(calls.count { it == "cancelFaultRhythm" }, alerts.count { it.result == GuidanceAlertResults.CANCELLED })
+        assertTrue("the run asked for rhythms", alerts.any { it.result == GuidanceAlertResults.REQUESTED })
+        assertTrue("and withdrew one", alerts.any { it.result == GuidanceAlertResults.CANCELLED })
+        assertTrue("and refused a notice", alerts.any { it.result == GuidanceAlertResults.REFUSED })
+        assertTrue("and published one", alerts.any { it.result == GuidanceAlertResults.PUBLISHED })
+        assertTrue("and said a recovery", alerts.any { it.kind == GuidanceAlertKinds.FAULT_RECOVERY })
+        assertTrue(alerts.none { it.channel == GuidanceAlertChannels.NONE })
     }
 
     private fun obstacle(

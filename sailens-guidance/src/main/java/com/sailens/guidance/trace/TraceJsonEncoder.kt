@@ -1,6 +1,7 @@
 package com.sailens.guidance.trace
 
 import com.sailens.guidance.model.trace.FrameTrace
+import com.sailens.guidance.model.trace.GuidanceAlertTrace
 import com.sailens.guidance.model.trace.PromptOutcomeTrace
 import com.sailens.guidance.model.trace.SessionTraceMetadata
 import com.sailens.guidance.model.trace.SessionTraceSummary
@@ -14,6 +15,7 @@ internal object TraceJsonEncoder {
         put("startedAt", metadata.startedAt)
         put("pipelineMode", metadata.pipelineMode)
         put("targetHardwareProfile", metadata.targetHardwareProfile)
+        metadata.openedElapsedMs?.let { put("openedElapsedMs", it) }
     }
 
     fun encodeFrame(frameTrace: FrameTrace): JSONObject = JSONObject().apply {
@@ -118,6 +120,29 @@ internal object TraceJsonEncoder {
                 },
             ),
         )
+        frameTrace.frameQuality?.let { put("frameQuality", it) }
+        frameTrace.frameQualityClassified?.let { put("frameQualityClassified", it) }
+        frameTrace.qualification?.let {
+            put("qualification", it)
+            put("qualificationReasons", JSONArray(frameTrace.qualificationReasons))
+        }
+        if (frameTrace.capabilities.isNotEmpty()) {
+            put(
+                "capabilities",
+                JSONObject().apply {
+                    frameTrace.capabilities.forEach { (name, capability) ->
+                        put(
+                            name,
+                            JSONObject().apply {
+                                put("status", capability.status)
+                                put("issues", JSONArray(capability.issues))
+                            },
+                        )
+                    }
+                },
+            )
+        }
+        frameTrace.receiptToDecisionMs?.let { put("receiptToDecisionMs", it) }
     }
 
     fun encodeOverlayRender(
@@ -158,6 +183,21 @@ internal object TraceJsonEncoder {
         put("hapticsEnabled", outcome.hapticsEnabled)
     }
 
+    fun encodeGuidanceAlert(alert: GuidanceAlertTrace): JSONObject = JSONObject().apply {
+        put("type", "guidance_alert")
+        put("sessionId", alert.sessionId)
+        put("seq", alert.seq)
+        put("at", alert.at)
+        put("elapsedMs", alert.elapsedMs)
+        put("source", alert.source)
+        put("kind", alert.kind)
+        alert.messageKey?.let { put("messageKey", it) }
+        alert.haptic?.let { put("haptic", it) }
+        put("priority", alert.priority)
+        put("channel", alert.channel)
+        put("result", alert.result)
+    }
+
     fun encodeSessionSummary(summary: SessionTraceSummary): JSONObject = JSONObject().apply {
         put("type", "session_summary")
         put("sessionId", summary.sessionId)
@@ -173,6 +213,8 @@ internal object TraceJsonEncoder {
         put("avgInferenceMs", summary.avgInferenceMs)
         put("p95TotalPipelineMs", summary.p95TotalPipelineMs)
         put("maxTotalPipelineMs", summary.maxTotalPipelineMs)
+        summary.closedElapsedMs?.let { put("closedElapsedMs", it) }
+        summary.guidanceAlertCount?.let { put("guidanceAlertCount", it) }
     }
 
     fun encodeError(sessionId: String, stage: String, throwable: Throwable): JSONObject = JSONObject().apply {

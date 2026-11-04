@@ -8,10 +8,12 @@ import com.sailens.guidance.model.perception.ObstacleDetection
 import com.sailens.guidance.model.perception.SegmentationOutput
 import com.sailens.guidance.model.scene.SceneEvent
 import com.sailens.guidance.processor.analysis.FrameQualityResult
+import com.sailens.guidance.safety.BaselineQualification
 import com.sailens.guidance.trace.capture.ConnectivityRecord
 import com.sailens.guidance.trace.capture.DetectionRunRecord
 import com.sailens.guidance.trace.capture.FrameQualityRecord
 import com.sailens.guidance.trace.capture.GeometryRecord
+import com.sailens.guidance.trace.capture.QualificationRecord
 import com.sailens.guidance.trace.capture.RegressionFrameRecord
 import com.sailens.guidance.trace.capture.SemanticRunRecord
 import com.sailens.guidance.trace.capture.SemanticRuns
@@ -51,6 +53,7 @@ class RegressionFrameAssembler(
         var quality: FrameQualityRecord? = null
         var stationary: Boolean? = null
         var geometry: GeometryRecord? = null
+        var qualification: QualificationRecord? = null
         var incomplete: String? = null
     }
 
@@ -130,6 +133,10 @@ class RegressionFrameAssembler(
         current?.stationary = stationary
     }
 
+    fun onQualification(baseline: BaselineQualification) = synchronized(lock) {
+        current?.qualification = baseline.toRecord()
+    }
+
     /** A hook failed while recording: the open frame cannot be complete. @return false when none is open. */
     fun markIncomplete(why: String): Boolean = synchronized(lock) {
         val builder = current ?: return false
@@ -156,6 +163,7 @@ class RegressionFrameAssembler(
             geometry = builder.geometry,
             events = events.map { it.toRecord() },
             failure = failure?.toString(),
+            qualification = builder.qualification,
         )
         return Outcome.Frame(record, builder.classIds, builder.classWidth, builder.classHeight)
     }

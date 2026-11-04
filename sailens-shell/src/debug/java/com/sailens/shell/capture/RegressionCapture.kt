@@ -14,6 +14,7 @@ import com.sailens.guidance.model.scene.SceneEvent
 import com.sailens.guidance.model.trace.PromptDeliveryChannels
 import com.sailens.guidance.model.trace.PromptOutcomeTrace
 import com.sailens.guidance.processor.analysis.FrameQualityResult
+import com.sailens.guidance.safety.BaselineQualification
 import com.sailens.guidance.trace.capture.CaptureRecord
 import com.sailens.guidance.trace.capture.CaptureSchema
 import com.sailens.guidance.trace.capture.ClassMapStore
@@ -123,7 +124,11 @@ internal class RegressionCapture(
     }
 
     /** The manifest block written when the capture starts; counters are filled in by [finish]. */
-    fun manifestBlock(): RegressionManifest = manifestBase().copy(utteranceLifecycle = speechSessions != null, speechPriorityScale = SpeechScale.FACTOR)
+    fun manifestBlock(): RegressionManifest = manifestBase().copy(
+        utteranceLifecycle = speechSessions != null,
+        speechPriorityScale = SpeechScale.FACTOR,
+        qualificationRecorded = true,
+    )
 
     /** The session directory exists now: the writer may start. Writer-thread caller. */
     fun attach(sessionId: String, directory: File) {
@@ -232,6 +237,8 @@ internal class RegressionCapture(
     override fun onGeometry(geometry: CameraGeometry) = guarded("onGeometry") { it.onGeometry(geometry) }
 
     override fun onStationary(stationary: Boolean) = guarded("onStationary") { it.onStationary(stationary) }
+
+    override fun onQualification(baseline: BaselineQualification) = guarded("onQualification") { it.onQualification(baseline) }
 
     override fun endFrame(frame: ImageFrame, events: List<SceneEvent>, failure: Throwable?) =
         guarded("endFrame") { it.endFrame(frame, events, failure) }
@@ -374,6 +381,8 @@ internal class RegressionCapture(
         fun onGeometry(geometry: CameraGeometry) = assembler.onGeometry(geometry)
 
         fun onStationary(stationary: Boolean) = assembler.onStationary(stationary)
+
+        fun onQualification(baseline: BaselineQualification) = assembler.onQualification(baseline)
 
         fun endFrame(frame: ImageFrame, events: List<SceneEvent>, failure: Throwable?) {
             when (val outcome = assembler.endFrame(frame, events, failure)) {

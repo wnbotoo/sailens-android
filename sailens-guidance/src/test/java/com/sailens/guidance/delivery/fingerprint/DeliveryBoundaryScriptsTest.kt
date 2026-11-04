@@ -223,7 +223,8 @@ class DeliveryBoundaryScriptsTest {
 
     private fun at(frame: Int): Long = START_MS + STEP_MS * frame
 
-    private fun seqOf(line: String): Long = line.substringBefore(' ').toLong()
+    /** The frame a line belongs to; an observation line carries it after its prefix. */
+    private fun seqOf(line: String): Long = line.removePrefix(FingerprintPipeline.QUALIFICATION_PREFIX).substringBefore(' ').toLong()
 
     private fun scene(
         vararg obstacles: DetectedObstacle,

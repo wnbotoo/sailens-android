@@ -219,6 +219,8 @@ class TraceReplayViewModel(
             appendLine("roadVehicleGeometry=reasons:$roadVehicleReasons bottomY:${avgRoadVehicleBottomYPercent}% centerOverlap:${avgRoadVehicleCenterBandOverlapPercent}% area:${avgRoadVehicleAreaPercent}%")
             appendLine("blockageReasons=$blockageReasons")
             appendLine("messageKeys=${report.uniqueMessageKeys.joinToString()}")
+            appendLine("qualificationFrames=${report.qualificationFrameCounts.countsOrNone()}")
+            appendLine("alertsInWindow=${report.guidanceAlertCounts.countsOrNone()} records=${report.alertCompletenessText()}")
             append(warningSection)
         }
     }
@@ -232,4 +234,14 @@ class TraceReplayViewModel(
         fun List<String>.summary() = ifEmpty { listOf("unknown") }.joinToString("|")
         return "accel=${accelerators.summary()},sel=${acceleratorSelections.summary()},pre=${preprocessBackends.summary()},post=${postprocessBackends.summary()}"
     }
+}
+
+/** "key:count, ...", or "none". */
+internal fun Map<String, Int>.countsOrNone(): String =
+    if (isEmpty()) "none" else entries.joinToString { (key, count) -> "$key:$count" }
+
+/** Whether the alert records are complete within the trace's window, with how many are known missing. */
+internal fun TraceReplayReport.alertCompletenessText(): String {
+    val name = guidanceAlertCompleteness.name.lowercase()
+    return if (guidanceAlertsMissing > 0) "$name (missing $guidanceAlertsMissing)" else name
 }
