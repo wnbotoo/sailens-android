@@ -1,5 +1,6 @@
 package com.sailens.guidance.delivery.fingerprint
 
+import com.sailens.guidance.trace.capture.RegressionStats
 import com.sailens.guidance.trace.regression.RegressionReplay
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -19,14 +20,33 @@ class FingerprintFilesTest {
     private fun report(replayed: Int, stoppedAt: Long? = null, mismatch: RegressionReplay.Mismatch? = null, approximate: List<Long> = emptyList()) =
         RegressionReplay.Report(replayed, decisions = replayed, firstMismatch = mismatch, approximateFrames = approximate, stoppedAtLostSeq = stoppedAt)
 
+    private val whole = RegressionStats(framesRecorded = 120)
+
     @Test
     fun `only a replay of every recorded frame, exact, counts`() {
-        assertNull(replayProblem(report(replayed = 120), recordedFrames = 120))
-        assertNotNull("stopped before a lost frame, nothing replayed", replayProblem(report(replayed = 0, stoppedAt = 1), recordedFrames = 120))
-        assertNotNull("stopped before a lost frame mid-way", replayProblem(report(replayed = 60, stoppedAt = 61), recordedFrames = 120))
-        assertNotNull("fewer frames than recorded", replayProblem(report(replayed = 119), recordedFrames = 120))
-        assertNotNull("a mismatch", replayProblem(report(replayed = 10, mismatch = RegressionReplay.Mismatch(10, "events", "a", "b")), recordedFrames = 120))
-        assertNotNull("an approximate frame", replayProblem(report(replayed = 120, approximate = listOf(7)), recordedFrames = 120))
+        assertNull(replayProblem(report(replayed = 120), readFrames = 120, stats = whole))
+        assertNotNull("stopped before a lost frame, nothing replayed", replayProblem(report(replayed = 0, stoppedAt = 1), readFrames = 120, stats = whole))
+        assertNotNull("stopped before a lost frame mid-way", replayProblem(report(replayed = 60, stoppedAt = 61), readFrames = 120, stats = whole))
+        assertNotNull("fewer frames replayed than read", replayProblem(report(replayed = 119), readFrames = 120, stats = whole))
+        assertNotNull("a mismatch", replayProblem(report(replayed = 10, mismatch = RegressionReplay.Mismatch(10, "events", "a", "b")), readFrames = 120, stats = whole))
+        assertNotNull("an approximate frame", replayProblem(report(replayed = 120, approximate = listOf(7)), readFrames = 120, stats = whole))
+    }
+
+    /** A loss at the tail never stops the replay, which has nothing left to replay: only the manifest knows of it. */
+    @Test
+    fun `a capture short of its tail is refused by what the manifest says`() {
+        assertNotNull(
+            "the manifest counts a frame the file does not have",
+            replayProblem(report(replayed = 119), readFrames = 119, stats = RegressionStats(framesRecorded = 120)),
+        )
+        assertNotNull(
+            "file and manifest agree, but the manifest says a frame after the last one kept was lost",
+            replayProblem(report(replayed = 119), readFrames = 119, stats = RegressionStats(framesRecorded = 119, framesLost = 1, firstLostSeq = 120)),
+        )
+        assertNotNull(
+            "a loss counted without its seq",
+            replayProblem(report(replayed = 119), readFrames = 119, stats = RegressionStats(framesRecorded = 119, framesLost = 1)),
+        )
     }
 
     @Test

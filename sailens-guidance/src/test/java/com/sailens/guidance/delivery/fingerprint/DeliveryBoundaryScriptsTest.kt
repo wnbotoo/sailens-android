@@ -115,6 +115,9 @@ class DeliveryBoundaryScriptsTest {
         assertTrue("the two differ", otherPriority != otherWording)
         val otherComponents = pipeline.argument(event.copy(components = emptyList()))
         assertTrue("components the regression record leaves out are compared too", otherComponents.startsWith("e1 as=") && otherComponents.endsWith("components=[]"))
+        assertTrue("the prompt that reached the user goes by its number", pipeline.lines.any { it == "1 reached e1" })
+        pipeline.onReachedUser(event.copy(messageKey = "event_obstacle_left_person"))
+        assertTrue("a prompt that reached the user under the same id but otherwise is written whole", pipeline.lines.last().startsWith("1 reached e1 as="))
     }
 
     /** Vibration is the only channel and the motor queues it: once it plays, once it is dropped, once Guidance stops first. */
