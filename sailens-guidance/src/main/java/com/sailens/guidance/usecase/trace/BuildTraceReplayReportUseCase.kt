@@ -211,6 +211,7 @@ class BuildTraceReplayReportUseCase {
             guidanceAlertCounts = session.guidanceAlerts.groupingBy { it.kind }.eachCount().toSortedMap(),
             guidanceAlertCompleteness = alertCompleteness,
             guidanceAlertsMissing = alertsMissing,
+            safetyTimeline = SafetyTimelineBuilder.build(session),
         )
     }
 

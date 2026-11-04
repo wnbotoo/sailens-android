@@ -31,7 +31,11 @@ For what each metric means, how it is computed, and how to read it when tuning, 
     `capabilities`, `receiptToDecisionMs` (see
     [Qualification and alerts](trace_metrics_guide.md#qualification-and-alerts))
 - Every alert given or offered while the session is open records a `guidance_alert`, numbered by
-  `seq`.
+  `seq`: the vision faults' and, from the shell, a stall, a failure, an interruption and speech
+  going unavailable.
+- Every change of the safety state or a fact behind it records a `safety_state`, numbered by `seq`;
+  the one kept from before the session opened is its first, right after `session_start` (see
+  [Safety state](trace_metrics_guide.md#safety-state)).
 - At session end a `session summary` is emitted:
   - `totalFrames`
   - `droppedFrames`
@@ -43,8 +47,9 @@ For what each metric means, how it is computed, and how to read it when tuning, 
   - `avgTotalPipelineMs`
   - `p95TotalPipelineMs`
   - `maxTotalPipelineMs`
-  - `closedElapsedMs`, `guidanceAlertCount` (with `session_start.openedElapsedMs`: the window the
-    trace observes, and how many alert records it should hold)
+  - `closedElapsedMs`, `guidanceAlertCount`, `safetyStateCount` (with
+    `session_start.openedElapsedMs`: the window the trace observes, and how many alert and state
+    records it should hold)
 - The domain layer has minimal offline replay:
   - `TraceReplayParser` — structured parse of `trace_<sessionId>.jsonl` via
     `kotlinx.serialization.json`
@@ -63,6 +68,8 @@ For what each metric means, how it is computed, and how to read it when tuning, 
     - `uniqueMessageKeys`
     - `qualificationFrameCounts`
     - `guidanceAlertCounts`, with whether the alert records are complete within the window
+    - `safetyTimeline`: how long each safety state held within the window, the time whose state is
+      unknown, and whether the state records are complete
 - `SceneAnalysisView` has real entry points:
   - **Trace sessions** page — browse stored sessions
   - **Trace replay report** page — detailed metrics for a chosen session
@@ -91,6 +98,8 @@ File format:
   - optional `overlay_render`
   - optional `prompt_outcome` (one per offered prompt)
   - optional `guidance_alert` (one per alert given or offered)
+  - `safety_state` (the one kept from before the opening right after `session_start`, then one per
+    change)
   - optional `error`
   - `session_summary`
 

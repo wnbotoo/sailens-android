@@ -41,6 +41,9 @@ import com.sailens.shell.ext.OverlayBitmapRenderer
 import com.sailens.shell.guidance.settings.GuidanceFeedbackSettings
 import com.sailens.shell.guidance.overlay.SceneOverlayConfig
 import com.sailens.shell.guidance.overlay.SceneOverlayMode
+import com.sailens.shell.guidance.safety.GuidanceSafetyObservation
+import com.sailens.shell.guidance.safety.OutputFacts
+import com.sailens.shell.guidance.safety.SystemAlert
 import com.sailens.shell.guidance.settings.GuidanceSettingsStore
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -131,6 +134,22 @@ class SceneAnalysisViewModel(
     private var stallWatchJob: Job? = null
     private val stallDetector = GuidanceStallDetector()
     private val speechUnavailableAlert = SpeechUnavailableAlert()
+
+    /**
+     * Where Guidance stands for the user, observed only. Each event below reaches its monitor once, where this view
+     * model handles it; at each alert this view model gives, the state is checked against it and the alert is traced.
+     */
+    private val safety = GuidanceSafetyObservation(
+        stallCondition = stallDetector::condition,
+        nowMs = clock(),
+        initialOutput = _uiState.value.outputFacts(),
+        recordState = traceService::recordSafetyState,
+        recordAlert = traceService::recordGuidanceAlert,
+        publishState = { state -> _uiState.update { it.copy(safetyState = state) } },
+        logger = logger,
+        timed = { _uiState.value.showDiagnostics },
+        elapsedClock = clock,
+    )
 
     /** Takes each frame's decisions to the user; see [com.sailens.guidance.delivery.GuidanceOutputProtocol]. */
     private val guidanceOutput = GuidanceOutputWiring(
@@ -269,16 +288,27 @@ class SceneAnalysisViewModel(
     /** Alerts once per speech outage, as soon as the user relies on own speech; see [SpeechUnavailableAlert]. */
     private fun checkSpeechUnavailable() {
         val state = _uiState.value
+        safety.observe { onOutput(clock(), state.outputFacts()) }
         if (speechUnavailableAlert.update(state.speechEngineState, state.isSpeechEnabled, state.isScreenReaderActive)) {
+            safety.checkGiven(SystemAlert.SPEECH_UNAVAILABLE)
             onSpeechEngineUnavailable()
         }
     }
+
+    /** The output facts the safety monitor reads, with `isReady` as delivery reads it now. */
+    private fun SceneAnalysisUiState.outputFacts() = OutputFacts(
+        engineState = speechEngineState,
+        speechEnabled = isSpeechEnabled,
+        screenReaderActive = isScreenReaderActive,
+        hapticsEnabled = isHapticsEnabled,
+        speechReady = speechManager.isReady,
+    )
 
     fun toggleAnalysis() {
         when (val action = guidanceToggleAction(_uiState.value.isRunning, startGate)) {
             GuidanceToggleAction.Stop -> stopSceneAnalysis()
             GuidanceToggleAction.Start -> {
-                _uiState.update { it.copy(isLoading = true) }
+                _uiState.startRequested { safety.observe { onStartRequested(clock()) } }
                 startSceneAnalysis()
             }
             is GuidanceToggleAction.Refuse ->
@@ -382,16 +412,16 @@ class SceneAnalysisViewModel(
                 // copy it needs is made only while it is showing.
                 semanticMaskSnapshot = { rendersSemanticClassMask() },
             ).onStart {
-                _uiState.update {
-                    it.copy(isInitializing = false, isRunning = true, isLoading = false)
-                }
+                _uiState.flowStarted { safety.observe { onFlowStarted(clock()) } }
                 logger.info(TAG, "Scene analysis started")
             }.catch { e ->
+                safety.observe { onFlowFailed(clock(), e) }
                 logger.error(TAG, "Error in scene analysis", e)
                 stopStallWatch()
                 guidanceOutput.stop()
                 latestSceneResult = null
                 // 卡片对盲人不存在：这条失效必须出声/出震，而不只是把状态改成错误。
+                safety.checkGiven(SystemAlert.FAILED)
                 alertGuidanceUnavailable(GuidanceNotice.FAILED)
                 // Keep the raw cause in state + logs (logger.error above), but surface only a
                 // friendly, localized message to the user via the status card
@@ -407,9 +437,11 @@ class SceneAnalysisViewModel(
                         errorMessage = e.message ?: "Unknown error"
                     )
                 }
+                safety.endOfSession()
             }.collectLatest { result ->
                 frameCount++
                 stallDetector.onResult(clock())
+                safety.observe { onResult(clock(), result.qualification.baseline, speechReady = speechManager.isReady) }
                 latestSceneResult = result
                 val overlayMode = _uiState.value.overlayMode
                 val events = result.events
@@ -454,26 +486,40 @@ class SceneAnalysisViewModel(
         logger.warning(TAG, "Guidance unavailable while running", mapOf("notice" to notice.name))
         sceneDescriptionCoordinator.preemptForGuidance("guidance ${notice.name.lowercase()}")
         hapticManager.play(GuidanceHaptic.INTERRUPTED)
+        safety.rhythmPlayed(notice.systemAlert, GuidanceHaptic.INTERRUPTED)
 
         val state = _uiState.value
         if (!state.isSpeechEnabled) return
         val text = noticeText.resolve(notice)
         if (state.isScreenReaderActive) {
             screenReaderAnnouncer.announce(text)
+            safety.noticePublished(notice.systemAlert)
         } else {
             speechManager.speakSystemNotice(text, priority = notice.speechPriority(detFirst))
+            safety.noticeRequested(notice.systemAlert)
         }
     }
+
+    private val GuidanceNotice.systemAlert: SystemAlert
+        get() = when (this) {
+            GuidanceNotice.FAILED -> SystemAlert.FAILED
+            GuidanceNotice.STALLED -> SystemAlert.STALLED
+        }
 
     private fun startStallWatch() {
         stallWatchJob?.cancel()
         stallDetector.start(clock())
+        safety.observe { onStallWatchStarted(clock()) }
         stallWatchJob = viewModelScope.launch {
             while (true) {
                 delay(GuidanceStallDetector.POLL_INTERVAL_MS)
+                safety.observe { poll(clock()) }
                 // 进后台时 onGuidanceInterrupted 已经告知过；那时相机停帧是必然的，不重复报。
                 if (_uiState.value.wasInterrupted) continue
                 if (stallDetector.alarmDue(clock())) {
+                    // Polled again no earlier than the alarm's own time: a limit passed since the poll above is in the state.
+                    safety.observe { poll(clock()) }
+                    safety.checkGiven(SystemAlert.STALLED)
                     alertGuidanceUnavailable(GuidanceNotice.STALLED)
                 }
             }
@@ -493,6 +539,8 @@ class SceneAnalysisViewModel(
      * 恰好和"前方安全"是同一种体验。所以这里必须主动出声 + 震动，绝不能只写日志。
      */
     fun onGuidanceInterrupted(noticeText: String) {
+        safety.observe { onLifecycleStop(clock()) }
+        safety.checkInterruption(given = _uiState.value.isRunning)
         if (!_uiState.value.isRunning) return
 
         logger.warning(TAG, "Guidance interrupted while running")
@@ -503,20 +551,25 @@ class SceneAnalysisViewModel(
 
         // 震动先行：它不依赖 TTS 引擎，是最后一道能穿透的通知手段。
         hapticManager.play(GuidanceHaptic.INTERRUPTED)
+        safety.rhythmPlayed(SystemAlert.INTERRUPTED, GuidanceHaptic.INTERRUPTED)
 
         val state = _uiState.value
         if (!state.isSpeechEnabled) return
         if (state.isScreenReaderActive) {
             screenReaderAnnouncer.announce(noticeText)
+            safety.noticePublished(SystemAlert.INTERRUPTED)
         } else {
             // 必须说完：一条普通导航提示不能把"辅助已中断"冲掉。
             speechManager.speakSystemNotice(noticeText, priority = GuidanceNotice.INTERRUPTED_PRIORITY)
+            safety.noticeRequested(SystemAlert.INTERRUPTED)
         }
     }
 
     fun acknowledgeInterruption() {
         // 回到前台时相机要重新绑定，第一帧之前的空档不是卡死：给它重新计启动宽限。
         if (_uiState.value.isRunning && stallWatchJob != null) stallDetector.start(clock())
+        // After the detector's restart, so the monitor reads the new grace; before the UI state clears the interruption.
+        safety.observe { onLifecycleStart(clock()) }
         _uiState.update { it.copy(wasInterrupted = false) }
     }
 
@@ -539,6 +592,7 @@ class SceneAnalysisViewModel(
 
         logger.error(TAG, "Speech engine unavailable; alerting through haptics")
         hapticManager.play(GuidanceHaptic.SPEECH_UNAVAILABLE)
+        safety.rhythmPlayed(SystemAlert.SPEECH_UNAVAILABLE, GuidanceHaptic.SPEECH_UNAVAILABLE)
     }
 
     /**
@@ -577,27 +631,13 @@ class SceneAnalysisViewModel(
             overlayRenderJob = null
             latestSceneResult = null
         }
-        _uiState.update {
-            it.copy(
-                isRunning = false,
-                isInitializing = false,
-                isLoading = false,
-                // 用户主动停止，中断告警自然作废。
-                wasInterrupted = false,
-                lastEvents = emptyList(),
-                activeStatusEvent = null,
-                lastAnnouncedEvent = null,
-                segMask = null,
-                maskSourceAgeMs = 0L,
-                frameDisplayWidth = null,
-                frameDisplayHeight = null,
-                obstacleDetections = emptyList(),
-                latestSceneDebugInfo = null,
-            )
-        }
+        _uiState.stopped { safety.observe { onStopped(clock()) } }
+        safety.endOfSession()
     }
 
     override fun onCleared() {
+        safety.observe { onStopped(clock()) }
+        safety.endOfSession()
         stopStallWatch()
         guidanceOutput.protocol.reset()
         overlayRenderJob?.cancel()

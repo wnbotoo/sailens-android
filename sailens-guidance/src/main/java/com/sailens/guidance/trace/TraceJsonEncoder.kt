@@ -3,6 +3,7 @@ package com.sailens.guidance.trace
 import com.sailens.guidance.model.trace.FrameTrace
 import com.sailens.guidance.model.trace.GuidanceAlertTrace
 import com.sailens.guidance.model.trace.PromptOutcomeTrace
+import com.sailens.guidance.model.trace.SafetyStateTrace
 import com.sailens.guidance.model.trace.SessionTraceMetadata
 import com.sailens.guidance.model.trace.SessionTraceSummary
 import org.json.JSONArray
@@ -16,6 +17,28 @@ internal object TraceJsonEncoder {
         put("pipelineMode", metadata.pipelineMode)
         put("targetHardwareProfile", metadata.targetHardwareProfile)
         metadata.openedElapsedMs?.let { put("openedElapsedMs", it) }
+        if (metadata.safetyTrace) put("safetyTrace", true)
+    }
+
+    fun encodeSafetyState(state: SafetyStateTrace): JSONObject = JSONObject().apply {
+        put("type", "safety_state")
+        put("sessionId", state.sessionId)
+        put("seq", state.seq)
+        put("at", state.at)
+        put("elapsedMs", state.elapsedMs)
+        put("stateSinceElapsedMs", state.stateSinceElapsedMs)
+        put("state", state.state)
+        put("reasons", JSONArray(state.reasons))
+        put("phase", state.phase)
+        put("interrupted", state.interrupted)
+        put("stall", state.stall)
+        state.judgement?.let {
+            put("judgement", it)
+            put("judgementReasons", JSONArray(state.judgementReasons))
+        }
+        put("outputFaults", JSONArray(state.outputFaults))
+        put("expectedNavigationChannel", state.expectedNavigationChannel)
+        put("cause", state.cause)
     }
 
     fun encodeFrame(frameTrace: FrameTrace): JSONObject = JSONObject().apply {
@@ -215,6 +238,7 @@ internal object TraceJsonEncoder {
         put("maxTotalPipelineMs", summary.maxTotalPipelineMs)
         summary.closedElapsedMs?.let { put("closedElapsedMs", it) }
         summary.guidanceAlertCount?.let { put("guidanceAlertCount", it) }
+        summary.safetyStateCount?.let { put("safetyStateCount", it) }
     }
 
     fun encodeError(sessionId: String, stage: String, throwable: Throwable): JSONObject = JSONObject().apply {

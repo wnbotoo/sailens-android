@@ -1,5 +1,7 @@
 package com.sailens.shell.guidance.screen
 
+import com.sailens.shell.guidance.safety.StallCondition
+
 /**
  * Notices when a running Guidance session has stopped producing results.
  *
@@ -43,6 +45,17 @@ internal class GuidanceStallDetector(
         hasResult = true
         lastProgressAtMs = nowMs
         lastAlarmAtMs = null
+    }
+
+    /**
+     * Whether the session is stalled at [nowMs]: the test [alarmDue] starts with, and nothing more. It reads only;
+     * whether an alarm is due, and its repeat, are left to [alarmDue].
+     */
+    fun condition(nowMs: Long): StallCondition {
+        if (!watching) return StallCondition.NONE
+        val limit = if (hasResult) stallAfterMs else startupTimeoutMs
+        if (nowMs - lastProgressAtMs < limit) return StallCondition.NONE
+        return if (hasResult) StallCondition.NO_RESULTS else StallCondition.STARTUP_TIMEOUT
     }
 
     /** True when the session is stalled and an alarm is due now. Records the alarm when it is. */

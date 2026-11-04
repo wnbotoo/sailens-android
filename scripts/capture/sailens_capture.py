@@ -217,6 +217,9 @@ class Trace:
     prompt_outcomes: list = field(default_factory=list)
     # guidance_alert records, in file order: what the user was told or offered within the trace's window.
     alerts: list = field(default_factory=list)
+    # safety_state records, in file order: where Guidance stood for the user, and the facts it was derived from.
+    # Durations come from elapsedMs and stateSinceElapsedMs, never from the wall-clock "at"; a gap in "seq" is unknown.
+    safety_states: list = field(default_factory=list)
     warnings: list = field(default_factory=list)
 
 
@@ -239,6 +242,8 @@ def load_trace(path: str) -> Trace:
                 trace.prompt_outcomes.append(record)
             elif kind == "guidance_alert":
                 trace.alerts.append(record)
+            elif kind == "safety_state":
+                trace.safety_states.append(record)
     return trace
 
 

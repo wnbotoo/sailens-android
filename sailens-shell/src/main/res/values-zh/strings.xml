@@ -108,6 +108,7 @@
     <string name="settings_perception_default_supporting">增加障碍物识别：行人、车辆及路面物体</string>
     <string name="settings_perception_apply_hint">更改将在下次开始导航时生效</string>
     <string name="title_live_pipeline_debug">实时 Pipeline 调试</string>
+    <string name="debug_safety_state">安全状态：%1$s</string>
     <string name="debug_semantic_provider">语义提供者：%1$s</string>
     <string name="debug_obstacle_provider">障碍物提供者：%1$s</string>
     <string name="debug_perception_profile">感知挡位：%1$s</string>
@@ -245,6 +246,7 @@
     <string name="trace_report_blockage_reasons">阻塞原因：%1$s</string>
     <string name="trace_report_qualification_frames">各资格的帧数：%1$s</string>
     <string name="trace_report_guidance_alerts">trace 窗口内的告警：%1$s；记录 %2$s</string>
+    <string name="trace_report_safety_states">trace 窗口内的安全状态：%1$s；未知 %2$s；记录 %3$s</string>
     <string name="trace_session_button_label">会话 %1$s</string>
     <string name="trace_session_selected_label">当前会话 %1$s</string>
     <string name="trace_session_file_name">文件：%1$s</string>

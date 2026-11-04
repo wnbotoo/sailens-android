@@ -12,6 +12,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.sailens.guidance.model.scene.SceneDebugInfo
 import com.sailens.shell.R
+import com.sailens.shell.guidance.safety.GuidanceSafetyState
+import com.sailens.shell.guidance.safety.label
 
 /**
  * Dense live-pipeline metrics panel for the debug-only guidance surface. It is an engineering
@@ -21,6 +23,7 @@ import com.sailens.shell.R
 internal fun SceneDebugInfoView(
     debugInfo: SceneDebugInfo,
     maskSourceAgeMs: Long,
+    safetyState: GuidanceSafetyState,
     modifier: Modifier = Modifier,
     scrollable: Boolean = false,
 ) {
@@ -67,6 +70,7 @@ internal fun SceneDebugInfoView(
             text = stringResource(R.string.title_live_pipeline_debug),
             style = MaterialTheme.typography.titleSmall,
         )
+        SafetyStateLine(safetyState)
         Text(stringResource(R.string.debug_semantic_provider, debugInfo.semanticProvider))
         Text(stringResource(R.string.debug_obstacle_provider, debugInfo.obstacleProvider))
         Text(stringResource(R.string.debug_perception_profile, debugInfo.perceptionProfile))
@@ -198,4 +202,13 @@ internal fun SceneDebugInfoView(
             },
         )
     }
+}
+
+/**
+ * The safety state with its reasons, as the trace names them. Part of the debug panel, and shown alone while there is
+ * no frame to show the panel for (starting, stopped): only where the diagnostics are.
+ */
+@Composable
+internal fun SafetyStateLine(safetyState: GuidanceSafetyState, modifier: Modifier = Modifier) {
+    Text(stringResource(R.string.debug_safety_state, safetyState.label), modifier = modifier)
 }

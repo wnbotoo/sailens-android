@@ -24,6 +24,8 @@ A trace is a JSONL file; each line is one event:
   received — label false alarms against `prompt_outcome`.
 - `guidance_alert` — one alert the user was given or offered about a fault: a sentence or a rhythm
   and what the output did with it. See [Qualification and alerts](#qualification-and-alerts).
+- `safety_state` — where Guidance stood for the user, and the facts it was derived from, written
+  whenever either changed. See [Safety state](#safety-state).
 - `session_summary` — the aggregate summary after a session ends.
 - `error` — an exception in the pipeline or in tracing.
 
@@ -805,13 +807,22 @@ Each is absent in traces written before it existed, which means "not recorded", 
 ### `guidance_alert`
 
 One record per alert the user was given or offered: `source` (`vision` for a covered lens, low light
-or an unrecognised floor), `kind` (`fault_notice`, `fault_recovery`, `fault_rhythm`), a sentence's
-`messageKey` or a rhythm's `haptic`, `priority`, `channel` (`speech`, `screen_reader`, `haptics`, or
-`none` when nothing was offered: speech off, or a scene description holding the floor) and `result`:
+or an unrecognised floor; `system` for Guidance itself stalling, failing, being interrupted, or its
+own speech going unavailable), `kind` (`fault_notice`, `fault_recovery`, `fault_rhythm`; `stalled`,
+`failed`, `interrupted`, `speech_unavailable`), a sentence's `messageKey` or a rhythm's `haptic`,
+`priority`, `channel` (`speech`, `screen_reader`, `haptics`, or `none` when nothing was offered:
+speech off, or a scene description holding the floor) and `result`:
 
 - a sentence: `accepted` (own speech took it), `published` (the screen reader took it) or `refused`;
+  a system notice handed to own speech is `requested`, because own speech reports nothing back for it;
 - a rhythm: `requested` when asked of the motor, `played` when it started, `cancelled` when withdrawn
-  before it started.
+  before it started. A system alert's rhythm claims the motor unconditionally, so it is `played` at
+  once.
+
+A system alert gives a rhythm record (`interrupted`, or `speech_unavailable`), then, with speech on, a
+sentence record (`notice_guidance_stalled`, `notice_guidance_failed`, `notice_guidance_interrupted`;
+speech going unavailable has no sentence). `priority` is an `EventPriority` name, or `max` for an alert
+nothing may cut: a failure, an interruption, the speech-unavailable alarm; a stall notice is `high`.
 
 `at` is wall clock, for lining records up with frames; `elapsedMs` is elapsed realtime. `seq` numbers
 the session's alert records from 1.
@@ -821,7 +832,8 @@ the session's alert records from 1.
 Records reach a trace only while its session is open. `session_start.openedElapsedMs` and
 `session_summary.closedElapsedMs` bound that window in elapsed realtime; an alert outside it is in no
 trace. `session_summary.guidanceAlertCount` is how many alert records the session queued, so a
-complete trace holds every `seq` from 1 to it.
+complete trace holds every `seq` from 1 to it. An alert given before the session opened (Guidance
+interrupted while its models still load, say) is in no trace and not in the count.
 
 ### `qualificationFrames`
 
@@ -842,6 +854,86 @@ window, not every alert of the run.
 - `not_recorded`: the trace was written before alert records existed. A trace that kept anything
   newer (the count, the start's window, an alert, or a frame's `qualification`) is never this, even
   when the queue dropped its start and every alert.
+
+## Safety state
+
+Where Guidance stood for the user, as one state, derived in the shell from facts it already keeps.
+Observation only: the debug panel shows it, nothing decides on it, and the user is not told of it.
+"It cannot say it" (the output) and "it cannot judge the way" (the judgement) are separate facts: the
+output alone never moves the state into or out of a stop, an interruption or a failure.
+
+### States
+
+By the first rule that holds:
+
+1. `failed` (`pipeline_failed`: thirty frames in a row failed; `error`: anything else that ended the
+   analysis);
+2. `idle`: not running;
+3. `interrupted` (`lifecycle`): the app went to the background during a running session;
+4. `stop_required` (`startup_stalled` / `perception_stalled`): no first result within 20 s, or no new
+   one for 2.5 s after results;
+5. `initializing`: starting, or running and waiting for the first result, also again after coming
+   back to the foreground;
+6. `stop_required` (`camera_obstructed` / `too_dark`): the latest frame was unqualified;
+7. `degraded`: part of the judgement paused (`ground_unrecognized`) or own speech impaired
+   (`speech_unavailable`, `speech_not_ready`);
+8. `guiding`.
+
+### `safety_state`
+
+`state` and its `reasons`; the facts: `phase` (`not_started`, `starting`, `awaiting_first_result`,
+`running`, `failed`), `interrupted`, `stall` (`none`, `startup_timeout`, `no_results`), `judgement`
+(the latest result's `qualification`, with `judgementReasons`; absent before the first result),
+`outputFaults` (own speech by its engine's state, when the user relies on it), and
+`expectedNavigationChannel` (`speech`, `screen_reader`, `haptics_only`, `status_card_only`, `none`):
+the channel the next navigation prompt is expected to go out on, by the delivery's own branches. It is
+a sample, not evidence of delivery (that is `prompt_outcome`), and it is not part of the state:
+`none` alone is still `guiding`. The engine can be ready to speak again while `outputFaults` still
+says `speech_unavailable`: the engine has not yet proved it recovered.
+
+`cause` is the input that changed something (`start_requested`, `flow_started`, `result`, `poll`,
+`output`, `lifecycle_stop`, ...). `elapsedMs` is when it was observed and `stateSinceElapsedMs` since
+when the state (with its reasons) has held, both elapsed realtime; a record that only changes a fact
+keeps `stateSinceElapsedMs`. `at` is wall clock, for lining up only. `seq` numbers the session's state
+records from 1.
+
+The state outlives the window. The latest record is kept while no session is open, and written again
+as the session's first state record (`cause` `session_start`, `seq` 1, `elapsedMs` the opening,
+`stateSinceElapsedMs` as it was), so a session's timeline starts on its first lines even though the
+start request and the flow's start come before the trace opens. `session_start.safetyTrace` says the
+trace records these; without it a trace has no timeline, which is not one in which nothing changed.
+`session_summary.safetyStateCount` is how many state records the session queued.
+
+The analysis flow closes the trace before the shell handles its error, so `failed` and the alert for
+it are never in a trace. The report says when a trace's flow ended on an error.
+
+### `safetyStatesInWindow`
+
+How long each state (with its reasons) held within the window, by elapsed realtime alone; a jump of
+the wall clock changes nothing. A state counts from its `stateSinceElapsedMs`, or the window's start
+when it began before, to the next different state's, or the window's end. Records that only change a
+fact neither restart a state nor count it twice.
+
+What the records cannot tell is `unknown`, never given to a neighbouring state:
+
+- a gap in `seq`: from the record before it to the next record's `stateSinceElapsedMs` (the missing
+  records may have changed the state any time after the earlier one was observed). When the next
+  record's state began before that, only a fact was lost, and nothing is unknown;
+- fewer records than `safetyStateCount`: from the last one kept to the window's end;
+- no `seq` 1: from the window's start to the first record's state;
+- no record at all: the whole window.
+
+Gaps are found on the records as read, before neighbours of the same state are joined, and unknown
+time overrides known time where they overlap. True states 0-10 s `guiding`, 10-20 s
+`stop_required`, 20-30 s `guiding`, with only the `stop_required` record lost, read as `guiding` 10 s
+(20-30) and unknown 20 s (0-20): never `guiding` 30 s.
+
+Without `session_start`, the window opens where the session's first state record was written; without
+that too, counting starts at the first record kept (`+ before the first record`). Without
+`session_summary`, counting stops at the last record kept (`+ after the last record`): the time beyond
+is unknown and its length too. `records` is `complete`, `incomplete (missing n)`,
+`possibly_incomplete` (no count) or `not_recorded`, as for alerts, with `ended on an error` when the
+trace records the flow ending on one.
 
 ## Quick diagnosis paths
 

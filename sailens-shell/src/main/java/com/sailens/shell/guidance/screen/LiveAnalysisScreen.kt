@@ -79,6 +79,7 @@ import com.sailens.guidance.model.perception.ObstacleDetection
 import com.sailens.shell.R
 import com.sailens.shell.capture.FieldCaptureMarkerButton
 import com.sailens.shell.device.SceneEventTextResolver
+import com.sailens.shell.guidance.overlay.SafetyStateLine
 import com.sailens.shell.guidance.overlay.SceneDebugInfoView
 import com.sailens.shell.guidance.overlay.SceneOverlayMode
 import com.sailens.output.SpeechEngineState
@@ -728,13 +729,17 @@ private fun ControlView(
                     SceneDebugInfoView(
                         debugInfo = debugInfo,
                         maskSourceAgeMs = state.maskSourceAgeMs,
+                        safetyState = state.safetyState,
                         modifier = Modifier.fillMaxWidth(),
                     )
-                } ?: Text(
-                    text = stringResource(R.string.msg_no_live_pipeline_debug),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                } ?: run {
+                    SafetyStateLine(state.safetyState, modifier = Modifier.fillMaxWidth())
+                    Text(
+                        text = stringResource(R.string.msg_no_live_pipeline_debug),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
     }

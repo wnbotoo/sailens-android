@@ -3,6 +3,7 @@ package com.sailens.guidance.trace
 import com.sailens.guidance.model.trace.FrameTrace
 import com.sailens.guidance.model.trace.GuidanceAlertTrace
 import com.sailens.guidance.model.trace.PromptOutcomeTrace
+import com.sailens.guidance.model.trace.SafetyStateTrace
 import com.sailens.guidance.model.trace.SessionTraceMetadata
 import com.sailens.guidance.model.trace.SessionTraceSummary
 import org.json.JSONObject
@@ -55,6 +56,12 @@ internal sealed interface TraceQueueEntry {
         val alert: GuidanceAlertTrace,
     ) : TraceQueueEntry {
         override fun encode(): JSONObject = TraceJsonEncoder.encodeGuidanceAlert(alert)
+    }
+
+    data class SafetyState(
+        val state: SafetyStateTrace,
+    ) : TraceQueueEntry {
+        override fun encode(): JSONObject = TraceJsonEncoder.encodeSafetyState(state)
     }
 
     data class Error(

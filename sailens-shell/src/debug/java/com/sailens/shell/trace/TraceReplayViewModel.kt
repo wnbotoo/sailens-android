@@ -2,6 +2,8 @@ package com.sailens.shell.trace
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.sailens.guidance.model.trace.SafetyRecordCompleteness
+import com.sailens.guidance.model.trace.SafetyStateTimeline
 import com.sailens.guidance.model.trace.TraceReplayReport
 import com.sailens.guidance.model.trace.TraceSessionDescriptor
 import com.sailens.core.log.LogService
@@ -19,6 +21,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.Locale
 
 private const val TAG = "TraceReplayViewModel"
 
@@ -221,6 +224,10 @@ class TraceReplayViewModel(
             appendLine("messageKeys=${report.uniqueMessageKeys.joinToString()}")
             appendLine("qualificationFrames=${report.qualificationFrameCounts.countsOrNone()}")
             appendLine("alertsInWindow=${report.guidanceAlertCounts.countsOrNone()} records=${report.alertCompletenessText()}")
+            appendLine(
+                "safetyStatesInWindow=${report.safetyTimeline.durationsText()} unknown=${report.safetyTimeline.unknownText()} " +
+                    "records=${report.safetyTimeline.recordsText()}",
+            )
             append(warningSection)
         }
     }
@@ -245,3 +252,29 @@ internal fun TraceReplayReport.alertCompletenessText(): String {
     val name = guidanceAlertCompleteness.name.lowercase()
     return if (guidanceAlertsMissing > 0) "$name (missing $guidanceAlertsMissing)" else name
 }
+
+/** "state:12.3s, ...": the time each safety state is known to have held in the window; "none", or "not recorded". */
+internal fun SafetyStateTimeline.durationsText(): String = when {
+    completeness == SafetyRecordCompleteness.NOT_RECORDED -> "not recorded"
+    durationsMs.isEmpty() -> "none"
+    else -> durationsMs.entries.joinToString { (label, ms) -> "$label:${ms.seconds()}" }
+}
+
+/** The time in the window whose state is unknown, and the unknown stretches of unknown length beyond a lost bound. */
+internal fun SafetyStateTimeline.unknownText(): String {
+    if (completeness == SafetyRecordCompleteness.NOT_RECORDED) return "-"
+    return buildString {
+        append(unknownMs.seconds())
+        if (!windowStartKnown) append(" + before the first record")
+        if (!windowEndKnown) append(" + after the last record")
+    }
+}
+
+/** Whether the safety-state records are all those of the window, how many are known missing, and how it ended. */
+internal fun SafetyStateTimeline.recordsText(): String = buildString {
+    append(completeness.name.lowercase())
+    if (missingRecords > 0) append(" (missing $missingRecords)")
+    if (endedOnError) append(", ended on an error")
+}
+
+private fun Long.seconds(): String = String.format(Locale.ROOT, "%.1fs", this / 1000.0)

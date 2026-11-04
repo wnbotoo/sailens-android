@@ -282,6 +282,36 @@ class TraceTest(unittest.TestCase):
             self.assertEqual([(a["seq"], a["result"]) for a in trace.alerts], [(1, "requested"), (2, "played")])
             self.assertEqual([o["eventId"] for o in trace.prompt_outcomes], ["e1"])
             self.assertEqual(trace.frames_by_seq[3]["qualification"], "unqualified")
+            self.assertEqual(trace.safety_states, [])
+            self.assertEqual(trace.warnings, [])
+
+    def test_safety_state_records_are_kept_in_order_beside_the_alerts(self):
+        def state(seq, name, since, elapsed, cause, reasons=()):
+            return {"type": "safety_state", "sessionId": "s", "seq": seq, "at": START_WALL + elapsed, "elapsedMs": elapsed,
+                    "stateSinceElapsedMs": since, "state": name, "reasons": list(reasons), "phase": "running",
+                    "interrupted": False, "stall": "none", "outputFaults": [], "expectedNavigationChannel": "speech",
+                    "cause": cause}
+
+        with tempfile.TemporaryDirectory() as root:
+            path = os.path.join(root, "trace_s.jsonl")
+            with open(path, "w") as f:
+                for record in (
+                    {"type": "session_start", "sessionId": "s", "openedElapsedMs": 9_000, "safetyTrace": True},
+                    state(1, "initializing", since=8_100, elapsed=9_000, cause="session_start"),
+                    {"type": "guidance_alert", "sessionId": "s", "seq": 1, "at": START_WALL, "elapsedMs": 9_500, "source": "system",
+                     "kind": "interrupted", "haptic": "interrupted", "priority": "max", "channel": "haptics", "result": "played"},
+                    state(2, "stop_required", since=10_000, elapsed=10_000, cause="result", reasons=["camera_obstructed"]),
+                    {"type": "a_later_record"},
+                    {"type": "session_summary", "sessionId": "s", "closedElapsedMs": 12_000, "safetyStateCount": 2, "guidanceAlertCount": 1},
+                ):
+                    f.write(json.dumps(record) + "\n")
+
+            trace = load_trace(path)
+            self.assertEqual(
+                [(s["seq"], s["state"], s["reasons"], s["cause"]) for s in trace.safety_states],
+                [(1, "initializing", [], "session_start"), (2, "stop_required", ["camera_obstructed"], "result")],
+            )
+            self.assertEqual([(a["source"], a["kind"]) for a in trace.alerts], [("system", "interrupted")])
             self.assertEqual(trace.warnings, [])
 
 

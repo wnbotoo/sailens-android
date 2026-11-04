@@ -454,6 +454,14 @@ private fun TraceReplayReportDetail(
                     report.alertCompletenessText(),
                 )
             )
+            TraceMetricLine(
+                stringResource(
+                    R.string.trace_report_safety_states,
+                    report.safetyTimeline.durationsText(),
+                    report.safetyTimeline.unknownText(),
+                    report.safetyTimeline.recordsText(),
+                )
+            )
 
             Spacer(modifier = Modifier.height(4.dp))
 

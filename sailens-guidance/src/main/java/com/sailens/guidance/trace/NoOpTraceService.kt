@@ -3,6 +3,7 @@ package com.sailens.guidance.trace
 import com.sailens.guidance.model.trace.FrameTrace
 import com.sailens.guidance.model.trace.GuidanceAlertTrace
 import com.sailens.guidance.model.trace.PromptOutcomeTrace
+import com.sailens.guidance.model.trace.SafetyStateTrace
 import com.sailens.guidance.model.trace.SessionTraceMetadata
 import com.sailens.guidance.model.trace.SessionTraceSummary
 import com.sailens.guidance.service.TraceService
@@ -29,4 +30,6 @@ object NoOpTraceService : TraceService {
     override fun finishSession(summary: SessionTraceSummary) = Unit
 
     override fun recordGuidanceAlert(alert: GuidanceAlertTrace) = Unit
+
+    override fun recordSafetyState(state: SafetyStateTrace) = Unit
 }
