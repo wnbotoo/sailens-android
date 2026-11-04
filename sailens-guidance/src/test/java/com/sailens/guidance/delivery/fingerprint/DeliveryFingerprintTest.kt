@@ -11,6 +11,7 @@ import com.sailens.guidance.trace.capture.CaptureSchema
 import com.sailens.guidance.trace.capture.CaptureSessionReader
 import com.sailens.guidance.trace.capture.orThrow
 import com.sailens.guidance.trace.regression.RegressionReplay
+import com.sailens.guidance.trace.regression.replayProblem
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Test
