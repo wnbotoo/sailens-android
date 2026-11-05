@@ -308,6 +308,7 @@ class SceneAnalysisViewModel(
         when (val action = guidanceToggleAction(_uiState.value.isRunning, startGate)) {
             GuidanceToggleAction.Stop -> stopSceneAnalysis()
             GuidanceToggleAction.Start -> {
+                safety.startOfSession()
                 _uiState.startRequested { safety.observe { onStartRequested(clock()) } }
                 startSceneAnalysis()
             }

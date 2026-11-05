@@ -224,6 +224,7 @@ class GuidanceSafetyObservationTest {
     @Test
     fun `with diagnostics on, the session's main-thread time is logged at its end, then started afresh`() {
         diagnostics = true
+        observation.startOfSession()
         for (micros in listOf(10L, 20L, 30L, 40L, 1_000L)) {
             observation.observe {
                 nanos += micros * 1_000
@@ -246,9 +247,31 @@ class GuidanceSafetyObservationTest {
 
     @Test
     fun `with diagnostics off, nothing is timed or logged`() {
+        observation.startOfSession()
         running()
         observation.endOfSession()
         assertEquals(emptyList<String>(), log)
+    }
+
+    @Test
+    fun `a call outside a session is not timed - before the start is asked for, or after the session ended`() {
+        diagnostics = true
+        fun call(micros: Long) = observation.observe {
+            nanos += micros * 1_000
+            poll(0)
+        }
+        // The speech engine coming up as the app starts: no session yet.
+        call(5_000)
+        observation.startOfSession()
+        repeat(3) { call(10) }
+        observation.endOfSession()
+        call(5_000)
+        observation.endOfSession()
+
+        assertEquals("one session, logged once", listOf("info Safety observation main-thread time"), log)
+        val summary = logData.single()!!
+        assertEquals(3L, summary["calls"])
+        assertEquals(0.01, summary["maxMs"] as Double, 1e-9)
     }
 
     @Test

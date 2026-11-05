@@ -15,8 +15,9 @@ import com.sailens.shell.device.GuidanceHaptic
  * Nothing here decides anything. A disagreement is a warning in the log, never a change to an alert; a fault in an
  * observation call is an error in the log, never an exception into the view model.
  *
- * While [timed] (diagnostics on), the main-thread time of every call through here is kept, and [endOfSession] logs
- * its p50, p95 and maximum.
+ * While [timed] (diagnostics on), the main-thread time of every call through here from [startOfSession] to
+ * [endOfSession] is kept, and [endOfSession] logs its count, p50, p95 and maximum. A call outside a session (the speech
+ * engine coming up as the app starts, say) belongs to none and is not timed.
  *
  * @param recordState the trace's `safety_state` record.
  * @param recordAlert the trace's `guidance_alert` record.
@@ -37,6 +38,9 @@ internal class GuidanceSafetyObservation(
     private val nanoClock: () -> Long = System::nanoTime,
 ) {
     private val cost = ObservationCost()
+
+    /** Between [startOfSession] and [endOfSession]: only then is a call timed. */
+    private var inSession = false
 
     val monitor = GuidanceSafetyMonitor(stallCondition, nowMs, initialOutput, onChange = ::changed)
 
@@ -80,11 +84,18 @@ internal class GuidanceSafetyObservation(
 
     private fun SystemAlert.sentenceKey(): String = checkNotNull(noticeKey) { "$this has no sentence" }
 
-    /** A session ended: logs the main-thread time kept since the last one, if any was. */
-    fun endOfSession() {
-        val summary = cost.summary() ?: return
-        logger.info(TAG, "Safety observation main-thread time", summary)
+    /** The user asked to start: main-thread time is kept from the next call on, the start request's own included. */
+    fun startOfSession() {
         cost.clear()
+        inSession = true
+    }
+
+    /** A session ended: logs the main-thread time kept since it started, if any was, and keeps none until the next. */
+    fun endOfSession() {
+        inSession = false
+        val summary = cost.summary()
+        cost.clear()
+        if (summary != null) logger.info(TAG, "Safety observation main-thread time", summary)
     }
 
     /**
@@ -123,11 +134,11 @@ internal class GuidanceSafetyObservation(
     }
 
     /**
-     * Runs one call, timed while diagnostics are on. A fault in it is logged and goes no further: observing must not
-     * change what the view model does next, and an exception would.
+     * Runs one call, timed while a session runs and diagnostics are on. A fault in it is logged and goes no further:
+     * observing must not change what the view model does next, and an exception would.
      */
     private inline fun timedCall(block: () -> Unit) {
-        val started = if (timed()) nanoClock() else null
+        val started = if (inSession && timed()) nanoClock() else null
         try {
             contained(block)
         } finally {
