@@ -855,7 +855,7 @@ recorded while it was open, not every alert of the run; a few at the opening can
 just before the window (see above). To compare an alert by when it happened, use its `elapsedMs`.
 
 - `complete`: every `seq` from 1 to `guidanceAlertCount` is there, that is every alert the session
-  recorded. It says nothing of alerts given while no session was open.
+  recorded. It says nothing of alerts recorded while no session was open.
 - `incomplete (missing n)`: a gap, a first `seq` above 1, or fewer records than counted. The trace
   queue drops the oldest entries when it overflows, so a busy trace can lose some.
 - `possibly_incomplete`: none found missing, but there is no count (the process died before the

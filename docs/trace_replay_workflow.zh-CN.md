@@ -26,7 +26,7 @@
   - `isBlocked` / `isNarrowing` / `isRoadDangerous`
   - `messageKeys`
   - `frameQuality` / `frameQualityClassified`、`qualification` / `qualificationReasons`、`capabilities`、`receiptToDecisionMs`（见[资格与告警](trace_metrics_guide.zh-CN.md#资格与告警)）
-- 会话打开期间，每次给用户或试图给用户的告知记一条 `guidance_alert`，按 `seq` 编号：视觉故障的告知，以及 shell 发出的卡死、出错、中断和语音失效告警
+- 每次给用户或试图给用户的告知记一条 `guidance_alert`，归入记录它时打开着的那段会话，按 `seq` 编号：视觉故障的告知，以及 shell 发出的卡死、出错、中断和语音失效告警
 - 安全状态或它背后的事实每变化一次记一条 `safety_state`，按 `seq` 编号；会话打开之前保留的那条紧跟在 `session_start` 之后，作为第一条（见[安全状态](trace_metrics_guide.zh-CN.md#安全状态)）
 - 会话结束时会输出 `session summary`：
   - `totalFrames`

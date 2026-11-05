@@ -30,9 +30,9 @@ For what each metric means, how it is computed, and how to read it when tuning, 
   - `frameQuality` / `frameQualityClassified`, `qualification` / `qualificationReasons`,
     `capabilities`, `receiptToDecisionMs` (see
     [Qualification and alerts](trace_metrics_guide.md#qualification-and-alerts))
-- Every alert given or offered while the session is open records a `guidance_alert`, numbered by
-  `seq`: the vision faults' and, from the shell, a stall, a failure, an interruption and speech
-  going unavailable.
+- Every alert given or offered records a `guidance_alert` in the session open when it is recorded,
+  numbered by `seq`: the vision faults' and, from the shell, a stall, a failure, an interruption and
+  speech going unavailable.
 - Every change of the safety state or a fact behind it records a `safety_state`, numbered by `seq`;
   the one kept from before the session opened is its first, right after `session_start` (see
   [Safety state](trace_metrics_guide.md#safety-state)).

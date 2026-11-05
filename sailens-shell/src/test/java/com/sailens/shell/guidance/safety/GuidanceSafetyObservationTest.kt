@@ -275,6 +275,25 @@ class GuidanceSafetyObservationTest {
     }
 
     @Test
+    fun `a start asked for again before the session ended keeps what the first one's calls took`() {
+        diagnostics = true
+        fun call(micros: Long) = observation.observe {
+            nanos += micros * 1_000
+            poll(0)
+        }
+        observation.startOfSession()
+        call(5_000)
+        // The first request is still waiting to start, and the user asks again.
+        observation.startOfSession()
+        call(10)
+        observation.endOfSession()
+
+        val summary = logData.single()!!
+        assertEquals(2L, summary["calls"])
+        assertEquals(5.0, summary["maxMs"] as Double, 1e-9)
+    }
+
+    @Test
     fun `percentiles are the microsecond above, the maximum exact, and a long call is not lost`() {
         val cost = ObservationCost(buckets = 1_000)
         assertNull(cost.percentileMs(0.95))

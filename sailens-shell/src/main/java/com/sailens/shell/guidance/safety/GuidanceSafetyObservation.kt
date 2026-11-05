@@ -84,8 +84,13 @@ internal class GuidanceSafetyObservation(
 
     private fun SystemAlert.sentenceKey(): String = checkNotNull(noticeKey) { "$this has no sentence" }
 
-    /** The user asked to start: main-thread time is kept from the next call on, the start request's own included. */
+    /**
+     * The user asked to start: main-thread time is kept from the next call on, the start request's own included. Asked
+     * again before the session ended (the first request still waiting to start), it is the same session, and what was
+     * kept stays.
+     */
     fun startOfSession() {
+        if (inSession) return
         cost.clear()
         inSession = true
     }

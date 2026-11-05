@@ -19,7 +19,10 @@ data class TraceReplaySession(
     val promptOutcomes: List<PromptOutcomeTrace> = emptyList(),
     val errors: List<TraceReplayError>,
     val summary: SessionTraceSummary?,
-    /** The alerts given or offered while the trace's session was open, in file order; empty for traces recorded before these were written. */
+    /**
+     * The alerts the trace's session recorded while it was open, one given just before the opening and recorded after
+     * it included, in file order; empty for traces recorded before these were written.
+     */
     val guidanceAlerts: List<GuidanceAlertTrace> = emptyList(),
     /** The safety-state records, in file order; empty for traces recorded before these were written. */
     val safetyStates: List<SafetyStateTrace> = emptyList(),
