@@ -46,6 +46,9 @@ class GuidanceSystemAlertsTest {
     private var screenReader = false
     private var hapticsEnabled = true
     private var engine = SpeechEngineState.READY
+
+    /** The engine's `isReady`, apart from its state: a rebuilt engine takes speech while its state still says unavailable. */
+    private var ready = true
     private var vibrates = true
 
     private fun call(what: String) {
@@ -61,14 +64,26 @@ class GuidanceSystemAlertsTest {
             call("log error $tag: $message" + (throwable?.let { " (${it.message})" } ?: ""))
     }
 
-    /** The output facts the view model passes, `isReady` reading as the engine's state says. */
+    /** The output facts the view model builds the alerts with. */
     private fun facts() = OutputFacts(
         engineState = engine,
         speechEnabled = speechEnabled,
         screenReaderActive = screenReader,
         hapticsEnabled = hapticsEnabled,
-        speechReady = engine == SpeechEngineState.READY,
+        speechReady = ready,
     )
+
+    /** The engine gives up: unavailable, and nothing takes speech. */
+    private fun engineFails() {
+        engine = SpeechEngineState.UNAVAILABLE
+        ready = false
+    }
+
+    /** The engine is back and has spoken: ready by both readings. */
+    private fun engineRecovers() {
+        engine = SpeechEngineState.READY
+        ready = true
+    }
 
     private fun alerts(detFirst: DetFirstConfig = DetFirstConfig()) = GuidanceSystemAlerts(
         cancelStallLoop = { call("cancel stall loop") },
@@ -100,6 +115,7 @@ class GuidanceSystemAlertsTest {
         isRunning = { running },
         wasInterrupted = { interrupted },
         outputSettings = { GuidanceOutputSettings(speechEnabled = speechEnabled, screenReaderActive = screenReader, hapticsEnabled = hapticsEnabled) },
+        speechReady = { ready },
         initialOutput = facts(),
         recordState = { call("safety_state ${it.described()}") },
         recordAlert = { call("guidance_alert ${it.described()}") },
@@ -117,7 +133,7 @@ class GuidanceSystemAlertsTest {
     /** Start pressed (`9f2deb3:311-312`), then `runs.start` launches the stall loop (`9f2deb3:406`, `:510-514`). */
     private fun GuidanceSystemAlerts.startPressed() {
         onStartRequested()
-        onStallWatchStarted(now)
+        onStallWatchStarted()
         nextPollAtMs = now + POLL_MS
     }
 
@@ -128,11 +144,15 @@ class GuidanceSystemAlertsTest {
     }
 
     /** A result in `collectLatest` (`9f2deb3:444-445`). */
-    private fun GuidanceSystemAlerts.result() = onResult(now, BaselineQualification.Qualified, speechReady = engine == SpeechEngineState.READY)
+    private fun GuidanceSystemAlerts.result() = onResult(BaselineQualification.Qualified)
+
+    /** `checkSpeechUnavailable` (`9f2deb3:289-296`), from any of its three callers: the output as the screen holds it. */
+    private fun GuidanceSystemAlerts.output() = onOutput(engine, speechEnabled, screenReader, hapticsEnabled)
 
     /**
      * The user's stop (`9f2deb3:625-637`): the stall loop goes first (`:626`, `:530-534`); after the output's stop,
-     * `stopped {}` tells the monitor before the UI state stops running and clears the interruption.
+     * `stopped {}` tells the monitor before the UI state stops running and clears the interruption (`:635`), and the
+     * session ends after that (`:636`).
      */
     private fun GuidanceSystemAlerts.userStopped() {
         onStallWatchStopped()
@@ -140,13 +160,14 @@ class GuidanceSystemAlertsTest {
         onStopped()
         running = false
         interrupted = false
+        endOfSession()
     }
 
     /** The stall loop's polls, every 500 ms from the watch's start, up to [toMs]; the clock is then at [toMs]. */
     private fun GuidanceSystemAlerts.pollUntil(toMs: Long) {
         while (nextPollAtMs <= toMs) {
             now = nextPollAtMs
-            poll(now)
+            poll()
             nextPollAtMs += POLL_MS
         }
         now = toMs
@@ -534,7 +555,7 @@ class GuidanceSystemAlertsTest {
         alerts.pollUntil(5_200L)
         alerts.onLifecycleStop("interrupted words")
         alerts.pollUntil(30_200L)
-        alerts.onLifecycleStart(now)
+        alerts.onLifecycleStart()
         alerts.pollUntil(51_000L)
 
         // 1a99f6e:474: every poll while interrupted skips the alarm; 1a99f6e:518 restarts the 20 s grace at 30.2 s.
@@ -592,7 +613,7 @@ class GuidanceSystemAlertsTest {
         alerts.pollUntil(2_200L)
         record.clear()
 
-        alerts.onLifecycleStart(now)
+        alerts.onLifecycleStart()
 
         assertEquals(
             listOf(
@@ -616,7 +637,7 @@ class GuidanceSystemAlertsTest {
         record.clear()
         now = 5_000L
 
-        alerts.onLifecycleStart(now)
+        alerts.onLifecycleStart()
 
         assertEquals(
             listOf(
@@ -633,7 +654,7 @@ class GuidanceSystemAlertsTest {
         val alerts = alerts()
         record.clear()
 
-        alerts.onLifecycleStart(now)
+        alerts.onLifecycleStart()
 
         assertEquals(listOf("clear interrupted"), recorded()) // 1a99f6e:518-519; 9f2deb3:573 changes no axis
     }
@@ -649,10 +670,10 @@ class GuidanceSystemAlertsTest {
         record.clear()
         now = 2_000L
 
-        alerts.onLifecycleStart(now)
+        alerts.onLifecycleStart()
         // A poll long after the grace would have run out finds the detector still stopped.
         now = 30_000L
-        alerts.poll(now)
+        alerts.poll()
 
         assertEquals(
             listOf(
@@ -676,8 +697,8 @@ class GuidanceSystemAlertsTest {
     fun `a stop and a new start within one speech outage alert once`() {
         val alerts = alerts().guiding()
         now = 2_000L
-        engine = SpeechEngineState.UNAVAILABLE
-        alerts.onOutput(facts())
+        engineFails()
+        alerts.output()
         now = 3_000L
         alerts.userStopped()
         now = 4_000L
@@ -687,7 +708,7 @@ class GuidanceSystemAlertsTest {
         alerts.result()
         now = 6_000L
         // A setting changed with the engine still unavailable (1a99f6e:321).
-        alerts.onOutput(facts())
+        alerts.output()
 
         assertEquals(
             listOf(
@@ -714,12 +735,12 @@ class GuidanceSystemAlertsTest {
         val alerts = alerts()
         record.clear()
 
-        engine = SpeechEngineState.UNAVAILABLE
-        alerts.onOutput(facts())
-        engine = SpeechEngineState.READY
-        alerts.onOutput(facts())
-        engine = SpeechEngineState.UNAVAILABLE
-        alerts.onOutput(facts())
+        engineFails()
+        alerts.output()
+        engineRecovers()
+        alerts.output()
+        engineFails()
+        alerts.output()
 
         val unavailable = listOf(
             "safety_state idle phase=not_started faults=speech_unavailable channel=haptics_only <- output", // 9f2deb3:291
@@ -736,13 +757,13 @@ class GuidanceSystemAlertsTest {
     fun `an outage that began under the screen reader is told when own speech is back`() {
         screenReader = true
         val alerts = alerts().guiding()
-        engine = SpeechEngineState.UNAVAILABLE
-        alerts.onOutput(facts())
+        engineFails()
+        alerts.output()
         // 1a99f6e:271: the reader speaks, so nothing; 9f2deb3:291: no fault while the user does not rely on own speech.
         assertEquals(emptyList<String>(), recorded())
 
         screenReader = false
-        alerts.onOutput(facts())
+        alerts.output()
 
         assertEquals(
             listOf(
@@ -757,12 +778,12 @@ class GuidanceSystemAlertsTest {
     fun `an outage that began with speech off is told when speech is switched on`() {
         speechEnabled = false
         val alerts = alerts().guiding()
-        engine = SpeechEngineState.UNAVAILABLE
-        alerts.onOutput(facts())
+        engineFails()
+        alerts.output()
         assertEquals(emptyList<String>(), recorded()) // 1a99f6e:271; 9f2deb3:291 changes no axis
 
         speechEnabled = true
-        alerts.onOutput(facts())
+        alerts.output()
 
         assertEquals(
             listOf(
@@ -773,18 +794,82 @@ class GuidanceSystemAlertsTest {
         )
     }
 
+    // An engine rebuilt after a failure takes speech (`isReady`) while its state still says unavailable, until it accepts
+    // its first sentence: SpeechManager.kt:743-747 at 9f2deb3. The monitor reads `isReady` where 9f2deb3:291 and :445 do.
+
     @Test
-    fun `a user's stop ends the session's main-thread time`() {
+    fun `an outage told while a rebuilt engine already takes speech still alerts, and prompts are expected on speech`() {
         val alerts = alerts().guiding()
         now = 2_000L
+        engine = SpeechEngineState.UNAVAILABLE
+        ready = true
 
-        alerts.userStopped()
+        alerts.output()
 
         assertEquals(
             listOf(
-                "safety_state idle phase=not_started channel=speech <- stopped", // 9f2deb3:635
+                // 9f2deb3:291: own speech is unavailable by the engine's state, while a prompt would still go to speech.
+                "safety_state degraded(speech_unavailable) phase=running faults=speech_unavailable channel=speech <- output",
+                "publish degraded(speech_unavailable)",
+            ) + speechUnavailableAlert, // 1a99f6e:271-272: the engine's state, not `isReady`, decides the alert
+            recorded(),
+        )
+    }
+
+    @Test
+    fun `a rebuilt engine takes speech before it reports ready, and the outage it ends is not told again`() {
+        val alerts = alerts().guiding()
+        now = 2_000L
+        engineFails()
+        alerts.output()
+        record.clear()
+
+        // Rebuilt: `isReady` again, the state unchanged, so nothing reaches the screen until the next result.
+        ready = true
+        now = 3_000L
+        alerts.result()
+        now = 3_500L
+        alerts.output() // a setting changed
+        now = 4_000L
+        engineRecovers() // the first sentence was accepted
+        alerts.output()
+
+        assertEquals(
+            listOf(
+                "safety_state degraded(speech_unavailable) phase=running faults=speech_unavailable channel=speech <- result", // 9f2deb3:445
+                // 3.5 s: 1a99f6e:271 the outage was told; 9f2deb3:291 changes no axis.
+                "safety_state guiding phase=running channel=speech <- output", // 9f2deb3:291
+                "publish guiding",
+            ),
+            recorded(),
+        )
+    }
+
+    @Test
+    fun `a user's stop ends the session's main-thread time once the stop is on the screen`() {
+        val alerts = alerts().guiding()
+        now = 2_000L
+
+        // 9f2deb3:635: `stopped {}` tells the monitor, then writes the UI state; the session has not ended yet.
+        alerts.onStallWatchStopped()
+        alerts.onStopped()
+        assertEquals(
+            listOf(
+                "safety_state idle phase=not_started channel=speech <- stopped",
                 "publish idle",
-                "log info $SAFETY: $SESSION_TIME", // 9f2deb3:636
+            ),
+            recorded(),
+        )
+
+        running = false
+        interrupted = false
+        alerts.endOfSession() // 9f2deb3:636, after the UI state's update; in onCleared right after the monitor (:640-641)
+
+        assertEquals(
+            listOf(
+                "safety_state idle phase=not_started channel=speech <- stopped",
+                "publish idle",
+                "log info $SAFETY: $SESSION_TIME",
             ),
             recorded(),
         )

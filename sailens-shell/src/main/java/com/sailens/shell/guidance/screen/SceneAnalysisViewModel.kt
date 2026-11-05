@@ -168,6 +168,7 @@ class SceneAnalysisViewModel(
                 hapticsEnabled = state.isHapticsEnabled,
             )
         },
+        speechReady = { speechManager.isReady },
         initialOutput = _uiState.value.outputFacts(),
         recordState = traceService::recordSafetyState,
         recordAlert = traceService::recordGuidanceAlert,
@@ -314,10 +315,11 @@ class SceneAnalysisViewModel(
 
     /** The output facts as they now stand, to the alerts: once per speech outage they alert; see [GuidanceSystemAlerts.onOutput]. */
     private fun checkSpeechUnavailable() {
-        alerts.onOutput(_uiState.value.outputFacts())
+        val state = _uiState.value
+        alerts.onOutput(state.speechEngineState, state.isSpeechEnabled, state.isScreenReaderActive, state.isHapticsEnabled)
     }
 
-    /** The output facts the safety monitor reads, with `isReady` as delivery reads it now. */
+    /** The output facts the safety monitor starts from, with `isReady` as delivery reads it now. */
     private fun SceneAnalysisUiState.outputFacts() = OutputFacts(
         engineState = speechEngineState,
         speechEnabled = isSpeechEnabled,
@@ -441,7 +443,7 @@ class SceneAnalysisViewModel(
             }.collectLatest { result ->
                 frameCount++
                 // Before the frame's prompts are delivered.
-                alerts.onResult(clock(), result.qualification.baseline, speechReady = speechManager.isReady)
+                alerts.onResult(result.qualification.baseline)
                 latestSceneResult = result
                 val overlayMode = _uiState.value.overlayMode
                 val events = result.events
@@ -478,11 +480,11 @@ class SceneAnalysisViewModel(
     /** The stall loop: the watch is the alerts', this view model only keeps time for it. */
     private fun startStallWatch() {
         stallWatchJob?.cancel()
-        alerts.onStallWatchStarted(clock())
+        alerts.onStallWatchStarted()
         stallWatchJob = viewModelScope.launch {
             while (true) {
                 delay(GuidanceStallDetector.POLL_INTERVAL_MS)
-                alerts.poll(clock())
+                alerts.poll()
             }
         }
     }
@@ -507,7 +509,7 @@ class SceneAnalysisViewModel(
 
     /** Back in the foreground; see [GuidanceSystemAlerts.onLifecycleStart]. */
     fun acknowledgeInterruption() {
-        alerts.onLifecycleStart(clock())
+        alerts.onLifecycleStart()
     }
 
     /**
@@ -547,10 +549,13 @@ class SceneAnalysisViewModel(
             latestSceneResult = null
         }
         _uiState.stopped { alerts.onStopped() }
+        // After the stop is in the UI state: the session's time is logged last.
+        alerts.endOfSession()
     }
 
     override fun onCleared() {
         alerts.onStopped()
+        alerts.endOfSession()
         stopStallWatch()
         guidanceOutput.protocol.reset()
         overlayRenderJob?.cancel()

@@ -6,6 +6,7 @@ import com.sailens.guidance.delivery.GuidanceOutputSettings
 import com.sailens.guidance.model.trace.GuidanceAlertTrace
 import com.sailens.guidance.model.trace.SafetyStateTrace
 import com.sailens.guidance.safety.BaselineQualification
+import com.sailens.output.SpeechEngineState
 import com.sailens.shell.device.GuidanceHaptic
 import com.sailens.shell.device.GuidanceNotice
 import com.sailens.shell.guidance.screen.GuidanceStallDetector
@@ -21,12 +22,13 @@ import com.sailens.shell.guidance.screen.SpeechUnavailableAlert
  * once-per-outage rule for speech.
  *
  * Takes plain functions, as [com.sailens.shell.guidance.screen.GuidanceOutputWiring] does, so the order of every call
- * an alert makes can be checked on the JVM. The fact ports ([isRunning], [wasInterrupted], [outputSettings]) read the
- * view model's own state, never a copy kept here. The one fact kept here is whether the view model's stall loop exists
- * ([onStallWatchStarted] / [onStallWatchStopped], told where the loop is launched and cancelled).
+ * an alert makes can be checked on the JVM. The fact ports ([isRunning], [wasInterrupted], [outputSettings],
+ * [speechReady]) read the view model's own state and the engine, never a copy kept here. The one fact kept here is
+ * whether the view model's stall loop exists ([onStallWatchStarted] / [onStallWatchStopped], told where the loop is
+ * launched and cancelled).
  *
- * An entry with a `nowMs` is given the time the view model read for the event; any later time an entry needs is
- * read from [clock] there, where it is needed.
+ * Every time an entry needs is read from [clock] at the point it is used, a monitor input's inside its observation
+ * call: a time read earlier can fall on the other side of a limit from the one the monitor would read.
  *
  * Main thread only, like the stall detector and the monitor.
  *
@@ -45,6 +47,8 @@ import com.sailens.shell.guidance.screen.SpeechUnavailableAlert
  * @param markFailed shows the session as ended on an error, with its message.
  * @param isRunning whether the screen says the session runs.
  * @param outputSettings speech, screen reader and navigation vibration as the screen holds them now.
+ * @param speechReady the speech engine's `isReady`, the reading delivery goes by. It can be true while the engine's
+ *   state still says unavailable: a rebuilt engine takes speech before it reports ready.
  * @param initialOutput the output facts when the screen is built, for the monitor.
  * @param recordState the trace's `safety_state` record.
  * @param recordAlert the trace's `guidance_alert` record.
@@ -68,6 +72,7 @@ internal class GuidanceSystemAlerts(
     private val isRunning: () -> Boolean,
     private val wasInterrupted: () -> Boolean,
     private val outputSettings: () -> GuidanceOutputSettings,
+    private val speechReady: () -> Boolean,
     initialOutput: OutputFacts,
     recordState: (SafetyStateTrace) -> Unit,
     recordAlert: (GuidanceAlertTrace) -> Unit,
@@ -108,9 +113,9 @@ internal class GuidanceSystemAlerts(
         observation.observe { onStartRequested(clock()) }
     }
 
-    /** The view model is launching its stall loop: a new watch, with the startup grace from [nowMs]. */
-    fun onStallWatchStarted(nowMs: Long) {
-        stallDetector.start(nowMs)
+    /** The view model is launching its stall loop: a new watch, with the startup grace from now. */
+    fun onStallWatchStarted() {
+        stallDetector.start(clock())
         observation.observe { onStallWatchStarted(clock()) }
         stallWatchRunning = true
     }
@@ -129,10 +134,13 @@ internal class GuidanceSystemAlerts(
         observation.observe { onFlowStarted(clock()) }
     }
 
-    /** A result reached the view model at [nowMs]: the stall detector hears of it, then the monitor. */
-    fun onResult(nowMs: Long, baseline: BaselineQualification, speechReady: Boolean) {
-        stallDetector.onResult(nowMs)
-        observation.observe { onResult(clock(), baseline, speechReady = speechReady) }
+    /**
+     * A result reached the view model, [baseline] its qualification: the stall detector hears of it, then the monitor,
+     * with `isReady` as it reads then.
+     */
+    fun onResult(baseline: BaselineQualification) {
+        stallDetector.onResult(clock())
+        observation.observe { onResult(clock(), baseline, speechReady = speechReady()) }
     }
 
     /**
@@ -156,9 +164,17 @@ internal class GuidanceSystemAlerts(
         observation.endOfSession()
     }
 
-    /** The user stopped Guidance, or the screen went away. The session's main-thread time is logged. */
+    /** The user stopped Guidance, or the screen went away. The session ends with [endOfSession]. */
     fun onStopped() {
         observation.observe { onStopped(clock()) }
+    }
+
+    /**
+     * The stopped session is over: its main-thread time is logged. After a user's stop the view model calls this once
+     * the stop is in its UI state, as [onFlowFailed] ends its session once the failure is; on the screen going away,
+     * right after [onStopped].
+     */
+    fun endOfSession() {
         observation.endOfSession()
     }
 
@@ -197,30 +213,33 @@ internal class GuidanceSystemAlerts(
         }
     }
 
-    /** Back in the foreground, at [nowMs]. */
-    fun onLifecycleStart(nowMs: Long) {
+    /** Back in the foreground. */
+    fun onLifecycleStart() {
         // 回到前台时相机要重新绑定，第一帧之前的空档不是卡死：给它重新计启动宽限。
-        if (isRunning() && stallWatchRunning) stallDetector.start(nowMs)
+        if (isRunning() && stallWatchRunning) stallDetector.start(clock())
         // After the detector's restart, so the monitor reads the new grace; before the UI state clears the interruption.
         observation.observe { onLifecycleStart(clock()) }
         clearInterrupted()
     }
 
     /**
-     * The output facts as they now stand: the engine's state, a setting or the screen reader changed. Alerts once per
-     * speech outage, as soon as the user relies on own speech; see [SpeechUnavailableAlert].
+     * The output as the screen now holds it: the engine's state, a setting or the screen reader changed. The monitor
+     * hears it with `isReady` as it reads then. Alerts once per speech outage, as soon as the user relies on own
+     * speech; see [SpeechUnavailableAlert].
      */
-    fun onOutput(facts: OutputFacts) {
-        observation.observe { onOutput(clock(), facts) }
-        if (speechUnavailableAlert.update(facts.engineState, facts.speechEnabled, facts.screenReaderActive)) {
+    fun onOutput(engineState: SpeechEngineState, speechEnabled: Boolean, screenReaderActive: Boolean, hapticsEnabled: Boolean) {
+        observation.observe {
+            onOutput(clock(), OutputFacts(engineState, speechEnabled, screenReaderActive, hapticsEnabled, speechReady = speechReady()))
+        }
+        if (speechUnavailableAlert.update(engineState, speechEnabled, screenReaderActive)) {
             observation.checkGiven(SystemAlert.SPEECH_UNAVAILABLE)
             speechEngineUnavailable()
         }
     }
 
-    /** The stall loop's poll, at [nowMs]. */
-    fun poll(nowMs: Long) {
-        observation.observe { poll(nowMs) }
+    /** The stall loop's poll. */
+    fun poll() {
+        observation.observe { poll(clock()) }
         // 进后台时 onLifecycleStop 已经告知过；那时相机停帧是必然的，不重复报。
         if (wasInterrupted()) return
         if (stallDetector.alarmDue(clock())) {
