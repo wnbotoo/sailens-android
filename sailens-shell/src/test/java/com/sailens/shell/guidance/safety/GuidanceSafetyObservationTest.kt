@@ -26,6 +26,7 @@ class GuidanceSafetyObservationTest {
     private var stall = StallCondition.NONE
     private var diagnostics = false
     private var failRecording = false
+    private var failPublishing = false
     private val states = mutableListOf<SafetyStateTrace>()
     private val alerts = mutableListOf<GuidanceAlertTrace>()
     private val published = mutableListOf<GuidanceSafetyState>()
@@ -59,7 +60,10 @@ class GuidanceSafetyObservationTest {
             states += it
         },
         recordAlert = { alerts += it },
-        publishState = { published += it },
+        publishState = {
+            check(!failPublishing) { "no UI" }
+            published += it
+        },
         logger = logger,
         timed = { diagnostics },
         elapsedClock = { now },
@@ -152,10 +156,10 @@ class GuidanceSafetyObservationTest {
     @Test
     fun `system alerts are traced as the shell's, with their kind, key, channel, result and priority`() {
         now = 7_000
-        observation.rhythmPlayed(SystemAlert.STALLED, GuidanceHaptic.INTERRUPTED)
+        observation.rhythmGiven(SystemAlert.STALLED, GuidanceHaptic.INTERRUPTED, vibrated = true)
         observation.noticeRequested(SystemAlert.STALLED)
         observation.noticePublished(SystemAlert.INTERRUPTED)
-        observation.rhythmPlayed(SystemAlert.SPEECH_UNAVAILABLE, GuidanceHaptic.SPEECH_UNAVAILABLE)
+        observation.rhythmGiven(SystemAlert.SPEECH_UNAVAILABLE, GuidanceHaptic.SPEECH_UNAVAILABLE, vibrated = true)
         observation.noticeRequested(SystemAlert.FAILED)
 
         assertTrue(alerts.all { it.source == GuidanceAlertSources.SYSTEM && it.elapsedMs == 7_000L && it.at == 1_700_000_007_000L })
@@ -172,6 +176,16 @@ class GuidanceSafetyObservationTest {
     }
 
     @Test
+    fun `a rhythm on a phone without a vibrator is traced as nothing having taken it`() {
+        observation.rhythmGiven(SystemAlert.INTERRUPTED, GuidanceHaptic.INTERRUPTED, vibrated = false)
+
+        assertEquals(
+            listOf(listOf(GuidanceAlertKinds.INTERRUPTED, "interrupted", GuidanceAlertChannels.HAPTICS, GuidanceAlertResults.REFUSED)),
+            alerts.map { listOf(it.kind, it.haptic, it.channel, it.result) },
+        )
+    }
+
+    @Test
     fun `a fault in observing is logged and goes no further, and the monitor keeps its state`() {
         failRecording = true
         observation.observe { onStartRequested(0) }
@@ -180,6 +194,31 @@ class GuidanceSafetyObservationTest {
         assertEquals(listOf("error Safety observation failed", "error Safety observation failed"), log)
         assertEquals(GuidanceSafetyState.Initializing, observation.monitor.state)
         assertEquals(emptyList<GuidanceAlertTrace>(), alerts)
+    }
+
+    @Test
+    fun `a fault in the trace still lets the UI have the new state`() {
+        failRecording = true
+        observation.observe { onStartRequested(0) }
+
+        assertEquals(listOf("error Safety observation failed"), log)
+        assertEquals(listOf<GuidanceSafetyState>(GuidanceSafetyState.Idle, GuidanceSafetyState.Initializing), published)
+    }
+
+    @Test
+    fun `a fault in the UI still lets the trace have the change, and the state the UI missed is offered at the next`() {
+        failPublishing = true
+        observation.observe { onStartRequested(0) }
+
+        assertEquals(listOf("error Safety observation failed"), log)
+        assertEquals(listOf(SafetyTraceNames.States.INITIALIZING), states.map { it.state })
+        assertEquals(listOf<GuidanceSafetyState>(GuidanceSafetyState.Idle), published)
+
+        failPublishing = false
+        // The flow starts: the phase changes, the state stays Initializing, which the UI has not had.
+        observation.observe { onFlowStarted(0) }
+        assertEquals(listOf<GuidanceSafetyState>(GuidanceSafetyState.Idle, GuidanceSafetyState.Initializing), published)
+        assertEquals(2, states.size)
     }
 
     @Test

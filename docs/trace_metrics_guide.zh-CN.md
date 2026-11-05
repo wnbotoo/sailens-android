@@ -653,7 +653,7 @@ bbox 接地带（det∩sem 交叉验证）从 sem 可行走区抠除后的占比
 用户得到或被提供的每一次告知一条记录：`source`（`vision`：镜头遮挡、光线过暗、认不出地面；`system`：Guidance 自身卡死、出错、被中断，或自带语音失效）、`kind`（`fault_notice`、`fault_recovery`、`fault_rhythm`；`stalled`、`failed`、`interrupted`、`speech_unavailable`）、句子的 `messageKey` 或节奏的 `haptic`、`priority`、`channel`（`speech`、`screen_reader`、`haptics`，什么都没提供时为 `none`：语音关，或场景描述正在说）以及 `result`：
 
 - 句子：`accepted`（自带语音接收）、`published`（交给了读屏）或 `refused`；交给自带语音的系统告知是 `requested`，因为自带语音不回报它的结果；
-- 节奏：向马达请求时 `requested`，开始播放时 `played`，开始前撤回时 `cancelled`。系统告警的节奏无条件占用马达，所以立即是 `played`。
+- 节奏：向马达请求时 `requested`，开始播放时 `played`，开始前撤回时 `cancelled`。系统告警的节奏无条件占用马达，所以立即有结果：振动器被要求播放时是 `played`，手机没有振动器时是 `refused`（什么都感觉不到）。视觉故障的节奏轮到马达时就是 `played`，不论手机有没有振动器。
 
 一次系统告警先记一条节奏（`interrupted` 或 `speech_unavailable`），语音开时再记一条句子（`notice_guidance_stalled`、`notice_guidance_failed`、`notice_guidance_interrupted`；语音失效没有句子）。`priority` 是 `EventPriority` 的名字，或者 `max`：任何东西都不能打断的告警（出错、中断、语音失效的提醒）；卡死的告知是 `high`。
 

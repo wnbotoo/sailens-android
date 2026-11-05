@@ -485,8 +485,8 @@ class SceneAnalysisViewModel(
     private fun alertGuidanceUnavailable(notice: GuidanceNotice) {
         logger.warning(TAG, "Guidance unavailable while running", mapOf("notice" to notice.name))
         sceneDescriptionCoordinator.preemptForGuidance("guidance ${notice.name.lowercase()}")
-        hapticManager.play(GuidanceHaptic.INTERRUPTED)
-        safety.rhythmPlayed(notice.systemAlert, GuidanceHaptic.INTERRUPTED)
+        val vibrated = hapticManager.play(GuidanceHaptic.INTERRUPTED)
+        safety.rhythmGiven(notice.systemAlert, GuidanceHaptic.INTERRUPTED, vibrated)
 
         val state = _uiState.value
         if (!state.isSpeechEnabled) return
@@ -550,8 +550,8 @@ class SceneAnalysisViewModel(
         sceneDescriptionCoordinator.preemptForGuidance("guidance interrupted")
 
         // 震动先行：它不依赖 TTS 引擎，是最后一道能穿透的通知手段。
-        hapticManager.play(GuidanceHaptic.INTERRUPTED)
-        safety.rhythmPlayed(SystemAlert.INTERRUPTED, GuidanceHaptic.INTERRUPTED)
+        val vibrated = hapticManager.play(GuidanceHaptic.INTERRUPTED)
+        safety.rhythmGiven(SystemAlert.INTERRUPTED, GuidanceHaptic.INTERRUPTED, vibrated)
 
         val state = _uiState.value
         if (!state.isSpeechEnabled) return
@@ -591,8 +591,8 @@ class SceneAnalysisViewModel(
         if (state.isScreenReaderActive) return
 
         logger.error(TAG, "Speech engine unavailable; alerting through haptics")
-        hapticManager.play(GuidanceHaptic.SPEECH_UNAVAILABLE)
-        safety.rhythmPlayed(SystemAlert.SPEECH_UNAVAILABLE, GuidanceHaptic.SPEECH_UNAVAILABLE)
+        val vibrated = hapticManager.play(GuidanceHaptic.SPEECH_UNAVAILABLE)
+        safety.rhythmGiven(SystemAlert.SPEECH_UNAVAILABLE, GuidanceHaptic.SPEECH_UNAVAILABLE, vibrated)
     }
 
     /**

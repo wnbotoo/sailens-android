@@ -9,6 +9,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.hideFromAccessibility
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.sailens.guidance.model.scene.SceneDebugInfo
 import com.sailens.shell.R
@@ -207,8 +209,13 @@ internal fun SceneDebugInfoView(
 /**
  * The safety state with its reasons, as the trace names them. Part of the debug panel, and shown alone while there is
  * no frame to show the panel for (starting, stopped): only where the diagnostics are.
+ *
+ * Hidden from screen readers: the state is only observed, and what TalkBack can reach stays as it was.
  */
 @Composable
 internal fun SafetyStateLine(safetyState: GuidanceSafetyState, modifier: Modifier = Modifier) {
-    Text(stringResource(R.string.debug_safety_state, safetyState.label), modifier = modifier)
+    Text(
+        stringResource(R.string.debug_safety_state, safetyState.label),
+        modifier = modifier.semantics { hideFromAccessibility() },
+    )
 }

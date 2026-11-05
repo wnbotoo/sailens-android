@@ -18,7 +18,8 @@ import java.util.concurrent.Executors
 
 /**
  * @param directory where the trace files go.
- * @param elapsedClock elapsed-realtime milliseconds, for the window a session's trace observes.
+ * @param elapsedClock elapsed-realtime milliseconds, for the window a session's trace observes; read inside the
+ *   ledger's lock, with the opening and the closing it times.
  * @param appendEntry encodes one entry onto the open file.
  * @param wallClock wall-clock milliseconds, for the time written on the safety state that opens a session.
  */
@@ -46,7 +47,7 @@ class FileTraceService internal constructor(
     private val queue = CountedTraceQueue<TraceQueueEntry>()
 
     /** The alert and safety-state records, ordered against the session's opening and closing without this object's lock. */
-    private val ledger = SafetyTraceLedger(queue)
+    private val ledger = SafetyTraceLedger(queue, elapsedClock, wallClock)
 
     @Volatile
     private var isRunning = true
@@ -71,7 +72,7 @@ class FileTraceService internal constructor(
             flushToDisk()
             activeSessionId = metadata.sessionId
             traceFile = createTraceFile(metadata.sessionId)
-            ledger.attach(metadata.copy(openedElapsedMs = elapsedClock(), safetyTrace = true), openedAt = wallClock())
+            ledger.attach(metadata.copy(safetyTrace = true))
             trim()
         }
     }
@@ -128,7 +129,7 @@ class FileTraceService internal constructor(
     override fun finishSession(summary: SessionTraceSummary) {
         synchronized(this) {
             if (summary.sessionId != activeSessionId) return
-            ledger.detach(summary.copy(closedElapsedMs = elapsedClock()))
+            ledger.detach(summary)
             trim()
             flushToDisk()
             activeSessionId = null

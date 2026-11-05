@@ -59,9 +59,13 @@ internal class GuidanceSafetyObservation(
         if (monitor.supports(SystemAlert.INTERRUPTED) != given) disagree(SystemAlert.INTERRUPTED, given)
     }
 
-    /** [alert]'s rhythm was played: the motor is claimed unconditionally, so it starts at once. */
-    fun rhythmPlayed(alert: SystemAlert, haptic: GuidanceHaptic) = timedCall {
-        recordAlert(alertTrace(alert, haptic = haptic.name.lowercase(), channel = GuidanceAlertChannels.HAPTICS, result = GuidanceAlertResults.PLAYED))
+    /**
+     * [alert]'s rhythm was given. The motor is claimed unconditionally, so it starts at once when [vibrated], the
+     * vibrator having been asked to play it; on a phone without a vibrator nothing took it.
+     */
+    fun rhythmGiven(alert: SystemAlert, haptic: GuidanceHaptic, vibrated: Boolean) = timedCall {
+        val result = if (vibrated) GuidanceAlertResults.PLAYED else GuidanceAlertResults.REFUSED
+        recordAlert(alertTrace(alert, haptic = haptic.name.lowercase(), channel = GuidanceAlertChannels.HAPTICS, result = result))
     }
 
     /** [alert]'s sentence went to the screen reader, which reports no completion. */
@@ -83,11 +87,17 @@ internal class GuidanceSafetyObservation(
         cost.clear()
     }
 
+    /**
+     * The trace and the UI each on their own: a fault in one must not keep the other on an old state, and the monitor
+     * tells of a change only once. A state the UI did not take is offered again at the next change.
+     */
     private fun changed(snapshot: GuidanceSafetySnapshot) {
-        recordState(snapshot.toTrace(at = wallClock()))
+        contained { recordState(snapshot.toTrace(at = wallClock())) }
         if (snapshot.state != published) {
-            published = snapshot.state
-            publishState(snapshot.state)
+            contained {
+                publishState(snapshot.state)
+                published = snapshot.state
+            }
         }
     }
 
@@ -119,11 +129,17 @@ internal class GuidanceSafetyObservation(
     private inline fun timedCall(block: () -> Unit) {
         val started = if (timed()) nanoClock() else null
         try {
+            contained(block)
+        } finally {
+            if (started != null) cost.add(nanoClock() - started)
+        }
+    }
+
+    private inline fun contained(block: () -> Unit) {
+        try {
             block()
         } catch (error: Exception) {
             logger.error(TAG, "Safety observation failed", error)
-        } finally {
-            if (started != null) cost.add(nanoClock() - started)
         }
     }
 

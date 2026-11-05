@@ -374,7 +374,7 @@ object GuidanceAlertResults {
     /** Handed to the screen reader, which reports no completion. */
     const val PUBLISHED = "published"
 
-    /** Nothing took it. */
+    /** Nothing took it; for a system alert's rhythm, the phone has no vibrator. */
     const val REFUSED = "refused"
 
     /**

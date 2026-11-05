@@ -816,8 +816,10 @@ speech off, or a scene description holding the floor) and `result`:
 - a sentence: `accepted` (own speech took it), `published` (the screen reader took it) or `refused`;
   a system notice handed to own speech is `requested`, because own speech reports nothing back for it;
 - a rhythm: `requested` when asked of the motor, `played` when it started, `cancelled` when withdrawn
-  before it started. A system alert's rhythm claims the motor unconditionally, so it is `played` at
-  once.
+  before it started. A system alert's rhythm claims the motor unconditionally, so it has its result at
+  once: `played` when the vibrator was asked to play it, `refused` on a phone without a vibrator, where
+  nothing is felt. A vision fault's rhythm is `played` when its turn on the motor comes, whether or not
+  the phone has a vibrator.
 
 A system alert gives a rhythm record (`interrupted`, or `speech_unavailable`), then, with speech on, a
 sentence record (`notice_guidance_stalled`, `notice_guidance_failed`, `notice_guidance_interrupted`;
