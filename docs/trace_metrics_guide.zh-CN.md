@@ -630,7 +630,7 @@ bbox 接地带（det∩sem 交叉验证）从 sem 可行走区抠除后的占比
 - `event_road_exit` 与 `event_suggest_*` 已删除：前者在用户走过之后才触发，纯噪音；后者依赖的 `suggestedBias` 没有建议侧连通性证据，因此当前不生成可执行方向后缀。
 - **所有事件当前都不带方向后缀。** `suggestedBias` 是每个扫描层里最宽通行段中心相对中线的加权偏移（`ConnectivityStatsExtractor.computeDirectionBias`），而 `layer.isValid` 是宽度检查不是连通性检查——几段互不相连的通行区域偏左，同样会得出 `bias = LEFT`。全局 `floodReachRatio` 合格也只能证明某处存在前向通道，不能证明 bias 指向的那一侧连通。
   *后续能力：* 需要对左右候选路线分别做洪泛连通性与安全性判定，让方向指向一条真的走得通的路。`SceneEvent.directionHint` 在此之前仅作为 trace/replay 兼容字段保留。
-- 出现 `event_camera_blocked` / `event_low_light`：表示输入帧不可用（镜头被遮挡、环境过暗），该帧会抑制其余全部事件——此时任何基于画面的判断都不可信，而保持沉默会被用户理解成"前方安全"。一次运行里这类事件占比不低时，先复查采集本身，其余指标才有意义。
+- 出现 `event_camera_blocked` / `event_low_light`：表示输入帧不可用（镜头被遮挡，或正对 30 cm 左右的素墙，画面分不开这两者；环境过暗），该帧会抑制其余全部事件——此时任何基于画面的判断都不可信，而保持沉默会被用户理解成"前方安全"。一次运行里这类事件占比不低时，先复查采集本身，其余指标才有意义。
 - 出现 `event_intersection`：表示 scene element 判断为路口。文案不再用“疑似”——盲人无法验证这份不确定性，而“疑似有路口”和“有路口”对应的动作完全一样，含糊措辞只多占播报时长。确定性现在由阈值表达而不是措辞：当前发布 profile 不启用 traffic-light/road-ratio fallback，因为该 fallback 误报偏多；只有显式可靠的路口信号才应进入用户播报。
 - 出现 `event_traffic_light`：表示语义分割稳定检测到红绿灯，但没有把它升级成“疑似路口”。该提示是低优先级、长冷却的宽泛交通提示，应排在车辆、行人、blocked / path-complex 之后；触发前需要满足 traffic-light 像素占比、道路语境和稳定帧门槛，避免远处小目标或单帧误分割过早播报。
 - 出现已禁用策略类提示：检查 EventGenerator / EventMerger 配置。
