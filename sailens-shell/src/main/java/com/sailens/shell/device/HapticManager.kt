@@ -97,11 +97,15 @@ class HapticManager(context: Context) {
     /**
      * Plays one symbol from the vocabulary unconditionally. The settings preview and the failure
      * alarms use this; a navigation rhythm arriving while an alarm plays does not cut it.
+     *
+     * @return whether the vibrator was asked to play it: false on a phone without one, where the motor is
+     *   claimed all the same and nothing is felt.
      */
-    fun play(haptic: GuidanceHaptic, amplitude: Int = DEFAULT_AMPLITUDE) {
+    fun play(haptic: GuidanceHaptic, amplitude: Int = DEFAULT_AMPLITUDE): Boolean {
         arbiter.claimUnconditionally(haptic.durationMs)
-        player.play(timings = haptic.timings, amplitude = amplitude)
+        val vibrated = player.play(timings = haptic.timings, amplitude = amplitude)
         motorWait.reschedule()
+        return vibrated
     }
 
     /**

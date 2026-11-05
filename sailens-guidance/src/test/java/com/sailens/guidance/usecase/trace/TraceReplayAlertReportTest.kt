@@ -21,7 +21,7 @@ import java.nio.file.Files
 import java.util.Collections
 
 /**
- * What the trace report says about alerts and qualification. Alert counts are counts within the trace's window, and
+ * What the trace report says about alerts and qualification. Alert counts are of the alerts the session recorded, and
  * whether they are complete is read from `seq` and the session's count: a dropped record is reported, never hidden.
  */
 class TraceReplayAlertReportTest {
@@ -106,7 +106,7 @@ class TraceReplayAlertReportTest {
     }
 
     @Test
-    fun `alerts outside the window are in no trace and not counted, so the window's own are complete`() {
+    fun `alerts recorded while no session is open are in no trace and not counted, so the session's own are complete`() {
         // The session counted the two it queued; an alert before it opened never reached it.
         assertEquals(AlertRecordCompleteness.COMPLETE to 0L, completeness(listOf(1, 2), count = 2))
     }

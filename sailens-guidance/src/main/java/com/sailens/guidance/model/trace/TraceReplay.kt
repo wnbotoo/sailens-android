@@ -19,8 +19,13 @@ data class TraceReplaySession(
     val promptOutcomes: List<PromptOutcomeTrace> = emptyList(),
     val errors: List<TraceReplayError>,
     val summary: SessionTraceSummary?,
-    /** The alerts given or offered within the trace's window, in file order; empty for traces recorded before these were written. */
+    /**
+     * The alerts the trace's session recorded while it was open, one given just before the opening and recorded after
+     * it included, in file order; empty for traces recorded before these were written.
+     */
     val guidanceAlerts: List<GuidanceAlertTrace> = emptyList(),
+    /** The safety-state records, in file order; empty for traces recorded before these were written. */
+    val safetyStates: List<SafetyStateTrace> = emptyList(),
 )
 
 data class TraceReplayError(
@@ -126,19 +131,71 @@ data class TraceReplayReport(
     val uniqueMessageKeys: List<String>,
     /** Traced frames per qualification level; "none" counts frames from before the field existed. */
     val qualificationFrameCounts: Map<String, Int> = emptyMap(),
-    /** Alert records per kind: the alerts within the trace's window, not every alert of the run. */
+    /** Alert records per kind: the alerts the session recorded while it was open, not every alert of the run. */
     val guidanceAlertCounts: Map<String, Int> = emptyMap(),
     val guidanceAlertCompleteness: AlertRecordCompleteness = AlertRecordCompleteness.NOT_RECORDED,
     /** Alert records known to be missing; with [AlertRecordCompleteness.INCOMPLETE] and no summary, at least this many. */
     val guidanceAlertsMissing: Long = 0,
+    /** How long each safety state held within the trace's window, and how much of it is unknown. */
+    val safetyTimeline: SafetyStateTimeline = SafetyStateTimeline.NOT_RECORDED,
 )
 
-/** How far a trace's alert records are all the alerts within its window. */
+/**
+ * How long each safety state held within the trace's window `[openedElapsedMs, closedElapsedMs]`, by elapsed realtime
+ * alone (the wall clock may jump). A state counts from its `stateSinceElapsedMs`, or the window's start if it began
+ * before, to the next different state's, or the window's end.
+ *
+ * What the records cannot tell is unknown, never given to a neighbouring state: from a record before a gap in `seq` to
+ * the next record's state start (the missing ones may have changed the state any time after the first was observed);
+ * after the last record when the session counted more; before the first when the first is missing; and any part of the
+ * window no record covers. Unknown time overrides known time where they overlap.
+ *
+ * @param durationsMs per state label ([SafetyStateTrace.stateLabel]), the time it is known to have held in the window.
+ * @param unknownMs the time within the window whose state is not known. When a bound of the window is not in the trace,
+ *   the time beyond the record nearest it is not in this either: see [windowStartKnown] and [windowEndKnown].
+ * @param windowStartKnown false when neither `session_start` nor the session's first safety state was kept: then
+ *   counting starts at the first record kept, and the time before it is unknown, of unknown length.
+ * @param windowEndKnown false without a `session_summary` (the process died, or the bound dropped it): then counting
+ *   stops at the last record kept, and the time after it is unknown, of unknown length.
+ * @param missingRecords the records known to be missing; without the session's count, at least this many.
+ * @param endedOnError the trace records the analysis ending on an error: its failure and the alert for it come after
+ *   the trace closed, so the timeline stops short of them.
+ */
+data class SafetyStateTimeline(
+    val completeness: SafetyRecordCompleteness,
+    val durationsMs: Map<String, Long> = emptyMap(),
+    val unknownMs: Long = 0,
+    val windowStartKnown: Boolean = false,
+    val windowEndKnown: Boolean = false,
+    val missingRecords: Long = 0,
+    val endedOnError: Boolean = false,
+) {
+    companion object {
+        val NOT_RECORDED = SafetyStateTimeline(SafetyRecordCompleteness.NOT_RECORDED)
+    }
+}
+
+/** How far a trace's safety-state records are all those of its window. */
+enum class SafetyRecordCompleteness {
+    /** The trace was written before safety states were recorded: it has no timeline. */
+    NOT_RECORDED,
+
+    /** Every `seq` from 1 up to the session's [SessionTraceSummary.safetyStateCount] is there. */
+    COMPLETE,
+
+    /** Records are missing: a `seq` gap, a first `seq` above 1, or fewer than the session counted. */
+    INCOMPLETE,
+
+    /** None found missing, but there is no count (the process died, or the summary was dropped): the last could be. */
+    POSSIBLY_INCOMPLETE,
+}
+
+/** How far a trace's alert records are all the alerts its session recorded. */
 enum class AlertRecordCompleteness {
     /** The trace was written before alerts were recorded: nothing it kept, not even a frame's qualification, is newer. */
     NOT_RECORDED,
 
-    /** Every `seq` from 1 up to the session's [SessionTraceSummary.guidanceAlertCount] is there. */
+    /** Every `seq` from 1 up to the session's [SessionTraceSummary.guidanceAlertCount] is there: every alert the session recorded. */
     COMPLETE,
 
     /** Records are missing: a `seq` gap, a first `seq` above 1, or fewer than the session counted. */
@@ -164,6 +221,7 @@ object TraceReplayParser {
         val overlayRenders = mutableListOf<OverlayRenderTrace>()
         val promptOutcomes = mutableListOf<PromptOutcomeTrace>()
         val guidanceAlerts = mutableListOf<GuidanceAlertTrace>()
+        val safetyStates = mutableListOf<SafetyStateTrace>()
         val errors = mutableListOf<TraceReplayError>()
 
         lines.forEachIndexed { index, rawLine ->
@@ -177,6 +235,7 @@ object TraceReplayParser {
                 OVERLAY_RENDER_TYPE -> overlayRenders += parseOverlayRender(entry, index)
                 PROMPT_OUTCOME_TYPE -> promptOutcomes += parsePromptOutcome(entry, index)
                 GUIDANCE_ALERT_TYPE -> guidanceAlerts += parseGuidanceAlert(entry, index)
+                SAFETY_STATE_TYPE -> safetyStates += parseSafetyState(entry, index)
                 SESSION_SUMMARY_TYPE -> summary = parseSummary(entry, index)
                 ERROR_TYPE -> errors += parseError(entry, index)
                 else -> throw IllegalArgumentException("Unsupported trace entry type '$type' at line ${index + 1}")
@@ -191,6 +250,7 @@ object TraceReplayParser {
             errors = errors,
             summary = summary,
             guidanceAlerts = guidanceAlerts,
+            safetyStates = safetyStates,
         )
     }
 
@@ -208,6 +268,7 @@ object TraceReplayParser {
         pipelineMode = entry.requireString("pipelineMode", lineIndex),
         targetHardwareProfile = entry.requireString("targetHardwareProfile", lineIndex),
         openedElapsedMs = entry.optionalLong("openedElapsedMs"),
+        safetyTrace = entry.optionalBoolean("safetyTrace") ?: false,
     )
 
     private fun parseFrame(entry: JsonObject, lineIndex: Int) = FrameTrace(
@@ -394,6 +455,42 @@ object TraceReplayParser {
         }
     }
 
+    /** The invariants live in [SafetyStateTrace] itself; this only adds the line number. */
+    private fun parseSafetyState(entry: JsonObject, lineIndex: Int): SafetyStateTrace {
+        val sessionId = entry.requireString("sessionId", lineIndex)
+        val seq = entry.requireLong("seq", lineIndex)
+        val at = entry.requireLong("at", lineIndex)
+        val elapsedMs = entry.requireLong("elapsedMs", lineIndex)
+        val stateSinceElapsedMs = entry.requireLong("stateSinceElapsedMs", lineIndex)
+        val state = entry.requireString("state", lineIndex)
+        val phase = entry.requireString("phase", lineIndex)
+        val interrupted = entry.requireBoolean("interrupted", lineIndex)
+        val stall = entry.requireString("stall", lineIndex)
+        val channel = entry.requireString("expectedNavigationChannel", lineIndex)
+        val cause = entry.requireString("cause", lineIndex)
+        return try {
+            SafetyStateTrace(
+                sessionId = sessionId,
+                seq = seq,
+                at = at,
+                elapsedMs = elapsedMs,
+                stateSinceElapsedMs = stateSinceElapsedMs,
+                state = state,
+                reasons = entry.optionalStringArray("reasons").orEmpty(),
+                phase = phase,
+                interrupted = interrupted,
+                stall = stall,
+                judgement = entry.optionalString("judgement"),
+                judgementReasons = entry.optionalStringArray("judgementReasons").orEmpty(),
+                outputFaults = entry.optionalStringArray("outputFaults").orEmpty(),
+                expectedNavigationChannel = channel,
+                cause = cause,
+            )
+        } catch (error: IllegalArgumentException) {
+            throw IllegalArgumentException("Invalid safety_state at line ${lineIndex + 1}: ${error.message}", error)
+        }
+    }
+
     private fun parseSummary(entry: JsonObject, lineIndex: Int) = SessionTraceSummary(
         sessionId = entry.requireString("sessionId", lineIndex),
         startedAt = entry.requireLong("startedAt", lineIndex),
@@ -410,6 +507,7 @@ object TraceReplayParser {
         maxTotalPipelineMs = entry.requireLong("maxTotalPipelineMs", lineIndex),
         closedElapsedMs = entry.optionalLong("closedElapsedMs"),
         guidanceAlertCount = entry.optionalLong("guidanceAlertCount"),
+        safetyStateCount = entry.optionalLong("safetyStateCount"),
     )
 
     private fun parseError(entry: JsonObject, lineIndex: Int) = TraceReplayError(
@@ -486,6 +584,7 @@ object TraceReplayParser {
     private const val OVERLAY_RENDER_TYPE = "overlay_render"
     private const val PROMPT_OUTCOME_TYPE = "prompt_outcome"
     private const val GUIDANCE_ALERT_TYPE = "guidance_alert"
+    private const val SAFETY_STATE_TYPE = "safety_state"
     private const val SESSION_SUMMARY_TYPE = "session_summary"
     private const val ERROR_TYPE = "error"
 }

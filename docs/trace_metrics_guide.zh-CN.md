@@ -19,6 +19,7 @@ Trace 是 JSONL 文件，每一行是一个事件：
   记录里的 `messageKeys` 是冷却后的候选，不是用户收到的提示——标注误报要对照 `prompt_outcome`。
 - `guidance_alert`：就某个故障给用户（或试图给用户）的一次告知：一句话或一段节奏，以及输出对它做了什么。
   见[资格与告警](#资格与告警)。
+- `safety_state`：Guidance 对用户处在什么状态，以及它从哪些事实算出；两者任一变化时写一条。见[安全状态](#安全状态)。
 - `session_summary`：会话结束后的聚合摘要。
 - `error`：pipeline 或 trace 中出现异常。
 
@@ -649,16 +650,18 @@ bbox 接地带（det∩sem 交叉验证）从 sem 可行走区抠除后的占比
 
 ### `guidance_alert`
 
-用户得到或被提供的每一次告知一条记录：`source`（`vision`：镜头遮挡、光线过暗、认不出地面）、`kind`（`fault_notice`、`fault_recovery`、`fault_rhythm`）、句子的 `messageKey` 或节奏的 `haptic`、`priority`、`channel`（`speech`、`screen_reader`、`haptics`，什么都没提供时为 `none`：语音关，或场景描述正在说）以及 `result`：
+用户得到或被提供的每一次告知一条记录：`source`（`vision`：镜头遮挡、光线过暗、认不出地面；`system`：Guidance 自身卡死、出错、被中断，或自带语音失效）、`kind`（`fault_notice`、`fault_recovery`、`fault_rhythm`；`stalled`、`failed`、`interrupted`、`speech_unavailable`）、句子的 `messageKey` 或节奏的 `haptic`、`priority`、`channel`（`speech`、`screen_reader`、`haptics`，什么都没提供时为 `none`：语音关，或场景描述正在说）以及 `result`：
 
-- 句子：`accepted`（自带语音接收）、`published`（交给了读屏）或 `refused`；
-- 节奏：向马达请求时 `requested`，开始播放时 `played`，开始前撤回时 `cancelled`。
+- 句子：`accepted`（自带语音接收）、`published`（交给了读屏）或 `refused`；交给自带语音的系统告知是 `requested`，因为自带语音不回报它的结果；
+- 节奏：向马达请求时 `requested`，开始播放时 `played`，开始前撤回时 `cancelled`。系统告警的节奏无条件占用马达，所以立即有结果：振动器被要求播放时是 `played`，手机没有振动器时是 `refused`（什么都感觉不到）。视觉故障的节奏轮到马达时就是 `played`，不论手机有没有振动器。
+
+一次系统告警先记一条节奏（`interrupted` 或 `speech_unavailable`），语音开时再记一条句子（`notice_guidance_stalled`、`notice_guidance_failed`、`notice_guidance_interrupted`；语音失效没有句子）。`priority` 是 `EventPriority` 的名字，或者 `max`：任何东西都不能打断的告警（出错、中断、语音失效的提醒）；卡死的告知是 `high`。
 
 `at` 是墙钟，用来和帧对照；`elapsedMs` 是 elapsed realtime。`seq` 是这段会话里告警记录的序号，从 1 起。
 
 ### trace 能观测的窗口
 
-只有会话打开期间的记录才会进 trace。`session_start.openedElapsedMs` 和 `session_summary.closedElapsedMs` 用 elapsed realtime 界定这个窗口；窗口外的告警不在任何 trace 里。`session_summary.guidanceAlertCount` 是这段会话放进队列的告警记录条数，所以完整的 trace 里 `seq` 从 1 到它一条不缺。
+只有会话打开期间的记录才会进 trace。`session_start.openedElapsedMs` 和 `session_summary.closedElapsedMs` 用 elapsed realtime 界定这个窗口，在会话打开、关闭的那一刻读取。一条告警或安全状态属于记录它时打开着的那段会话；它自己的 `elapsedMs` 是它发生的时刻，由记录它的一方稍早读取。所以，在打开前一刻发生、打开后才记录的，会进 trace，`elapsedMs` 比 `openedElapsedMs` 略早；在关闭前一刻发生、关闭后才记录的，不在任何 trace 里。`session_summary.guidanceAlertCount` 是这段会话放进队列的告警记录条数，所以完整的 trace 里 `seq` 从 1 到它一条不缺。没有会话打开时记录的告警（例如模型还在加载时 Guidance 被中断）不在任何 trace 里，也不计入这个数。一条告警相对窗口落在哪里，看它的 `elapsedMs`，不看 trace 里有没有它。
 
 ### `qualificationFrames`
 
@@ -666,12 +669,54 @@ bbox 接地带（det∩sem 交叉验证）从 sem 可行走区抠除后的占比
 
 ### `alertsInWindow`
 
-按种类统计的告警记录数，以及是否齐全。这是 trace 窗口内的次数，不是这次运行的全部告警。
+按种类统计的告警记录数，以及是否齐全。这是会话打开期间记录下的告警条数，不是这次运行的全部告警；打开时的少数几条，`elapsedMs` 可能略早于窗口（见上）。要按发生时刻比较告警，用它的 `elapsedMs`。
 
-- `complete`：`seq` 从 1 到 `guidanceAlertCount` 一条不缺。
+- `complete`：`seq` 从 1 到 `guidanceAlertCount` 一条不缺，也就是这段会话记录下的告警都在。没有会话打开时记录的告警，它不涉及。
 - `incomplete (missing n)`：有缺号、第一条 `seq` 大于 1，或者记录比计数少。trace 队列溢出时会丢最旧的条目，所以繁忙的 trace 可能丢掉一些。
 - `possibly_incomplete`：没发现缺失，但没有计数（进程在写摘要之前被杀，或摘要本身被丢），最后几条可能缺。没有计数时发现的缺号只是下限。
 - `not_recorded`：这份 trace 写于告警记录出现之前。只要留下了任何较新的内容（计数、起始的窗口、一条告警，或者一帧的 `qualification`），就不会是这一项，即使队列丢掉了起始和全部告警。
+
+## 安全状态
+
+Guidance 此刻对用户处在什么状态，合成为一个值，由 shell 从它本来就有的事实算出。只是观测：调试面板显示它，没有任何决策读它，也不告诉用户。"说不出来"（输出）和"判断不了路"（判断）是两个独立的事实：只有输出变化时，状态永远不会进入或离开停止、中断或出错。
+
+### 状态
+
+按次序取第一条成立的：
+
+1. `failed`（`pipeline_failed`：连续 30 帧失败；`error`：其余结束分析的错误）；
+2. `idle`：没在运行；
+3. `interrupted`（`lifecycle`）：运行中的会话里应用进了后台；
+4. `stop_required`（`startup_stalled` / `perception_stalled`）：20 s 内没有第一个结果，或有过结果后 2.5 s 没有新结果；
+5. `initializing`：正在启动，或运行中等第一个结果，回到前台后也是；
+6. `stop_required`（`camera_obstructed` / `too_dark`）：最近一帧不合格；
+7. `degraded`：一部分判断暂停（`ground_unrecognized`）或自带语音受损（`speech_unavailable`、`speech_not_ready`）；
+8. `guiding`。
+
+### `safety_state`
+
+`state` 和它的 `reasons`；事实：`phase`（`not_started`、`starting`、`awaiting_first_result`、`running`、`failed`）、`interrupted`、`stall`（`none`、`startup_timeout`、`no_results`）、`judgement`（最近一个结果的 `qualification`，原因在 `judgementReasons`；第一个结果之前没有这个字段）、`outputFaults`（用户依赖自带语音时，按引擎状态给出的输出健康），以及 `expectedNavigationChannel`（`speech`、`screen_reader`、`haptics_only`、`status_card_only`、`none`）：按送达本身的分支，下一条导航提示预期走的通道。它是采样，不是送达证据（证据是 `prompt_outcome`），也不属于状态：只有 `none` 时仍是 `guiding`。引擎可以已经能说话、而 `outputFaults` 仍是 `speech_unavailable`：引擎还没证明自己恢复。
+
+`cause` 是引起变化的输入（`start_requested`、`flow_started`、`result`、`poll`、`output`、`lifecycle_stop` 等）。`elapsedMs` 是观测时刻，`stateSinceElapsedMs` 是这个状态（连同原因）从什么时候开始，两者都是 elapsed realtime；只改事实的记录保持 `stateSinceElapsedMs` 不变。`at` 是墙钟，只用来对照。`seq` 是这段会话里状态记录的序号，从 1 起。
+
+状态比窗口长。没有会话打开时最近一条记录会被保留，会话打开时作为这段会话的第一条状态记录再写一次（`cause` 为 `session_start`，`seq` 为 1，`elapsedMs` 为打开时刻，`stateSinceElapsedMs` 保持原值）：开始请求和流的开始都发生在 trace 打开之前，会话的时间线照样从开头几行就有。`session_start.safetyTrace` 表示这份 trace 记录状态；没有它的 trace 没有时间线，这和"状态从没变过"不是一回事。`session_summary.safetyStateCount` 是这段会话放进队列的状态记录条数。
+
+分析流在 shell 处理它的错误之前就关闭了 trace，所以 `failed` 和对应的告警永远不在 trace 里。流以错误结束时报告会写明。
+
+### `safetyStatesInWindow`
+
+每个状态（连同原因）在窗口内持续了多久，只用 elapsed realtime；墙钟跳变不影响。一个状态从它的 `stateSinceElapsedMs`（早于窗口时从窗口起点，打开后一刻才记录的状态就可能这样）算到下一个不同状态的 `stateSinceElapsedMs`（或窗口终点）。只改事实的记录既不重新开始一个状态，也不重复累计。
+
+记录说不清的时间都算"未知"（`unknown`），绝不算给相邻的状态：
+
+- `seq` 有缺口：从缺口前那条记录到下一条记录的 `stateSinceElapsedMs`（丢掉的记录可能在前一条被观测之后的任何时刻改过状态）。下一条的状态在那之前就已开始时，丢的只是事实变化，没有未知；
+- 记录比 `safetyStateCount` 少：从最后一条到窗口终点；
+- 没有 `seq` 1：从窗口起点到第一条记录的状态开始；
+- 一条记录都没有：整个窗口。
+
+缺口在原始记录上找，再合并相邻的同状态记录；未知和已知重叠时按未知算。真实状态 0–10 s `guiding`、10–20 s `stop_required`、20–30 s `guiding`，只丢了 `stop_required` 那条，报告给出 `guiding` 10 s（20–30）和未知 20 s（0–20），绝不会是 `guiding` 30 s。
+
+没有 `session_start` 时，窗口从这段会话第一条状态记录写下的时刻开始；那条也没有时，从读到的第一条记录算起（`+ before the first record`）。没有 `session_summary` 时，算到读到的最后一条记录为止（`+ after the last record`）：之后的时间未知，长度也未知。`records` 是 `complete`、`incomplete (missing n)`、`possibly_incomplete`（没有计数）或 `not_recorded`，和告警一样；trace 记录了流以错误结束时再加 `ended on an error`。
 
 ## 快速诊断路径
 

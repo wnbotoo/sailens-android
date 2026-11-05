@@ -26,10 +26,11 @@ public class HapticPlayer(context: Context) {
      * @param timings alternating off/on durations; index 0 is the initial delay, so even indices
      *   do not vibrate.
      * @param amplitude 1..255, applied to the on segments when the motor supports it.
+     * @return whether the vibrator was asked to play it: false on a device without one, where nothing is felt.
      */
-    public fun play(timings: LongArray, amplitude: Int) {
-        val device = vibrator ?: return
-        if (!device.hasVibrator()) return
+    public fun play(timings: LongArray, amplitude: Int): Boolean {
+        val device = vibrator ?: return false
+        if (!device.hasVibrator()) return false
 
         val effect = if (device.hasAmplitudeControl()) {
             val amplitudes = IntArray(timings.size) { index ->
@@ -43,6 +44,7 @@ public class HapticPlayer(context: Context) {
         }
 
         vibrate(device, effect)
+        return true
     }
 
     public fun cancel() {

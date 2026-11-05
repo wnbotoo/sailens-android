@@ -13,6 +13,11 @@ data class SessionTraceMetadata(
      * and taken before the models initialise. Null in traces written before it existed.
      */
     val openedElapsedMs: Long? = null,
+    /**
+     * The trace records the safety state ([SafetyStateTrace]). Set by the trace service. False in a trace written
+     * before these were: it then has no state timeline, which is not the same as one in which nothing changed.
+     */
+    val safetyTrace: Boolean = false,
 )
 
 data class FrameTrace(
@@ -285,15 +290,16 @@ object PromptDeliveryChannels {
  * One alert the user was given or offered: a sentence or a rhythm about a fault, and what the output did
  * with it. A sentence carries [messageKey], a rhythm [haptic]; exactly one of them.
  *
- * Records reach the trace only while a session is open: an alert outside that window is in no trace and
- * not counted, so [seq] and [SessionTraceSummary.guidanceAlertCount] prove a trace complete within its
- * window, not every alert of a Guidance run.
+ * Records reach the trace only while a session is open: an alert recorded while none is open is in no trace
+ * and not counted, so [seq] and [SessionTraceSummary.guidanceAlertCount] prove a trace holds every alert its
+ * session recorded, not every alert of a Guidance run.
  *
  * @param sessionId and [seq] are filled in by the trace service: callers leave them.
  * @param at wall-clock milliseconds, the clock of [FrameTrace.pipelineCompletedAt]; for lining up only.
  * @param elapsedMs elapsed-realtime milliseconds when it happened.
  * @param seq 1 for the session's first alert record, and one more for each after it.
- * @param priority an `EventPriority` name, lower case.
+ * @param priority an `EventPriority` name, lower case; [GuidanceAlertTrace.MAX_PRIORITY] for a system alert that
+ *   nothing may cut.
  */
 data class GuidanceAlertTrace(
     val sessionId: String = "",
@@ -316,6 +322,11 @@ data class GuidanceAlertTrace(
         require(kind in GuidanceAlertKinds.all) { "Unknown alert kind '$kind'" }
         require(channel in GuidanceAlertChannels.all) { "Unknown alert channel '$channel'" }
         require(result in GuidanceAlertResults.all) { "Unknown alert result '$result'" }
+    }
+
+    companion object {
+        /** The [priority] of a system alert above every prompt: a failure, an interruption, an alarm. */
+        const val MAX_PRIORITY = "max"
     }
 }
 
@@ -363,10 +374,13 @@ object GuidanceAlertResults {
     /** Handed to the screen reader, which reports no completion. */
     const val PUBLISHED = "published"
 
-    /** Nothing took it. */
+    /** Nothing took it; for a system alert's rhythm, the phone has no vibrator. */
     const val REFUSED = "refused"
 
-    /** A rhythm asked of the motor, which plays it at once or as soon as a rhythm it may not cut ends. */
+    /**
+     * A rhythm asked of the motor, which plays it at once or as soon as a rhythm it may not cut ends; or a system
+     * notice handed to own speech, which reports nothing back for it.
+     */
     const val REQUESTED = "requested"
 
     /** The rhythm started. */
@@ -376,6 +390,127 @@ object GuidanceAlertResults {
     const val CANCELLED = "cancelled"
 
     val all: Set<String> = setOf(ACCEPTED, PUBLISHED, REFUSED, REQUESTED, PLAYED, CANCELLED)
+}
+
+/**
+ * Where Guidance stood for the user, and the facts it was derived from, written by the shell whenever a fact or the
+ * state changed. The state is the shell's `GuidanceSafetyState`; the names are lower case.
+ *
+ * Records reach the trace only while a session is open; the latest one is kept meanwhile, and written again as the
+ * session's first ([cause] [SafetyTraceNames.Causes.SESSION_START], [seq] 1) when one opens, so a session's timeline
+ * starts with its first line. [seq] and [SessionTraceSummary.safetyStateCount] let a reader find the records the
+ * trace's bound dropped.
+ *
+ * @param sessionId and [seq] are filled in by the trace service: callers leave them.
+ * @param at wall-clock milliseconds, the clock of [FrameTrace.pipelineCompletedAt]; for lining up only, never a duration.
+ * @param elapsedMs elapsed-realtime milliseconds when this was observed.
+ * @param stateSinceElapsedMs elapsed realtime since when [state] with [reasons] has held, which may be before the
+ *   session: a record that only changes a fact keeps it.
+ * @param state one of [SafetyTraceNames.States].
+ * @param reasons the state's reasons: the perception reasons then the output faults for a degraded state, the one
+ *   reason of a stop, an interruption or a failure, none otherwise. An open set.
+ * @param judgement the latest result's qualification level (`qualified` / `degraded` / `unqualified`), null before
+ *   the first result; [judgementReasons] its reasons.
+ * @param outputFaults the output's health, by the speech engine's state. An open set.
+ */
+data class SafetyStateTrace(
+    val sessionId: String = "",
+    val seq: Long = 0,
+    val at: Long,
+    val elapsedMs: Long,
+    val stateSinceElapsedMs: Long,
+    val state: String,
+    val reasons: List<String> = emptyList(),
+    val phase: String,
+    val interrupted: Boolean,
+    val stall: String,
+    val judgement: String? = null,
+    val judgementReasons: List<String> = emptyList(),
+    val outputFaults: List<String> = emptyList(),
+    val expectedNavigationChannel: String,
+    val cause: String,
+) {
+    init {
+        require(state in SafetyTraceNames.States.all) { "Unknown safety state '$state'" }
+        require(phase in SafetyTraceNames.Phases.all) { "Unknown run phase '$phase'" }
+        require(stall in SafetyTraceNames.Stalls.all) { "Unknown stall condition '$stall'" }
+        require(expectedNavigationChannel in SafetyTraceNames.Channels.all) { "Unknown navigation channel '$expectedNavigationChannel'" }
+        require(cause in SafetyTraceNames.Causes.all) { "Unknown safety state cause '$cause'" }
+        require(judgement == null || judgement in SafetyTraceNames.JUDGEMENTS) { "Unknown judgement '$judgement'" }
+        require(judgement != null || judgementReasons.isEmpty()) { "Judgement reasons without a judgement: $judgementReasons" }
+    }
+
+    /** The state with its reasons, as one label: `degraded(ground_unrecognized)`, or `guiding`. Equal labels are the same state. */
+    val stateLabel: String
+        get() = if (reasons.isEmpty()) state else reasons.sorted().joinToString(prefix = "$state(", postfix = ")", separator = ",")
+}
+
+/** The closed sets of names a [SafetyStateTrace] carries. */
+object SafetyTraceNames {
+    object States {
+        const val IDLE = "idle"
+        const val INITIALIZING = "initializing"
+        const val GUIDING = "guiding"
+        const val DEGRADED = "degraded"
+        const val STOP_REQUIRED = "stop_required"
+        const val INTERRUPTED = "interrupted"
+        const val FAILED = "failed"
+
+        val all: Set<String> = setOf(IDLE, INITIALIZING, GUIDING, DEGRADED, STOP_REQUIRED, INTERRUPTED, FAILED)
+    }
+
+    object Phases {
+        const val NOT_STARTED = "not_started"
+        const val STARTING = "starting"
+        const val AWAITING_FIRST_RESULT = "awaiting_first_result"
+        const val RUNNING = "running"
+        const val FAILED = "failed"
+
+        val all: Set<String> = setOf(NOT_STARTED, STARTING, AWAITING_FIRST_RESULT, RUNNING, FAILED)
+    }
+
+    object Stalls {
+        const val NONE = "none"
+        const val STARTUP_TIMEOUT = "startup_timeout"
+        const val NO_RESULTS = "no_results"
+
+        val all: Set<String> = setOf(NONE, STARTUP_TIMEOUT, NO_RESULTS)
+    }
+
+    object Channels {
+        const val SCREEN_READER = "screen_reader"
+        const val SPEECH = "speech"
+        const val HAPTICS_ONLY = "haptics_only"
+        const val STATUS_CARD_ONLY = "status_card_only"
+        const val NONE = "none"
+
+        val all: Set<String> = setOf(SCREEN_READER, SPEECH, HAPTICS_ONLY, STATUS_CARD_ONLY, NONE)
+    }
+
+    /** The input that produced the record. */
+    object Causes {
+        const val START_REQUESTED = "start_requested"
+        const val STALL_WATCH_STARTED = "stall_watch_started"
+        const val FLOW_STARTED = "flow_started"
+        const val RESULT = "result"
+        const val FLOW_FAILED = "flow_failed"
+        const val STOPPED = "stopped"
+        const val LIFECYCLE_STOP = "lifecycle_stop"
+        const val LIFECYCLE_START = "lifecycle_start"
+        const val OUTPUT = "output"
+        const val POLL = "poll"
+
+        /** The latest record, written again as the first of a session that just opened. */
+        const val SESSION_START = "session_start"
+
+        val all: Set<String> = setOf(
+            START_REQUESTED, STALL_WATCH_STARTED, FLOW_STARTED, RESULT, FLOW_FAILED, STOPPED, LIFECYCLE_STOP,
+            LIFECYCLE_START, OUTPUT, POLL, SESSION_START,
+        )
+    }
+
+    /** The qualification levels, as frames write them. */
+    val JUDGEMENTS: Set<String> = setOf("qualified", "degraded", "unqualified")
 }
 
 data class SessionTraceSummary(
@@ -399,6 +534,11 @@ data class SessionTraceSummary(
      * Set by the trace service; null in older traces.
      */
     val guidanceAlertCount: Long? = null,
+    /**
+     * How many [SafetyStateTrace] records this session queued, the one written when it opened included: the highest
+     * `seq` a complete trace holds. Set by the trace service; null in older traces.
+     */
+    val safetyStateCount: Long? = null,
 )
 
 class SessionTraceAccumulator(

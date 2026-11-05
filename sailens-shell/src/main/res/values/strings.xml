@@ -110,6 +110,7 @@
     <string name="settings_perception_default_supporting">Adds obstacle recognition: people, vehicles, and objects in your path.</string>
     <string name="settings_perception_apply_hint">Changes take effect the next time navigation starts.</string>
     <string name="title_live_pipeline_debug">Live pipeline debug</string>
+    <string name="debug_safety_state">Safety state: %1$s</string>
     <string name="debug_semantic_provider">Semantic provider: %1$s</string>
     <string name="debug_obstacle_provider">Obstacle provider: %1$s</string>
     <string name="debug_perception_profile">Perception profile: %1$s</string>
@@ -246,7 +247,8 @@
     <string name="trace_report_road_vehicle_sources">Road vehicles: sources %1$s, avg conf %2$d%%, reasons %3$s, bottom/center/area %4$d/%5$d/%6$d%%</string>
     <string name="trace_report_blockage_reasons">Blocked reasons: %1$s</string>
     <string name="trace_report_qualification_frames">Frames by qualification: %1$s</string>
-    <string name="trace_report_guidance_alerts">Alerts in the trace window: %1$s; records %2$s</string>
+    <string name="trace_report_guidance_alerts">Alerts the session recorded: %1$s; records %2$s</string>
+    <string name="trace_report_safety_states">Safety states in the trace window: %1$s; unknown %2$s; records %3$s</string>
     <string name="trace_session_button_label">Session %1$s</string>
     <string name="trace_session_selected_label">Selected session %1$s</string>
     <string name="trace_session_file_name">File: %1$s</string>

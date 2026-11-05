@@ -1,18 +1,34 @@
 package com.sailens.guidance.trace
 
 import com.sailens.guidance.model.trace.GuidanceAlertTrace
+import com.sailens.guidance.model.trace.SafetyStateTrace
+import com.sailens.guidance.model.trace.SafetyTraceNames
 import com.sailens.guidance.model.trace.SessionTraceMetadata
 import com.sailens.guidance.model.trace.SessionTraceSummary
 
 /**
  * Orders the records that come from the main thread against the opening and closing of a trace session,
- * and numbers them: every alert record lands after its session's `session_start` and before its
- * `session_summary`, which carries how many there were.
+ * and numbers them: every alert and safety-state record lands after its session's `session_start` and before its
+ * `session_summary`, which carries how many of each there were.
+ *
+ * The safety state is lasting, so the latest record is kept whether or not a session is attached, and written again
+ * as the session's first safety-state record when one is: a state that began before the trace opened (the start
+ * request, the stall watch and the flow's start all come before it) is on the session's first lines. An alert is a
+ * single event: recorded while no session is attached, it is in no trace, and not kept.
  *
  * It has a lock of its own and never takes the trace service's, which is held while the queue is encoded
  * and written to disk: the main thread must not wait for a disk. Inside the lock there are only the
- * attached session, the counter and [CountedTraceQueue.offerCounted]; no encoding, no disk and no trim.
- * A caller trims after the call returns.
+ * attached session, the kept state, the counters, the clock reads that bound the window and
+ * [CountedTraceQueue.offerCounted]; no encoding, no disk and no trim. A caller trims after the call returns.
+ *
+ * The window's bounds, `openedElapsedMs` and `closedElapsedMs`, are read inside the lock, with the attaching and
+ * detaching they bound. Read before it, a state recorded in between would open the session as the kept state,
+ * observed at an opening earlier than its own start, and the input that set it would be lost; an alert recorded in
+ * between would be counted in a window that closed before it.
+ *
+ * A record's own time is read by its producer before the call, so one read just before a bound and recorded just
+ * after it lands past the bound: after an opening, it is in the session with a time just before `openedElapsedMs`;
+ * after a closing, it is in no trace. The gap is the producer's few steps from its clock to this lock.
  *
  * Locks are always taken in one order: the trace service's ([attach] and [detach] are called holding it),
  * then this one. Nothing holding this one waits for the other, so they cannot deadlock. Waiting here is
@@ -21,15 +37,21 @@ import com.sailens.guidance.model.trace.SessionTraceSummary
  * Only the records that go through here are ordered by it. Other records (frames, prompt outcomes) go
  * straight to the queue and may still fall between these.
  */
-internal class SafetyTraceLedger(private val queue: CountedTraceQueue<TraceQueueEntry>) {
+internal class SafetyTraceLedger(
+    private val queue: CountedTraceQueue<TraceQueueEntry>,
+    private val elapsedClock: () -> Long,
+    private val wallClock: () -> Long,
+) {
     private val lock = Any()
     private var sessionId: String? = null
     private var alerts = 0L
+    private var states = 0L
+    private var latestState: SafetyStateTrace? = null
 
     /**
      * Queues [alert] with the attached session and its next `seq`.
      *
-     * @return false, and nothing queued, when no session is attached: an alert outside the window is in no trace.
+     * @return false, and nothing queued, when no session is attached: an alert recorded then is in no trace.
      */
     fun recordAlert(alert: GuidanceAlertTrace): Boolean = synchronized(lock) {
         val id = sessionId ?: return false
@@ -38,16 +60,57 @@ internal class SafetyTraceLedger(private val queue: CountedTraceQueue<TraceQueue
         true
     }
 
-    /** Queues the session's opening and attaches it: what is recorded from now on belongs to it, numbered from 1. */
-    fun attach(metadata: SessionTraceMetadata) = synchronized(lock) {
-        queue.offerCounted(TraceQueueEntry.SessionStart(metadata))
-        sessionId = metadata.sessionId
-        alerts = 0
+    /**
+     * Keeps [state] as the latest, and queues it with the attached session and its next `seq`.
+     *
+     * @return false when no session is attached: then it is only kept, to open the next session with.
+     */
+    fun recordState(state: SafetyStateTrace): Boolean = synchronized(lock) {
+        latestState = state
+        val id = sessionId ?: return false
+        states++
+        queue.offerCounted(TraceQueueEntry.SafetyState(state.copy(sessionId = id, seq = states)))
+        true
     }
 
-    /** Detaches first, then queues the closing with the count, so nothing recorded later can follow it. */
+    /**
+     * Queues the session's opening, with `openedElapsedMs` read now, and attaches it: what is recorded from now on
+     * belongs to it, numbered from 1. The kept state, if any, follows the opening at once as `seq` 1, observed at the
+     * opening and with its own `stateSinceElapsedMs`.
+     */
+    fun attach(metadata: SessionTraceMetadata) = synchronized(lock) {
+        val openedElapsedMs = elapsedClock()
+        val openedAt = wallClock()
+        queue.offerCounted(TraceQueueEntry.SessionStart(metadata.copy(openedElapsedMs = openedElapsedMs)))
+        sessionId = metadata.sessionId
+        alerts = 0
+        states = 0
+        latestState?.let { kept ->
+            states++
+            queue.offerCounted(
+                TraceQueueEntry.SafetyState(
+                    kept.copy(
+                        sessionId = metadata.sessionId,
+                        seq = states,
+                        at = openedAt,
+                        elapsedMs = openedElapsedMs,
+                        cause = SafetyTraceNames.Causes.SESSION_START,
+                    ),
+                ),
+            )
+        }
+    }
+
+    /**
+     * Detaches first, then queues the closing with `closedElapsedMs` read now and the counts, so nothing recorded
+     * later can follow it.
+     */
     fun detach(summary: SessionTraceSummary) = synchronized(lock) {
         sessionId = null
-        queue.offerCounted(TraceQueueEntry.SessionSummary(summary.copy(guidanceAlertCount = alerts)))
+        queue.offerCounted(
+            TraceQueueEntry.SessionSummary(
+                summary.copy(closedElapsedMs = elapsedClock(), guidanceAlertCount = alerts, safetyStateCount = states),
+            ),
+        )
     }
 }

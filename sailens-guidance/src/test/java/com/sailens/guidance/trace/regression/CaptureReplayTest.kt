@@ -21,7 +21,9 @@ import java.io.File
  * ```
  *
  * One report per capture goes to `sailens-guidance/build/replay/<sessionId>.txt`; the test fails
- * unless every `model_regression` capture under the path replays exactly.
+ * unless every `model_regression` capture under the path replays exactly and whole ([replayProblem]):
+ * an exact prefix that stopped before a lost frame, a capture whose manifest counts a lost or missing
+ * frame, or an approximate frame fails it too.
  */
 class CaptureReplayTest {
 
@@ -60,11 +62,13 @@ class CaptureReplayTest {
                 firstLostSeq = block.stats.firstLostSeq,
                 qualificationRecorded = block.qualificationRecorded,
             )
+            val problem = replayProblem(report, session.regressionFrames.size, block.stats)
             val text = buildString {
                 appendLine("capture ${manifest.sessionId} (${manifest.group ?: "no group"}: ${manifest.sceneLabel ?: "no scene"})")
                 appendLine("build ${manifest.gitSha} models ${manifest.modelArtifacts}")
                 appendLine("frames recorded ${session.regressionFrames.size}, replayed ${report.framesReplayed}, decisions ${report.decisions}")
                 appendLine("exact ${report.exact}")
+                appendLine(problem?.let { "not whole: $it" } ?: "whole")
                 report.stoppedAtLostSeq?.let { appendLine("stopped before lost frame $it (${block.stats.framesLost} lost)") }
                 report.firstMismatch?.let { appendLine("first mismatch at seq ${it.seq}: ${it.what}\n  expected ${it.expected}\n  actual   ${it.actual}") }
                 if (report.approximateFrames.isNotEmpty()) appendLine("approximate frames ${report.approximateFrames}")
@@ -72,9 +76,9 @@ class CaptureReplayTest {
             }
             File(out, "${manifest.sessionId}.txt").writeText(text)
             println(text)
-            if (!report.exact) failures += manifest.sessionId
+            problem?.let { failures += "${manifest.sessionId}: $it" }
         }
         assertTrue("no model_regression capture under $path", replayedAny)
-        assertTrue("not exact: $failures (reports in ${out.path})", failures.isEmpty())
+        assertTrue("not an exact replay of the whole capture: $failures (reports in ${out.path})", failures.isEmpty())
     }
 }

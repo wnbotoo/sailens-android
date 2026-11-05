@@ -6,6 +6,7 @@ import com.sailens.guidance.config.TraceRuntimeConfig
 import com.sailens.guidance.model.trace.FrameTrace
 import com.sailens.guidance.model.trace.GuidanceAlertTrace
 import com.sailens.guidance.model.trace.PromptOutcomeTrace
+import com.sailens.guidance.model.trace.SafetyStateTrace
 import com.sailens.guidance.model.trace.SessionTraceMetadata
 import com.sailens.guidance.model.trace.SessionTraceSummary
 import com.sailens.core.log.LogService
@@ -17,8 +18,10 @@ import java.util.concurrent.Executors
 
 /**
  * @param directory where the trace files go.
- * @param elapsedClock elapsed-realtime milliseconds, for the window a session's trace observes.
+ * @param elapsedClock elapsed-realtime milliseconds, for the window a session's trace observes; read inside the
+ *   ledger's lock, with the opening and the closing it times.
  * @param appendEntry encodes one entry onto the open file.
+ * @param wallClock wall-clock milliseconds, for the time written on the safety state that opens a session.
  */
 class FileTraceService internal constructor(
     private val directory: () -> File,
@@ -26,6 +29,7 @@ class FileTraceService internal constructor(
     private val traceRuntimeConfig: TraceRuntimeConfig,
     private val elapsedClock: () -> Long,
     private val appendEntry: (Writer, TraceQueueEntry) -> Unit,
+    private val wallClock: () -> Long = System::currentTimeMillis,
 ) : TraceService {
     constructor(
         context: Context,
@@ -42,8 +46,8 @@ class FileTraceService internal constructor(
     private val executor = Executors.newSingleThreadExecutor()
     private val queue = CountedTraceQueue<TraceQueueEntry>()
 
-    /** The alert records, ordered against the session's opening and closing without this object's lock. */
-    private val ledger = SafetyTraceLedger(queue)
+    /** The alert and safety-state records, ordered against the session's opening and closing without this object's lock. */
+    private val ledger = SafetyTraceLedger(queue, elapsedClock, wallClock)
 
     @Volatile
     private var isRunning = true
@@ -68,7 +72,7 @@ class FileTraceService internal constructor(
             flushToDisk()
             activeSessionId = metadata.sessionId
             traceFile = createTraceFile(metadata.sessionId)
-            ledger.attach(metadata.copy(openedElapsedMs = elapsedClock()))
+            ledger.attach(metadata.copy(safetyTrace = true))
             trim()
         }
     }
@@ -117,10 +121,15 @@ class FileTraceService internal constructor(
         if (ledger.recordAlert(alert)) trim()
     }
 
+    /** Never takes this object's lock, which a flush holds while it writes to disk. */
+    override fun recordSafetyState(state: SafetyStateTrace) {
+        if (ledger.recordState(state)) trim()
+    }
+
     override fun finishSession(summary: SessionTraceSummary) {
         synchronized(this) {
             if (summary.sessionId != activeSessionId) return
-            ledger.detach(summary.copy(closedElapsedMs = elapsedClock()))
+            ledger.detach(summary)
             trim()
             flushToDisk()
             activeSessionId = null

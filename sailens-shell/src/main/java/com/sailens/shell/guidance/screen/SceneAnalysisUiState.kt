@@ -6,6 +6,9 @@ import com.sailens.guidance.model.scene.SceneEvent
 import com.sailens.guidance.model.scene.SceneDebugInfo
 import com.sailens.output.SpeechEngineState
 import com.sailens.shell.guidance.overlay.SceneOverlayMode
+import com.sailens.shell.guidance.safety.GuidanceSafetyState
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.update
 
 data class SceneAnalysisUiState(
     val isInitializing: Boolean = false,
@@ -58,7 +61,51 @@ data class SceneAnalysisUiState(
      */
     val lastAnnouncedEvent: SceneEvent? = null,
     val errorMessage: String? = null,
+    /**
+     * Where Guidance stands for the user, as the safety monitor derives it. Observation only: the debug panel shows
+     * it, nothing decides on it, and it is not announced.
+     */
+    val safetyState: GuidanceSafetyState = GuidanceSafetyState.Idle,
 )
+
+/**
+ * The start request, the flow's start and the user's stop are facts the safety monitor and this state both hold. Each
+ * reaches the monitor ([tellMonitor]) before it is written here, so that a check comparing the two at the start of an
+ * input never finds this state ahead of the monitor.
+ */
+internal inline fun MutableStateFlow<SceneAnalysisUiState>.startRequested(tellMonitor: () -> Unit) {
+    tellMonitor()
+    update { it.copy(isLoading = true) }
+}
+
+/** The analysis flow is collected; see [startRequested] for the order. */
+internal inline fun MutableStateFlow<SceneAnalysisUiState>.flowStarted(tellMonitor: () -> Unit) {
+    tellMonitor()
+    update { it.copy(isInitializing = false, isRunning = true, isLoading = false) }
+}
+
+/** The user stopped Guidance: everything the session showed is cleared; see [startRequested] for the order. */
+internal inline fun MutableStateFlow<SceneAnalysisUiState>.stopped(tellMonitor: () -> Unit) {
+    tellMonitor()
+    update {
+        it.copy(
+            isRunning = false,
+            isInitializing = false,
+            isLoading = false,
+            // 用户主动停止，中断告警自然作废。
+            wasInterrupted = false,
+            lastEvents = emptyList(),
+            activeStatusEvent = null,
+            lastAnnouncedEvent = null,
+            segMask = null,
+            maskSourceAgeMs = 0L,
+            frameDisplayWidth = null,
+            frameDisplayHeight = null,
+            obstacleDetections = emptyList(),
+            latestSceneDebugInfo = null,
+        )
+    }
+}
 
 /**
  * 合并新一帧的决策输出和当前状态卡片。
