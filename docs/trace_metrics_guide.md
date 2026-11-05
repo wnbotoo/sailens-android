@@ -833,9 +833,13 @@ the session's alert records from 1.
 ### The window a trace observes
 
 Records reach a trace only while its session is open. `session_start.openedElapsedMs` and
-`session_summary.closedElapsedMs` bound that window in elapsed realtime; an alert outside it is in no
-trace. `session_summary.guidanceAlertCount` is how many alert records the session queued, so a
-complete trace holds every `seq` from 1 to it. An alert given before the session opened (Guidance
+`session_summary.closedElapsedMs` bound that window in elapsed realtime, read as the session opens and
+closes. An alert or a safety state belongs to the session that was open when it was recorded; its own
+`elapsedMs` is when it happened, read a moment earlier by whatever recorded it. So one that happened
+just before the opening and was recorded just after it is in the trace with an `elapsedMs` a little
+before `openedElapsedMs`, and one that happened just before the closing and was recorded just after it
+is in no trace. `session_summary.guidanceAlertCount` is how many alert records the session queued, so
+a complete trace holds every `seq` from 1 to it. An alert given before the session opened (Guidance
 interrupted while its models still load, say) is in no trace and not in the count.
 
 ### `qualificationFrames`
@@ -845,10 +849,12 @@ follow the trace sampling, except that a frame that offered a prompt is always k
 
 ### `alertsInWindow`
 
-Alert records per kind, and whether they are all there. The counts are counts within the trace's
-window, not every alert of the run.
+Alert records per kind, and whether they are all there. The counts are of the alerts the session
+recorded while it was open, not every alert of the run; a few at the opening can carry an `elapsedMs`
+just before the window (see above). To compare an alert by when it happened, use its `elapsedMs`.
 
-- `complete`: every `seq` from 1 to `guidanceAlertCount` is there.
+- `complete`: every `seq` from 1 to `guidanceAlertCount` is there, that is every alert the session
+  recorded. It says nothing of alerts given while no session was open.
 - `incomplete (missing n)`: a gap, a first `seq` above 1, or fewer records than counted. The trace
   queue drops the oldest entries when it overflows, so a busy trace can lose some.
 - `possibly_incomplete`: none found missing, but there is no count (the process died before the
@@ -914,7 +920,8 @@ it are never in a trace. The report says when a trace's flow ended on an error.
 
 How long each state (with its reasons) held within the window, by elapsed realtime alone; a jump of
 the wall clock changes nothing. A state counts from its `stateSinceElapsedMs`, or the window's start
-when it began before, to the next different state's, or the window's end. Records that only change a
+when it began before (as a state recorded just after the opening can), to the next different state's,
+or the window's end. Records that only change a
 fact neither restart a state nor count it twice.
 
 What the records cannot tell is `unknown`, never given to a neighbouring state:

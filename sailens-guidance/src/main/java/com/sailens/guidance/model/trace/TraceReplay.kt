@@ -19,7 +19,7 @@ data class TraceReplaySession(
     val promptOutcomes: List<PromptOutcomeTrace> = emptyList(),
     val errors: List<TraceReplayError>,
     val summary: SessionTraceSummary?,
-    /** The alerts given or offered within the trace's window, in file order; empty for traces recorded before these were written. */
+    /** The alerts given or offered while the trace's session was open, in file order; empty for traces recorded before these were written. */
     val guidanceAlerts: List<GuidanceAlertTrace> = emptyList(),
     /** The safety-state records, in file order; empty for traces recorded before these were written. */
     val safetyStates: List<SafetyStateTrace> = emptyList(),
@@ -128,7 +128,7 @@ data class TraceReplayReport(
     val uniqueMessageKeys: List<String>,
     /** Traced frames per qualification level; "none" counts frames from before the field existed. */
     val qualificationFrameCounts: Map<String, Int> = emptyMap(),
-    /** Alert records per kind: the alerts within the trace's window, not every alert of the run. */
+    /** Alert records per kind: the alerts the session recorded while it was open, not every alert of the run. */
     val guidanceAlertCounts: Map<String, Int> = emptyMap(),
     val guidanceAlertCompleteness: AlertRecordCompleteness = AlertRecordCompleteness.NOT_RECORDED,
     /** Alert records known to be missing; with [AlertRecordCompleteness.INCOMPLETE] and no summary, at least this many. */
@@ -192,7 +192,7 @@ enum class AlertRecordCompleteness {
     /** The trace was written before alerts were recorded: nothing it kept, not even a frame's qualification, is newer. */
     NOT_RECORDED,
 
-    /** Every `seq` from 1 up to the session's [SessionTraceSummary.guidanceAlertCount] is there. */
+    /** Every `seq` from 1 up to the session's [SessionTraceSummary.guidanceAlertCount] is there: every alert the session recorded. */
     COMPLETE,
 
     /** Records are missing: a `seq` gap, a first `seq` above 1, or fewer than the session counted. */

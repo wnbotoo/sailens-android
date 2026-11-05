@@ -216,7 +216,7 @@ class BuildTraceReplayReportUseCase {
     }
 
     /**
-     * Whether the alert records are every alert within the trace's window, and how many are known missing:
+     * Whether the alert records are every alert the session recorded while it was open, and how many are known missing:
      * `seq` must run from 1 without a gap up to the session's count. Without the count only the first two
      * can be checked, and a gap found then is a lower bound.
      *

@@ -290,9 +290,9 @@ object PromptDeliveryChannels {
  * One alert the user was given or offered: a sentence or a rhythm about a fault, and what the output did
  * with it. A sentence carries [messageKey], a rhythm [haptic]; exactly one of them.
  *
- * Records reach the trace only while a session is open: an alert outside that window is in no trace and
- * not counted, so [seq] and [SessionTraceSummary.guidanceAlertCount] prove a trace complete within its
- * window, not every alert of a Guidance run.
+ * Records reach the trace only while a session is open: an alert recorded while none is open is in no trace
+ * and not counted, so [seq] and [SessionTraceSummary.guidanceAlertCount] prove a trace holds every alert its
+ * session recorded, not every alert of a Guidance run.
  *
  * @param sessionId and [seq] are filled in by the trace service: callers leave them.
  * @param at wall-clock milliseconds, the clock of [FrameTrace.pipelineCompletedAt]; for lining up only.

@@ -661,7 +661,7 @@ bbox 接地带（det∩sem 交叉验证）从 sem 可行走区抠除后的占比
 
 ### trace 能观测的窗口
 
-只有会话打开期间的记录才会进 trace。`session_start.openedElapsedMs` 和 `session_summary.closedElapsedMs` 用 elapsed realtime 界定这个窗口；窗口外的告警不在任何 trace 里。`session_summary.guidanceAlertCount` 是这段会话放进队列的告警记录条数，所以完整的 trace 里 `seq` 从 1 到它一条不缺。会话打开之前发出的告警（例如模型还在加载时 Guidance 被中断）不在任何 trace 里，也不计入这个数。
+只有会话打开期间的记录才会进 trace。`session_start.openedElapsedMs` 和 `session_summary.closedElapsedMs` 用 elapsed realtime 界定这个窗口，在会话打开、关闭的那一刻读取。一条告警或安全状态属于记录它时打开着的那段会话；它自己的 `elapsedMs` 是它发生的时刻，由记录它的一方稍早读取。所以，在打开前一刻发生、打开后才记录的，会进 trace，`elapsedMs` 比 `openedElapsedMs` 略早；在关闭前一刻发生、关闭后才记录的，不在任何 trace 里。`session_summary.guidanceAlertCount` 是这段会话放进队列的告警记录条数，所以完整的 trace 里 `seq` 从 1 到它一条不缺。会话打开之前发出的告警（例如模型还在加载时 Guidance 被中断）不在任何 trace 里，也不计入这个数。
 
 ### `qualificationFrames`
 
@@ -669,9 +669,9 @@ bbox 接地带（det∩sem 交叉验证）从 sem 可行走区抠除后的占比
 
 ### `alertsInWindow`
 
-按种类统计的告警记录数，以及是否齐全。这是 trace 窗口内的次数，不是这次运行的全部告警。
+按种类统计的告警记录数，以及是否齐全。这是会话打开期间记录下的告警条数，不是这次运行的全部告警；打开时的少数几条，`elapsedMs` 可能略早于窗口（见上）。要按发生时刻比较告警，用它的 `elapsedMs`。
 
-- `complete`：`seq` 从 1 到 `guidanceAlertCount` 一条不缺。
+- `complete`：`seq` 从 1 到 `guidanceAlertCount` 一条不缺，也就是这段会话记录下的告警都在。没有会话打开时发出的告警，它不涉及。
 - `incomplete (missing n)`：有缺号、第一条 `seq` 大于 1，或者记录比计数少。trace 队列溢出时会丢最旧的条目，所以繁忙的 trace 可能丢掉一些。
 - `possibly_incomplete`：没发现缺失，但没有计数（进程在写摘要之前被杀，或摘要本身被丢），最后几条可能缺。没有计数时发现的缺号只是下限。
 - `not_recorded`：这份 trace 写于告警记录出现之前。只要留下了任何较新的内容（计数、起始的窗口、一条告警，或者一帧的 `qualification`），就不会是这一项，即使队列丢掉了起始和全部告警。
@@ -705,7 +705,7 @@ Guidance 此刻对用户处在什么状态，合成为一个值，由 shell 从�
 
 ### `safetyStatesInWindow`
 
-每个状态（连同原因）在窗口内持续了多久，只用 elapsed realtime；墙钟跳变不影响。一个状态从它的 `stateSinceElapsedMs`（早于窗口时从窗口起点）算到下一个不同状态的 `stateSinceElapsedMs`（或窗口终点）。只改事实的记录既不重新开始一个状态，也不重复累计。
+每个状态（连同原因）在窗口内持续了多久，只用 elapsed realtime；墙钟跳变不影响。一个状态从它的 `stateSinceElapsedMs`（早于窗口时从窗口起点，打开后一刻才记录的状态就可能这样）算到下一个不同状态的 `stateSinceElapsedMs`（或窗口终点）。只改事实的记录既不重新开始一个状态，也不重复累计。
 
 记录说不清的时间都算"未知"（`unknown`），绝不算给相邻的状态：
 

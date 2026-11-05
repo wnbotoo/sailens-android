@@ -257,7 +257,7 @@ class SafetyTimelineReportTest {
     }
 
     @Test
-    fun `an alert from before the session opened is in no trace and not counted, so the window's alerts are complete`() {
+    fun `an alert from before the session opened is in no trace and not counted, so the session's alerts are complete`() {
         // The ledger drops an alert while no session is attached and does not count it: the session's alerts start at 1.
         val report = build(
             listOf(

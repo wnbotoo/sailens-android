@@ -14,7 +14,7 @@ import com.sailens.guidance.model.trace.SessionTraceSummary
  * The safety state is lasting, so the latest record is kept whether or not a session is attached, and written again
  * as the session's first safety-state record when one is: a state that began before the trace opened (the start
  * request, the stall watch and the flow's start all come before it) is on the session's first lines. An alert is a
- * single event: outside the window it is in no trace, and not kept.
+ * single event: recorded while no session is attached, it is in no trace, and not kept.
  *
  * It has a lock of its own and never takes the trace service's, which is held while the queue is encoded
  * and written to disk: the main thread must not wait for a disk. Inside the lock there are only the
@@ -51,7 +51,7 @@ internal class SafetyTraceLedger(
     /**
      * Queues [alert] with the attached session and its next `seq`.
      *
-     * @return false, and nothing queued, when no session is attached: an alert outside the window is in no trace.
+     * @return false, and nothing queued, when no session is attached: an alert recorded then is in no trace.
      */
     fun recordAlert(alert: GuidanceAlertTrace): Boolean = synchronized(lock) {
         val id = sessionId ?: return false

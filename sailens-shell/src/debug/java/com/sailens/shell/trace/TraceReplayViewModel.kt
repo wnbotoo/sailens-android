@@ -247,7 +247,7 @@ class TraceReplayViewModel(
 internal fun Map<String, Int>.countsOrNone(): String =
     if (isEmpty()) "none" else entries.joinToString { (key, count) -> "$key:$count" }
 
-/** Whether the alert records are complete within the trace's window, with how many are known missing. */
+/** Whether the session's alert records are all there, with how many are known missing. */
 internal fun TraceReplayReport.alertCompletenessText(): String {
     val name = guidanceAlertCompleteness.name.lowercase()
     return if (guidanceAlertsMissing > 0) "$name (missing $guidanceAlertsMissing)" else name
