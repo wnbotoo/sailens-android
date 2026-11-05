@@ -661,7 +661,7 @@ bbox 接地带（det∩sem 交叉验证）从 sem 可行走区抠除后的占比
 
 ### trace 能观测的窗口
 
-只有会话打开期间的记录才会进 trace。`session_start.openedElapsedMs` 和 `session_summary.closedElapsedMs` 用 elapsed realtime 界定这个窗口，在会话打开、关闭的那一刻读取。一条告警或安全状态属于记录它时打开着的那段会话；它自己的 `elapsedMs` 是它发生的时刻，由记录它的一方稍早读取。所以，在打开前一刻发生、打开后才记录的，会进 trace，`elapsedMs` 比 `openedElapsedMs` 略早；在关闭前一刻发生、关闭后才记录的，不在任何 trace 里。`session_summary.guidanceAlertCount` 是这段会话放进队列的告警记录条数，所以完整的 trace 里 `seq` 从 1 到它一条不缺。会话打开之前发出的告警（例如模型还在加载时 Guidance 被中断）不在任何 trace 里，也不计入这个数。
+只有会话打开期间的记录才会进 trace。`session_start.openedElapsedMs` 和 `session_summary.closedElapsedMs` 用 elapsed realtime 界定这个窗口，在会话打开、关闭的那一刻读取。一条告警或安全状态属于记录它时打开着的那段会话；它自己的 `elapsedMs` 是它发生的时刻，由记录它的一方稍早读取。所以，在打开前一刻发生、打开后才记录的，会进 trace，`elapsedMs` 比 `openedElapsedMs` 略早；在关闭前一刻发生、关闭后才记录的，不在任何 trace 里。`session_summary.guidanceAlertCount` 是这段会话放进队列的告警记录条数，所以完整的 trace 里 `seq` 从 1 到它一条不缺。没有会话打开时记录的告警（例如模型还在加载时 Guidance 被中断）不在任何 trace 里，也不计入这个数。一条告警相对窗口落在哪里，看它的 `elapsedMs`，不看 trace 里有没有它。
 
 ### `qualificationFrames`
 

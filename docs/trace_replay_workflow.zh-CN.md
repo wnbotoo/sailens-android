@@ -55,7 +55,7 @@
     - `errorCount`
     - `uniqueMessageKeys`
     - `qualificationFrameCounts`
-    - `guidanceAlertCounts`，以及窗口内的告警记录是否齐全
+    - `guidanceAlertCounts`：会话收录的告警，以及这些记录是否齐全
     - `safetyTimeline`：各安全状态在窗口内持续了多久、状态未知的时长，以及状态记录是否齐全
 - `SceneAnalysisView` 已接入正式入口：
   - `Trace sessions` 页面：查看已存储 session 列表

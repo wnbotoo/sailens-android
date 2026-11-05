@@ -67,7 +67,7 @@ For what each metric means, how it is computed, and how to read it when tuning, 
     - `errorCount`
     - `uniqueMessageKeys`
     - `qualificationFrameCounts`
-    - `guidanceAlertCounts`, with whether the alert records are complete within the window
+    - `guidanceAlertCounts`: the alerts the session recorded, with whether those records are complete
     - `safetyTimeline`: how long each safety state held within the window, the time whose state is
       unknown, and whether the state records are complete
 - `SceneAnalysisView` has real entry points:

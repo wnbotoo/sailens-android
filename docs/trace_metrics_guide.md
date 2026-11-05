@@ -839,8 +839,9 @@ closes. An alert or a safety state belongs to the session that was open when it 
 just before the opening and was recorded just after it is in the trace with an `elapsedMs` a little
 before `openedElapsedMs`, and one that happened just before the closing and was recorded just after it
 is in no trace. `session_summary.guidanceAlertCount` is how many alert records the session queued, so
-a complete trace holds every `seq` from 1 to it. An alert given before the session opened (Guidance
-interrupted while its models still load, say) is in no trace and not in the count.
+a complete trace holds every `seq` from 1 to it. An alert recorded while no session is open (Guidance
+interrupted while its models still load, say) is in no trace and not in the count. Where an alert
+falls against the window is a matter of its `elapsedMs`, not of whether the trace has it.
 
 ### `qualificationFrames`
 
