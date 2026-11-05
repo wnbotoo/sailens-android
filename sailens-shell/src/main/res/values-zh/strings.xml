@@ -318,7 +318,9 @@
     <string name="event_ground_to_indoor">路面变化</string>
 
     <!-- 输入质量。用户无法自行察觉这类失效，所以措辞直接给出可执行动作。 -->
-    <string name="event_camera_blocked">镜头被遮挡</string>
+    <!-- 画面几乎没有明暗变化时说。约 30 cm 外的素白墙和纸巾贴住镜头在亮度统计上分不开，
+         所以两种情况都说出来：移开遮挡，或者后退。 -->
+    <string name="event_camera_blocked">镜头被挡住，或离墙太近</string>
     <string name="event_low_light">光线不足</string>
     <!-- 模型认不出脚下的地面（室内地板、镜头抬得太高——或者正前方就是墙，它分不清），"前方不通"
          一类提示已暂停。措辞必须说"不知道能不能走"，不能让人听成"能走"。障碍物提示照常。 -->

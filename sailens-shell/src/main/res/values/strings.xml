@@ -325,7 +325,10 @@
     <string name="event_ground_to_indoor">Surface changing</string>
 
     <!-- Input quality. The user cannot notice these failures unaided, so the wording is actionable. -->
-    <string name="event_camera_blocked">Camera is covered</string>
+    <!-- Said when the frame has almost no contrast. A plain white wall about 30 cm away and a tissue
+         over the lens cannot be told apart by their luma statistics, so it names both: uncover the
+         lens, or step back. -->
+    <string name="event_camera_blocked">Camera is covered, or too close to a wall</string>
     <string name="event_low_light">Too dark to see</string>
     <!-- The model does not recognise the ground at the user's feet (an indoor floor, the camera
          pointed too high — or a wall right ahead, which it cannot tell apart), so "path blocked"

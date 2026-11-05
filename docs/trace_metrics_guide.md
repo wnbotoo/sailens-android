@@ -760,7 +760,8 @@ Reading it:
   *Deferred capability:* per-side flood connectivity and safety judgement is needed so a direction
   names a route that actually goes somewhere. `SceneEvent.directionHint` remains only for
   trace/replay compatibility until then.
-- `event_camera_blocked` / `event_low_light`: the input frame is unusable (covered lens, too dark).
+- `event_camera_blocked` / `event_low_light`: the input frame is unusable (covered lens or a plain wall about
+  30 cm ahead, which the frame cannot tell apart; too dark).
   These suppress every other event for that frame — any judgement built on that frame is untrusted,
   and staying silent would read to the user as "nothing ahead". A run with a non-trivial share of
   these needs the capture re-checked before its other metrics mean anything.
