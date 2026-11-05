@@ -9,11 +9,12 @@ import com.sailens.guidance.model.trace.SafetyStateTrace
 import com.sailens.shell.device.GuidanceHaptic
 
 /**
- * The view model's side of the safety monitor while the state is only observed: every change goes to the trace and
- * the UI state, at each alert today's code gives the state is checked against it, and the alert itself is traced.
+ * The screen's side of the safety monitor while the state is only observed, built and fed by [GuidanceSystemAlerts]:
+ * every change goes to the trace and the UI state, at each alert today's code gives the state is checked against it,
+ * and the alert itself is traced.
  *
  * Nothing here decides anything. A disagreement is a warning in the log, never a change to an alert; a fault in an
- * observation call is an error in the log, never an exception into the view model.
+ * observation call is an error in the log, never an exception into the caller.
  *
  * While [timed] (diagnostics on), the main-thread time of every call through here from [startOfSession] to
  * [endOfSession] is kept, and [endOfSession] logs its count, p50, p95 and maximum. A call outside a session (the speech
@@ -140,7 +141,7 @@ internal class GuidanceSafetyObservation(
 
     /**
      * Runs one call, timed while a session runs and diagnostics are on. A fault in it is logged and goes no further:
-     * observing must not change what the view model does next, and an exception would.
+     * observing must not change what the screen does next, and an exception would.
      */
     private inline fun timedCall(block: () -> Unit) {
         val started = if (inSession && timed()) nanoClock() else null
