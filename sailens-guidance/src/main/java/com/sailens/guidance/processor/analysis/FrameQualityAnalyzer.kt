@@ -21,12 +21,16 @@ import kotlin.math.sqrt
  *
  * 判定顺序上遮挡优先于过暗：遮挡是用户能立刻纠正的（把手指移开），过暗不是。
  *
- * ## 阈值尚未实测校准
+ * ## 阈值的实测情况
  *
- * [obstructedMaxStdDev] 与 [darkMaxMeanLuma] 目前**只有合成帧的单测支撑**，没有用真实相机数据
- * 标定过。已知的几类边界情况还没验：夜间路灯下的真实路面、贴近白墙、镜头朝地、以及自动曝光
- * 在明暗切换时的过渡帧。上线前应当采集这几类样本，用 trace 里的 `event_camera_blocked` /
- * `event_low_light` 占比反查误报率——两个参数留成构造参数就是为了方便按实测调整。
+ * [obstructedMaxStdDev] 与 [darkMaxMeanLuma] 没有用真实相机数据整体标定过。在 CPH2747（SM8850）的
+ * 1280×720 分析帧上实测过的：
+ * - 手指按住、手掌捂住、镜头贴桌、放进口袋、纸巾贴住，标准差都在 6 以下，全部判成遮挡；
+ * - 约 30 cm 外的素白墙标准差 3.7–5.4，和纸巾贴住镜头（3.8–5.4）重叠，所以也判成遮挡，告知句因此
+ *   同时说"离墙太近"。1 m 外的同一面墙在 6 以上（中位 7.1），离阈值很近；有颜色或纹理的墙中位 14.7。
+ *
+ * 还没验的：夜间路灯下的真实路面、镜头朝地、户外强光下的半透明遮挡，以及自动曝光在明暗切换时的
+ * 过渡帧。两个参数留成构造参数，是为了方便按实测调整。
  */
 class FrameQualityAnalyzer(
     private val obstructedMaxStdDev: Float = 6.0f,
@@ -98,8 +102,9 @@ class FrameQualityAnalyzer(
                     sum += luma
                     sumSquares += luma.toDouble() * luma
                     count++
-                    // 清晰度：采样点处 4 邻域拉普拉斯的绝对值。镜头被完全遮住时画面彻底失焦，
-                    // 这个值会掉一个数量级以上；只记录，不参与判定（阈值待在录像上校准）。
+                    // 清晰度：采样点处 4 邻域拉普拉斯的绝对值。只记录，不参与判定：平坦画面上它主要
+                    // 反映传感器噪声，画面越暗、增益越高它越大，纸巾贴住镜头时反而比 30 cm 外的
+                    // 白墙还高，分不开这两者。
                     if (x > 0 && y > 0 && x < frame.width - 1 && y < frame.height - 1) {
                         val left = lumaAt(frame, x - 1, y)
                         val right = lumaAt(frame, x + 1, y)

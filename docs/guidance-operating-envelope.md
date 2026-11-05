@@ -35,5 +35,7 @@ for a prompt. The cases below are the ones where that matters most.
 - "Blocked" is said only when several signs agree. A path it does not call blocked may still be impassable.
 - A covered lens, low light and unrecognised ground are told as such, because then even the absence of other prompts
   says little.
+- A plain wall about 30 cm ahead looks to the camera like a covered lens, and a tissue over the lens looks the same, so
+  the covered-lens alert says "covered, or too close to a wall". It stops all other prompts, as for a covered lens.
 - A distance is an estimate from one camera. It leans towards nearer, and it depends on the phone being held about as
   the settings say.
