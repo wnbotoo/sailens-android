@@ -13,7 +13,8 @@ import org.junit.Test
 
 /**
  * The monitor through whole sessions, fed the way the view model feeds it: the stall detector first where the view
- * model updates it first, then the monitor. Each step checks the axes, the state, and the change it reported.
+ * model updates it first, then the monitor. Each step checks the axes, the state, the change it reported, and the
+ * alert the input called for.
  */
 class GuidanceSafetyMonitorTest {
 
@@ -23,7 +24,13 @@ class GuidanceSafetyMonitorTest {
     private inner class Session(initialOutput: OutputFacts = output) {
         val detector = GuidanceStallDetector()
         val changes = mutableListOf<GuidanceSafetySnapshot>()
-        val monitor = GuidanceSafetyMonitor(detector::condition, nowMs = 0L, initialOutput = initialOutput, onChange = { changes += it })
+        val monitor = GuidanceSafetyMonitor(
+            detector::condition,
+            detector::alarmDue,
+            nowMs = 0L,
+            initialOutput = initialOutput,
+            onChange = { changes += it },
+        )
         private var watching = false
         private var running = false
 
@@ -47,11 +54,12 @@ class GuidanceSafetyMonitorTest {
 
         fun poll(now: Long) = monitor.poll(now)
 
-        fun failed(now: Long, error: Throwable) {
-            monitor.onFlowFailed(now, error)
+        fun failed(now: Long, error: Throwable): SystemAlert? {
+            val alert = monitor.onFlowFailed(now, error)
             detector.stop()
             watching = false
             running = false
+            return alert
         }
 
         fun stopped(now: Long) {
@@ -61,10 +69,14 @@ class GuidanceSafetyMonitorTest {
             running = false
         }
 
-        /** @return whether today's code gives the interruption alert. */
-        fun background(now: Long): Boolean {
-            monitor.onLifecycleStop(now)
-            return running
+        /**
+         * @return the alert the monitor calls for, checked against the rule the screen applied itself before the
+         *   monitor decided it: the interruption is told exactly when the screen says the session runs.
+         */
+        fun background(now: Long): SystemAlert? {
+            val alert = monitor.onLifecycleStop(now)
+            assertEquals("told exactly when running", if (running) SystemAlert.INTERRUPTED else null, alert)
+            return alert
         }
 
         fun foreground(now: Long) {
@@ -123,31 +135,28 @@ class GuidanceSafetyMonitorTest {
         assertState(s, GuidanceSafetyState.Degraded(setOf(DegradeReason.GROUND_UNRECOGNIZED), emptySet()), GuidanceRunPhase.RUNNING)
         assertEquals(6, s.changes.size)
 
-        s.poll(9_000)
+        assertEquals(null, s.poll(9_000))
         assertEquals("before the stall limit nothing changes", 6, s.changes.size)
-        s.poll(9_500)
+        assertEquals(SystemAlert.STALLED, s.poll(9_500))
         assertState(s, GuidanceSafetyState.StopRequired(StopReason.PERCEPTION_STALLED), GuidanceRunPhase.RUNNING, StallCondition.NO_RESULTS)
-        assertTrue(s.monitor.supports(SystemAlert.STALLED))
         s.lastChange(7).let { assertEquals(SafetyInput.POLL, it.cause); assertEquals(9_500L, it.stateSinceElapsedMs) }
 
         s.result(11_000)
         assertState(s, GuidanceSafetyState.Guiding, GuidanceRunPhase.RUNNING)
-        assertFalse(s.monitor.supports(SystemAlert.STALLED))
 
-        assertTrue("today's code alerts: the session runs", s.background(12_000))
+        assertEquals("the session runs: the interruption is told", SystemAlert.INTERRUPTED, s.background(12_000))
         assertState(s, GuidanceSafetyState.Interrupted(InterruptReason.LIFECYCLE), GuidanceRunPhase.RUNNING)
-        assertTrue(s.monitor.supports(SystemAlert.INTERRUPTED))
         val interruptedSince = s.monitor.stateSinceElapsedMs
 
-        // The camera gives no frames in the background: the condition is reached, the state is not touched.
-        s.poll(14_000)
+        // The camera gives no frames in the background: the condition is reached, the state is not touched, and no
+        // alarm is given.
+        assertEquals(null, s.poll(14_000))
         assertState(s, GuidanceSafetyState.Interrupted(InterruptReason.LIFECYCLE), GuidanceRunPhase.RUNNING, StallCondition.NO_RESULTS)
         s.lastChange(10).let { assertEquals(SafetyInput.POLL, it.cause); assertEquals(interruptedSince, it.stateSinceElapsedMs) }
 
         s.foreground(20_000)
         assertState(s, GuidanceSafetyState.Initializing, GuidanceRunPhase.AWAITING_FIRST_RESULT)
-        assertFalse("a new startup grace, not a stall", s.monitor.supports(SystemAlert.STALLED))
-        s.poll(25_000)
+        assertEquals("a new startup grace, not a stall", null, s.poll(25_000))
         assertState(s, GuidanceSafetyState.Initializing, GuidanceRunPhase.AWAITING_FIRST_RESULT)
 
         s.result(26_000)
@@ -184,9 +193,8 @@ class GuidanceSafetyMonitorTest {
         s.startRequested(0)
         s.stallWatchStarted(50)
         s.flowStarted(50)
-        s.failed(900, IllegalStateException("detection model not ready"))
+        assertEquals(SystemAlert.FAILED, s.failed(900, IllegalStateException("detection model not ready")))
         assertState(s, GuidanceSafetyState.Failed(FailureReason.ERROR), GuidanceRunPhase.FAILED)
-        assertTrue(s.monitor.supports(SystemAlert.FAILED))
 
         s.startRequested(5_000)
         assertState(s, GuidanceSafetyState.Initializing, GuidanceRunPhase.STARTING)
@@ -214,8 +222,8 @@ class GuidanceSafetyMonitorTest {
         s.stallWatchStarted(0)
         s.flowStarted(0)
         s.result(2_000)
-        assertTrue(s.background(3_000))
-        s.failed(4_000, GuidancePipelineFailedException(30, RuntimeException("sem")))
+        assertEquals(SystemAlert.INTERRUPTED, s.background(3_000))
+        assertEquals("told in the background too", SystemAlert.FAILED, s.failed(4_000, GuidancePipelineFailedException(30, RuntimeException("sem"))))
         assertState(s, GuidanceSafetyState.Failed(FailureReason.PIPELINE_FAILED), GuidanceRunPhase.FAILED)
         assertTrue("the view model does not clear wasInterrupted on a failure", s.monitor.axes.interrupted)
 
@@ -228,8 +236,7 @@ class GuidanceSafetyMonitorTest {
     fun `backgrounded before the flow started - no interruption, initialising throughout, however long the wait`() {
         val s = Session()
         s.startRequested(0)
-        assertFalse("today's code gives no alert: not running yet", s.background(10))
-        assertFalse(s.monitor.supports(SystemAlert.INTERRUPTED))
+        assertEquals("no alert: not running yet", null, s.background(10))
         assertState(s, GuidanceSafetyState.Initializing, GuidanceRunPhase.STARTING)
 
         // The previous run's barrier, then up to two seconds of resource release: no stall watch yet, so no poll.
@@ -300,10 +307,10 @@ class GuidanceSafetyMonitorTest {
     @Test
     fun `speech going unavailable while idle is on the output axis, and the state stays idle`() {
         val s = Session()
-        s.output(1_000, output.copy(engineState = SpeechEngineState.UNAVAILABLE, speechReady = false))
+        val alert = s.output(1_000, output.copy(engineState = SpeechEngineState.UNAVAILABLE, speechReady = false))
         assertState(s, GuidanceSafetyState.Idle, GuidanceRunPhase.NOT_STARTED)
         assertEquals(setOf(OutputFault.SPEECH_UNAVAILABLE), s.monitor.axes.outputFaults)
-        assertTrue(s.monitor.supports(SystemAlert.SPEECH_UNAVAILABLE))
+        assertEquals("told with Guidance not running", SystemAlert.SPEECH_UNAVAILABLE, alert)
         assertEquals(SafetyInput.OUTPUT, s.lastChange(1).cause)
     }
 
@@ -314,10 +321,10 @@ class GuidanceSafetyMonitorTest {
         s.stallWatchStarted(0)
         s.flowStarted(0)
         s.result(1_000)
-        s.output(2_000, output.copy(engineState = SpeechEngineState.UNAVAILABLE, speechReady = false))
+        val alert = s.output(2_000, output.copy(engineState = SpeechEngineState.UNAVAILABLE, speechReady = false))
         assertState(s, GuidanceSafetyState.Degraded(emptySet(), setOf(OutputFault.SPEECH_UNAVAILABLE)), GuidanceRunPhase.RUNNING)
         assertEquals(NavigationChannel.HAPTICS_ONLY, s.monitor.axes.expectedNavigationChannel)
-        assertTrue(s.monitor.supports(SystemAlert.SPEECH_UNAVAILABLE))
+        assertEquals(SystemAlert.SPEECH_UNAVAILABLE, alert)
     }
 
     @Test
@@ -351,6 +358,107 @@ class GuidanceSafetyMonitorTest {
         s.stopped(2_500)
         assertState(s, GuidanceSafetyState.Idle, GuidanceRunPhase.NOT_STARTED)
         assertFalse(s.monitor.axes.interrupted)
-        assertFalse(s.monitor.supports(SystemAlert.INTERRUPTED))
+        assertEquals("stopped: nothing to tell", null, s.background(3_000))
+    }
+
+    @Test
+    fun `the stall alarm comes from the detector's repeat, and is not asked for while interrupted`() {
+        val s = Session()
+        s.startRequested(0)
+        s.stallWatchStarted(0)
+        s.flowStarted(0)
+        s.result(1_000)
+        val alarms = (3..48).map { it * 500L }.filter { s.poll(it) == SystemAlert.STALLED }
+        // 2.5 s after the last result, then every 10 s, as the detector's own test has it.
+        assertEquals(listOf(3_500L, 13_500L, 23_500L), alarms)
+
+        s.background(24_200)
+        assertEquals(emptyList<Long>(), (49..80).map { it * 500L }.filter { s.poll(it) == SystemAlert.STALLED })
+        // Not asked while interrupted: had the polls in the background asked, the repeat would have been taken at
+        // 33.5 s and this one would not be due.
+        s.monitor.onLifecycleStart(40_000) // the detector left as it was, to see what the background did to it
+        assertEquals(SystemAlert.STALLED, s.poll(40_500))
+    }
+
+    // Own speech being unavailable is told once per outage. Each case below is one the rule had while it stood on its
+    // own in the screen, kept input for input: the engine's state, speech on or off, the screen reader on or off.
+
+    private val speechRule = GuidanceSafetyMonitor({ StallCondition.NONE }, { false }, nowMs = 0L, initialOutput = output)
+
+    private fun alertDue(
+        state: SpeechEngineState,
+        speech: Boolean = true,
+        screenReader: Boolean = false,
+    ): Boolean = speechRule.onOutput(
+        nowMs = 0L,
+        facts = OutputFacts(state, speechEnabled = speech, screenReaderActive = screenReader, hapticsEnabled = true, speechReady = false),
+    ) == SystemAlert.SPEECH_UNAVAILABLE
+
+    @Test
+    fun `speech unavailable alert fires once on entering unavailable`() {
+        assertFalse(alertDue(SpeechEngineState.INITIALIZING))
+        assertTrue(alertDue(SpeechEngineState.UNAVAILABLE))
+        assertFalse("same outage", alertDue(SpeechEngineState.UNAVAILABLE))
+    }
+
+    @Test
+    fun `speech unavailable alert is irrelevant when speech is disabled or screen reader owns output`() {
+        assertFalse(alertDue(SpeechEngineState.UNAVAILABLE, speech = false))
+        assertFalse(alertDue(SpeechEngineState.UNAVAILABLE, screenReader = true))
+    }
+
+    @Test
+    fun `an outage that began under the screen reader is announced when own speech is back`() {
+        // A failure under the screen reader raises no alert, and switching the screen reader off leaves
+        // the engine state where it was: the alert must still come once own speech is back.
+        assertFalse(alertDue(SpeechEngineState.READY, screenReader = true))
+        assertFalse(alertDue(SpeechEngineState.UNAVAILABLE, screenReader = true))
+
+        assertTrue(alertDue(SpeechEngineState.UNAVAILABLE, screenReader = false))
+        assertFalse("still failing: announced once", alertDue(SpeechEngineState.UNAVAILABLE))
+    }
+
+    @Test
+    fun `an outage that began with speech off is announced when speech is switched on`() {
+        assertFalse(alertDue(SpeechEngineState.UNAVAILABLE, speech = false))
+        assertTrue(alertDue(SpeechEngineState.UNAVAILABLE, speech = true))
+    }
+
+    @Test
+    fun `a recovered engine that fails again is a new outage`() {
+        assertTrue(alertDue(SpeechEngineState.UNAVAILABLE))
+        assertFalse(alertDue(SpeechEngineState.READY))
+
+        assertTrue(alertDue(SpeechEngineState.UNAVAILABLE))
+    }
+
+    @Test
+    fun `an outage told is not told again when the screen reader or the speech setting comes and goes`() {
+        assertTrue(alertDue(SpeechEngineState.UNAVAILABLE))
+        assertFalse(alertDue(SpeechEngineState.UNAVAILABLE, screenReader = true))
+        assertFalse("the same outage", alertDue(SpeechEngineState.UNAVAILABLE))
+        assertFalse(alertDue(SpeechEngineState.UNAVAILABLE, speech = false))
+        assertFalse("the same outage", alertDue(SpeechEngineState.UNAVAILABLE))
+    }
+
+    @Test
+    fun `the once-per-outage rule outlives a stop and a new start, and only an output input gives the alert`() {
+        val s = Session()
+        s.startRequested(0)
+        s.stallWatchStarted(0)
+        s.flowStarted(0)
+        s.result(1_000)
+        assertEquals(SystemAlert.SPEECH_UNAVAILABLE, s.output(2_000, output.copy(engineState = SpeechEngineState.UNAVAILABLE, speechReady = false)))
+        s.stopped(3_000)
+        s.startRequested(4_000)
+        s.stallWatchStarted(4_000)
+        s.flowStarted(4_000)
+        s.result(5_000, ready = true)
+        assertEquals(
+            "the same outage",
+            null,
+            s.output(6_000, output.copy(engineState = SpeechEngineState.UNAVAILABLE, speechReady = true, hapticsEnabled = false)),
+        )
+        assertEquals(setOf(OutputFault.SPEECH_UNAVAILABLE), s.monitor.axes.outputFaults)
     }
 }

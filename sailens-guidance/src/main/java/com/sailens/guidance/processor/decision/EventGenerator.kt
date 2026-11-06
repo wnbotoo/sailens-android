@@ -6,7 +6,6 @@ import com.sailens.guidance.config.MetricGateConfig
 import com.sailens.guidance.depth.ContactValidity
 import com.sailens.guidance.geometry.HeightSource
 import com.sailens.guidance.model.analysis.FrameQuality
-import com.sailens.guidance.model.analysis.GroundRecognition
 import com.sailens.guidance.model.analysis.GroundTypeChange
 import com.sailens.guidance.model.analysis.RoadSafetyState
 import com.sailens.guidance.model.analysis.SceneSnapshot
@@ -26,6 +25,9 @@ import com.sailens.guidance.model.scene.SceneEvent
 import com.sailens.guidance.model.scene.SceneEventMessageKeys
 import com.sailens.guidance.model.perception.DetectedObstacle
 import com.sailens.guidance.model.perception.ObstacleSource
+import com.sailens.guidance.safety.GuidanceQualifier
+import com.sailens.guidance.safety.pausesPathPrompts
+import com.sailens.guidance.safety.visionFaults
 
 /**
  * 事件生成器
@@ -66,18 +68,17 @@ class EventGenerator(
     val detFirst: DetFirstConfig get() = config.detFirst
 
     /**
-     * The states [generate] makes the SENSOR_QUALITY and GROUND_UNRECOGNIZED events for, by the same
-     * test, so what the shell alerts on and what Guidance generates events for are
-     * one thing.
+     * The states [generate] makes the SENSOR_QUALITY and GROUND_UNRECOGNIZED events for: the projection of the same
+     * qualification it decides with, so what the shell alerts on and what Guidance generates events for are one thing.
      */
-    fun visionFaults(snapshot: SceneSnapshot): VisionFaults = VisionFaults(
-        frameQuality = if (config.enableSensorQualityEvents) snapshot.frameQuality else FrameQuality.OK,
-        groundUnrecognized = snapshot.groundRecognition == GroundRecognition.UNRECOGNIZED,
-    )
+    fun visionFaults(snapshot: SceneSnapshot): VisionFaults = GuidanceQualifier.baseline(snapshot, config).visionFaults()
 
     fun generate(snapshot: SceneSnapshot, now: Long): List<SceneEvent> {
         val events = mutableListOf<SceneEvent>()
-        val faults = visionFaults(snapshot)
+        // Whether this frame lets Guidance judge the way ahead: read from the snapshot itself, by the test the trace,
+        // the capture and the shell's safety state carry.
+        val baseline = GuidanceQualifier.baseline(snapshot, config)
+        val faults = baseline.visionFaults()
 
         // 0. 输入质量。镜头被挡/环境过暗时，下面所有基于画面的判断都不可信，
         //    但这条事件仍然照常生成——由 EventConflictResolver 负责让它压掉其余全部事件。
@@ -90,7 +91,7 @@ class EventGenerator(
         //    同时播一条状态提示，说清楚"无法判断前方能否通行"，而不是让用户把"没提示"当成"能走"。
         //    确认之前一律照常播：sem 分不清不认识的地板和贴脸的墙，见 GroundRecognitionAnalyzer。
         //    障碍物检测不依赖地面，始终照常。
-        val pathJudgementReliable = !snapshot.groundRecognition.pausesPathPrompts
+        val pathJudgementReliable = !baseline.pausesPathPrompts
         if (faults.groundUnrecognized) {
             events.add(createGroundUnrecognizedEvent(now))
         }

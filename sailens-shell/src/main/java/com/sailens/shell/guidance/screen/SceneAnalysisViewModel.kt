@@ -133,7 +133,8 @@ class SceneAnalysisViewModel(
 
     /**
      * The alerts about Guidance itself, and what this screen does around them. Each event below goes to the entry of
-     * the same name, which also feeds the safety monitor: where Guidance stands for the user, observed only.
+     * the same name, which feeds the safety monitor (where Guidance stands for the user) and gives the alert the
+     * monitor says the event calls for.
      */
     private val alerts = GuidanceSystemAlerts(
         cancelStallLoop = ::cancelStallLoop,

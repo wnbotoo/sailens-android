@@ -1,7 +1,6 @@
 package com.sailens.guidance.usecase.decision
 
 import com.sailens.guidance.model.analysis.SceneSnapshot
-import com.sailens.guidance.model.analysis.VisionFaults
 import com.sailens.guidance.model.common.EventCategory
 import com.sailens.guidance.model.scene.SceneEvent
 import com.sailens.guidance.model.trace.PromptRevokeReasons
@@ -38,14 +37,9 @@ class DecideEventsUseCase(
     private val regressionRecorder: RegressionRecorder = RegressionRecorder.None,
 ) {
     /**
-     * Which of the states Guidance must tell the user about hold in [snapshot], by
-     * the generator's own test. Decides nothing and changes nothing.
-     */
-    fun visionFaults(snapshot: SceneSnapshot): VisionFaults = eventGenerator.visionFaults(snapshot)
-
-    /**
-     * Whether [snapshot] lets Guidance judge the way ahead, from the config the generator decides with.
-     * Decides nothing and changes nothing; no decision reads it yet.
+     * Whether [snapshot] lets Guidance judge the way ahead: the baseline the generator decides with, from
+     * the same config. Decides nothing and changes nothing itself; it is for the result, the trace and
+     * the capture.
      */
     fun qualification(snapshot: SceneSnapshot): BaselineQualification = GuidanceQualifier.baseline(snapshot, eventGenerator.config)
 

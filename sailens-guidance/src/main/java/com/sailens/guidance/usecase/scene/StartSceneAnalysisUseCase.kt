@@ -24,6 +24,7 @@ import com.sailens.guidance.processor.analysis.FrameQualityAnalyzer
 import com.sailens.guidance.safety.GuidanceQualification
 import com.sailens.guidance.safety.GuidanceQualifier
 import com.sailens.guidance.safety.receiptToDecisionMs
+import com.sailens.guidance.safety.visionFaults
 import com.sailens.guidance.safety.withQualification
 import com.sailens.guidance.repository.ObstacleProvider
 import com.sailens.guidance.repository.PerceptionRepository
@@ -223,7 +224,8 @@ class StartSceneAnalysisUseCase(
 
                 // 决策事件
                 val events = decideEventsUseCase(sceneSnapshot)
-                // Observed only: nothing decides on it. Recorded before the frame ends, as an output of it.
+                // The baseline the decision above was made with, for the result, the trace and the capture. Recorded
+                // before the frame ends, as an output of it.
                 val baseline = decideEventsUseCase.qualification(sceneSnapshot)
                 if (recording) regressionRecorder.onQualification(baseline)
                 if (recording) regressionRecorder.endFrame(frame, events, null)
@@ -453,7 +455,7 @@ class StartSceneAnalysisUseCase(
                         events = events,
                         cameraGeometry = geometry,
                         motion = motion,
-                        visionFaults = decideEventsUseCase.visionFaults(sceneSnapshot),
+                        visionFaults = baseline.visionFaults(),
                         qualification = qualification,
                     ),
                     frameTrace = frameTrace,

@@ -10,22 +10,23 @@ import com.sailens.output.SpeechEngineState
 import com.sailens.shell.device.GuidanceHaptic
 import com.sailens.shell.device.GuidanceNotice
 import com.sailens.shell.guidance.screen.GuidanceStallDetector
-import com.sailens.shell.guidance.screen.SpeechUnavailableAlert
 
 /**
  * The four alerts about Guidance itself — the session failed, it stalled, the app was sent to the background, own
  * speech is gone — together with what the guidance screen does around each of them.
  *
  * The view model hands every event it handles to the entry of the same name and does nothing more for it here. Each
- * entry feeds the safety monitor (through [GuidanceSafetyObservation], which it builds) at the point the event is
- * handled, and gives the alert itself, in the order the outputs must see it. Holds the stall detector and the
- * once-per-outage rule for speech.
+ * entry feeds the safety monitor (through [GuidanceSafetyObservation], which it builds) once, at the point the event is
+ * handled, and gives the alert the monitor returns for that input, in the order the outputs must see it: the state
+ * decides when an alert is due, this class how it is given. Holds the stall detector, whose condition the state reads
+ * and whose repeat paces the stall alarm.
  *
  * Takes plain functions, as [com.sailens.shell.guidance.screen.GuidanceOutputWiring] does, so the order of every call
  * an alert makes can be checked on the JVM. The fact ports ([isRunning], [wasInterrupted], [outputSettings],
- * [speechReady]) read the view model's own state and the engine, never a copy kept here. The one fact kept here is
- * whether the view model's stall loop exists ([onStallWatchStarted] / [onStallWatchStopped], told where the loop is
- * launched and cancelled).
+ * [speechReady]) read the view model's own state and the engine, never a copy kept here. Whether the session runs and
+ * was interrupted are the monitor's to decide on; the screen's own two are only compared with it at the start of each
+ * input. The one fact kept here is whether the view model's stall loop exists ([onStallWatchStarted] /
+ * [onStallWatchStopped], told where the loop is launched and cancelled).
  *
  * Every time an entry needs is read from [clock] at the point it is used, a monitor input's inside its observation
  * call: a time read earlier can fall on the other side of a limit from the one the monitor would read.
@@ -45,7 +46,8 @@ import com.sailens.shell.guidance.screen.SpeechUnavailableAlert
  * @param markInterrupted sets the screen's interruption flag, which [wasInterrupted] reads.
  * @param clearInterrupted clears it.
  * @param markFailed shows the session as ended on an error, with its message.
- * @param isRunning whether the screen says the session runs.
+ * @param isRunning whether the screen says the session runs; compared with the monitor, decided on by nothing.
+ * @param wasInterrupted whether the screen says the session was interrupted; likewise.
  * @param outputSettings speech, screen reader and navigation vibration as the screen holds them now.
  * @param speechReady the speech engine's `isReady`, the reading delivery goes by. It can be true while the engine's
  *   state still says unavailable: a rebuilt engine takes speech before it reports ready.
@@ -56,6 +58,7 @@ import com.sailens.shell.guidance.screen.SpeechUnavailableAlert
  * @param timed whether main-thread time is kept (diagnostics on).
  * @param clock the same monotonic clock Guidance stamps events with.
  * @param detFirst the policy switches Guidance decides with: a stall notice's rank depends on them.
+ * @param wrapMonitor what the inputs reach the monitor through: the monitor itself, but for a test that counts them.
  */
 internal class GuidanceSystemAlerts(
     private val cancelStallLoop: () -> Unit,
@@ -83,9 +86,9 @@ internal class GuidanceSystemAlerts(
     private val detFirst: DetFirstConfig,
     wallClock: () -> Long = System::currentTimeMillis,
     nanoClock: () -> Long = System::nanoTime,
+    wrapMonitor: (SafetyMonitor) -> SafetyMonitor = { it },
 ) {
     private val stallDetector = GuidanceStallDetector()
-    private val speechUnavailableAlert = SpeechUnavailableAlert()
 
     /**
      * The view model's stall loop exists: set once it is launched, cleared once it is cancelled. Not whether the loop
@@ -93,8 +96,18 @@ internal class GuidanceSystemAlerts(
      */
     private var stallWatchRunning = false
 
+    /**
+     * Inside [onFlowFailed], from the monitor taking the failure to the screen showing it ([markFailed] comes last).
+     * The failure reaches the main thread as a posted dispatch, not from inside another coroutine's step, so when its
+     * alert changes the speech engine's state (a sentence the engine refuses makes it unavailable at once) the view
+     * model's collector of that state runs there and then, and [onOutput] comes in the middle of this entry. The screen
+     * still says running then, and the monitor has failed: the one difference the check expects, for that input only.
+     */
+    private var failureNotShown = false
+
     private val observation = GuidanceSafetyObservation(
         stallCondition = stallDetector::condition,
+        stallAlarmDue = stallDetector::alarmDue,
         nowMs = clock(),
         initialOutput = initialOutput,
         recordState = recordState,
@@ -105,16 +118,19 @@ internal class GuidanceSystemAlerts(
         elapsedClock = clock,
         wallClock = wallClock,
         nanoClock = nanoClock,
+        wrapMonitor = wrapMonitor,
     )
 
     /** Start pressed. Main-thread time is kept from here on, this call's own included. */
     fun onStartRequested() {
         observation.startOfSession()
+        checkFacts(SafetyInput.START_REQUESTED)
         observation.observe { onStartRequested(clock()) }
     }
 
     /** The view model is launching its stall loop: a new watch, with the startup grace from now. */
     fun onStallWatchStarted() {
+        checkFacts(SafetyInput.STALL_WATCH_STARTED)
         stallDetector.start(clock())
         observation.observe { onStallWatchStarted(clock()) }
         stallWatchRunning = true
@@ -122,7 +138,9 @@ internal class GuidanceSystemAlerts(
 
     /**
      * The view model cancelled its stall loop. The monitor hears nothing of it: the watch stops there with the input
-     * that stopped the loop (the flow's failure, the user's stop).
+     * that stopped the loop (the flow's failure, the user's stop). Not an input, so the screen's facts are not compared
+     * here: when the screen goes away the loop is cancelled after the monitor heard of the stop, which the UI state
+     * never hears of.
      */
     fun onStallWatchStopped() {
         stallWatchRunning = false
@@ -131,6 +149,7 @@ internal class GuidanceSystemAlerts(
 
     /** The analysis flow is collected. */
     fun onFlowStarted() {
+        checkFacts(SafetyInput.FLOW_STARTED)
         observation.observe { onFlowStarted(clock()) }
     }
 
@@ -139,6 +158,7 @@ internal class GuidanceSystemAlerts(
      * with `isReady` as it reads then.
      */
     fun onResult(baseline: BaselineQualification) {
+        checkFacts(SafetyInput.RESULT)
         stallDetector.onResult(clock())
         observation.observe { onResult(clock(), baseline, speechReady = speechReady()) }
     }
@@ -148,31 +168,37 @@ internal class GuidanceSystemAlerts(
      * session can cut it; the screen shows the failure last.
      */
     fun onFlowFailed(error: Throwable) {
-        observation.observe { onFlowFailed(clock(), error) }
-        logger.error(TAG, "Error in scene analysis", error)
-        stopStallWatch()
-        stopGuidanceOutput()
-        clearLatestResult()
-        // 卡片对盲人不存在：这条失效必须出声/出震，而不只是把状态改成错误。
-        observation.checkGiven(SystemAlert.FAILED)
-        alertGuidanceUnavailable(GuidanceNotice.FAILED)
-        // Keep the raw cause in state + logs (logger.error above), but surface only a
-        // friendly, localized message to the user via the status card
-        // (error_analysis_start_failed). No raw-exception toast: it leaks internals and is
-        // not useful to a screen-reader user; the persistent error card already communicates it.
-        markFailed(error.message ?: "Unknown error")
+        checkFacts(SafetyInput.FLOW_FAILED)
+        val alert = observation.observe { onFlowFailed(clock(), error) }
+        failureNotShown = true
+        try {
+            logger.error(TAG, "Error in scene analysis", error)
+            stopStallWatch()
+            stopGuidanceOutput()
+            clearLatestResult()
+            // 卡片对盲人不存在：这条失效必须出声/出震，而不只是把状态改成错误。
+            if (alert == SystemAlert.FAILED) alertGuidanceUnavailable(GuidanceNotice.FAILED)
+            // Keep the raw cause in state + logs (logger.error above), but surface only a
+            // friendly, localized message to the user via the status card
+            // (error_analysis_start_failed). No raw-exception toast: it leaks internals and is
+            // not useful to a screen-reader user; the persistent error card already communicates it.
+            markFailed(error.message ?: "Unknown error")
+        } finally {
+            failureNotShown = false
+        }
         observation.endOfSession()
     }
 
     /** The user stopped Guidance, or the screen went away. The session ends with [endOfSession]. */
     fun onStopped() {
+        checkFacts(SafetyInput.STOPPED)
         observation.observe { onStopped(clock()) }
     }
 
     /**
      * The stopped session is over: its main-thread time is logged. After a user's stop the view model calls this once
      * the stop is in its UI state, as [onFlowFailed] ends its session once the failure is; on the screen going away,
-     * right after [onStopped].
+     * right after [onStopped], with the UI state left as it was. Not an input, so the screen's facts are not compared.
      */
     fun endOfSession() {
         observation.endOfSession()
@@ -184,12 +210,14 @@ internal class GuidanceSystemAlerts(
      * 这是整条链路最危险的失效：用户以为辅助还在跑，实际上已经什么都不检测了，而"没有提示"
      * 恰好和"前方安全"是同一种体验。所以这里必须主动出声 + 震动，绝不能只写日志。
      *
+     * 只有监视器说会话在运行时才告知（它返回 INTERRUPTED）。
+     *
      * @param noticeText the words for it, resolved by the screen.
      */
     fun onLifecycleStop(noticeText: String) {
-        observation.observe { onLifecycleStop(clock()) }
-        observation.checkInterruption(given = isRunning())
-        if (!isRunning()) return
+        checkFacts(SafetyInput.LIFECYCLE_STOP)
+        val alert = observation.observe { onLifecycleStop(clock()) }
+        if (alert != SystemAlert.INTERRUPTED) return
 
         logger.warning(TAG, "Guidance interrupted while running")
         markInterrupted()
@@ -215,8 +243,11 @@ internal class GuidanceSystemAlerts(
 
     /** Back in the foreground. */
     fun onLifecycleStart() {
+        checkFacts(SafetyInput.LIFECYCLE_START)
         // 回到前台时相机要重新绑定，第一帧之前的空档不是卡死：给它重新计启动宽限。
-        if (isRunning() && stallWatchRunning) stallDetector.start(clock())
+        // Running is the monitor's to say; whether the stall loop exists is this class's, not the monitor's watch, which
+        // never hears of the loop's cancelling.
+        if (observation.monitor.axes.phase.isRunning && stallWatchRunning) stallDetector.start(clock())
         // After the detector's restart, so the monitor reads the new grace; before the UI state clears the interruption.
         observation.observe { onLifecycleStart(clock()) }
         clearInterrupted()
@@ -224,30 +255,36 @@ internal class GuidanceSystemAlerts(
 
     /**
      * The output as the screen now holds it: the engine's state, a setting or the screen reader changed. The monitor
-     * hears it with `isReady` as it reads then. Alerts once per speech outage, as soon as the user relies on own
-     * speech; see [SpeechUnavailableAlert].
+     * hears it with `isReady` as it reads then, and says when own speech being gone is due to be told: once per
+     * outage, as soon as the user relies on own speech.
      */
     fun onOutput(engineState: SpeechEngineState, speechEnabled: Boolean, screenReaderActive: Boolean, hapticsEnabled: Boolean) {
-        observation.observe {
+        checkFacts(SafetyInput.OUTPUT)
+        val alert = observation.observe {
             onOutput(clock(), OutputFacts(engineState, speechEnabled, screenReaderActive, hapticsEnabled, speechReady = speechReady()))
         }
-        if (speechUnavailableAlert.update(engineState, speechEnabled, screenReaderActive)) {
-            observation.checkGiven(SystemAlert.SPEECH_UNAVAILABLE)
-            speechEngineUnavailable()
-        }
+        if (alert == SystemAlert.SPEECH_UNAVAILABLE) speechEngineUnavailable()
     }
 
-    /** The stall loop's poll. */
+    /**
+     * The stall loop's poll. One input, one time: the monitor reads the stall condition for the state and, unless the
+     * session is interrupted, asks the detector whether an alarm is due, both at the same moment.
+     */
     fun poll() {
-        observation.observe { poll(clock()) }
-        // 进后台时 onLifecycleStop 已经告知过；那时相机停帧是必然的，不重复报。
-        if (wasInterrupted()) return
-        if (stallDetector.alarmDue(clock())) {
-            // Polled again no earlier than the alarm's own time: a limit passed since the poll above is in the state.
-            observation.observe { poll(clock()) }
-            observation.checkGiven(SystemAlert.STALLED)
-            alertGuidanceUnavailable(GuidanceNotice.STALLED)
-        }
+        checkFacts(SafetyInput.POLL)
+        // 进后台时 onLifecycleStop 已经告知过；那时相机停帧是必然的，不重复报：中断期间监视器不问检测器。
+        val alert = observation.observe { poll(clock()) }
+        if (alert == SystemAlert.STALLED) alertGuidanceUnavailable(GuidanceNotice.STALLED)
+    }
+
+    /** The screen's own facts against the monitor's, before the input [next] reaches it; see [failureNotShown]. */
+    private fun checkFacts(next: SafetyInput) {
+        observation.checkFacts(
+            next,
+            running = isRunning(),
+            interrupted = wasInterrupted(),
+            failureNotShown = failureNotShown && next == SafetyInput.OUTPUT,
+        )
     }
 
     private fun stopStallWatch() {

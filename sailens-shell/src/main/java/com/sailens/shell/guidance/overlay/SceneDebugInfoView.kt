@@ -210,7 +210,8 @@ internal fun SceneDebugInfoView(
  * The safety state with its reasons, as the trace names them. Part of the debug panel, and shown alone while there is
  * no frame to show the panel for (starting, stopped): only where the diagnostics are.
  *
- * Hidden from screen readers: the state is only observed, and what TalkBack can reach stays as it was.
+ * Hidden from screen readers: the state itself is not announced (the alerts it drives are, on their own channels),
+ * and what TalkBack can reach stays as it was.
  */
 @Composable
 internal fun SafetyStateLine(safetyState: GuidanceSafetyState, modifier: Modifier = Modifier) {

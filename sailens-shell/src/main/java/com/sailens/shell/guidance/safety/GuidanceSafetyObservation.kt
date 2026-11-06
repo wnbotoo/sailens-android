@@ -9,24 +9,30 @@ import com.sailens.guidance.model.trace.SafetyStateTrace
 import com.sailens.shell.device.GuidanceHaptic
 
 /**
- * The screen's side of the safety monitor while the state is only observed, built and fed by [GuidanceSystemAlerts]:
- * every change goes to the trace and the UI state, at each alert today's code gives the state is checked against it,
- * and the alert itself is traced.
+ * The screen's side of the safety monitor, built and fed by [GuidanceSystemAlerts]: every input goes to the monitor
+ * and returns the alert it calls for; every change goes to the trace and the UI state; before each input the screen's
+ * own facts are checked against the monitor; and each alert given is traced.
  *
- * Nothing here decides anything. A disagreement is a warning in the log, never a change to an alert; a fault in an
- * observation call is an error in the log, never an exception into the caller.
+ * What the monitor decides is not caught here: a fault in an input reaches the caller, as a fault in the rules the
+ * screen applied itself would, so that it cannot pass for "no alert". Everything else is contained. A disagreement is
+ * a warning in the log, never a change to an alert; a fault in the trace, the UI state, the check or an alert's record
+ * is an error in the log, never an exception into the caller.
  *
  * While [timed] (diagnostics on), the main-thread time of every call through here from [startOfSession] to
  * [endOfSession] is kept, and [endOfSession] logs its count, p50, p95 and maximum. A call outside a session (the speech
  * engine coming up as the app starts, say) belongs to none and is not timed.
  *
+ * @param stallCondition the stall detector's condition, for the state.
+ * @param stallAlarmDue the stall detector's alarm test, for the stall alarm.
  * @param recordState the trace's `safety_state` record.
  * @param recordAlert the trace's `guidance_alert` record.
  * @param publishState the state for the UI, on each change of it.
  * @param elapsedClock the view model's clock, for when an alert was given.
+ * @param wrapMonitor what the inputs reach the monitor through: the monitor itself, but for a test that counts them.
  */
 internal class GuidanceSafetyObservation(
     stallCondition: (nowMs: Long) -> StallCondition,
+    stallAlarmDue: (nowMs: Long) -> Boolean,
     nowMs: Long,
     initialOutput: OutputFacts,
     private val recordState: (SafetyStateTrace) -> Unit,
@@ -37,13 +43,15 @@ internal class GuidanceSafetyObservation(
     private val elapsedClock: () -> Long,
     private val wallClock: () -> Long = System::currentTimeMillis,
     private val nanoClock: () -> Long = System::nanoTime,
+    wrapMonitor: (SafetyMonitor) -> SafetyMonitor = { it },
 ) {
     private val cost = ObservationCost()
 
     /** Between [startOfSession] and [endOfSession]: only then is a call timed. */
     private var inSession = false
 
-    val monitor = GuidanceSafetyMonitor(stallCondition, nowMs, initialOutput, onChange = ::changed)
+    val monitor: SafetyMonitor =
+        wrapMonitor(GuidanceSafetyMonitor(stallCondition, stallAlarmDue, nowMs, initialOutput, onChange = ::changed))
 
     private var published: GuidanceSafetyState = monitor.state
 
@@ -51,17 +59,38 @@ internal class GuidanceSafetyObservation(
         publishState(published)
     }
 
-    /** One input to the monitor. */
-    fun observe(input: GuidanceSafetyMonitor.() -> Unit) = timedCall { monitor.input() }
+    /** One input to the monitor; returns what the monitor returns for it, the alert it calls for if it is one that can. */
+    fun <A> observe(input: SafetyMonitor.() -> A): A = measured { monitor.input() }
 
-    /** Today's code is giving [alert] now: the state must stand behind it. */
-    fun checkGiven(alert: SystemAlert) = timedCall {
-        if (!monitor.supports(alert)) disagree(alert, given = true)
-    }
-
-    /** At the app going to the background, today's code gives the interruption alert exactly when [given]. */
-    fun checkInterruption(given: Boolean) = timedCall {
-        if (monitor.supports(SystemAlert.INTERRUPTED) != given) disagree(SystemAlert.INTERRUPTED, given)
+    /**
+     * Before the input [next], the screen's own facts: whether its UI state says the session runs ([running]) and was
+     * interrupted ([interrupted]). The monitor must hold the same. Each fact reaches the monitor before the screen
+     * writes it, and the screen has written everything the previous input led to, so at the start of an input the two
+     * never differ unless one of them is wrong.
+     *
+     * The one input that can come before the screen has written what the previous one led to is an output change
+     * inside a failure's own handling, [failureNotShown]: the monitor has failed, the screen shows it last, and in
+     * between the failure's alert can change the speech engine's state. Then the screen must still say running and the
+     * monitor must have failed; the interruption is compared as always.
+     */
+    fun checkFacts(next: SafetyInput, running: Boolean, interrupted: Boolean, failureNotShown: Boolean = false) = timedCall {
+        val axes = monitor.axes
+        val runningAgrees = if (failureNotShown) axes.phase == GuidanceRunPhase.FAILED && running else axes.phase.isRunning == running
+        if (!runningAgrees || axes.interrupted != interrupted) {
+            logger.warning(
+                TAG,
+                DISAGREEMENT,
+                mapOf(
+                    "input" to next.name,
+                    "running" to running,
+                    "interrupted" to interrupted,
+                    "failureNotShown" to failureNotShown,
+                    "phase" to axes.phase.name,
+                    "monitorInterrupted" to axes.interrupted,
+                    "state" to monitor.state.label,
+                ),
+            )
+        }
     }
 
     /**
@@ -131,22 +160,17 @@ internal class GuidanceSafetyObservation(
             result = result,
         )
 
-    private fun disagree(alert: SystemAlert, given: Boolean) {
-        logger.warning(
-            TAG,
-            DISAGREEMENT,
-            mapOf("alert" to alert.name, "given" to given, "state" to monitor.state.label, "phase" to monitor.axes.phase.name),
-        )
-    }
-
     /**
-     * Runs one call, timed while a session runs and diagnostics are on. A fault in it is logged and goes no further:
-     * observing must not change what the screen does next, and an exception would.
+     * Runs one call that decides nothing, [measured]. A fault in it is logged and goes no further: tracing, publishing and
+     * checking must not change what the screen does next, and an exception would.
      */
-    private inline fun timedCall(block: () -> Unit) {
+    private inline fun timedCall(block: () -> Unit) = measured { contained(block) }
+
+    /** Runs one call, timed while a session runs and diagnostics are on. */
+    private inline fun <A> measured(block: () -> A): A {
         val started = if (inSession && timed()) nanoClock() else null
         try {
-            contained(block)
+            return block()
         } finally {
             if (started != null) cost.add(nanoClock() - started)
         }
@@ -163,8 +187,8 @@ internal class GuidanceSafetyObservation(
     companion object {
         private const val TAG = "GuidanceSafety"
 
-        /** The warning a disagreement writes; a smoke test counts these. */
-        const val DISAGREEMENT = "Safety state disagrees with an alert"
+        /** The warning a disagreement between the screen's facts and the monitor writes; a smoke test counts these. */
+        const val DISAGREEMENT = "Safety state disagrees with the screen"
     }
 }
 
