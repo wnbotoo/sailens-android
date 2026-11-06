@@ -223,7 +223,8 @@ class StartSceneAnalysisUseCase(
 
                 // 决策事件
                 val events = decideEventsUseCase(sceneSnapshot)
-                // Observed only: nothing decides on it. Recorded before the frame ends, as an output of it.
+                // The baseline the decision above was made with, for the result, the trace and the capture. Recorded
+                // before the frame ends, as an output of it.
                 val baseline = decideEventsUseCase.qualification(sceneSnapshot)
                 if (recording) regressionRecorder.onQualification(baseline)
                 if (recording) regressionRecorder.endFrame(frame, events, null)

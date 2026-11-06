@@ -8,7 +8,6 @@ import com.sailens.guidance.model.trace.PromptDeliveryChannels.HAPTICS
 import com.sailens.guidance.model.trace.PromptDeliveryChannels.SCREEN_READER
 import com.sailens.guidance.model.trace.PromptDeliveryChannels.SPEECH
 import com.sailens.guidance.model.trace.PromptDeliveryChannels.STATUS_CARD
-import com.sailens.output.SpeechEngineState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -45,52 +44,6 @@ class SceneAnalysisGuidanceStateTest {
         assertSame(replacement, updated.activeStatusEvent)
         assertEquals(listOf(replacement), updated.lastEvents)
         assertSame(previous, updated.lastAnnouncedEvent)
-    }
-
-    private val alert = SpeechUnavailableAlert()
-
-    private fun alertDue(
-        state: SpeechEngineState,
-        speech: Boolean = true,
-        screenReader: Boolean = false,
-    ) = alert.update(state, speechEnabled = speech, screenReaderActive = screenReader)
-
-    @Test
-    fun `speech unavailable alert fires once on entering unavailable`() {
-        assertFalse(alertDue(SpeechEngineState.INITIALIZING))
-        assertTrue(alertDue(SpeechEngineState.UNAVAILABLE))
-        assertFalse("same outage", alertDue(SpeechEngineState.UNAVAILABLE))
-    }
-
-    @Test
-    fun `speech unavailable alert is irrelevant when speech is disabled or screen reader owns output`() {
-        assertFalse(alertDue(SpeechEngineState.UNAVAILABLE, speech = false))
-        assertFalse(alertDue(SpeechEngineState.UNAVAILABLE, screenReader = true))
-    }
-
-    @Test
-    fun `an outage that began under the screen reader is announced when own speech is back`() {
-        // A failure under the screen reader raises no alert, and switching the screen reader off leaves
-        // the engine state where it was: the alert must still come once own speech is back.
-        assertFalse(alertDue(SpeechEngineState.READY, screenReader = true))
-        assertFalse(alertDue(SpeechEngineState.UNAVAILABLE, screenReader = true))
-
-        assertTrue(alertDue(SpeechEngineState.UNAVAILABLE, screenReader = false))
-        assertFalse("still failing: announced once", alertDue(SpeechEngineState.UNAVAILABLE))
-    }
-
-    @Test
-    fun `an outage that began with speech off is announced when speech is switched on`() {
-        assertFalse(alertDue(SpeechEngineState.UNAVAILABLE, speech = false))
-        assertTrue(alertDue(SpeechEngineState.UNAVAILABLE, speech = true))
-    }
-
-    @Test
-    fun `a recovered engine that fails again is a new outage`() {
-        assertTrue(alertDue(SpeechEngineState.UNAVAILABLE))
-        assertFalse(alertDue(SpeechEngineState.READY))
-
-        assertTrue(alertDue(SpeechEngineState.UNAVAILABLE))
     }
 
     @Test

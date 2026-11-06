@@ -62,8 +62,9 @@ data class SceneAnalysisUiState(
     val lastAnnouncedEvent: SceneEvent? = null,
     val errorMessage: String? = null,
     /**
-     * Where Guidance stands for the user, as the safety monitor derives it. Observation only: the debug panel shows
-     * it, nothing decides on it, and it is not announced.
+     * Where Guidance stands for the user, as the safety monitor derives it. The debug panel shows it and it is not
+     * announced; the monitor it comes from decides when the alerts about Guidance itself are due
+     * ([com.sailens.shell.guidance.safety.GuidanceSystemAlerts]). Nothing reads this field to decide.
      */
     val safetyState: GuidanceSafetyState = GuidanceSafetyState.Idle,
 )
@@ -122,28 +123,4 @@ internal fun SceneAnalysisUiState.withFrameEvents(
         lastEvents = events,
         activeStatusEvent = activeEvent,
     )
-}
-
-/**
- * Tells the user once per outage that the app's own speech is gone, as soon as they rely on it.
- *
- * Not a transition rule: an outage that began while the screen reader spoke (or speech was off)
- * raised no alert, and when the user switches back to the app's own speech the engine state does
- * not change again — it is still unavailable. So [update] runs whenever the engine state, the screen
- * reader or the speech setting changes, and the alert is due when the user relies on own speech, the
- * engine is unavailable, and this outage has not been announced yet.
- */
-internal class SpeechUnavailableAlert {
-    private var announced = false
-
-    /** @return true when the alert is due now; it then counts as announced for this outage. */
-    fun update(engineState: SpeechEngineState, speechEnabled: Boolean, screenReaderActive: Boolean): Boolean {
-        if (engineState != SpeechEngineState.UNAVAILABLE) {
-            announced = false
-            return false
-        }
-        if (announced || !speechEnabled || screenReaderActive) return false
-        announced = true
-        return true
-    }
 }

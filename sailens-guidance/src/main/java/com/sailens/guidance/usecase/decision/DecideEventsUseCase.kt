@@ -44,8 +44,9 @@ class DecideEventsUseCase(
     fun visionFaults(snapshot: SceneSnapshot): VisionFaults = eventGenerator.visionFaults(snapshot)
 
     /**
-     * Whether [snapshot] lets Guidance judge the way ahead, from the config the generator decides with.
-     * Decides nothing and changes nothing; no decision reads it yet.
+     * Whether [snapshot] lets Guidance judge the way ahead: the baseline the generator decides with, from
+     * the same config. Decides nothing and changes nothing itself; it is for the result, the trace and
+     * the capture.
      */
     fun qualification(snapshot: SceneSnapshot): BaselineQualification = GuidanceQualifier.baseline(snapshot, eventGenerator.config)
 

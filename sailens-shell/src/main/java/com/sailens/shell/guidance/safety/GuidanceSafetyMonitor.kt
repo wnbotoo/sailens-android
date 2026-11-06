@@ -28,27 +28,69 @@ internal data class GuidanceSafetySnapshot(
     val cause: SafetyInput,
 )
 
-/** The alerts the view model gives about Guidance itself. */
+/** The alerts about Guidance itself: what an input to the safety monitor can call for. */
 internal enum class SystemAlert { FAILED, STALLED, INTERRUPTED, SPEECH_UNAVAILABLE }
 
+/** Whether the screen says the session runs: from the flow's start until it fails or is stopped. */
+internal val GuidanceRunPhase.isRunning: Boolean
+    get() = this == GuidanceRunPhase.AWAITING_FIRST_RESULT || this == GuidanceRunPhase.RUNNING
+
 /**
- * Keeps the safety axes from the events the view model handles, and derives the state from them.
+ * The safety monitor's inputs, one per event the view model handles, and what it holds after them. An input that can
+ * call for an alert returns it, for this input alone: null when none is due.
+ *
+ * [GuidanceSafetyMonitor] is the one implementation. The interface is here so that a test can count the inputs that
+ * reach it.
+ */
+internal interface SafetyMonitor {
+    val axes: GuidanceSafetyAxes
+    val state: GuidanceSafetyState
+    val stateSinceElapsedMs: Long
+
+    fun onStartRequested(nowMs: Long)
+    fun onStallWatchStarted(nowMs: Long)
+    fun onFlowStarted(nowMs: Long)
+    fun onResult(nowMs: Long, baseline: BaselineQualification, speechReady: Boolean)
+
+    /** Always [SystemAlert.FAILED]. */
+    fun onFlowFailed(nowMs: Long, error: Throwable): SystemAlert?
+    fun onStopped(nowMs: Long)
+
+    /** [SystemAlert.INTERRUPTED] when the session runs. */
+    fun onLifecycleStop(nowMs: Long): SystemAlert?
+    fun onLifecycleStart(nowMs: Long)
+
+    /** [SystemAlert.SPEECH_UNAVAILABLE] once per outage of own speech. */
+    fun onOutput(nowMs: Long, facts: OutputFacts): SystemAlert?
+
+    /** [SystemAlert.STALLED] when the session is stalled and an alarm is due. */
+    fun poll(nowMs: Long): SystemAlert?
+}
+
+/**
+ * Keeps the safety axes from the events the view model handles, derives the state from them, and says which of the
+ * alerts about Guidance itself each input calls for.
  *
  * Each input is one of the view model's events, called at the same point, with the time it happened. After each, the
  * axes are rebuilt (the stall condition asked of [stallCondition] while the stall watch runs) and, when they or the
  * state changed, [onChange] hears of it; a change of state alone restarts [GuidanceSafetySnapshot.stateSinceElapsedMs].
+ * Then the input returns the alert it calls for, if any, read from what it has just changed. An alert follows the
+ * input, not a change of state: a stall that goes on is alarmed again every repeat, and only going to the background
+ * is an interruption to tell.
  *
- * Observation only: nothing decides on it. Pure and clock-driven, like the stall detector, and like it not
- * thread-safe: the view model calls it from the main thread only.
+ * The state itself is not announced. Pure and clock-driven, like the stall detector, and like it not thread-safe: the
+ * view model calls it from the main thread only.
  *
  * @param stallCondition the stall detector's condition at a time: whether its limit has passed, nothing more.
+ * @param stallAlarmDue the stall detector's alarm test at a time: its condition, then its repeat, which it records.
  */
 internal class GuidanceSafetyMonitor(
     private val stallCondition: (nowMs: Long) -> StallCondition,
+    private val stallAlarmDue: (nowMs: Long) -> Boolean,
     nowMs: Long,
     initialOutput: OutputFacts,
     private val onChange: (GuidanceSafetySnapshot) -> Unit = {},
-) {
+) : SafetyMonitor {
     private var phase = GuidanceRunPhase.NOT_STARTED
     private var failure: FailureReason? = null
     private var interrupted = false
@@ -56,86 +98,113 @@ internal class GuidanceSafetyMonitor(
     private var judgement: BaselineQualification? = null
     private var output = initialOutput
 
-    var axes: GuidanceSafetyAxes = axesAt(nowMs)
+    /**
+     * The current outage of own speech has been told. It ends only when the engine leaves UNAVAILABLE: a stop and a
+     * new start of Guidance, or a turn of the screen reader or the speech setting, keep it.
+     */
+    private var speechOutageTold = false
+
+    override var axes: GuidanceSafetyAxes = axesAt(nowMs)
         private set
-    var state: GuidanceSafetyState = axes.state()
+    override var state: GuidanceSafetyState = axes.state()
         private set
-    var stateSinceElapsedMs: Long = nowMs
+    override var stateSinceElapsedMs: Long = nowMs
         private set
 
     /** Start pressed: a new run, with no result and no failure yet. */
-    fun onStartRequested(nowMs: Long) = update(nowMs, SafetyInput.START_REQUESTED) {
+    override fun onStartRequested(nowMs: Long) = update(nowMs, SafetyInput.START_REQUESTED) {
         phase = GuidanceRunPhase.STARTING
         failure = null
         judgement = null
     }
 
-    fun onStallWatchStarted(nowMs: Long) = update(nowMs, SafetyInput.STALL_WATCH_STARTED) {
+    override fun onStallWatchStarted(nowMs: Long) = update(nowMs, SafetyInput.STALL_WATCH_STARTED) {
         watching = true
     }
 
     /** The analysis flow is collected: the view model says it is running from here. */
-    fun onFlowStarted(nowMs: Long) = update(nowMs, SafetyInput.FLOW_STARTED) {
+    override fun onFlowStarted(nowMs: Long) = update(nowMs, SafetyInput.FLOW_STARTED) {
         phase = GuidanceRunPhase.AWAITING_FIRST_RESULT
         failure = null
     }
 
     /** A result reached the view model, after the stall detector heard of it. */
-    fun onResult(nowMs: Long, baseline: BaselineQualification, speechReady: Boolean) = update(nowMs, SafetyInput.RESULT) {
+    override fun onResult(nowMs: Long, baseline: BaselineQualification, speechReady: Boolean) = update(nowMs, SafetyInput.RESULT) {
         if (phase == GuidanceRunPhase.AWAITING_FIRST_RESULT) phase = GuidanceRunPhase.RUNNING
         judgement = baseline
         output = output.copy(speechReady = speechReady)
     }
 
-    /** The analysis flow threw; the stall watch stops with it. An interruption is kept, as the view model keeps it. */
-    fun onFlowFailed(nowMs: Long, error: Throwable) = update(nowMs, SafetyInput.FLOW_FAILED) {
-        phase = GuidanceRunPhase.FAILED
-        failure = if (error is GuidancePipelineFailedException) FailureReason.PIPELINE_FAILED else FailureReason.ERROR
-        watching = false
+    /**
+     * The analysis flow threw; the stall watch stops with it. An interruption is kept, as the view model keeps it. The
+     * failure is always told, in the background too.
+     */
+    override fun onFlowFailed(nowMs: Long, error: Throwable): SystemAlert? {
+        update(nowMs, SafetyInput.FLOW_FAILED) {
+            phase = GuidanceRunPhase.FAILED
+            failure = if (error is GuidancePipelineFailedException) FailureReason.PIPELINE_FAILED else FailureReason.ERROR
+            watching = false
+        }
+        return SystemAlert.FAILED
     }
 
     /** The user stopped, or the screen went away: the stall watch stops with it, and an interruption no longer stands. */
-    fun onStopped(nowMs: Long) = update(nowMs, SafetyInput.STOPPED) {
+    override fun onStopped(nowMs: Long) = update(nowMs, SafetyInput.STOPPED) {
         phase = GuidanceRunPhase.NOT_STARTED
         failure = null
         watching = false
         interrupted = false
     }
 
-    /** The app went to the background. Only a running session is interrupted, as only then the view model says so. */
-    fun onLifecycleStop(nowMs: Long) = update(nowMs, SafetyInput.LIFECYCLE_STOP) {
-        if (phase.isRunning) interrupted = true
+    /**
+     * The app went to the background. Only a running session is interrupted, and only then is it told: before the
+     * flow's start, after a failure or a stop, there is nothing the user would lose.
+     */
+    override fun onLifecycleStop(nowMs: Long): SystemAlert? {
+        val running = phase.isRunning
+        update(nowMs, SafetyInput.LIFECYCLE_STOP) {
+            if (running) interrupted = true
+        }
+        return if (running) SystemAlert.INTERRUPTED else null
     }
 
     /**
      * Back in the foreground. A running session whose stall watch runs waits for a first result again: the detector's
      * startup grace has just been restarted, before this.
      */
-    fun onLifecycleStart(nowMs: Long) = update(nowMs, SafetyInput.LIFECYCLE_START) {
+    override fun onLifecycleStart(nowMs: Long) = update(nowMs, SafetyInput.LIFECYCLE_START) {
         if (phase.isRunning && watching) phase = GuidanceRunPhase.AWAITING_FIRST_RESULT
         interrupted = false
     }
 
-    fun onOutput(nowMs: Long, facts: OutputFacts) = update(nowMs, SafetyInput.OUTPUT) {
-        output = facts
+    /**
+     * The output as the screen now holds it. Own speech being unavailable is told once per outage, as soon as the user
+     * relies on it (the output axis has [OutputFault.SPEECH_UNAVAILABLE]): an outage that began under the screen reader
+     * or with speech off is told when own speech is back, since the engine's state does not change again then. A new
+     * outage begins only once the engine has left UNAVAILABLE. Guidance need not be running.
+     */
+    override fun onOutput(nowMs: Long, facts: OutputFacts): SystemAlert? {
+        update(nowMs, SafetyInput.OUTPUT) {
+            output = facts
+        }
+        if (facts.engineState != SpeechEngineState.UNAVAILABLE) {
+            speechOutageTold = false
+            return null
+        }
+        if (speechOutageTold || OutputFault.SPEECH_UNAVAILABLE !in axes.outputFaults) return null
+        speechOutageTold = true
+        return SystemAlert.SPEECH_UNAVAILABLE
     }
 
-    /** The stall watch's poll: the condition may have changed with time alone. */
-    fun poll(nowMs: Long) = update(nowMs, SafetyInput.POLL) {}
-
     /**
-     * Whether the state stands behind [alert] being given now: a failure for FAILED, a stall for STALLED, an
-     * interruption for INTERRUPTED, own speech unavailable for SPEECH_UNAVAILABLE. The alert's own pacing (the stall
-     * alarm's repeat, once per speech outage) is not the state's, so for those only giving one can disagree.
+     * The stall watch's poll: the condition may have changed with time alone, and [nowMs] is the one time both the
+     * state and the alarm are read at. In the background the interruption has been told and the camera gives no frames
+     * by design, so no alarm is asked for: the alarm's repeat stays where it was.
      */
-    fun supports(alert: SystemAlert): Boolean = when (alert) {
-        SystemAlert.FAILED -> state is GuidanceSafetyState.Failed
-        SystemAlert.STALLED -> state.let {
-            it is GuidanceSafetyState.StopRequired &&
-                (it.reason == StopReason.STARTUP_STALLED || it.reason == StopReason.PERCEPTION_STALLED)
-        }
-        SystemAlert.INTERRUPTED -> state is GuidanceSafetyState.Interrupted
-        SystemAlert.SPEECH_UNAVAILABLE -> OutputFault.SPEECH_UNAVAILABLE in axes.outputFaults
+    override fun poll(nowMs: Long): SystemAlert? {
+        update(nowMs, SafetyInput.POLL) {}
+        if (interrupted) return null
+        return if (stallAlarmDue(nowMs)) SystemAlert.STALLED else null
     }
 
     private inline fun update(nowMs: Long, cause: SafetyInput, change: () -> Unit) {
@@ -163,7 +232,4 @@ internal class GuidanceSafetyMonitor(
             speechReady = output.speechReady,
         ),
     )
-
-    private val GuidanceRunPhase.isRunning: Boolean
-        get() = this == GuidanceRunPhase.AWAITING_FIRST_RESULT || this == GuidanceRunPhase.RUNNING
 }

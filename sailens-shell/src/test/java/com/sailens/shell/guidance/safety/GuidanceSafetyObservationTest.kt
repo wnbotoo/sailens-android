@@ -18,12 +18,17 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** What the view model's side of the monitor writes: trace records, the UI's state, and warnings when they disagree. */
+/**
+ * What the view model's side of the monitor writes and returns: trace records, the UI's state, the monitor's alerts,
+ * and warnings when the screen's facts and the monitor disagree.
+ */
 class GuidanceSafetyObservationTest {
 
     private var now = 0L
     private var nanos = 0L
     private var stall = StallCondition.NONE
+    private var alarmDue = false
+    private var conditionFault: RuntimeException? = null
     private var diagnostics = false
     private var failRecording = false
     private var failPublishing = false
@@ -52,7 +57,8 @@ class GuidanceSafetyObservationTest {
     private val output = OutputFacts(SpeechEngineState.READY, speechEnabled = true, screenReaderActive = false, hapticsEnabled = true, speechReady = true)
 
     private val observation = GuidanceSafetyObservation(
-        stallCondition = { stall },
+        stallCondition = { conditionFault?.let { throw it } ?: stall },
+        stallAlarmDue = { alarmDue },
         nowMs = 0L,
         initialOutput = output,
         recordState = {
@@ -127,30 +133,74 @@ class GuidanceSafetyObservationTest {
     }
 
     @Test
-    fun `an alert the state stands behind writes nothing, one it does not a warning`() {
+    fun `screen facts the monitor agrees with write nothing, ones it does not a warning`() {
+        observation.checkFacts(SafetyInput.START_REQUESTED, running = false, interrupted = false)
+        assertEquals("idle: not running, not interrupted", emptyList<String>(), log)
+
         running()
-        observation.checkGiven(SystemAlert.STALLED)
-        observation.checkGiven(SystemAlert.FAILED)
-        observation.checkGiven(SystemAlert.SPEECH_UNAVAILABLE)
-        observation.checkInterruption(given = true)
-        assertEquals(
-            List(4) { "warning ${GuidanceSafetyObservation.DISAGREEMENT}" },
-            log,
-        )
+        observation.checkFacts(SafetyInput.POLL, running = true, interrupted = false)
+        assertEquals(emptyList<String>(), log)
+        observation.checkFacts(SafetyInput.POLL, running = false, interrupted = false)
+        observation.checkFacts(SafetyInput.POLL, running = true, interrupted = true)
+        assertEquals(List(2) { "warning ${GuidanceSafetyObservation.DISAGREEMENT}" }, log)
 
         log.clear()
-        stall = StallCondition.NO_RESULTS
-        observation.observe { poll(4_000) }
-        observation.checkGiven(SystemAlert.STALLED)
-        observation.checkInterruption(given = false)
-        assertEquals(emptyList<String>(), log)
-
+        logData.clear()
         observation.observe { onLifecycleStop(5_000) }
-        observation.checkInterruption(given = true)
-        observation.checkInterruption(given = false)
+        observation.checkFacts(SafetyInput.LIFECYCLE_START, running = true, interrupted = true)
+        assertEquals(emptyList<String>(), log)
+        observation.checkFacts(SafetyInput.LIFECYCLE_START, running = true, interrupted = false)
         assertEquals(listOf("warning ${GuidanceSafetyObservation.DISAGREEMENT}"), log)
-        assertEquals("INTERRUPTED", logData.last()!!["alert"])
-        assertEquals(false, logData.last()!!["given"])
+        assertEquals(
+            mapOf(
+                "input" to "LIFECYCLE_START",
+                "running" to true,
+                "interrupted" to false,
+                "phase" to "RUNNING",
+                "monitorInterrupted" to true,
+                "state" to "interrupted(lifecycle)",
+            ),
+            logData.last(),
+        )
+    }
+
+    @Test
+    fun `an input returns the alert the monitor calls for`() {
+        assertEquals("not running: nothing to tell", null, observation.observe { onLifecycleStop(0) })
+        running()
+        assertEquals(null, observation.observe { poll(2_000) })
+        alarmDue = true
+        assertEquals(SystemAlert.STALLED, observation.observe { poll(4_000) })
+        assertEquals(SystemAlert.INTERRUPTED, observation.observe { onLifecycleStop(5_000) })
+        assertEquals("interrupted: no stall alarm", null, observation.observe { poll(5_500) })
+        assertEquals(SystemAlert.FAILED, observation.observe { onFlowFailed(6_000, IllegalStateException("lost")) })
+        assertEquals(
+            SystemAlert.SPEECH_UNAVAILABLE,
+            observation.observe { onOutput(7_000, output.copy(engineState = SpeechEngineState.UNAVAILABLE, speechReady = false)) },
+        )
+        assertEquals(emptyList<String>(), log)
+    }
+
+    @Test
+    fun `a fault in the monitor's own input reaches the caller, and is still timed`() {
+        diagnostics = true
+        observation.startOfSession()
+        running()
+        conditionFault = IllegalStateException("broken rule")
+        nanos = 0L
+
+        val thrown = runCatching {
+            observation.observe {
+                nanos += 7_000_000
+                poll(2_000)
+            }
+        }.exceptionOrNull()
+
+        assertEquals("broken rule", thrown?.message)
+        assertEquals("not logged as a contained fault", emptyList<String>(), log)
+        conditionFault = null
+        observation.endOfSession()
+        assertEquals(7.0, logData.single()!!["maxMs"] as Double, 1e-9)
     }
 
     @Test

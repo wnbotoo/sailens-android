@@ -8,9 +8,11 @@ import com.sailens.output.SpeechEngineState
 /**
  * Where Guidance stands for the user, as one value: whether it is running, can judge the way ahead, and can be heard.
  *
- * Derived from [GuidanceSafetyAxes] by [state]. Observation only: the debug panel and the trace show it, nothing
- * decides on it. "I cannot say it" (the output) and "I cannot judge the way" (the judgement) are separate axes, and
- * the output alone never moves this into or out of [StopRequired], [Interrupted] or [Failed].
+ * Derived from [GuidanceSafetyAxes] by [state]. The debug panel and the trace show it, and it is not announced; the
+ * monitor that keeps it decides when the alerts about Guidance itself are due (failed, stalled, interrupted, speech
+ * unavailable), each from the input that calls for it. "I cannot say it" (the output) and "I cannot judge the way"
+ * (the judgement) are separate axes, and the output alone never moves this into or out of [StopRequired],
+ * [Interrupted] or [Failed].
  */
 sealed interface GuidanceSafetyState {
     /** Not running. */

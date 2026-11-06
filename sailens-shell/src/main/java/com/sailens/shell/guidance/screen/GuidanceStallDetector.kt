@@ -11,7 +11,8 @@ import com.sailens.shell.guidance.safety.StallCondition
  * longer than any real frame takes must be reported on a channel the user can perceive.
  *
  * Pure and clock-driven so the rule is testable on the JVM. Not thread-safe: it is called from the
- * main thread only, by [com.sailens.shell.guidance.safety.GuidanceSystemAlerts].
+ * main thread only, by [com.sailens.shell.guidance.safety.GuidanceSystemAlerts] and the safety
+ * monitor it feeds, which reads [condition] for the state and asks [alarmDue] for the alarm.
  *
  * @param startupTimeoutMs how long the first result may take. Loading and compiling the models
  *   happens before it, and takes seconds on a cold GPU delegate.
@@ -48,8 +49,8 @@ internal class GuidanceStallDetector(
     }
 
     /**
-     * Whether the session is stalled at [nowMs]: the test [alarmDue] starts with, and nothing more. It reads only;
-     * whether an alarm is due, and its repeat, are left to [alarmDue].
+     * Whether the session is stalled at [nowMs]: the safety state's stall condition, and the test [alarmDue] starts
+     * with. It reads only; the alarm's repeat is left to [alarmDue].
      */
     fun condition(nowMs: Long): StallCondition {
         if (!watching) return StallCondition.NONE
@@ -58,11 +59,17 @@ internal class GuidanceStallDetector(
         return if (hasResult) StallCondition.NO_RESULTS else StallCondition.STARTUP_TIMEOUT
     }
 
-    /** True when the session is stalled and an alarm is due now. Records the alarm when it is. */
-    fun alarmDue(nowMs: Long): Boolean {
-        if (!watching) return false
-        val limit = if (hasResult) stallAfterMs else startupTimeoutMs
-        if (nowMs - lastProgressAtMs < limit) return false
+    /**
+     * True when the session is stalled at [nowMs] ([condition]) and an alarm is due again ([repeatDue]). Records the
+     * alarm when it is.
+     */
+    fun alarmDue(nowMs: Long): Boolean = condition(nowMs) != StallCondition.NONE && repeatDue(nowMs)
+
+    /**
+     * The repeat, for a stall that holds at [nowMs]: the first alarm of a stall at once, then one every
+     * [repeatEveryMs]. Records the alarm when one is due.
+     */
+    private fun repeatDue(nowMs: Long): Boolean {
         val lastAlarm = lastAlarmAtMs
         if (lastAlarm != null && nowMs - lastAlarm < repeatEveryMs) return false
         lastAlarmAtMs = nowMs

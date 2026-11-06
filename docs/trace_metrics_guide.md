@@ -782,8 +782,10 @@ Reading it:
 
 ## Qualification and alerts
 
-These are observations: nothing decides on them. They record whether Guidance could judge the way
-ahead in a frame, and what it told the user when it could not.
+These are records: nothing that reads a trace acts on them. They record whether Guidance could judge
+the way ahead in a frame, and what it told the user when it could not. The qualification is the one
+the event generator decides with: the covered-lens, low-light and unrecognised-floor events and the
+pause of the path prompts all come from it, and the trace carries the same value.
 
 ### Frame fields
 
@@ -868,7 +870,9 @@ just before the window (see above). To compare an alert by when it happened, use
 ## Safety state
 
 Where Guidance stood for the user, as one state, derived in the shell from facts it already keeps.
-Observation only: the debug panel shows it, nothing decides on it, and the user is not told of it.
+The monitor that keeps it decides when the four alerts about Guidance itself are due (failed, stalled,
+interrupted, speech unavailable), each from the input that calls for it. The state itself is only on
+the debug panel, and the user is not told of it.
 "It cannot say it" (the output) and "it cannot judge the way" (the judgement) are separate facts: the
 output alone never moves the state into or out of a stop, an interruption or a failure.
 

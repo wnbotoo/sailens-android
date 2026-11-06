@@ -18,9 +18,10 @@ import com.sailens.guidance.motion.OrientationQuality
  * One frame's qualification: whether Guidance can judge the way ahead as it does today, and how each
  * optional input stood.
  *
- * Observation only. Nothing decides on it: the event generator still applies its own test, and
- * [BaselineQualification.visionFaults] equals [com.sailens.guidance.processor.decision.EventGenerator.visionFaults]
- * on every snapshot.
+ * The event generator decides with the baseline: its covered-lens, low-light and unrecognised-floor
+ * events and the pause of the path prompts all come from [GuidanceQualifier.baseline], and the vision
+ * faults the delivery protocol tells of are its projection, [BaselineQualification.visionFaults]. The
+ * same baseline goes to the trace, the capture and the shell's safety state.
  *
  * @param capabilities for the trace only; no decision reads them.
  */
