@@ -96,6 +96,15 @@ internal class GuidanceSystemAlerts(
      */
     private var stallWatchRunning = false
 
+    /**
+     * Inside [onFlowFailed], from the monitor taking the failure to the screen showing it ([markFailed] comes last).
+     * The failure reaches the main thread as a posted dispatch, not from inside another coroutine's step, so when its
+     * alert changes the speech engine's state (a sentence the engine refuses makes it unavailable at once) the view
+     * model's collector of that state runs there and then, and [onOutput] comes in the middle of this entry. The screen
+     * still says running then, and the monitor has failed: the one difference the check expects, for that input only.
+     */
+    private var failureNotShown = false
+
     private val observation = GuidanceSafetyObservation(
         stallCondition = stallDetector::condition,
         stallAlarmDue = stallDetector::alarmDue,
@@ -161,17 +170,22 @@ internal class GuidanceSystemAlerts(
     fun onFlowFailed(error: Throwable) {
         checkFacts(SafetyInput.FLOW_FAILED)
         val alert = observation.observe { onFlowFailed(clock(), error) }
-        logger.error(TAG, "Error in scene analysis", error)
-        stopStallWatch()
-        stopGuidanceOutput()
-        clearLatestResult()
-        // 卡片对盲人不存在：这条失效必须出声/出震，而不只是把状态改成错误。
-        if (alert == SystemAlert.FAILED) alertGuidanceUnavailable(GuidanceNotice.FAILED)
-        // Keep the raw cause in state + logs (logger.error above), but surface only a
-        // friendly, localized message to the user via the status card
-        // (error_analysis_start_failed). No raw-exception toast: it leaks internals and is
-        // not useful to a screen-reader user; the persistent error card already communicates it.
-        markFailed(error.message ?: "Unknown error")
+        failureNotShown = true
+        try {
+            logger.error(TAG, "Error in scene analysis", error)
+            stopStallWatch()
+            stopGuidanceOutput()
+            clearLatestResult()
+            // 卡片对盲人不存在：这条失效必须出声/出震，而不只是把状态改成错误。
+            if (alert == SystemAlert.FAILED) alertGuidanceUnavailable(GuidanceNotice.FAILED)
+            // Keep the raw cause in state + logs (logger.error above), but surface only a
+            // friendly, localized message to the user via the status card
+            // (error_analysis_start_failed). No raw-exception toast: it leaks internals and is
+            // not useful to a screen-reader user; the persistent error card already communicates it.
+            markFailed(error.message ?: "Unknown error")
+        } finally {
+            failureNotShown = false
+        }
         observation.endOfSession()
     }
 
@@ -263,9 +277,14 @@ internal class GuidanceSystemAlerts(
         if (alert == SystemAlert.STALLED) alertGuidanceUnavailable(GuidanceNotice.STALLED)
     }
 
-    /** The screen's own facts against the monitor's, before the input [next] reaches it. */
+    /** The screen's own facts against the monitor's, before the input [next] reaches it; see [failureNotShown]. */
     private fun checkFacts(next: SafetyInput) {
-        observation.checkFacts(next, running = isRunning(), interrupted = wasInterrupted())
+        observation.checkFacts(
+            next,
+            running = isRunning(),
+            interrupted = wasInterrupted(),
+            failureNotShown = failureNotShown && next == SafetyInput.OUTPUT,
+        )
     }
 
     private fun stopStallWatch() {

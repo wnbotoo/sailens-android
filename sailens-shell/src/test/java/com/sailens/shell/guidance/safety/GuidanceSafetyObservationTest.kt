@@ -156,12 +156,33 @@ class GuidanceSafetyObservationTest {
                 "input" to "LIFECYCLE_START",
                 "running" to true,
                 "interrupted" to false,
+                "failureNotShown" to false,
                 "phase" to "RUNNING",
                 "monitorInterrupted" to true,
                 "state" to "interrupted(lifecycle)",
             ),
             logData.last(),
         )
+    }
+
+    @Test
+    fun `inside a failure not yet shown, the screen still saying running is what agrees`() {
+        running()
+        observation.observe { onFlowFailed(2_000, IllegalStateException("lost")) }
+
+        observation.checkFacts(SafetyInput.OUTPUT, running = true, interrupted = false, failureNotShown = true)
+        assertEquals(emptyList<String>(), log)
+        // Outside that window the failed monitor and a running screen disagree, and so do a stopped screen inside it.
+        observation.checkFacts(SafetyInput.OUTPUT, running = true, interrupted = false)
+        observation.checkFacts(SafetyInput.OUTPUT, running = false, interrupted = false, failureNotShown = true)
+        observation.checkFacts(SafetyInput.OUTPUT, running = true, interrupted = true, failureNotShown = true)
+        assertEquals(List(3) { "warning ${GuidanceSafetyObservation.DISAGREEMENT}" }, log)
+
+        // A monitor that has not failed is not what the window expects.
+        val fresh = GuidanceSafetyObservationTest()
+        fresh.running()
+        fresh.observation.checkFacts(SafetyInput.OUTPUT, running = true, interrupted = false, failureNotShown = true)
+        assertEquals(listOf("warning ${GuidanceSafetyObservation.DISAGREEMENT}"), fresh.log)
     }
 
     @Test

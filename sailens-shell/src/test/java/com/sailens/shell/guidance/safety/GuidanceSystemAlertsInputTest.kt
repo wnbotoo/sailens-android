@@ -6,6 +6,10 @@ import com.sailens.guidance.delivery.GuidanceOutputSettings
 import com.sailens.guidance.safety.BaselineQualification
 import com.sailens.output.SpeechEngineState
 import com.sailens.shell.device.GuidanceHaptic
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -32,6 +36,19 @@ class GuidanceSystemAlertsInputTest {
     private val alarms = mutableListOf<GuidanceHaptic>()
     private val warnings = mutableListOf<Pair<String, Map<String, Any>?>>()
     private val errors = mutableListOf<String>()
+
+    /** The outputs and the screen's writes, in order. */
+    private val calls = mutableListOf<String>()
+
+    /** The `safety_state` records' states, in order. */
+    private val states = mutableListOf<String>()
+
+    /** What the clock reads next, when a test makes time move within an entry; [now] otherwise. */
+    private val clockScript = ArrayDeque<Long>()
+    private var clockReads = 0
+
+    /** Runs inside the failure's sentence, as a view-model collector resumed by it would. */
+    private var onSpeak: () -> Unit = {}
 
     private val logger = object : LogService {
         override fun debug(tag: String, message: String, data: Map<String, Any>?) = Unit
@@ -104,30 +121,40 @@ class GuidanceSystemAlertsInputTest {
 
     private fun alerts() = GuidanceSystemAlerts(
         cancelStallLoop = {},
-        stopGuidanceOutput = {},
+        stopGuidanceOutput = { calls += "stop guidance output" },
         clearLatestResult = {},
         preemptDescription = {},
         playAlarm = { haptic ->
             alarms += haptic
+            calls += "alarm ${haptic.name}"
             true
         },
-        speakSystemNotice = { _, _ -> },
+        speakSystemNotice = { text, _ ->
+            calls += "speak $text"
+            onSpeak()
+        },
         announceToScreenReader = {},
         noticeText = { it.name },
         markInterrupted = { interrupted = true },
         clearInterrupted = { interrupted = false },
-        markFailed = { running = false },
+        markFailed = {
+            running = false
+            calls += "mark failed"
+        },
         isRunning = { running },
         wasInterrupted = { interrupted },
         outputSettings = { GuidanceOutputSettings(speechEnabled = speechEnabled, screenReaderActive = screenReader, hapticsEnabled = true) },
         speechReady = { engine == SpeechEngineState.READY },
         initialOutput = OutputFacts(engine, speechEnabled, screenReader, hapticsEnabled = true, speechReady = engine == SpeechEngineState.READY),
-        recordState = {},
+        recordState = { states += it.stateLabel },
         recordAlert = {},
         publishState = {},
         timed = { false },
         logger = logger,
-        clock = { now },
+        clock = {
+            clockReads++
+            clockScript.removeFirstOrNull() ?: now
+        },
         detFirst = DetFirstConfig(),
         wrapMonitor = { real -> CountingMonitor(real).also { counting = it } },
     )
@@ -252,6 +279,9 @@ class GuidanceSystemAlertsInputTest {
         engine = SpeechEngineState.READY
         alarms.clear()
         warnings.clear()
+        calls.clear()
+        states.clear()
+        onSpeak = {}
     }
 
     @Test
@@ -304,5 +334,93 @@ class GuidanceSystemAlertsInputTest {
         assertEquals(emptyList<GuidanceHaptic>(), alarms)
         assertFalse(interrupted)
         assertEquals(1, disagreements().size)
+    }
+
+    @Test
+    fun `a failure's sentence that makes own speech unavailable is heard of inside the failure, in order and agreeing`() {
+        // The view model collects the engine's state on the main thread, and a failure reaches the main thread as a
+        // posted dispatch: a state the failure's own sentence sets resumes that collector at once, inside onFlowFailed.
+        // A collector on the unconfined dispatcher, started and resumed outside any coroutine, does the same here.
+        val engineState = MutableStateFlow(SpeechEngineState.READY)
+        val alerts = alerts().guiding()
+        val collector = CoroutineScope(Dispatchers.Unconfined).launch {
+            engineState.collect { state ->
+                engine = state
+                calls += "engine ${state.name}"
+                alerts.output()
+            }
+        }
+        try {
+            // A sentence the engine refuses: it drops itself and says unavailable before the call returns.
+            onSpeak = { engineState.value = SpeechEngineState.UNAVAILABLE }
+            calls.clear()
+            alerts.onFlowFailed(IllegalStateException("model lost"))
+        } finally {
+            collector.cancel()
+        }
+
+        assertEquals(
+            listOf(
+                "stop guidance output",
+                "alarm INTERRUPTED",
+                "speak FAILED",
+                "engine UNAVAILABLE",
+                "alarm SPEECH_UNAVAILABLE",
+                "mark failed",
+            ),
+            calls,
+        )
+        assertEquals(emptyList<Pair<String, Map<String, Any>?>>(), disagreements())
+
+        // Once the failure is on the screen, an output change is compared as always: not running, and failed.
+        alerts.output()
+        assertEquals(emptyList<Pair<String, Map<String, Any>?>>(), disagreements())
+    }
+
+    @Test
+    fun `inside a failure not yet shown, any input but an output change still disagrees`() {
+        val alerts = alerts().guiding()
+        onSpeak = { alerts.poll() }
+
+        alerts.onFlowFailed(IllegalStateException("model lost"))
+
+        assertEquals(listOf("POLL"), disagreements().map { it.second!!["input"] })
+    }
+
+    @Test
+    fun `a poll reads the clock once, so a stall limit passed during the poll is the next poll's`() {
+        val alerts = alerts().guiding() // the last result at 1 000 ms: stalled from 3 500 ms
+        now = 3_000L
+        alerts.poll()
+
+        // The poll starts at 3 499 ms; any later reading in it would be 3 500 ms.
+        clockReads = 0
+        clockScript += 3_499L
+        now = 3_500L
+        alerts.poll()
+        assertEquals(1, clockReads)
+        assertEquals(emptyList<GuidanceHaptic>(), alarms)
+        assertFalse(states.any { it.startsWith("stop_required") })
+
+        now = 4_000L
+        alerts.poll()
+        assertEquals(listOf(GuidanceHaptic.INTERRUPTED), alarms)
+        assertEquals("stop_required(perception_stalled)", states.last())
+    }
+
+    @Test
+    fun `a result before that next poll leaves neither the stall alarm nor the stall state`() {
+        val alerts = alerts().guiding()
+        clockScript += 3_499L
+        now = 3_500L
+        alerts.poll()
+
+        now = 3_750L
+        alerts.onResult(BaselineQualification.Qualified)
+        now = 4_000L
+        alerts.poll()
+
+        assertEquals(emptyList<GuidanceHaptic>(), alarms)
+        assertFalse(states.any { it.startsWith("stop_required") })
     }
 }

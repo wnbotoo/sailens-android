@@ -67,10 +67,16 @@ internal class GuidanceSafetyObservation(
      * interrupted ([interrupted]). The monitor must hold the same. Each fact reaches the monitor before the screen
      * writes it, and the screen has written everything the previous input led to, so at the start of an input the two
      * never differ unless one of them is wrong.
+     *
+     * The one input that can come before the screen has written what the previous one led to is an output change
+     * inside a failure's own handling, [failureNotShown]: the monitor has failed, the screen shows it last, and in
+     * between the failure's alert can change the speech engine's state. Then the screen must still say running and the
+     * monitor must have failed; the interruption is compared as always.
      */
-    fun checkFacts(next: SafetyInput, running: Boolean, interrupted: Boolean) = timedCall {
+    fun checkFacts(next: SafetyInput, running: Boolean, interrupted: Boolean, failureNotShown: Boolean = false) = timedCall {
         val axes = monitor.axes
-        if (axes.phase.isRunning != running || axes.interrupted != interrupted) {
+        val runningAgrees = if (failureNotShown) axes.phase == GuidanceRunPhase.FAILED && running else axes.phase.isRunning == running
+        if (!runningAgrees || axes.interrupted != interrupted) {
             logger.warning(
                 TAG,
                 DISAGREEMENT,
@@ -78,6 +84,7 @@ internal class GuidanceSafetyObservation(
                     "input" to next.name,
                     "running" to running,
                     "interrupted" to interrupted,
+                    "failureNotShown" to failureNotShown,
                     "phase" to axes.phase.name,
                     "monitorInterrupted" to axes.interrupted,
                     "state" to monitor.state.label,

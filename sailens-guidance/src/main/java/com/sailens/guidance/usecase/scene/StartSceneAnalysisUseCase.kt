@@ -24,6 +24,7 @@ import com.sailens.guidance.processor.analysis.FrameQualityAnalyzer
 import com.sailens.guidance.safety.GuidanceQualification
 import com.sailens.guidance.safety.GuidanceQualifier
 import com.sailens.guidance.safety.receiptToDecisionMs
+import com.sailens.guidance.safety.visionFaults
 import com.sailens.guidance.safety.withQualification
 import com.sailens.guidance.repository.ObstacleProvider
 import com.sailens.guidance.repository.PerceptionRepository
@@ -454,7 +455,7 @@ class StartSceneAnalysisUseCase(
                         events = events,
                         cameraGeometry = geometry,
                         motion = motion,
-                        visionFaults = decideEventsUseCase.visionFaults(sceneSnapshot),
+                        visionFaults = baseline.visionFaults(),
                         qualification = qualification,
                     ),
                     frameTrace = frameTrace,
