@@ -10,8 +10,8 @@ import com.sailens.shell.guidance.safety.StallCondition
  * "no prompt" is indistinguishable from "nothing ahead". So a session that has gone quiet for
  * longer than any real frame takes must be reported on a channel the user can perceive.
  *
- * Pure and clock-driven so the rule is testable on the JVM. Not thread-safe: the view model calls
- * it from the main thread only.
+ * Pure and clock-driven so the rule is testable on the JVM. Not thread-safe: it is called from the
+ * main thread only, by [com.sailens.shell.guidance.safety.GuidanceSystemAlerts].
  *
  * @param startupTimeoutMs how long the first result may take. Loading and compiling the models
  *   happens before it, and takes seconds on a cold GPU delegate.

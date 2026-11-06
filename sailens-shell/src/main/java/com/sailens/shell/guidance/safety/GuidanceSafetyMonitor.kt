@@ -108,8 +108,8 @@ internal class GuidanceSafetyMonitor(
     }
 
     /**
-     * Back in the foreground. A running session whose stall watch runs waits for a first result again: the view model
-     * has just restarted the detector's startup grace, before this.
+     * Back in the foreground. A running session whose stall watch runs waits for a first result again: the detector's
+     * startup grace has just been restarted, before this.
      */
     fun onLifecycleStart(nowMs: Long) = update(nowMs, SafetyInput.LIFECYCLE_START) {
         if (phase.isRunning && watching) phase = GuidanceRunPhase.AWAITING_FIRST_RESULT
