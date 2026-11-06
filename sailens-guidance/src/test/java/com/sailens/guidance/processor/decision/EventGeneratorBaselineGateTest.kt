@@ -8,6 +8,7 @@ import com.sailens.guidance.model.analysis.GroundRecognition
 import com.sailens.guidance.model.analysis.SceneSnapshot
 import com.sailens.guidance.model.analysis.VisionFaults
 import com.sailens.guidance.model.common.EventCategory
+import com.sailens.guidance.model.common.Severity
 import com.sailens.guidance.model.scene.SceneEventMessageKeys
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -16,24 +17,24 @@ import org.junit.Test
  * The generator's two gates and its vision faults, which it reads from the qualification's baseline, against the test
  * written out by hand: frame quality counts only while sensor-quality events are on, and a confirmed unrecognised
  * floor both makes its own event and pauses the path prompts (blocked, path complex, narrowing). Every frame quality,
- * floor and switch, with the policy switches off and at launch, on a blocked scene and on a narrowing one, each with a
- * person ahead.
+ * floor and switch, with the policy switches off and at launch, on a hard-blocked, a path-complex and a narrowing
+ * scene, each with a person ahead.
  */
 class EventGeneratorBaselineGateTest {
 
-    private val gated = setOf(
-        EventCategory.SENSOR_QUALITY,
-        EventCategory.GROUND_UNRECOGNIZED,
-        EventCategory.BLOCKED,
-        EventCategory.PATH_COMPLEX,
-        EventCategory.NARROWING,
-    )
+    private val pathCategories = setOf(EventCategory.BLOCKED, EventCategory.PATH_COMPLEX, EventCategory.NARROWING)
+
+    private val gated = setOf(EventCategory.SENSOR_QUALITY, EventCategory.GROUND_UNRECOGNIZED) + pathCategories
 
     private fun blocked(quality: FrameQuality, ground: GroundRecognition): SceneSnapshot = EvaluationFixtures.snapshot(
         obstacles = listOf(EvaluationFixtures.obstacle(1)),
         blocked = true,
         frameQuality = quality,
     ).copy(groundRecognition = ground)
+
+    /** Blocked, but not severe enough for a hard block: a path-complex prompt, unless the policy turns those off. */
+    private fun pathComplex(quality: FrameQuality, ground: GroundRecognition): SceneSnapshot =
+        blocked(quality, ground).let { it.copy(connectivity = it.connectivity.copy(blockageSeverity = Severity.MODERATE)) }
 
     private fun narrowing(quality: FrameQuality, ground: GroundRecognition): SceneSnapshot =
         EvaluationFixtures.snapshot(obstacles = listOf(EvaluationFixtures.obstacle(1)), frameQuality = quality).let {
@@ -49,9 +50,12 @@ class EventGeneratorBaselineGateTest {
                 val generator = EventGenerator(config)
                 for ((sceneName, scene, pathCategory) in listOf(
                     Triple("blocked", ::blocked, EventCategory.BLOCKED),
+                    Triple("path complex", ::pathComplex, EventCategory.PATH_COMPLEX.takeUnless { detFirst.pathComplexOff }),
                     Triple("narrowing", ::narrowing, EventCategory.NARROWING),
                 )) {
                     val plain = generator.generate(scene(FrameQuality.OK, GroundRecognition.RECOGNIZED), now = 1_000L)
+                    val plainPath = plain.filter { it.category in pathCategories }
+                    assertEquals("$detFirst $sceneName: the scene's path prompt", listOfNotNull(pathCategory), plainPath.map { it.category })
                     for (quality in FrameQuality.entries) {
                         for (ground in GroundRecognition.entries) {
                             val label = "$detFirst sensorQuality=$sensorQuality $sceneName $quality $ground"
@@ -72,7 +76,7 @@ class EventGeneratorBaselineGateTest {
                                     FrameQuality.OK -> Unit
                                 }
                                 if (floorUnrecognized) add(EventCategory.GROUND_UNRECOGNIZED to SceneEventMessageKeys.GROUND_UNRECOGNIZED)
-                                if (!pathPaused) add(pathCategory to plain.single { it.category == pathCategory }.messageKey)
+                                if (!pathPaused) addAll(plainPath.map { it.category to it.messageKey })
                             }
                             assertEquals(label, expectedGated, events.filter { it.category in gated }.map { it.category to it.messageKey })
                             assertEquals(
@@ -86,6 +90,6 @@ class EventGeneratorBaselineGateTest {
                 }
             }
         }
-        assertEquals(2 * 2 * 2 * FrameQuality.entries.size * GroundRecognition.entries.size, cases)
+        assertEquals(2 * 2 * 3 * FrameQuality.entries.size * GroundRecognition.entries.size, cases)
     }
 }
