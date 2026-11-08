@@ -42,6 +42,9 @@ android {
     buildFeatures {
         buildConfig = true
     }
+    testFixtures {
+        enable = true
+    }
     testOptions {
         // SemanticModelPreflight takes a Context it only uses to reach assets; a ModelSource.File
         // never touches it. Letting the stub return defaults is what makes the preflight path
@@ -89,6 +92,7 @@ dependencies {
 
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.serialization.json)
+    testFixturesImplementation(libs.kotlinx.coroutines.core)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
