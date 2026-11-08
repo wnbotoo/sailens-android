@@ -93,9 +93,11 @@ field.
 - **Not verified: wired or Bluetooth earphones.** Nothing notices when earphones are disconnected or when speech goes
   somewhere you cannot hear it.
 - **Screen reader** (such as TalkBack) on, with speech on: every prompt and alert is handed to the screen reader, in
-  its voice and at its rate, and Guidance's own speech is not started. Handing an alert to the screen reader counts as
-  telling you: the app cannot know whether you heard it, so the vibration that otherwise follows an alert not heard in
-  time does not come, and with fault vibration off there is no vibration for it at all. With speech off, the screen
+  its voice and at its rate, and Guidance's own speech is not started. For a covered lens, low light and unrecognised
+  ground, handing the alert to the screen reader counts as telling you: the app cannot know whether you heard it, so
+  the vibration that otherwise follows such an alert not heard in time does not come, and with fault vibration off it
+  has no vibration at all. Stalled, failed and interrupted Guidance still give the interruption vibration first,
+  whatever the vibration setting. With speech off, the screen
   reader is not used for prompts: they are given by vibration only, or, with navigation vibration off too, only on
   the screen. **Not verified** in the field: the recordings were made with the screen reader off.
 - **No prompt here means:** if the audio goes somewhere you cannot hear, prompts are lost and nothing says so.
@@ -156,9 +158,11 @@ automated tests of the code that gives it.
 - **A recovery sentence may not be heard.** It is a low-priority try: if no speech takes it within 5 s it is dropped,
   and once taken a more urgent prompt can cut it off. With speech off there is no recovery sentence and no recovery
   vibration.
-- **With a screen reader on and speech on**, every sentence above goes to the screen reader instead. Handing it over
-  counts as telling you, so the "comes anyway" vibration does not follow, and with fault vibration off there is no
-  vibration at all.
+- **With a screen reader on and speech on**, every sentence above goes to the screen reader instead. For the first
+  three rows (covered lens, too dark, ground not recognised), handing it over counts as telling you, so the "comes
+  anyway" vibration does not follow, and with fault vibration off there is no vibration at all. Not responding,
+  analysis failed and background still give the interruption vibration before the sentence, whatever the vibration
+  setting.
 
 ## Known limits
 
