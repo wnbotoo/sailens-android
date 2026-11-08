@@ -219,7 +219,9 @@ sem/det 一样由张量形状判定。没有类别顺序可弄错；对应的风
 
 ## 7. 仿真器
 
-`sailens-guidance/src/test/java/com/sailens/guidance/sim/` 在 JVM 上确定性地运行合成世界里的脚本化行走。
+`sailens-guidance/src/testFixtures/java/com/sailens/guidance/sim/` 在 JVM 上确定性地运行合成世界里的脚本化行走。
+它放在模块的 test fixtures 里，是为了别的模块的测试也能用它；运行它的测试（如 `SyntheticSceneTest`、
+`ScenarioGoldenTest`）在模块的 `src/test` 里。
 
 - **`SyntheticScene`** 是物理真值：§2 的相机、一个位姿（相机高度、低于水平的俯角、走过的距离），以及
   由给定高度的地面块、竖直的盒子和远处背景组成的世界。光线投射渲染器把它变成模型会报告的东西：类别

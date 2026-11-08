@@ -64,6 +64,7 @@ dependencies {
     implementation(project(":sailens-core"))
     implementation(project(":sailens-guidance"))
     testImplementation(libs.junit)
+    testImplementation(testFixtures(project(":sailens-guidance")))
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(platform(libs.androidx.compose.bom))

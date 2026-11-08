@@ -278,8 +278,10 @@ transform).
 
 ## 7. Simulator
 
-`sailens-guidance/src/test/java/com/sailens/guidance/sim/` runs scripted walks through a synthetic
-world on the JVM, deterministically.
+`sailens-guidance/src/testFixtures/java/com/sailens/guidance/sim/` runs scripted walks through a
+synthetic world on the JVM, deterministically. It is in the module's test fixtures so that other
+modules' tests can use it as well; the tests that run it, such as `SyntheticSceneTest` and
+`ScenarioGoldenTest`, are in the module's `src/test`.
 
 - **`SyntheticScene`** is the physical truth: the camera of §2, a pose (camera height, pitch below
   horizontal, distance walked), and a world of ground patches at given heights, upright boxes and a
