@@ -1,79 +1,24 @@
 package com.sailens.guidance.sim
 
-import com.sailens.core.frame.FrameSourceGeometry
-import com.sailens.core.frame.ImageFrame
-import com.sailens.core.frame.ImagePixelFormat
-import com.sailens.core.frame.Yuv420FrameData
-import com.sailens.core.frame.YuvPlaneData
-import com.sailens.core.log.LogService
 import com.sailens.guidance.config.AnalysisConfig
 import com.sailens.guidance.config.PerceptionConfig
-import com.sailens.guidance.config.PipelinePerformanceBudget
-import com.sailens.guidance.config.TraceRuntimeConfig
-import com.sailens.guidance.depth.DefaultDepthRepository
-import com.sailens.guidance.depth.GroundContactDistanceEstimator
-import com.sailens.guidance.depth.ImagePositionDepthEstimator
-import com.sailens.guidance.geometry.CameraFactsSource
 import com.sailens.guidance.geometry.PhoneGeometrySettings
-import com.sailens.guidance.geometry.SensorSample
-import com.sailens.guidance.geometry.Vec3
-import com.sailens.guidance.geometry.toCameraFacts
-import com.sailens.guidance.motion.MotionTracker
-import com.sailens.guidance.motion.OrientationSource
 import com.sailens.guidance.model.common.ObstacleProviderType
 import com.sailens.guidance.model.common.PerceptionProfile
 import com.sailens.guidance.model.perception.DetectedObstacle
-import com.sailens.guidance.model.perception.ObstacleModelOutput
-import com.sailens.guidance.model.perception.SegmentationMask
-import com.sailens.guidance.model.perception.SegmentationOutput
 import com.sailens.guidance.model.scene.SceneResult
-import com.sailens.guidance.processor.analysis.ConnectivityChecker
-import com.sailens.guidance.processor.analysis.CrossValidator
-import com.sailens.guidance.processor.analysis.FrameQualityAnalyzer
-import com.sailens.guidance.processor.analysis.GroundRecognitionAnalyzer
-import com.sailens.guidance.processor.analysis.GroundTypeDetector
-import com.sailens.guidance.processor.analysis.KotlinConnectivityStatsExtractor
-import com.sailens.guidance.processor.analysis.ObstacleOcclusionAnalyzer
-import com.sailens.guidance.processor.analysis.RoadSafetyAnalyzer
-import com.sailens.guidance.processor.analysis.SceneClassifier
-import com.sailens.guidance.processor.decision.CooldownManager
-import com.sailens.guidance.processor.decision.EventConflictResolver
-import com.sailens.guidance.processor.decision.EventGenerator
-import com.sailens.guidance.processor.decision.EventMerger
-import com.sailens.guidance.processor.perception.ObstacleExtractor
-import com.sailens.guidance.processor.perception.ObstacleTracker
-import com.sailens.guidance.processor.perception.PerceptionProfileManager
-import com.sailens.guidance.processor.perception.SegmentationAnalyzer
-import com.sailens.guidance.repository.DeviceSensorRepository
-import com.sailens.guidance.repository.ObstacleProvider
-import com.sailens.guidance.repository.PerceptionRepository
-import com.sailens.guidance.semantics.CityscapesNavigationSemantics
-import com.sailens.guidance.trace.NoOpTraceService
-import com.sailens.guidance.usecase.decision.DecideEventsUseCase
-import com.sailens.guidance.usecase.perception.AnalyzeSceneUseCase
-import com.sailens.guidance.usecase.perception.ProcessFrameUseCase
-import com.sailens.guidance.usecase.scene.StartSceneAnalysisUseCase
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Locale
-import java.util.concurrent.atomic.AtomicLong
-import kotlin.math.abs
-import kotlin.random.Random
 
 /**
  * Runs a [Scenario] through the real Guidance pipeline (`StartSceneAnalysisUseCase` and everything
- * below it) with fakes only at the model boundary (docs/geometry.md §7). Deterministic: a
- * fake clock that advances by the scenario's step, seeded camera noise, no threads of its own.
- *
- * Wired as `DomainBindingsModule` wires the app, with two substitutions, both because the native
- * libraries are arm64-only and this runs on the JVM:
- * - connectivity uses the Kotlin fallback, not `NativeConnectivityStatsExtractor`. The two are known
- *   to differ on a narrowing corridor (the native kernel skips the perspective width scaling), so
- *   the goldens' blockage, width and flood figures are the fallback's, not the shipped kernel's;
- * - semantic stats are computed by the Kotlin extractor from the class map, where the device gets
- *   them from the fused native postprocess.
+ * below it, wired by [SimulatedPipeline]) with fakes only at the model boundary (docs/geometry.md §7).
+ * Deterministic: a fake clock that advances by the scenario's step before each frame, lost frames
+ * included, seeded camera noise, and one frame in the pipeline at a time.
  *
  * With the ground-contact distance off, Guidance decides on no pose; the scenario's pose shapes what
  * the models report (the class map and boxes move with pitch and height). The camera geometry is fed
@@ -91,144 +36,59 @@ class GuidanceSimulator(
     /** The phone settings the user would have set; the scenario's pose is the truth they approximate. */
     private val phoneGeometry: () -> PhoneGeometrySettings = { PhoneGeometrySettings.DEFAULT },
 ) {
-    private val semantics = CityscapesNavigationSemantics
-
-    fun run(scenario: Scenario): List<SceneResult> = runBlocking {
-        // Rendering is the slow part, and a standing user repeats the same view frame after frame.
-        val views = HashMap<Pair<Pose, World>, RenderedFrame>()
-        val rendered = scenario.frames.map { views.getOrPut(it.pose to it.world) { render(scenario.camera, it.pose, it.world) } }
-        val now = AtomicLong(1_000_000)
-        val clock = { now.get() }
-        val stationary = MutableStateFlow(false)
-        var current = 0
-        val cameraFacts = scenario.facts(0).camera.toCameraFacts()
-        val orientation = object : OrientationSource {
-            private val noRotation = MotionTracker()
-            override fun start() = Unit
-            override fun stop() = Unit
-            override fun gravityNear(timeNanos: Long) = scenario.facts(current).gravity
-                .minByOrNull { abs(it.timestampNanos - timeNanos) }
-                ?.let { SensorSample(it.timestampNanos, Vec3(it.values[0], it.values[1], it.values[2])) }
-            // Scenarios carry no rotation vector yet.
-            override fun motionState(atNanos: Long, isStationary: Boolean) = noRotation.state(atNanos, isStationary)
-        }
-        fun out(frame: ImageFrame) = rendered[(frame.sequenceNumber - 1).toInt()]
-
-        val repository = object : PerceptionRepository {
-            override val isInitialized = true
-            override suspend fun initialize() = Unit
-            override suspend fun release() = Unit
-            override suspend fun segment(frame: ImageFrame): Result<SegmentationOutput> {
-                val ids = out(frame).classMap
-                return Result.success(SegmentationOutput(SegmentationMask(scenario.camera.mapWidth, scenario.camera.mapHeight, ids.copyOf()), 0, 0, 0))
-            }
-        }
-        val provider = object : ObstacleProvider {
-            override val isInitialized = true
-            override suspend fun initialize() = Unit
-            override fun release() = Unit
-            override suspend fun detect(frame: ImageFrame) = ObstacleModelOutput(out(frame).detections)
-        }
-        val sensors = object : DeviceSensorRepository {
-            override val deviceRotation: StateFlow<Int> = MutableStateFlow(0)
-            override val deviceRotationValue = 0
-            override val deviceRotationDegree = 0
-            override val isStationary: StateFlow<Boolean> = stationary
-            override fun startObserving() = Unit
-            override fun stopObserving() = Unit
-        }
-        val profiles = PerceptionProfileManager(perceptionConfig)
-        val processFrame = ProcessFrameUseCase(
-            profileManager = profiles,
-            perceptionRepository = repository,
-            realtimeObstacleProvider = provider,
-            depthRepository = DefaultDepthRepository(ImagePositionDepthEstimator(), GroundContactDistanceEstimator(semantics)),
-            segmentationAnalyzer = SegmentationAnalyzer(analysisConfig, semantics),
-            obstacleExtractor = ObstacleExtractor(perceptionConfig, semantics),
-            obstacleTracker = ObstacleTracker(perceptionConfig),
-            clock = clock,
-        )
-        val analyze = AnalyzeSceneUseCase(
-            connectivityChecker = ConnectivityChecker(analysisConfig, KotlinConnectivityStatsExtractor(analysisConfig)),
-            roadSafetyAnalyzer = RoadSafetyAnalyzer(analysisConfig, semantics),
-            groundTypeDetector = GroundTypeDetector(analysisConfig),
-            sceneClassifier = SceneClassifier(analysisConfig),
-            crossValidator = CrossValidator(analysisConfig),
-            obstacleOcclusionAnalyzer = ObstacleOcclusionAnalyzer(perceptionConfig),
-            groundRecognitionAnalyzer = GroundRecognitionAnalyzer(analysisConfig, semantics, clock),
-        )
-        val decide = DecideEventsUseCase(
-            EventGenerator(analysisConfig),
-            EventConflictResolver(analysisConfig.detFirst.keepBlockedWithObstacle),
-            EventMerger(),
-            analysisConfig.detFirst.let {
-                CooldownManager(
-                    proximityEscalation = it.proximityEscalation,
-                    retryInterrupted = it.retryInterrupted,
-                    metricOnlyRepeatMs = it.metricGate?.metricOnlyRepeatMs ?: 6_000L,
-                )
-            },
-            sensors,
-            clock,
-        )
-        val start = StartSceneAnalysisUseCase(
-            profileManager = profiles,
-            perceptionRepository = repository,
-            realtimeObstacleProvider = provider,
-            processFrameUseCase = processFrame,
-            analyzeSceneUseCase = analyze,
-            decideEventsUseCase = decide,
-            frameQualityAnalyzer = FrameQualityAnalyzer(),
-            logService = SilentLog,
-            traceService = NoOpTraceService,
-            traceRuntimeConfig = TraceRuntimeConfig(enabled = false),
-            pipelineBudget = PipelinePerformanceBudget(),
-            orientationSource = orientation,
-            cameraFactsSource = CameraFactsSource { cameraFacts },
-            phoneGeometry = phoneGeometry,
-            isStationary = { stationary.value },
-        )
-        val frames = flow {
-            scenario.frames.forEachIndexed { index, frame ->
-                now.addAndGet(scenario.stepMs)
-                stationary.value = frame.stationary
-                current = index
-                emit(cameraFrame(scenario, index, frame.lensCovered))
-            }
-        }
-        val results = mutableListOf<SceneResult>()
-        start(frames, releaseFrame = {}, semanticMaskSnapshot = { false }).collect { results += it }
-        results
+    /** Every result of [scenario]; throws what ended the pipeline if it did not run to the last frame. */
+    fun run(scenario: Scenario): List<SceneResult> {
+        val run = runToEnd(scenario)
+        (run.end as? SimulationEnd.Failed)?.let { throw it.error }
+        return run.results
     }
 
     /**
-     * The analysis frame as the camera would deliver it: the scenario camera's buffer size, rotation,
-     * timestamps and sensor-to-buffer transform (what the camera geometry reads), and luma for the frame-quality
-     * check -- textured, or flat when the lens is covered. Only the luma the check samples is filled.
+     * Runs [scenario] until the pipeline ends, and returns the results it produced and how it ended:
+     * after the last frame, or by throwing (the results before the throw are kept).
+     *
+     * A frame goes in only once the result of the one before it, if it had one, has been collected:
+     * the pipeline runs on another dispatcher, and without the wait a failure could end the run while
+     * an earlier result was still on its way to the collector.
      */
-    private fun cameraFrame(scenario: Scenario, index: Int, covered: Boolean): ImageFrame {
-        val record = scenario.facts(index).frame
-        val w = record.sourceWidth
-        val h = record.sourceHeight
-        val random = Random(record.seq)
-        val y = ByteArray(w * h) { if (covered) 6 else (110 + random.nextInt(-35, 35)).toByte() }
-        val chroma = YuvPlaneData(ByteArray(w * h / 2), w, 2)
-        return ImageFrame(
-            w, h, ByteArray(0), ImagePixelFormat.YUV_420_888, record.sensorTimestampNanos, record.rotationDegrees, record.seq,
-            yuvData = Yuv420FrameData(YuvPlaneData(y, w, 1), chroma, chroma),
-            receivedElapsedRealtimeNanos = record.receivedElapsedRealtimeNanos,
-            sourceGeometry = FrameSourceGeometry(checkNotNull(record.sensorToBufferTransform), 0, 0, w, h),
-        )
-    }
-
-    private object SilentLog : LogService {
-        override fun debug(tag: String, message: String, data: Map<String, Any>?) = Unit
-        override fun info(tag: String, message: String, data: Map<String, Any>?) = Unit
-        override fun warning(tag: String, message: String, data: Map<String, Any>?, throwable: Throwable?) = Unit
-        override fun error(tag: String, message: String, throwable: Throwable?) = Unit
+    fun runToEnd(scenario: Scenario): SimulationRun = runBlocking {
+        val pipeline = SimulatedPipeline(scenario, analysisConfig, perceptionConfig, phoneGeometry)
+        val collected = Channel<Long>(Channel.UNLIMITED)
+        val frames = flow {
+            scenario.frames.forEachIndexed { index, frame ->
+                pipeline.clock.advanceBy(scenario.stepMs)
+                pipeline.stationary.value = frame.stationary
+                if (frame.delivery == FrameDelivery.Lost) return@forEachIndexed
+                pipeline.currentIndex = index
+                val image = pipeline.cameraFrame(index)
+                emit(image)
+                // The frame has been processed; unless a model failed on it, its result is on its way.
+                if (!pipeline.failed(image.sequenceNumber)) {
+                    val got = withTimeoutOrNull(COLLECT_TIMEOUT_MS) { collected.receive() }
+                        ?: error("frame ${image.sequenceNumber} did not fail, but its result never reached the collector")
+                    check(got == image.sequenceNumber) { "expected the result of frame ${image.sequenceNumber}, collected $got" }
+                }
+            }
+        }
+        val results = mutableListOf<SceneResult>()
+        val end = try {
+            pipeline.start(frames, releaseFrame = {}, semanticMaskSnapshot = { false }).collect {
+                results += it
+                collected.trySend(it.sequenceNumber)
+            }
+            SimulationEnd.Completed
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            SimulationEnd.Failed(error)
+        }
+        SimulationRun(results, end)
     }
 
     companion object {
+        /** A real-time bound on the wait for a result; only a broken run reaches it. */
+        private const val COLLECT_TIMEOUT_MS = 60_000L
+
         /**
          * One golden line per frame: what Guidance decided and the analysis behind it. Floats are
          * rounded to 4 decimals, so a last-bit difference between JVMs does not look like a change
@@ -276,4 +136,16 @@ class GuidanceSimulator(
             return "[today=${e.today.name} ${c.validity.name.lowercase()} ${m(c.lowerM)}..${m(c.upperM)}]"
         }
     }
+}
+
+/** What [GuidanceSimulator.runToEnd] got: every result, in order, and how the run ended. */
+data class SimulationRun(val results: List<SceneResult>, val end: SimulationEnd)
+
+/** How a simulated run ended. */
+sealed interface SimulationEnd {
+    /** The pipeline took every frame and completed. */
+    data object Completed : SimulationEnd
+
+    /** The pipeline threw [error] (the session ended as failed, for one). */
+    data class Failed(val error: Exception) : SimulationEnd
 }
