@@ -17,6 +17,10 @@ for a prompt. The cases below are the ones where that matters most.
 - **Distance** comes from the bottom of a box, or from where that bottom meets the ground, given the phone's tilt and
   height. It says nothing about anything that has no box.
 
+This is the Standard mode, the default. In the Basic mode, chosen in Settings, the object detector does not run:
+obstacles are read from the segmentation instead, so the detector's list of classes does not apply. **Not verified**:
+every field recording used the Standard mode.
+
 ## Operating conditions
 
 Each condition has one of three statuses:
@@ -31,14 +35,15 @@ field.
 ### Carrying the phone
 
 - **Supported: held upright in the hand at chest height, the back camera facing the way ahead.** This is how every
-  field recording was made, tilted about 14–19° down on average.
+  field recording was made. In most of them the phone was tilted about 14–19° down, taking each recording's median.
 - **Not verified: any other way of carrying it**: on a lanyard, at the waist, in a pocket or a bag, sideways
   (landscape), tilted far up or down.
 - **How distance is worked out.** How near an obstacle is comes from how low the bottom of its box sits in the
   picture. In the lowest quarter it counts as near, and its prompt starts with "Careful". In the upper 45% it counts
   as far, and a far obstacle is usually not announced at all. In between it is the middle level. The phone's height
-  plays no part in it, so how the phone is tilted and held changes the level: a person standing 3 m away is at the
-  middle level or far depending only on the tilt and the height of the phone.
+  plays no part in it, so how the phone is tilted and held changes the level. In the simulator, with one fixed
+  camera and scene, a person standing 3 m away comes out at the middle level or far depending only on the phone's
+  tilt and height.
 - **The carrying settings are not in the normal app.** Chest lanyard, in the hand at chest height and at the waist
   can be chosen only on a debug build's diagnostics screen, together with an experimental ground-contact distance.
   That distance is off by default and stays off in a release build. Until a placement is chosen, the phone height is
@@ -56,13 +61,15 @@ field.
 
 - **Supported: outdoors on pavements, shopping streets and at road crossings; indoors in shopping-mall corridors and
   entrances.** These are where the field recordings were made.
-- **Low light.** Below a fixed brightness Guidance says "Too dark to see" and stops every other prompt until the light
-  is back (see [When Guidance itself is not working](#when-guidance-itself-is-not-working)).
+- **Low light.** Below a fixed brightness Guidance says "Too dark to see" and gives no new prompts about the scene
+  until the light is back (see [When Guidance itself is not working](#when-guidance-itself-is-not-working)).
+- **A very even picture counts as a covered lens**, and that is checked before darkness: a picture that is uniformly
+  dark, or so blurred that it is uniform, can be reported as covered rather than as too dark.
 - **Not verified: dim light above that threshold**, such as dusk or street lighting at night.
 - **A hand over the lens in bright sunlight** may not be recognised as a covered lens: light coming through the hand
   passes the brightness check. This was seen in a field pilot recording.
 - **Not verified: rain, fog, snow, water drops or dirt on the lens.** Only the picture's brightness and how evenly it
-  is spread are checked. A blurred or smeared picture raises no alert.
+  is spread are checked. There is no alert for a blurred or smeared picture as such.
 - **No prompt here means:** with a wet, dirty or misted lens the models may see nothing at all, and nothing tells you.
 
 ### Steps, crossings and crowds
@@ -74,9 +81,10 @@ field.
   when it sees one, as a low-priority prompt. A vehicle in the walking path is still announced as an obstacle.
   Waiting at a crossing was part of the field recordings.
 - **Supported: moderately busy pavements and shopping streets**, with people coming towards you or crossing your path.
-- **Not verified: dense crowds.** At most 10 detected obstacles per frame are considered.
-- **No prompt here means:** at a crossing, nothing has been judged about the traffic. In a crowd, only 10 of the
-  people in view are considered.
+- **Not verified: dense crowds.** Each detection returns at most 10 obstacles of every kind together: vehicles and
+  other obstacles take places too.
+- **No prompt here means:** at a crossing, nothing has been judged about the traffic. In a crowd, not everyone in view
+  is considered.
 
 ### Earphones and screen readers
 
@@ -85,9 +93,11 @@ field.
 - **Not verified: wired or Bluetooth earphones.** Nothing notices when earphones are disconnected or when speech goes
   somewhere you cannot hear it.
 - **Screen reader** (such as TalkBack) on, with speech on: every prompt and alert is handed to the screen reader, in
-  its voice and at its rate, and Guidance's own speech is not started. With speech off, the screen reader is not
-  used for prompts: they are given by vibration only, or, with navigation vibration off too, only on the screen.
-  **Not verified** in the field: the recordings were made with the screen reader off.
+  its voice and at its rate, and Guidance's own speech is not started. Handing an alert to the screen reader counts as
+  telling you: the app cannot know whether you heard it, so the vibration that otherwise follows an alert not heard in
+  time does not come, and with fault vibration off there is no vibration for it at all. With speech off, the screen
+  reader is not used for prompts: they are given by vibration only, or, with navigation vibration off too, only on
+  the screen. **Not verified** in the field: the recordings were made with the screen reader off.
 - **No prompt here means:** if the audio goes somewhere you cannot hear, prompts are lost and nothing says so.
 
 ### Phones and accelerators
@@ -131,9 +141,9 @@ automated tests of the code that gives it.
 
 | What happened | What you hear | What you feel | What else happens | Checked |
 |---|---|---|---|---|
-| Lens covered, or a plain wall about 30 cm ahead | "Camera is covered, or too close to a wall", again every 8 s; "Camera is clear again" 2 s after the view is back | The "can't see" vibration (long, short, long) each time, if fault vibration is on; with speech off, that vibration is the alert, every 8 s, and cannot be turned off | Every other prompt stops. If the sentence has not been heard within 5 s, the vibration comes anyway, whatever the settings | On a phone |
-| Too dark | "Too dark to see", again every 15 s; "Light is back to normal" | The "can't see" vibration when it starts, if fault vibration is on; with speech off, every 15 s | Every other prompt stops. If not heard within 6 s, the vibration comes anyway | On a phone |
-| Ground not recognised for 1.5 s | "Can't see the ground, can't tell if the way ahead is clear", again every 60 s; "Ground recognized again, path alerts are back" after 1 s of recognised ground | The "can't see" vibration when it starts, if fault vibration is on; with speech off, every 60 s | "Path blocked" and other path prompts pause; obstacles are still announced. If not heard within 10 s, the vibration comes anyway | On a phone |
+| Lens covered, or a plain wall about 30 cm ahead | "Camera is covered, or too close to a wall", again every 8 s. Once the view has been back for 2 s, Guidance tries to say "Camera is clear again" | The "can't see" vibration (long, short, long) each time, if fault vibration is on; with speech off, that vibration is the alert, every 8 s, and cannot be turned off | No new prompts about the scene. If the sentence has not been heard within 5 s, the vibration comes anyway, whatever the settings | On a phone |
+| Too dark | "Too dark to see", again every 15 s. Once the light is back, Guidance tries to say "Light is back to normal" | The "can't see" vibration when it starts, if fault vibration is on; with speech off, every 15 s | No new prompts about the scene. If not heard within 6 s, the vibration comes anyway | On a phone |
+| Ground not recognised for 1.5 s | "Can't see the ground, can't tell if the way ahead is clear", again every 60 s. Once ground has been recognised for 1 s, Guidance tries to say "Ground recognized again, path alerts are back" | The "can't see" vibration when it starts, if fault vibration is on; with speech off, every 60 s | "Path blocked" and other path prompts pause; obstacles are still announced. If not heard within 10 s, the vibration comes anyway | On a phone |
 | No result for 2.5 s while running, or none 20 s after starting | "Guidance is not responding. Stop and check before moving on.", again every 10 s | The interruption vibration (three extra long), whatever the vibration setting | It goes on until results come again | In tests |
 | Analysis failed: 30 frames in a row, or the models could not load | "Guidance stopped: analysis failed. Do not rely on it until restarted." | The interruption vibration, whatever the vibration setting | All other output stops first; the session ends and shows an error. If frames fail slowly, "not responding" can come first | In tests |
 | App in the background or screen off | "Guidance interrupted" | The interruption vibration, whatever the vibration setting | See [Screen off and background](#screen-off-and-background) | On a phone |
@@ -141,7 +151,14 @@ automated tests of the code that gives it.
 | The phone has no vibration motor | — | Nothing: no vibration is felt, and nothing says so | — | Not checked |
 | Earphones disconnected, or speech goes somewhere you cannot hear | — | — | Nothing notices it | Not checked |
 
-With a screen reader on and speech on, every sentence above goes to the screen reader instead.
+- **No new prompts** means that nothing new about the scene is given while the alert holds. A prompt already being
+  spoken or vibrated may carry on, and can keep a less urgent alert waiting.
+- **A recovery sentence may not be heard.** It is a low-priority try: if no speech takes it within 5 s it is dropped,
+  and once taken a more urgent prompt can cut it off. With speech off there is no recovery sentence and no recovery
+  vibration.
+- **With a screen reader on and speech on**, every sentence above goes to the screen reader instead. Handing it over
+  counts as telling you, so the "comes anyway" vibration does not follow, and with fault vibration off there is no
+  vibration at all.
 
 ## Known limits
 
@@ -151,20 +168,22 @@ With a screen reader on and speech on, every sentence above goes to the screen r
 | Sculptures, installations, unusual objects | Often no prompt | Not among the detector's classes; the segmentation model gives them whatever class is nearest |
 | Glass doors and walls | Often no prompt | The model sees what is behind the glass |
 | Steps, curbs and drops | No dependable prompt | Nothing looks for a change in height. A drop looks like more ground, and a low step has no box |
-| Reflective indoor floors | Ground may go unrecognised; path prompts then pause, and Guidance says it cannot tell whether the way is clear | The segmentation model was not trained on them |
+| Reflective indoor floors | Ground may go unrecognised; path prompts then pause, and Guidance says it cannot tell whether the way is clear | The segmentation model often gives them a class other than ground |
 | Anything above the phone's view, or below it | No prompt | Out of frame: an overhanging branch, a low bollard close in front |
 | A picture that reaches Guidance late | Judged as if it were current: a prompt can describe where things were | Nothing checks how old a picture is |
 | A camera that keeps sending the same picture | Guidance goes on judging the old picture, with no alert | Only the absence of results is noticed, not a picture that stops changing |
 
 ## Reading the prompts
 
-- With path-complex prompts off, only obstacles and a blocked path are announced, in speech and in vibration. A run
-  says so once when it starts, unless speech is off. Some of the "ahead" vibrations used to come from path-complex
-  prompts, and no longer do.
+- With path-complex prompts off, no path-complex prompt is given, in speech or in vibration; obstacles, a blocked path
+  and the other kinds of prompt, such as "Traffic light ahead", still follow their own rules. A run says "Now alerting
+  for obstacles and blocked paths only" once when it starts, unless speech is off. Some of the "ahead" vibrations used
+  to come from path-complex prompts, and no longer do.
 - "Blocked" is said only when several signs agree. A path it does not call blocked may still be impassable.
 - A covered lens, low light and unrecognised ground are told as such, because then even the absence of other prompts
   says little.
 - A plain wall about 30 cm ahead looks to the camera like a covered lens, and a tissue over the lens looks the same, so
-  the covered-lens alert says "covered, or too close to a wall". It stops all other prompts, as for a covered lens.
+  the covered-lens alert says "covered, or too close to a wall". As for a covered lens, no new prompts about the scene
+  are given while it holds.
 - A distance is a coarse level from one camera, read from where the obstacle's box sits in the picture. It changes
   with how the phone is tilted and held; see [Carrying the phone](#carrying-the-phone).
