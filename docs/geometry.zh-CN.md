@@ -228,8 +228,8 @@ sem/det 一样由张量形状判定。没有类别顺序可弄错；对应的风
   图和检测框（框只在某个高度以上才能被检测到，用来表示墙后的人）。`Scenario.facts(i)` 给出同一帧的采集
   会记录的原始事实（相机记录、带 sensor-to-buffer 变换的帧记录、重力样本），所以几何解析场景和解析录
   像完全一样。`SyntheticSceneTest` 检查两者描述的是同一台相机。
-- **`GuidanceSimulator`** 跑完整的 `StartSceneAnalysisUseCase` 路径，接线方式和 `DomainBindingsModule` 给
-  应用的一样，只有两个模型、时钟和静止标志是假的。JVM 迫使有两处替代，因为 native 库只有 arm64：连通
+- **`GuidanceSimulator`** 跑完整的 `StartSceneAnalysisUseCase` 路径，由 `SimulatedPipeline` 接线，方式和
+  `DomainBindingsModule` 给应用的一样，只有两个模型、时钟和静止标志是假的。JVM 迫使有两处替代，因为 native 库只有 arm64：连通
   性走 Kotlin 回退而不是 native 内核（两者在收窄的走廊上不同，见 [architecture.zh-CN.md](architecture.zh-CN.md)
   里关于连通性的说明），语义统计来自 Kotlin 提取器。golden 里的阻塞、宽度和洪泛数值都是回退路径的。
 - **golden**：`sailens-guidance/src/test/resources/scenarios/<name>.golden.txt`，开头是场景描述，之后每帧一
@@ -238,6 +238,13 @@ sem/det 一样由张量形状判定。没有类别顺序可弄错；对应的风
   是同一场景打开接地点距离（胸前预设 1.3 m）、带每个障碍物距离证据的版本（`GroundContactScenarioTest`）；
   关闭时普通 golden 不变。有意的改动之后，两种 golden 都要重新生成，并把 diff 和改动一起提交：
   `gradlew :sailens-guidance:testDebugUnitTest --tests "*ScenarioGoldenTest*" --tests "*GroundContactScenarioTest*" -PupdateGoldens`。
+- **边界场景**：`EdgeScenarios` 登记 Guidance 输入边界上的场景：各区域的障碍物、收窄和被挡住的路、闪烁的
+  类别图、只出现一帧和消失的检测、限频的检测、丢失、冻结、迟到接收或模型失败的帧、被挡住的镜头和过暗。
+  它们用 `ScenarioFrame` 的扰动字段写成（光照、投递、每个模型看到的世界、模型失败、接收滞后），每个字段的
+  默认值都是不受扰动的帧。`EdgeScenarioGoldenTest` 产出它们的 golden，目录和格式同上，只是丢失的帧和模型
+  失败的帧没有行（序号跳过）；管线以抛异常结束的一次运行，保留异常之前的行，结束方式由测试断言，不写进
+  golden。每个测试还断言场景确实走到了它要测的路径。它们不在 `Scenarios.all` 里，那里每帧都必须有结果。
+  重新生成：`gradlew :sailens-guidance:testDebugUnitTest --tests "*EdgeScenarioGoldenTest*" -PupdateGoldens`。
 - **golden 固定行为，不代表认可。** 静止在 3 m 外的人是 MEDIUM 还是 FAR 只取决于俯角和机高；被读成
   building 的室内地面先给出 CRITICAL 的"前方不通"，再给"识别不到地面"；下到路面的 15 cm 路沿看不见；走向
   1.5 m 落差时阻塞升到 1.0 却没有提示；下半身被墙挡住的人整个走近过程都读作 FAR。打开接地点后，没有任何

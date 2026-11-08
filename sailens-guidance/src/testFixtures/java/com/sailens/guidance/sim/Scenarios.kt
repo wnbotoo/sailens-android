@@ -6,13 +6,67 @@ import com.sailens.guidance.trace.capture.FrameEncoding
 import com.sailens.guidance.trace.capture.FrameRecord
 import com.sailens.guidance.trace.capture.SensorRecord
 
-/** One simulated frame: where the phone is, what is in front of it, and what the device reports. */
+/**
+ * One simulated frame: where the phone is, what is in front of it, and what the device reports.
+ * Every field past [stationary] perturbs the frame, and each defaults to the undisturbed frame.
+ *
+ * @param lensCovered the same as [Lighting.COVERED]; it wins over [lighting].
+ * @param lighting what the camera's luma shows: textured, flat (a covered lens) or dark but textured.
+ * @param delivery whether the frame reaches the pipeline, and with whose content.
+ * @param semWorld what the segmentation model sees instead of [world]; null for [world].
+ * @param detWorld what the detector sees instead of [world]; null for [world].
+ * @param semFails the segmentation model fails on this frame (if it runs on it).
+ * @param detFails the detector throws on this frame (if it runs on it).
+ * @param receiptLagMs how long before its decision the frame was received: its receipt time is
+ *   this much older than its camera timestamp. Only the receipt time moves.
+ */
 data class ScenarioFrame(
     val pose: Pose,
     val world: World,
     val stationary: Boolean = false,
     val lensCovered: Boolean = false,
-)
+    val lighting: Lighting = Lighting.NORMAL,
+    val delivery: FrameDelivery = FrameDelivery.Delivered,
+    val semWorld: World? = null,
+    val detWorld: World? = null,
+    val semFails: Boolean = false,
+    val detFails: Boolean = false,
+    val receiptLagMs: Long = 0,
+) {
+    init {
+        require(receiptLagMs >= 0) { "a frame cannot be received after its decision" }
+    }
+
+    /** [lighting], with [lensCovered] taken into account. */
+    val effectiveLighting: Lighting get() = if (lensCovered) Lighting.COVERED else lighting
+}
+
+/** What the camera's luma shows. */
+enum class Lighting {
+    /** Textured, mid-grey: the frame-quality check passes it. */
+    NORMAL,
+
+    /** Flat: no texture at all, as under a finger or in a pocket. */
+    COVERED,
+
+    /** Textured but dark: a mean luma around 20, a standard deviation around 10. */
+    DARK,
+}
+
+/** Whether a frame reaches the pipeline. A frame's sequence number and timestamp are its own either way. */
+sealed interface FrameDelivery {
+    /** It arrives as rendered. */
+    data object Delivered : FrameDelivery
+
+    /** It never arrives: its sequence number is skipped, and the clock still moves past it. */
+    data object Lost : FrameDelivery
+
+    /**
+     * It arrives with the picture of frame [fromIndex] (an earlier frame): the camera is stuck on one
+     * image while its timestamps keep moving. The phone's own sensors still report where it is now.
+     */
+    data class Frozen(val fromIndex: Int) : FrameDelivery
+}
 
 /** The raw facts a capture of one scenario frame would hold. */
 data class ScenarioFacts(val camera: CaptureCameraRecord, val frame: FrameRecord, val gravity: List<SensorRecord>)
@@ -20,6 +74,11 @@ data class ScenarioFacts(val camera: CaptureCameraRecord, val frame: FrameRecord
 /**
  * A scripted walk through a synthetic world. [frames] are [stepMs] apart; [description] says
  * what the scenario exercises and heads its golden file.
+ *
+ * @param alignClockToFrames whether the frames' camera timestamps are read off the simulated clock,
+ *   so that the time from a frame's receipt to its decision is its [ScenarioFrame.receiptLagMs].
+ *   Otherwise the timestamps count from zero while the clock starts at [CLOCK_START_MS]; no decision
+ *   reads the difference.
  */
 data class Scenario(
     val name: String,
@@ -27,16 +86,29 @@ data class Scenario(
     val frames: List<ScenarioFrame>,
     val camera: SyntheticCamera = SyntheticCamera(),
     val stepMs: Long = 100,
+    val alignClockToFrames: Boolean = false,
 ) {
+    init {
+        frames.forEachIndexed { index, frame ->
+            val delivery = frame.delivery
+            if (delivery is FrameDelivery.Frozen) {
+                require(delivery.fromIndex in 0 until index) { "frame $index can only freeze on an earlier frame" }
+            }
+        }
+    }
+
+    /** The clock reading, ms, at which frame [index] is processed. */
+    fun clockAt(index: Int): Long = CLOCK_START_MS + (index + 1L) * stepMs
+
     fun facts(index: Int): ScenarioFacts {
         val seq = index + 1L
-        val timestamp = seq * stepMs * 1_000_000
+        val timestamp = (if (alignClockToFrames) CLOCK_START_MS * 1_000_000 else 0L) + seq * stepMs * 1_000_000
         return ScenarioFacts(
             camera = camera.cameraRecord(),
             frame = FrameRecord(
                 seq = seq,
                 sensorTimestampNanos = timestamp,
-                receivedElapsedRealtimeNanos = timestamp,
+                receivedElapsedRealtimeNanos = timestamp - frames[index].receiptLagMs * 1_000_000,
                 sourceWidth = camera.bufferWidth,
                 sourceHeight = camera.bufferHeight,
                 rotationDegrees = camera.sensorOrientation,
@@ -49,6 +121,11 @@ data class Scenario(
             gravity = gravitySamples(frames[index].pose, timestamp),
         )
     }
+
+    companion object {
+        /** Where the simulated clock starts, ms; it then moves [stepMs] before each frame. */
+        const val CLOCK_START_MS = 1_000_000L
+    }
 }
 
 /**
@@ -58,31 +135,31 @@ data class Scenario(
  */
 object Scenarios {
     /** Camera height and pitch of the default carry (1.3 m, chest height). */
-    private const val HEIGHT = 1.3f
-    private const val PITCH = 25f
+    const val HEIGHT = 1.3f
+    const val PITCH = 25f
 
-    private val person = DetectedAs(cocoId = 0, label = "person", category = ObstacleCategory.PERSON)
-    private val car = DetectedAs(cocoId = 2, label = "car", category = ObstacleCategory.VEHICLE)
+    val person = DetectedAs(cocoId = 0, label = "person", category = ObstacleCategory.PERSON)
+    val car = DetectedAs(cocoId = 2, label = "car", category = ObstacleCategory.VEHICLE)
 
     /** The pitch most field recordings were held at (median 14-19 degrees per recording). */
-    private const val FIELD_PITCH = 17f
+    const val FIELD_PITCH = 17f
 
     /** Road on the left, a 3 m sidewalk ahead, verge on the right. */
-    private fun street(sidewalkEndZ: Double = 39.9, beyond: List<GroundPatch> = emptyList()) = listOf(
+    fun street(sidewalkEndZ: Double = 39.9, beyond: List<GroundPatch> = emptyList()) = listOf(
         GroundPatch(SceneClasses.ROAD, -30.0, -1.5, -5.0, sidewalkEndZ),
         GroundPatch(SceneClasses.SIDEWALK, -1.5, 1.5, -5.0, sidewalkEndZ),
         GroundPatch(SceneClasses.TERRAIN, 1.5, 30.0, -5.0, sidewalkEndZ),
     ) + beyond
 
-    private fun personAt(x: Double, z: Double, visibleAboveM: Double? = null) = Box(
+    fun personAt(x: Double, z: Double, visibleAboveM: Double? = null) = Box(
         SceneClasses.PERSON, x - 0.22, x + 0.22, z, z + 0.3, 1.7,
         detection = person.copy(visibleAboveM = visibleAboveM),
     )
 
-    private fun lerp(a: Float, b: Float, t: Float) = a + (b - a) * t
+    fun lerp(a: Float, b: Float, t: Float) = a + (b - a) * t
 
     /** [count] values from [from] to [to] inclusive. */
-    private fun sweep(from: Float, to: Float, count: Int) = (0 until count).map { lerp(from, to, it / (count - 1f)) }
+    fun sweep(from: Float, to: Float, count: Int) = (0 until count).map { lerp(from, to, it / (count - 1f)) }
 
     val straightClearPath = Scenario(
         name = "straight_clear_path",

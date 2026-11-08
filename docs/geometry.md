@@ -290,9 +290,9 @@ modules' tests can use it as well; the tests that run it, such as `SyntheticScen
   `Scenario.facts(i)` gives the raw facts a capture of the same frame would hold (camera record,
   frame record with sensor-to-buffer transform, gravity samples), so the geometry resolves a scenario
   exactly as it resolves a recording. `SyntheticSceneTest` checks that the two describe one camera.
-- **`GuidanceSimulator`** runs the whole `StartSceneAnalysisUseCase` path, wired as
-  `DomainBindingsModule` wires the app, with fakes only for the two models, the clock and the
-  stationary flag. Two substitutions are forced by the JVM, because the native libraries are
+- **`GuidanceSimulator`** runs the whole `StartSceneAnalysisUseCase` path, wired by
+  `SimulatedPipeline` as `DomainBindingsModule` wires the app, with fakes only for the two models, the
+  clock and the stationary flag. Two substitutions are forced by the JVM, because the native libraries are
   arm64-only: connectivity runs on the Kotlin fallback, not the native kernel (the two differ on a
   narrowing corridor; see the connectivity note in [architecture.md](architecture.md)), and semantic
   stats come from the Kotlin extractor. The goldens' blockage, width and flood figures are the
@@ -306,6 +306,18 @@ modules' tests can use it as well; the tests that run it, such as `SyntheticScen
   distance off the plain goldens are unchanged. After an intended change, regenerate both kinds and
   commit the diff with the change:
   `gradlew :sailens-guidance:testDebugUnitTest --tests "*ScenarioGoldenTest*" --tests "*GroundContactScenarioTest*" -PupdateGoldens`.
+- **Edge scenarios**: `EdgeScenarios` holds the scenarios at the edges of what Guidance is given:
+  obstacles in each zone, a narrowing and a blocked path, a flickering class map, single-frame and
+  vanishing detections, detection limited in rate, frames lost, frozen, received late or failed by a
+  model, a covered lens and the dark. They are scripted with the perturbation fields of
+  `ScenarioFrame` (lighting, delivery, what each model sees, model failures, receipt lag), each of
+  which defaults to the undisturbed frame. `EdgeScenarioGoldenTest` produces their goldens, in the same
+  directory and format as above, except that a frame that is lost or that a model fails on has no
+  line (its sequence number is skipped); a run that the pipeline ends by throwing keeps the lines
+  before it, and the test, not the golden, asserts how it ended. Each test also asserts that its
+  scenario reaches the path it is there to exercise. They are not in `Scenarios.all`, where every
+  frame must have a result. Regenerate:
+  `gradlew :sailens-guidance:testDebugUnitTest --tests "*EdgeScenarioGoldenTest*" -PupdateGoldens`.
 - **The goldens pin behaviour; they do not endorse it.** A person standing still 3 m away is MEDIUM
   or FAR depending only on pitch and phone height; an indoor floor read as building gives a CRITICAL
   "blocked" before "ground unrecognized"; a 15 cm curb down to the road is invisible; walking to a
