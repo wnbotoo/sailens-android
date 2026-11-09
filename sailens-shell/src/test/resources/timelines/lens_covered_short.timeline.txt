@@ -1,0 +1,45 @@
+# lens_covered_short: Walking a sidewalk with the lens covered for 10 s from 5050. The sixth covered frame stops guidance, said and felt at once and again each 8 s; the sixth clear frame judges again, and the lens is said clear once it has stayed clear for 2 s. Under the cover a person walks 1.5 m ahead for 3 s: the models still see the scene here, and the person is tracked, but no prompt but the covered lens's is given.
+# config detfirst=off step=100 speech=on screenReader=off haptics=on faultHaptics=on
+0 state idle since=0 phase=not_started interrupted=false stall=none judgement=none faults=[] channel=speech cause=output
+0 script start
+0 state initializing since=0 phase=starting interrupted=false stall=none judgement=none faults=[] channel=speech cause=start_requested
+0 state initializing since=0 phase=awaiting_first_result interrupted=false stall=none judgement=none faults=[] channel=speech cause=flow_started
+1000 script release_init sem
+1050 frame seq=1 q=qualified events=[]
+1050 state guiding since=1050 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result
+5450 frames seq=2..45 n=44 from=1150 q=qualified
+5550 frame seq=46 q=unqualified(camera_obstructed) events=[e1:event_camera_blocked:CRITICAL@-~11550]
+5550 state stop_required(camera_obstructed) since=5550 phase=running interrupted=false stall=none judgement=unqualified(camera_obstructed) faults=[] channel=speech cause=result
+5550 receipt confirm e1
+5550 outcome e1 src=46 event_camera_blocked CRITICAL delivered=vision_alerts
+5550 speech speak n1 "event_camera_blocked" scale=24 exp=10550 -> accepted
+5550 alert vision fault_notice event_camera_blocked priority=critical channel=speech result=accepted
+5550 alert vision fault_rhythm vision_unreliable priority=critical channel=haptics result=requested
+5550 motor reserve vision_unreliable -> started
+5550 alert vision fault_rhythm vision_unreliable priority=critical channel=haptics result=played
+6850 frames seq=47..59 n=13 from=5650 q=unqualified(camera_obstructed)
+6950 speech done n1
+13450 frames seq=60..125 n=66 from=6950 q=unqualified(camera_obstructed)
+13550 frame seq=126 q=unqualified(camera_obstructed) events=[e2:event_camera_blocked:CRITICAL@-~19550]
+13550 receipt confirm e2
+13550 outcome e2 src=126 event_camera_blocked CRITICAL delivered=vision_alerts
+13550 speech speak n2 "event_camera_blocked" scale=24 exp=18550 -> accepted
+13550 alert vision fault_notice event_camera_blocked priority=critical channel=speech result=accepted
+13550 alert vision fault_rhythm vision_unreliable priority=critical channel=haptics result=requested
+13550 motor reserve vision_unreliable -> started
+13550 alert vision fault_rhythm vision_unreliable priority=critical channel=haptics result=played
+14850 frames seq=127..139 n=13 from=13650 q=unqualified(camera_obstructed)
+14950 speech done n2
+15450 frames seq=140..145 n=6 from=14950 q=unqualified(camera_obstructed)
+15550 frame seq=146 q=qualified events=[]
+15550 state guiding since=15550 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result
+17550 frames seq=147..166 n=20 from=15650 q=qualified
+17550 speech speak n3 "event_camera_restored" scale=0 exp=22550 -> accepted
+17550 alert vision fault_recovery event_camera_restored priority=low channel=speech result=accepted
+18950 frames seq=167..180 n=14 from=17650 q=qualified
+18990 speech done n3
+19950 frames seq=181..190 n=10 from=19050 q=qualified
+20000 script stop
+20000 speech stop
+20000 motor cancel
+20000 state idle since=20000 phase=not_started interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=stopped

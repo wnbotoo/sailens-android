@@ -1,0 +1,35 @@
+# results_stop_background: The stall of results_stop, with the app in the background from 12000, after the first stall alarm, to 22000. In the background the stall is not alarmed again; back in the foreground the startup grace starts over, so the stall is not alarmed before the results come back at 25050.
+# config detfirst=off step=100 speech=on screenReader=off haptics=on faultHaptics=on
+0 state idle since=0 phase=not_started interrupted=false stall=none judgement=none faults=[] channel=speech cause=output
+0 script start
+0 state initializing since=0 phase=starting interrupted=false stall=none judgement=none faults=[] channel=speech cause=start_requested
+0 state initializing since=0 phase=awaiting_first_result interrupted=false stall=none judgement=none faults=[] channel=speech cause=flow_started
+1000 script release_init sem
+1050 frame seq=1 q=qualified events=[]
+1050 state guiding since=1050 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result
+6950 frames seq=2..60 n=59 from=1150 q=qualified
+9500 state stop_required(perception_stalled) since=9500 phase=running interrupted=false stall=no_results judgement=qualified faults=[] channel=speech cause=poll
+9500 motor alarm interrupted -> played
+9500 alert system stalled interrupted priority=high channel=haptics result=played
+9500 speech notice s1 "notice_guidance_stalled" scale=16 exp=24500 -> accepted
+9500 alert system stalled notice_guidance_stalled priority=high channel=speech result=requested
+11020 speech done s1
+12000 script background
+12000 state interrupted(lifecycle) since=12000 phase=running interrupted=true stall=no_results judgement=qualified faults=[] channel=speech cause=lifecycle_stop
+12000 ui mark_interrupted
+12000 motor alarm interrupted -> played
+12000 alert system interrupted interrupted priority=max channel=haptics result=played
+12000 speech notice s2 "notice_guidance_interrupted" scale=max exp=27000 -> accepted
+12000 alert system interrupted notice_guidance_interrupted priority=max channel=speech result=requested
+13680 speech done s2
+22000 script foreground
+22000 state initializing since=22000 phase=awaiting_first_result interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=lifecycle_start
+22000 ui clear_interrupted
+22300 script camera_resume
+25050 frames seq=241..241 n=1 from=25050 q=qualified
+25050 state guiding since=25050 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result
+26850 frames seq=242..259 n=18 from=25150 q=qualified
+27000 script stop
+27000 speech stop
+27000 motor cancel
+27000 state idle since=27000 phase=not_started interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=stopped
