@@ -12,7 +12,8 @@ import com.sailens.guidance.safety.traceReasons
  *
  * - every state's judgement is the reference qualification: none from a start press until the next result, then
  *   each result's; a stop, the foreground or a failure keep it (the monitor clears it at a start request only);
- * - a stop for the camera (obstructed, too dark) comes only after a frame the baseline judged unqualified;
+ * - a stop for the camera (obstructed, too dark) comes only after a frame of the same start the baseline judged
+ *   unqualified, for that reason: a frame from before a start says nothing of the run started;
  * - every system alert is the device call it says, at the same time and in the same place: its rhythm a
  *   `motor alarm` just before it, its sentence a `speech notice` or `screen_reader` line with its key; and every
  *   `motor alarm` and `speech notice` is one of theirs;
@@ -51,19 +52,20 @@ internal object TimelineCrossCheck {
         var latest: BaselineQualification? = null
         for (entry in entries) {
             when (entry) {
+                is TimelineEntry.Script -> if (entry.action == "start") latest = null
                 is TimelineEntry.Frame -> latest = entry.baseline
                 is TimelineEntry.State -> {
-                    val reasons = entry.trace.reasons
-                    val forTheCamera = entry.trace.state == SafetyTraceNames.States.STOP_REQUIRED &&
-                        reasons.any { it == "camera_obstructed" || it == "too_dark" }
-                    if (forTheCamera && latest !is BaselineQualification.Unqualified) {
-                        problems += "${entry.atMs}: ${entry.trace.stateLabel} after a frame judged $latest"
-                    }
+                    if (entry.trace.state != SafetyTraceNames.States.STOP_REQUIRED) continue
+                    val reason = entry.trace.reasons.singleOrNull { it in CAMERA_STOPS } ?: continue
+                    val judged = (latest as? BaselineQualification.Unqualified)?.reason?.name?.lowercase()
+                    if (judged != reason) problems += "${entry.atMs}: ${entry.trace.stateLabel} after a frame of this start judged $latest"
                 }
                 else -> Unit
             }
         }
     }
+
+    private val CAMERA_STOPS = setOf("camera_obstructed", "too_dark")
 
     private fun systemAlerts(entries: List<TimelineEntry>, problems: MutableList<String>) {
         val matched = HashSet<Int>()

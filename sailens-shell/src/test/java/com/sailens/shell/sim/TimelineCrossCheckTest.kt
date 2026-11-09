@@ -69,7 +69,31 @@ class TimelineCrossCheckTest {
         val stop = state(1150, "stop_required", "unqualified", "result", reasons = listOf("camera_obstructed"), judgementReasons = listOf("camera_obstructed"))
         assertEquals(emptyList<String>(), TimelineCrossCheck.check(listOf(TimelineEntry.Script(0, "start"), frame(1150, 2, unqualified), stop)))
         val problems = TimelineCrossCheck.check(listOf(TimelineEntry.Script(0, "start"), frame(1150, 2), stop))
-        assertTrue(problems.toString(), problems.any { "stop_required(camera_obstructed) after a frame judged" in it })
+        assertTrue(problems.toString(), problems.any { "stop_required(camera_obstructed) after a frame of this start judged" in it })
+        val tooDark = state(1150, "stop_required", "unqualified", "result", reasons = listOf("too_dark"), judgementReasons = listOf("camera_obstructed"))
+        assertTrue("for another reason than the frame's", TimelineCrossCheck.check(listOf(TimelineEntry.Script(0, "start"), frame(1150, 2, unqualified), tooDark)).any { "stop_required(too_dark)" in it })
+    }
+
+    @Test
+    fun `a frame from before a start does not account for a stop for the camera after it`() {
+        for ((reason, judged) in listOf("camera_obstructed" to UnqualifiedReason.CAMERA_OBSTRUCTED, "too_dark" to UnqualifiedReason.TOO_DARK)) {
+            val unqualified = BaselineQualification.Unqualified(judged, emptySet())
+            val earlier = listOf(
+                TimelineEntry.Script(0, "start"),
+                frame(1150, 2, unqualified),
+                state(1150, "stop_required", "unqualified", "result", reasons = listOf(reason), judgementReasons = listOf(reason)),
+                TimelineEntry.Script(2000, "stop"),
+                state(2000, "idle", "unqualified", "stopped", judgementReasons = listOf(reason)),
+                TimelineEntry.Script(3000, "start"),
+            )
+            // Started again, no frame yet: a stop for the camera has nothing of this start to come from.
+            val stale = earlier + state(3000, "stop_required", null, "start_requested", reasons = listOf(reason))
+            val problems = TimelineCrossCheck.check(stale)
+            assertTrue("$reason: $problems", problems.any { "3000: stop_required($reason) after a frame of this start judged null" in it })
+            val judgedAgain = earlier + frame(3050, 3, unqualified) +
+                state(3050, "stop_required", "unqualified", "result", reasons = listOf(reason), judgementReasons = listOf(reason))
+            assertEquals("$reason: a frame of the new start does", emptyList<String>(), TimelineCrossCheck.check(judgedAgain))
+        }
     }
 
     @Test
