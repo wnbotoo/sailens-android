@@ -37,6 +37,15 @@ class PromptOutcomeTraceTest {
     }
 
     @Test
+    fun `every revoke reason parses, a hold's included`() {
+        val lines = PromptRevokeReasons.all.mapIndexed { i, reason -> line(""""revokedAt":1700000000150,"revokeReason":"$reason"""", eventId = "e$i") }
+        assertEquals(
+            setOf("waiting_for_description", "output_refused", "cut", "haptic_dropped", "safety_hold"),
+            TraceReplayParser.parse(lines).promptOutcomes.map { it.revokeReason }.toSet(),
+        )
+    }
+
+    @Test
     fun `every illegal combination is rejected with its line number`() {
         val illegal = listOf(
             "neither timestamp" to "",

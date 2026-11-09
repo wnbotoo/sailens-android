@@ -22,71 +22,124 @@
 7188 frames seq=140..187 n=48 from=5637 q=unqualified(camera_obstructed)
 7221 frame seq=188 q=qualified events=[e2:event_obstacle_center_person:CRITICAL{count=1}@MEDIUM~10221]
 7221 state stop_required(camera_obstructed) since=4218 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=camera_obstructed(since=4218,recovering,fresh=1,span=0)
-7221 speech speak e2 "event_obstacle_center_person{count=1}" scale=24 exp=10221 -> accepted
-7221 motor queue ahead -> started
-7221 receipt confirm e2
-7221 outcome e2 src=188 event_obstacle_center_person CRITICAL delivered=speech,haptics
-7254 frames seq=189..189 n=1 from=7254 q=qualified
+7221 receipt revoke e2 safety_hold
+7221 outcome e2 src=188 event_obstacle_center_person CRITICAL revoked=safety_hold
+7254 frame seq=189 q=qualified events=[e3:event_obstacle_center_person:CRITICAL{count=1}@MEDIUM~10254]
 7254 state stop_required(camera_obstructed) since=4218 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=camera_obstructed(since=4218,recovering,fresh=2,span=33)
-7287 frames seq=190..190 n=1 from=7287 q=qualified
+7254 receipt revoke e3 safety_hold
+7254 outcome e3 src=189 event_obstacle_center_person CRITICAL revoked=safety_hold
+7287 frame seq=190 q=qualified events=[e4:event_obstacle_center_person:CRITICAL{count=1}@MEDIUM~10287]
 7287 state stop_required(camera_obstructed) since=4218 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=camera_obstructed(since=4218,recovering,fresh=3,span=66)
-7320 frames seq=191..191 n=1 from=7320 q=qualified
+7287 receipt revoke e4 safety_hold
+7287 outcome e4 src=190 event_obstacle_center_person CRITICAL revoked=safety_hold
+7320 frame seq=191 q=qualified events=[e5:event_obstacle_center_person:CRITICAL{count=1}@MEDIUM~10320]
 7320 state stop_required(camera_obstructed) since=4218 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=camera_obstructed(since=4218,recovering,fresh=4,span=99)
-7353 frames seq=192..192 n=1 from=7353 q=qualified
+7320 receipt revoke e5 safety_hold
+7320 outcome e5 src=191 event_obstacle_center_person CRITICAL revoked=safety_hold
+7353 frame seq=192 q=qualified events=[e6:event_obstacle_center_person:CRITICAL{count=1}@MEDIUM~10353]
 7353 state stop_required(camera_obstructed) since=4218 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=camera_obstructed(since=4218,recovering,fresh=5,span=132)
-7386 frames seq=193..193 n=1 from=7386 q=qualified
+7353 receipt revoke e6 safety_hold
+7353 outcome e6 src=192 event_obstacle_center_person CRITICAL revoked=safety_hold
+7386 frame seq=193 q=qualified events=[e7:event_obstacle_center_person:CRITICAL{count=1}@MEDIUM~10386]
 7386 state stop_required(camera_obstructed) since=4218 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=camera_obstructed(since=4218,recovering,fresh=6,span=165)
-7419 frames seq=194..194 n=1 from=7419 q=qualified
+7386 receipt revoke e7 safety_hold
+7386 outcome e7 src=193 event_obstacle_center_person CRITICAL revoked=safety_hold
+7419 frame seq=194 q=qualified events=[e8:event_obstacle_center_person:CRITICAL{count=1}@MEDIUM~10419]
 7419 state stop_required(camera_obstructed) since=4218 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=camera_obstructed(since=4218,recovering,fresh=7,span=198)
-7452 frames seq=195..195 n=1 from=7452 q=qualified
+7419 receipt revoke e8 safety_hold
+7419 outcome e8 src=194 event_obstacle_center_person CRITICAL revoked=safety_hold
+7452 frame seq=195 q=qualified events=[e9:event_obstacle_center_person:CRITICAL{count=1}@MEDIUM~10452]
 7452 state stop_required(camera_obstructed) since=4218 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=camera_obstructed(since=4218,recovering,fresh=8,span=231)
-7485 frames seq=196..196 n=1 from=7485 q=qualified
+7452 receipt revoke e9 safety_hold
+7452 outcome e9 src=195 event_obstacle_center_person CRITICAL revoked=safety_hold
+7485 frame seq=196 q=qualified events=[e10:event_obstacle_center_person:CRITICAL{count=1}@MEDIUM~10485]
 7485 state stop_required(camera_obstructed) since=4218 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=camera_obstructed(since=4218,recovering,fresh=9,span=264)
+7485 receipt revoke e10 safety_hold
+7485 outcome e10 src=196 event_obstacle_center_person CRITICAL revoked=safety_hold
 7518 frame seq=197 q=unqualified(camera_obstructed) events=[]
 7518 state stop_required(camera_obstructed) since=4218 phase=running interrupted=false stall=none judgement=unqualified(camera_obstructed) faults=[] channel=speech cause=result hold=camera_obstructed(since=7518,stopping,fresh=0,span=0)
 7980 frames seq=198..211 n=14 from=7551 q=unqualified(camera_obstructed)
-8013 frame seq=212 q=qualified events=[]
+8013 frame seq=212 q=qualified events=[e11:event_obstacle_center_person:CRITICAL{count=1}@MEDIUM~11013]
 8013 state stop_required(camera_obstructed) since=4218 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=camera_obstructed(since=7518,recovering,fresh=1,span=0)
-8046 frames seq=213..213 n=1 from=8046 q=qualified
+8013 receipt revoke e11 safety_hold
+8013 outcome e11 src=212 event_obstacle_center_person CRITICAL revoked=safety_hold
+8046 frame seq=213 q=qualified events=[e12:event_obstacle_center_person:CRITICAL{count=1}@MEDIUM~11046]
 8046 state stop_required(camera_obstructed) since=4218 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=camera_obstructed(since=7518,recovering,fresh=2,span=33)
-8079 frames seq=214..214 n=1 from=8079 q=qualified
+8046 receipt revoke e12 safety_hold
+8046 outcome e12 src=213 event_obstacle_center_person CRITICAL revoked=safety_hold
+8079 frame seq=214 q=qualified events=[e13:event_obstacle_center_person:CRITICAL{count=1}@MEDIUM~11079]
 8079 state stop_required(camera_obstructed) since=4218 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=camera_obstructed(since=7518,recovering,fresh=3,span=66)
-8112 frames seq=215..215 n=1 from=8112 q=qualified
+8079 receipt revoke e13 safety_hold
+8079 outcome e13 src=214 event_obstacle_center_person CRITICAL revoked=safety_hold
+8112 frame seq=215 q=qualified events=[e14:event_obstacle_center_person:CRITICAL{count=1}@MEDIUM~11112]
 8112 state stop_required(camera_obstructed) since=4218 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=camera_obstructed(since=7518,recovering,fresh=4,span=99)
-8145 frames seq=216..216 n=1 from=8145 q=qualified
+8112 receipt revoke e14 safety_hold
+8112 outcome e14 src=215 event_obstacle_center_person CRITICAL revoked=safety_hold
+8145 frame seq=216 q=qualified events=[e15:event_obstacle_center_person:CRITICAL{count=1}@MEDIUM~11145]
 8145 state stop_required(camera_obstructed) since=4218 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=camera_obstructed(since=7518,recovering,fresh=5,span=132)
-8178 frames seq=217..217 n=1 from=8178 q=qualified
+8145 receipt revoke e15 safety_hold
+8145 outcome e15 src=216 event_obstacle_center_person CRITICAL revoked=safety_hold
+8178 frame seq=217 q=qualified events=[e16:event_obstacle_center_person:CRITICAL{count=1}@MEDIUM~11178]
 8178 state stop_required(camera_obstructed) since=4218 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=camera_obstructed(since=7518,recovering,fresh=6,span=165)
-8211 frames seq=218..218 n=1 from=8211 q=qualified
+8178 receipt revoke e16 safety_hold
+8178 outcome e16 src=217 event_obstacle_center_person CRITICAL revoked=safety_hold
+8211 frame seq=218 q=qualified events=[e17:event_obstacle_center_person:CRITICAL{count=1}@MEDIUM~11211]
 8211 state stop_required(camera_obstructed) since=4218 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=camera_obstructed(since=7518,recovering,fresh=7,span=198)
-8244 frames seq=219..219 n=1 from=8244 q=qualified
+8211 receipt revoke e17 safety_hold
+8211 outcome e17 src=218 event_obstacle_center_person CRITICAL revoked=safety_hold
+8244 frame seq=219 q=qualified events=[e18:event_obstacle_center_person:CRITICAL{count=1}@MEDIUM~11244]
 8244 state stop_required(camera_obstructed) since=4218 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=camera_obstructed(since=7518,recovering,fresh=8,span=231)
-8277 frames seq=220..220 n=1 from=8277 q=qualified
+8244 receipt revoke e18 safety_hold
+8244 outcome e18 src=219 event_obstacle_center_person CRITICAL revoked=safety_hold
+8277 frame seq=220 q=qualified events=[e19:event_obstacle_center_person:CRITICAL{count=1}@MEDIUM~11277]
 8277 state stop_required(camera_obstructed) since=4218 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=camera_obstructed(since=7518,recovering,fresh=9,span=264)
-8310 frames seq=221..221 n=1 from=8310 q=qualified
+8277 receipt revoke e19 safety_hold
+8277 outcome e19 src=220 event_obstacle_center_person CRITICAL revoked=safety_hold
+8310 frame seq=221 q=qualified events=[e20:event_obstacle_center_person:CRITICAL{count=1}@MEDIUM~11310]
 8310 state stop_required(camera_obstructed) since=4218 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=camera_obstructed(since=7518,recovering,fresh=10,span=297)
-8343 frames seq=222..222 n=1 from=8343 q=qualified
+8310 receipt revoke e20 safety_hold
+8310 outcome e20 src=221 event_obstacle_center_person CRITICAL revoked=safety_hold
+8343 frame seq=222 q=qualified events=[e21:event_obstacle_center_person:CRITICAL{count=1}@MEDIUM~11343]
 8343 state stop_required(camera_obstructed) since=4218 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=camera_obstructed(since=7518,recovering,fresh=11,span=330)
-8376 frames seq=223..223 n=1 from=8376 q=qualified
+8343 receipt revoke e21 safety_hold
+8343 outcome e21 src=222 event_obstacle_center_person CRITICAL revoked=safety_hold
+8376 frame seq=223 q=qualified events=[e22:event_obstacle_center_person:CRITICAL{count=1}@MEDIUM~11376]
 8376 state stop_required(camera_obstructed) since=4218 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=camera_obstructed(since=7518,recovering,fresh=12,span=363)
-8409 frames seq=224..224 n=1 from=8409 q=qualified
+8376 receipt revoke e22 safety_hold
+8376 outcome e22 src=223 event_obstacle_center_person CRITICAL revoked=safety_hold
+8409 frame seq=224 q=qualified events=[e23:event_obstacle_center_person:CRITICAL{count=1}@MEDIUM~11409]
 8409 state stop_required(camera_obstructed) since=4218 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=camera_obstructed(since=7518,recovering,fresh=13,span=396)
-8442 frames seq=225..225 n=1 from=8442 q=qualified
+8409 receipt revoke e23 safety_hold
+8409 outcome e23 src=224 event_obstacle_center_person CRITICAL revoked=safety_hold
+8442 frame seq=225 q=qualified events=[e24:event_obstacle_center_person:CRITICAL{count=1}@MEDIUM~11442]
 8442 state stop_required(camera_obstructed) since=4218 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=camera_obstructed(since=7518,recovering,fresh=14,span=429)
-8475 frames seq=226..226 n=1 from=8475 q=qualified
+8442 receipt revoke e24 safety_hold
+8442 outcome e24 src=225 event_obstacle_center_person CRITICAL revoked=safety_hold
+8475 frame seq=226 q=qualified events=[e25:event_obstacle_center_person:CRITICAL{count=1}@MEDIUM~11475]
 8475 state stop_required(camera_obstructed) since=4218 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=camera_obstructed(since=7518,recovering,fresh=15,span=462)
-8508 frames seq=227..227 n=1 from=8508 q=qualified
+8475 receipt revoke e25 safety_hold
+8475 outcome e25 src=226 event_obstacle_center_person CRITICAL revoked=safety_hold
+8508 frame seq=227 q=qualified events=[e26:event_obstacle_center_person:CRITICAL{count=1}@MEDIUM~11508]
 8508 state stop_required(camera_obstructed) since=4218 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=camera_obstructed(since=7518,recovering,fresh=16,span=495)
-8541 frames seq=228..228 n=1 from=8541 q=qualified
+8508 receipt revoke e26 safety_hold
+8508 outcome e26 src=227 event_obstacle_center_person CRITICAL revoked=safety_hold
+8541 frame seq=228 q=qualified events=[e27:event_obstacle_center_person:CRITICAL{count=1}@MEDIUM~11541]
 8541 state guiding since=8541 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=none released=(fresh=17,span=528,src=228,fallbacks=0)
-8937 frames seq=229..240 n=12 from=8574 q=qualified
-8941 speech done e2
-10026 frames seq=241..273 n=33 from=8970 q=qualified
-10026 speech speak n2 "event_camera_restored" scale=0 exp=15026 -> accepted
-10026 alert vision fault_recovery event_camera_restored priority=low channel=speech result=accepted
-10785 frames seq=274..296 n=23 from=10059 q=qualified
+8541 speech speak e27 "event_obstacle_center_person{count=1}" scale=24 exp=11541 -> accepted
+8541 motor queue ahead -> started
+8541 receipt confirm e27
+8541 outcome e27 src=228 event_obstacle_center_person CRITICAL delivered=speech,haptics
+10026 frames seq=229..273 n=45 from=8574 q=qualified
+10026 speech speak n2 "event_camera_restored" scale=0 exp=15026 -> refused(outranked)
+10026 alert vision fault_recovery event_camera_restored priority=low channel=speech result=refused
+10257 frames seq=274..280 n=7 from=10059 q=qualified
+10261 speech done e27
+10554 frames seq=281..289 n=9 from=10290 q=qualified
+10554 speech speak n3 "event_camera_restored" scale=0 exp=15026 -> accepted
+10554 alert vision fault_recovery event_camera_restored priority=low channel=speech result=accepted
+10785 frames seq=290..296 n=7 from=10587 q=qualified
 10818 script stop
 10818 speech stop
-10818 speech cut n2
+10818 speech cut n3
 10818 motor cancel
 10818 state idle since=10818 phase=not_started interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=stopped hold=none

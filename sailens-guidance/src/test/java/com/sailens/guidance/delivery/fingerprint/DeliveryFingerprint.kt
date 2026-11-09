@@ -139,12 +139,15 @@ internal sealed interface MotorAnswer {
  * records), each followed by its frame's seq.
  *
  * @param inOutage whether a frame is in the engine outage of an [OutputCondition.engineOutage] condition.
+ * @param enforceHold the protocol holds ordinary prompts while the observed hold stands, as the shell does: off, the
+ *   hold is only observed (the `Q` lines) and the output is what it was without one.
  */
 internal class FingerprintPipeline(
     analysis: AnalysisConfig,
     private val condition: OutputCondition,
     private val inOutage: (seq: Long) -> Boolean = { false },
     private val script: FingerprintScript = FingerprintScript.NONE,
+    private val enforceHold: Boolean = false,
 ) {
     private val out = mutableListOf<String>()
     val lines: List<String> get() = out
@@ -241,6 +244,9 @@ internal class FingerprintPipeline(
             }
 
             override fun cancelVisionFaultVibration() = line("cancel_fault_vibration", "")
+
+            // Every rhythm here starts at once: nothing ever waits to be withdrawn.
+            override fun dropQueuedNavigation() = Unit
         },
         description = object : GuidanceDescriptionPort {
             override fun waits(priority: EventPriority): Boolean = description.waits(priority)
@@ -317,9 +323,15 @@ internal class FingerprintPipeline(
             "frame ${frame.seq}: $qualification projects to ${qualification.visionFaults()}, the generator said ${frame.visionFaults}"
         }
         observed("qualification", qualification.toRecord().toString())
-        observeHold(frame, qualification)
-        protocol.onFrame(events, frame.seq, frame.visionFaults)
+        val began = observeHold(frame, qualification)
+        if (enforceHold && began) protocol.holdBegan()
+        val held = hold.held != null
+        if (held) heldFrames += frame.seq
+        protocol.onFrame(events, frame.seq, frame.visionFaults, holdOrdinary = enforceHold && held)
     }
+
+    /** The frames on which the observed hold stood after the frame was judged: where holding it can change the output. */
+    val heldFrames = mutableSetOf<Long>()
 
     /** The protocol's and the cooldown's state at one moment of a stop. */
     data class StoppedState(val protocol: GuidanceOutputProtocol.State, val cooldown: CooldownManager.Canonical)
@@ -358,7 +370,8 @@ internal class FingerprintPipeline(
      */
     private val hold = PromptHold<UnqualifiedReason>()
 
-    private fun observeHold(frame: FingerprintFrame, qualification: BaselineQualification) {
+    /** Steps the observed hold with [frame]; returns whether a stop began with it. */
+    private fun observeHold(frame: FingerprintFrame, qualification: BaselineQualification): Boolean {
         val cause = (qualification as? BaselineQualification.Unqualified)?.reason
         val change = hold.step(frame.decidedAt, cause, if (cause == null) PromptHold.Result(frame.seq, receivedAtMs = null) else null)
         val held = hold.held
@@ -366,6 +379,7 @@ internal class FingerprintPipeline(
             change is PromptHold.Change.Released -> observed("hold", "released ${change.release}")
             held != null -> observed("hold", held.toString())
         }
+        return change is PromptHold.Change.StopBegan
     }
 
     /** What Guidance observed rather than delivered: a line a comparison leaves out. */

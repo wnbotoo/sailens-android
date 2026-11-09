@@ -18,6 +18,7 @@ import com.sailens.guidance.processor.decision.EventConflictResolver
 import com.sailens.guidance.processor.decision.EventGenerator
 import com.sailens.guidance.processor.decision.EventMerger
 import com.sailens.guidance.repository.DeviceSensorRepository
+import com.sailens.guidance.trace.regression.RegressionRecorder
 import com.sailens.guidance.usecase.decision.ConfirmDeliveredEventUseCase
 import com.sailens.guidance.usecase.decision.DecideEventsUseCase
 import com.sailens.guidance.usecase.decision.RevokeUndeliveredEventUseCase
@@ -74,6 +75,45 @@ class GuidancePromptOfferTest {
             revoke = { calls += "revoke"; revoke(primary) },
             record = { outcomes += it },
         ).delivered
+    }
+
+    @Test
+    fun `a prompt held after a stop is revoked as held before the description is weighed, and a vision fault's is told as ever`() {
+        fun offer(toldByVisionFaultAlerts: Boolean, waits: Boolean): Pair<List<String>, GuidanceDeliveryResult> {
+            val seen = mutableListOf<String>()
+            val result = offerGuidancePrompt(
+                waitsForDescription = waits,
+                toldByVisionFaultAlerts = toldByVisionFaultAlerts,
+                preemptDescription = { seen += "preempt" },
+                deliver = { seen += "deliver"; GuidanceDeliveryResult(listOf(SPEECH)) },
+                confirm = { seen += "confirm" },
+                revoke = { seen += "revoke:$it" },
+                heldAfterStop = true,
+            )
+            return seen to result
+        }
+        for (waits in listOf(false, true)) {
+            val (seen, result) = offer(toldByVisionFaultAlerts = false, waits = waits)
+            assertEquals("waits=$waits", listOf("revoke:${PromptRevokeReasons.SAFETY_HOLD}"), seen)
+            assertEquals(emptyList<String>(), result.channels)
+        }
+        val (seen, result) = offer(toldByVisionFaultAlerts = true, waits = false)
+        assertEquals(listOf("confirm"), seen)
+        assertEquals(listOf(PromptDeliveryChannels.VISION_ALERTS), result.channels)
+    }
+
+    @Test
+    fun `a held prompt's revoke reaches the model regression record with its reason`() {
+        val reasons = mutableListOf<String?>()
+        val recorder = object : RegressionRecorder {
+            override val isRecording: Boolean = true
+            override fun onRevoke(eventId: java.util.UUID, decisionsBefore: Long, reason: String?) {
+                reasons += reason
+            }
+        }
+        val primary = decide(snapshot(blocked = true)).first()
+        RevokeUndeliveredEventUseCase(cooldown, recorder)(primary, PromptRevokeReasons.SAFETY_HOLD)
+        assertEquals(listOf<String?>(PromptRevokeReasons.SAFETY_HOLD), reasons)
     }
 
     @Test

@@ -48,8 +48,9 @@ object CaptureSchema {
      * 6: `EventRecord.rank`, `RegressionRevokeRecord.reason`, `RegressionManifest.speechPriorityScale`,
      * `RegressionCutKeptRecord`, `RegressionHeardAfterCutRecord`.
      * 7: `RegressionFrameRecord.qualification`, `RegressionManifest.qualificationRecorded`.
+     * 8: `safety_hold`, a new value of the open string `RegressionRevokeRecord.reason`; no new field or record.
      */
-    const val MINOR: Int = 7
+    const val MINOR: Int = 8
 
     const val MANIFEST_FILE: String = "manifest.json"
     const val FRAMES_FILE: String = "frames.jsonl"

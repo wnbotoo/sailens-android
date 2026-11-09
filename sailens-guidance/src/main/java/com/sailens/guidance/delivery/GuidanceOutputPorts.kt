@@ -84,6 +84,13 @@ interface GuidanceMotorPort {
 
     /** See [VisionFaultAlerts.Outputs.cancelVibration]. */
     fun cancelVisionFaultVibration()
+
+    /**
+     * Withdraws the rhythm waiting for the motor after [vibrateAlone] answered [MotorOffer.QUEUED], if one still waits:
+     * its `onQueuedResult` hears that it did not play, before this returns. Nothing playing is cut. No default: an
+     * implementation whose motor never queues says so with an empty body.
+     */
+    fun dropQueuedNavigation()
 }
 
 enum class MotorOffer { PLAYED, QUEUED, REFUSED }

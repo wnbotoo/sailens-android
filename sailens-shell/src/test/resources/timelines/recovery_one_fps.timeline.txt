@@ -40,21 +40,29 @@
 17450 speech done n2
 18050 frame seq=18 q=qualified events=[e4:event_obstacle_left_person:HIGH{count=1}@MEDIUM~21050]
 18050 state stop_required(camera_obstructed) since=8050 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=camera_obstructed(since=8050,recovering,fresh=1,span=0)
-18050 speech speak e4 "event_obstacle_left_person{count=1}" scale=16 exp=21050 -> accepted
-18050 motor queue left -> started
-18050 receipt confirm e4
-18050 outcome e4 src=18 event_obstacle_left_person HIGH delivered=speech,haptics
-19050 frames seq=19..19 n=1 from=19050 q=qualified
+18050 receipt revoke e4 safety_hold
+18050 outcome e4 src=18 event_obstacle_left_person HIGH revoked=safety_hold
+19050 frame seq=19 q=qualified events=[e5:event_obstacle_left_person:HIGH{count=1}@MEDIUM~22050]
 19050 state stop_required(camera_obstructed) since=8050 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=camera_obstructed(since=8050,recovering,fresh=2,span=1000)
-19690 speech done e4
-20050 frames seq=20..20 n=1 from=20050 q=qualified
+19050 receipt revoke e5 safety_hold
+19050 outcome e5 src=19 event_obstacle_left_person HIGH revoked=safety_hold
+20050 frame seq=20 q=qualified events=[e6:event_obstacle_left_person:HIGH{count=1}@MEDIUM~23050]
 20050 state guiding since=20050 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=none released=(fresh=3,span=2000,src=20,fallbacks=0)
-20050 speech speak n3 "event_camera_restored" scale=0 exp=25050 -> accepted
-20050 alert vision fault_recovery event_camera_restored priority=low channel=speech result=accepted
+20050 speech speak e6 "event_obstacle_left_person{count=1}" scale=16 exp=23050 -> accepted
+20050 motor queue left -> started
+20050 receipt confirm e6
+20050 outcome e6 src=20 event_obstacle_left_person HIGH delivered=speech,haptics
+20050 speech speak n3 "event_camera_restored" scale=0 exp=25050 -> refused(outranked)
+20050 alert vision fault_recovery event_camera_restored priority=low channel=speech result=refused
 21050 frames seq=21..21 n=1 from=21050 q=qualified
-21490 speech done n3
+21050 speech speak n4 "event_camera_restored" scale=0 exp=25050 -> refused(outranked)
+21050 alert vision fault_recovery event_camera_restored priority=low channel=speech result=refused
+21690 speech done e6
 22050 frames seq=22..22 n=1 from=22050 q=qualified
+22050 speech speak n5 "event_camera_restored" scale=0 exp=25050 -> accepted
+22050 alert vision fault_recovery event_camera_restored priority=low channel=speech result=accepted
 23000 script stop
 23000 speech stop
+23000 speech cut n5
 23000 motor cancel
 23000 state idle since=23000 phase=not_started interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=stopped hold=none

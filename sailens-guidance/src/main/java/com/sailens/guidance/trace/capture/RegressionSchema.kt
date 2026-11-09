@@ -339,7 +339,10 @@ data class RegressionRevokeRecord(
     val eventId: String,
     val decisionsBefore: Long,
     val elapsedRealtimeNanos: Long,
-    /** Why, one of `PromptRevokeReasons` (schema 1.6). Replay does not read it. */
+    /**
+     * Why (schema 1.6): an open string, a value of `PromptRevokeReasons` when written (`safety_hold` from 1.8). A reader
+     * keeps a value it does not know as it is, and replay does not read it.
+     */
     val reason: String? = null,
 ) : CaptureRecord
 

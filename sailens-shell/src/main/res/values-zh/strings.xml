@@ -17,6 +17,7 @@
     <string name="status_label_standby">待机</string>
     <string name="status_label_latest_guidance">最新提示</string>
     <string name="status_label_monitoring">正在观察前方</string>
+    <string name="status_label_paused">提示暂停</string>
     <string name="status_error_title">分析已停止</string>
     <string name="error_analysis_start_failed">无法启动实时分析。此设备可能不满足实时分析的运行要求。</string>
     <string name="status_starting_title">正在启动辅助</string>
@@ -26,6 +27,9 @@
     <string name="status_idle_detail">准备好后即可开启。</string>
     <string name="status_guidance_detail">当前提示已生效。</string>
     <string name="status_clear_detail">当前没有紧急提示。</string>
+    <string name="status_hold_confirming_title">正在确认画面</string>
+    <string name="status_hold_stopping_detail">提示已暂停，请先停下。</string>
+    <string name="status_hold_recovering_detail">画面稳定后恢复提示。</string>
     <string name="status_speech_ready">语音就绪</string>
     <string name="status_speech_initializing">语音启动中</string>
     <string name="status_speech_off">语音已关闭</string>
@@ -109,6 +113,7 @@
     <string name="settings_perception_apply_hint">更改将在下次开始导航时生效</string>
     <string name="title_live_pipeline_debug">实时 Pipeline 调试</string>
     <string name="debug_safety_state">安全状态：%1$s</string>
+    <string name="debug_safety_state_held">安全状态：%1$s；提示保持：%2$s</string>
     <string name="debug_semantic_provider">语义提供者：%1$s</string>
     <string name="debug_obstacle_provider">障碍物提供者：%1$s</string>
     <string name="debug_perception_profile">感知挡位：%1$s</string>

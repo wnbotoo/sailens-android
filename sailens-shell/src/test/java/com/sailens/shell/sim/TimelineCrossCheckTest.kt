@@ -3,9 +3,12 @@ package com.sailens.shell.sim
 import com.sailens.guidance.model.common.EventCategory
 import com.sailens.guidance.model.common.EventPriority
 import com.sailens.guidance.model.scene.SceneEvent
+import com.sailens.guidance.model.scene.SceneEventMessageKeys
 import com.sailens.guidance.model.trace.GuidanceAlertTrace
+import com.sailens.guidance.model.trace.HoldReleaseTrace
 import com.sailens.guidance.model.trace.HoldTrace
 import com.sailens.guidance.model.trace.PromptOutcomeTrace
+import com.sailens.guidance.model.trace.PromptRevokeReasons
 import com.sailens.guidance.model.trace.SafetyStateTrace
 import com.sailens.guidance.model.trace.SafetyTraceNames
 import com.sailens.guidance.safety.BaselineQualification
@@ -95,6 +98,89 @@ class TimelineCrossCheckTest {
         assertTrue(notBegun.toString(), notBegun.any { "1450: stop_required(camera_obstructed) held by camera_obstructed since 1300, no frame of this start began it" in it })
         val restarted = listOf(TimelineEntry.Script(0, "start"), frame(1150, 2, unqualified), stop, TimelineEntry.Script(1300, "start"), frame(1450, 3))
         assertTrue("a frame of an earlier start began no stop of this one", TimelineCrossCheck.check(restarted + recovering(1150)).any { "since 1150, no frame of this start began it" in it })
+    }
+
+    private val covered = BaselineQualification.Unqualified(UnqualifiedReason.CAMERA_OBSTRUCTED, emptySet())
+
+    /** A person said at 1 050, the lens covered at 1 150: a hold stands from there. */
+    private val heldSession = listOf(
+        TimelineEntry.Script(0, "start"),
+        frame(1050, 1, events = listOf(event)),
+        TimelineEntry.Speech(1050, "speak", event.id.toString(), "x", result = "accepted"),
+        outcome(1050, 1),
+        frame(1150, 2, covered),
+        state(1150, "stop_required", "unqualified", "result", reasons = listOf("camera_obstructed"), judgementReasons = listOf("camera_obstructed")),
+    )
+
+    @Test
+    fun `while a hold stands no ordinary prompt reaches a channel, and what one took before it began does not count`() {
+        assertEquals("taken before the hold", emptyList<String>(), TimelineCrossCheck.ordinaryDeliveriesDuringHolds(heldSession))
+        val rhythm = GuidanceHaptic.forEvent(event)
+        val during = listOf(
+            outcome(1150, 1),
+            TimelineEntry.Speech(1150, "speak", event.id.toString(), "x", result = "accepted"),
+            TimelineEntry.ScreenReader(1150, "${event.messageKey}{count=1}"),
+            TimelineEntry.Motor(1150, "trigger", rhythm, "played"),
+            TimelineEntry.Motor(1150, "queue", rhythm, "queued"),
+            TimelineEntry.Motor(1150, "start", rhythm, null),
+        )
+        val found = TimelineCrossCheck.ordinaryDeliveriesDuringHolds(heldSession + during)
+        assertEquals(found.toString(), during.size, found.size)
+        val notDeliveries = listOf(
+            TimelineEntry.Motor(1150, "drop_queued", null, null),
+            TimelineEntry.Motor(1150, "drop", rhythm, null),
+            TimelineEntry.Motor(1150, "reserve", GuidanceHaptic.VISION_UNRELIABLE, "reserved"),
+            TimelineEntry.Speech(1150, "speak", "vision_notice_1", SceneEventMessageKeys.CAMERA_BLOCKED, result = "accepted"),
+            TimelineEntry.Speech(1150, "speak", event.id.toString(), "x", result = "refused(outranked)"),
+        )
+        assertEquals("withdrawals, the cover's own alerts and a refusal", emptyList<String>(), TimelineCrossCheck.ordinaryDeliveriesDuringHolds(heldSession + notDeliveries))
+    }
+
+    @Test
+    fun `a prompt decided during a hold is not confirmed while it stands`() {
+        val again = event.copy(id = java.util.UUID.randomUUID())
+        val confirmed = heldSession + frame(1250, 3, events = listOf(again)) +
+            state(1250, "stop_required", "qualified", "result", reasons = listOf("camera_obstructed")) +
+            TimelineEntry.Receipt(1250, "confirm", again.id.toString(), null)
+        assertTrue(TimelineCrossCheck.check(confirmed).toString(), TimelineCrossCheck.check(confirmed).any { "1250: held, a prompt decided during the hold was confirmed" in it })
+        val ofBefore = heldSession + TimelineEntry.Receipt(1250, "confirm", event.id.toString(), null)
+        assertTrue("one taken before the hold may still be confirmed", TimelineCrossCheck.check(ofBefore).none { "was confirmed" in it })
+    }
+
+    @Test
+    fun `the frame that releases a hold offers its own prompt`() {
+        val released = state(1650, "guiding", "qualified", "result").let {
+            it.copy(trace = it.trace.copy(holdReleased = HoldReleaseTrace("camera_obstructed", 1150, 3, 1250, 1650, 400, 0, 6)))
+        }
+        val next = event.copy(id = java.util.UUID.randomUUID())
+        fun outcomeOf(reason: String?) = TimelineEntry.Outcome(
+            1650,
+            PromptOutcomeTrace(
+                eventId = next.id.toString(), sourceSequenceNumber = 6, messageKey = next.messageKey, category = "obstacle", priority = "high",
+                deliveredAt = if (reason == null) 1 else null, revokedAt = if (reason == null) null else 1, revokeReason = reason,
+                deliveredVia = if (reason == null) listOf("speech") else emptyList(), speechEnabled = true, screenReaderActive = false, hapticsEnabled = true,
+            ),
+        )
+        val session = heldSession + frame(1650, 6, events = listOf(next)) + released
+        assertTrue("offered", TimelineCrossCheck.check(session + outcomeOf(null)).none { "released the hold" in it })
+        assertTrue("held", TimelineCrossCheck.check(session + outcomeOf(PromptRevokeReasons.SAFETY_HOLD)).any { "the frame that released the hold held its own prompt" in it })
+        assertTrue("never offered", TimelineCrossCheck.check(session + frame(1750, 7)).any { "never offered its prompt" in it })
+    }
+
+    @Test
+    fun `the card shows no event while prompts are held, nor after the release one from before it`() {
+        val before = event.id.toString()
+        val after = event.copy(id = java.util.UUID.randomUUID())
+        val entries = heldSession + frame(1650, 6, events = listOf(after))
+        assertEquals(
+            emptyList<String>(),
+            TimelineCrossCheck.cardsAcrossHolds(entries, listOf(CardSample(1, before, held = false), CardSample(2, null, held = true), CardSample(6, after.id.toString(), held = false))),
+        )
+        assertEquals(listOf("frame 2: held, the card shows an event"), TimelineCrossCheck.cardsAcrossHolds(entries, listOf(CardSample(2, before, held = true))))
+        assertEquals(
+            listOf("frame 6: the card shows an event from before the release at frame 6"),
+            TimelineCrossCheck.cardsAcrossHolds(entries, listOf(CardSample(2, null, held = true), CardSample(6, before, held = false))),
+        )
     }
 
     @Test

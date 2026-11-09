@@ -15,7 +15,9 @@ import androidx.compose.ui.unit.dp
 import com.sailens.guidance.model.scene.SceneDebugInfo
 import com.sailens.shell.R
 import com.sailens.shell.guidance.safety.GuidanceSafetyState
+import com.sailens.shell.guidance.safety.PromptHoldView
 import com.sailens.shell.guidance.safety.label
+import com.sailens.shell.guidance.safety.traceName
 
 /**
  * Dense live-pipeline metrics panel for the debug-only guidance surface. It is an engineering
@@ -26,6 +28,7 @@ internal fun SceneDebugInfoView(
     debugInfo: SceneDebugInfo,
     maskSourceAgeMs: Long,
     safetyState: GuidanceSafetyState,
+    promptHold: PromptHoldView?,
     modifier: Modifier = Modifier,
     scrollable: Boolean = false,
 ) {
@@ -72,7 +75,7 @@ internal fun SceneDebugInfoView(
             text = stringResource(R.string.title_live_pipeline_debug),
             style = MaterialTheme.typography.titleSmall,
         )
-        SafetyStateLine(safetyState)
+        SafetyStateLine(safetyState, promptHold)
         Text(stringResource(R.string.debug_semantic_provider, debugInfo.semanticProvider))
         Text(stringResource(R.string.debug_obstacle_provider, debugInfo.obstacleProvider))
         Text(stringResource(R.string.debug_perception_profile, debugInfo.perceptionProfile))
@@ -207,16 +210,19 @@ internal fun SceneDebugInfoView(
 }
 
 /**
- * The safety state with its reasons, as the trace names them. Part of the debug panel, and shown alone while there is
- * no frame to show the panel for (starting, stopped): only where the diagnostics are.
+ * The safety state with its reasons, as the trace names them, and a hold of ordinary prompts: its cause and whether it
+ * still stops or awaits fresh results (the count of those is in the trace). Part of the debug panel, and shown alone
+ * while there is no frame to show the panel for (starting, stopped): only where the diagnostics are.
  *
  * Hidden from screen readers: the state itself is not announced (the alerts it drives are, on their own channels),
  * and what TalkBack can reach stays as it was.
  */
 @Composable
-internal fun SafetyStateLine(safetyState: GuidanceSafetyState, modifier: Modifier = Modifier) {
+internal fun SafetyStateLine(safetyState: GuidanceSafetyState, promptHold: PromptHoldView? = null, modifier: Modifier = Modifier) {
     Text(
-        stringResource(R.string.debug_safety_state, safetyState.label),
+        promptHold?.let { hold ->
+            stringResource(R.string.debug_safety_state_held, safetyState.label, "${hold.cause.traceName}, ${if (hold.stopping) "stopping" else "recovering"}")
+        } ?: stringResource(R.string.debug_safety_state, safetyState.label),
         modifier = modifier.semantics { hideFromAccessibility() },
     )
 }

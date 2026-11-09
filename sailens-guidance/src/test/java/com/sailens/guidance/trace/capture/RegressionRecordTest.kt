@@ -120,6 +120,32 @@ class RegressionRecordTest {
     }
 
     @Test
+    fun `a revoke's reason is an open string - an older capture reads as ever, and a newer value comes back as it was`() {
+        for (minor in listOf(7, CaptureSchema.MINOR)) {
+            val dir = tmp.newFolder("s-reasons-$minor")
+            val revokes = listOf(
+                RegressionRevokeRecord("e1", decisionsBefore = 1, elapsedRealtimeNanos = 1, reason = "cut"),
+                RegressionRevokeRecord("e2", decisionsBefore = 2, elapsedRealtimeNanos = 2, reason = "safety_hold"),
+                RegressionRevokeRecord("e3", decisionsBefore = 3, elapsedRealtimeNanos = 3, reason = "a_reason_of_a_later_version"),
+                RegressionRevokeRecord("e4", decisionsBefore = 4, elapsedRealtimeNanos = 4),
+            ).let { if (minor < CaptureSchema.MINOR) it.filter { r -> r.reason != "safety_hold" } else it }
+            File(dir, CaptureSchema.REGRESSION_FILE).writeText(revokes.joinToString("\n", postfix = "\n", transform = CaptureSchema::encodeRecord))
+            File(dir, CaptureSchema.MANIFEST_FILE).writeText(
+                CaptureSchema.encodeManifest(
+                    CaptureManifest(
+                        schemaMinor = minor,
+                        sessionId = "s-reasons", captureMode = CaptureModes.MODEL_REGRESSION, startedWallMs = 1, startedElapsedRealtimeNanos = 2,
+                        deviceManufacturer = "Acme", deviceModel = "Phone", sdkInt = 36, complete = true,
+                        regression = RegressionManifest(taxonomyId = "cityscapes-19", depthSource = "position", stats = RegressionStats(framesRecorded = 0)),
+                    ),
+                ),
+            )
+            val session = CaptureSessionReader.read(dir).orThrow()
+            assertEquals("minor $minor", revokes, session.revokes)
+        }
+    }
+
+    @Test
     fun `a class map entry that is not the one recorded is refused`() {
         val file = tmp.newFile("classmaps.bin")
         val entry = ClassMapStore.encode(5, 8, 4, classMap(8, 4, 0))

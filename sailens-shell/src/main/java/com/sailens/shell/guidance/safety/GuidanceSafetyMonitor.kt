@@ -52,6 +52,9 @@ internal interface SafetyMonitor {
     val state: GuidanceSafetyState
     val stateSinceElapsedMs: Long
 
+    /** Whether the latest input began a stop, and with it a hold: ordinary prompts are held from that input on. */
+    val beganStop: Boolean
+
     fun onStartRequested(nowMs: Long)
     fun onStallWatchStarted(nowMs: Long)
     fun onFlowStarted(nowMs: Long)
@@ -122,6 +125,8 @@ internal class GuidanceSafetyMonitor(
     override var state: GuidanceSafetyState = axes.state()
         private set
     override var stateSinceElapsedMs: Long = nowMs
+        private set
+    override var beganStop: Boolean = false
         private set
 
     /** Start pressed: a new run, with no result and no failure yet. */
@@ -226,12 +231,9 @@ internal class GuidanceSafetyMonitor(
     private inline fun update(nowMs: Long, cause: SafetyInput, result: PromptHold.Result? = null, change: () -> Unit) {
         change()
         val facts = axesAt(nowMs)
-        val release = if (facts.phase.isRunning) {
-            (promptHold.step(nowMs, facts.stopCause(), result) as? PromptHold.Change.Released)?.release
-        } else {
-            promptHold.clear()
-            null
-        }
+        val step = if (facts.phase.isRunning) promptHold.step(nowMs, facts.stopCause(), result) else PromptHold.Change.None.also { promptHold.clear() }
+        beganStop = step is PromptHold.Change.StopBegan
+        val release = (step as? PromptHold.Change.Released)?.release
         val next = facts.copy(hold = promptHold.held)
         if (next == axes) return
         val nextState = next.state()

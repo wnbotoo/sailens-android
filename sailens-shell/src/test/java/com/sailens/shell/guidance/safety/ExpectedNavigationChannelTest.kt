@@ -42,6 +42,7 @@ class ExpectedNavigationChannelTest {
             announceToScreenReader = {},
             vibrateEvent = { true },
             vibrateEventAlone = { _, _ -> NavigationClaim.STARTED },
+            dropQueuedNavigation = {},
             playOrReserveVisionFault = { _, onPlayed -> onPlayed() },
             cancelVisionFaultReservation = {},
             cancelHaptics = {},

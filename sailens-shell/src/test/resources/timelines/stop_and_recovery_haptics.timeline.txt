@@ -25,6 +25,10 @@
 7050 frames seq=60..61 n=2 from=6950 q=degraded(ground_unrecognized)
 7150 frame seq=62 q=unqualified(camera_obstructed;also=ground_unrecognized) events=[e4:event_camera_blocked:CRITICAL@-~13150]
 7150 state stop_required(camera_obstructed) since=7150 phase=running interrupted=false stall=none judgement=unqualified(camera_obstructed,ground_unrecognized) faults=[] channel=haptics_only cause=result hold=camera_obstructed(since=7150,stopping,fresh=0,span=0)
+7150 motor drop_queued
+7150 motor drop ahead
+7150 receipt revoke e3 safety_hold
+7150 outcome e3 src=59 event_obstacle_center_person CRITICAL revoked=safety_hold
 7150 receipt confirm e4
 7150 outcome e4 src=62 event_camera_blocked CRITICAL delivered=vision_alerts
 7150 alert vision fault_rhythm vision_unreliable priority=critical channel=haptics result=requested
@@ -32,23 +36,32 @@
 7450 frames seq=63..65 n=3 from=7250 q=unqualified(camera_obstructed;also=ground_unrecognized)
 7490 motor start vision_unreliable
 7490 alert vision fault_rhythm vision_unreliable priority=critical channel=haptics result=played
-8350 frames seq=66..74 n=9 from=7550 q=unqualified(camera_obstructed;also=ground_unrecognized)
-8430 motor start ahead
-8430 receipt confirm e3
-8430 outcome e3 src=59 event_obstacle_center_person CRITICAL delivered=haptics
-11050 frames seq=75..101 n=27 from=8450 q=unqualified(camera_obstructed;also=ground_unrecognized)
-11150 frame seq=102 q=degraded(ground_unrecognized) events=[]
+11050 frames seq=66..101 n=36 from=7550 q=unqualified(camera_obstructed;also=ground_unrecognized)
+11150 frame seq=102 q=degraded(ground_unrecognized) events=[e5:event_obstacle_center_person:CRITICAL{count=1}@MEDIUM~14150]
 11150 state stop_required(camera_obstructed) since=7150 phase=running interrupted=false stall=none judgement=degraded(ground_unrecognized) faults=[] channel=haptics_only cause=result hold=camera_obstructed(since=7150,recovering,fresh=1,span=0)
-11250 frames seq=103..103 n=1 from=11250 q=degraded(ground_unrecognized)
+11150 receipt revoke e5 safety_hold
+11150 outcome e5 src=102 event_obstacle_center_person CRITICAL revoked=safety_hold
+11250 frame seq=103 q=degraded(ground_unrecognized) events=[e6:event_obstacle_center_person:CRITICAL{count=1}@MEDIUM~14250]
 11250 state stop_required(camera_obstructed) since=7150 phase=running interrupted=false stall=none judgement=degraded(ground_unrecognized) faults=[] channel=haptics_only cause=result hold=camera_obstructed(since=7150,recovering,fresh=2,span=100)
-11350 frames seq=104..104 n=1 from=11350 q=degraded(ground_unrecognized)
+11250 receipt revoke e6 safety_hold
+11250 outcome e6 src=103 event_obstacle_center_person CRITICAL revoked=safety_hold
+11350 frame seq=104 q=degraded(ground_unrecognized) events=[e7:event_obstacle_center_person:CRITICAL{count=1}@MEDIUM~14350]
 11350 state stop_required(camera_obstructed) since=7150 phase=running interrupted=false stall=none judgement=degraded(ground_unrecognized) faults=[] channel=haptics_only cause=result hold=camera_obstructed(since=7150,recovering,fresh=3,span=200)
-11450 frames seq=105..105 n=1 from=11450 q=degraded(ground_unrecognized)
+11350 receipt revoke e7 safety_hold
+11350 outcome e7 src=104 event_obstacle_center_person CRITICAL revoked=safety_hold
+11450 frame seq=105 q=degraded(ground_unrecognized) events=[e8:event_obstacle_center_person:CRITICAL{count=1}@MEDIUM~14450]
 11450 state stop_required(camera_obstructed) since=7150 phase=running interrupted=false stall=none judgement=degraded(ground_unrecognized) faults=[] channel=haptics_only cause=result hold=camera_obstructed(since=7150,recovering,fresh=4,span=300)
-11550 frames seq=106..106 n=1 from=11550 q=degraded(ground_unrecognized)
+11450 receipt revoke e8 safety_hold
+11450 outcome e8 src=105 event_obstacle_center_person CRITICAL revoked=safety_hold
+11550 frame seq=106 q=degraded(ground_unrecognized) events=[e9:event_obstacle_center_person:CRITICAL{count=1}@MEDIUM~14550]
 11550 state stop_required(camera_obstructed) since=7150 phase=running interrupted=false stall=none judgement=degraded(ground_unrecognized) faults=[] channel=haptics_only cause=result hold=camera_obstructed(since=7150,recovering,fresh=5,span=400)
-11650 frames seq=107..107 n=1 from=11650 q=degraded(ground_unrecognized)
+11550 receipt revoke e9 safety_hold
+11550 outcome e9 src=106 event_obstacle_center_person CRITICAL revoked=safety_hold
+11650 frame seq=107 q=degraded(ground_unrecognized) events=[e10:event_obstacle_center_person:CRITICAL{count=1}@MEDIUM~14650]
 11650 state degraded(ground_unrecognized) since=11650 phase=running interrupted=false stall=none judgement=degraded(ground_unrecognized) faults=[] channel=haptics_only cause=result hold=none released=(fresh=6,span=500,src=107,fallbacks=0)
+11650 motor queue ahead -> started
+11650 receipt confirm e10
+11650 outcome e10 src=107 event_obstacle_center_person CRITICAL delivered=haptics
 13850 frames seq=108..129 n=22 from=11750 q=degraded(ground_unrecognized)
 14000 script stop
 14000 speech stop

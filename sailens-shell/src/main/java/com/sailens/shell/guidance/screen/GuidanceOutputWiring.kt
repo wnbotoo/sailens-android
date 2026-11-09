@@ -92,6 +92,7 @@ internal class GuidanceOutputWiring(
     announceToScreenReader: (String) -> Unit,
     vibrateEvent: (SceneEvent) -> Boolean,
     vibrateEventAlone: (SceneEvent, onQueuedResult: (played: Boolean) -> Unit) -> NavigationClaim,
+    dropQueuedNavigation: () -> Unit,
     playOrReserveVisionFault: (EventPriority, onPlayed: () -> Unit) -> Unit,
     cancelVisionFaultReservation: () -> Unit,
     private val cancelHaptics: () -> Unit,
@@ -164,6 +165,8 @@ internal class GuidanceOutputWiring(
                 playOrReserveVisionFault(priority, onPlayed)
 
             override fun cancelVisionFaultVibration() = cancelVisionFaultReservation()
+
+            override fun dropQueuedNavigation() = dropQueuedNavigation()
         },
         description = object : GuidanceDescriptionPort {
             override fun waits(priority: EventPriority): Boolean =

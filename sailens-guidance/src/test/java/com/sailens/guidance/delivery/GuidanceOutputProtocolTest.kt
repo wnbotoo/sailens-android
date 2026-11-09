@@ -38,6 +38,7 @@ class GuidanceOutputProtocolTest {
     private var motorTakesPrompt = true
     private var motorStartsAtOnce = true
     private var descriptionWaitsBelow: EventPriority? = null
+    private var descriptionAsks = 0
 
     private var outputReads = 0
     private var visionFaultReads = 0
@@ -122,9 +123,20 @@ class GuidanceOutputProtocolTest {
                 calls += "cancelFaultRhythm"
                 reservedRhythm = null
             }
+
+            // As the arbiter: what waits hears that it did not play, before this returns.
+            override fun dropQueuedNavigation() {
+                calls += "dropQueued"
+                val waiting = motorAnswer.takeIf { motorQueues }
+                motorAnswer = null
+                waiting?.invoke(false)
+            }
         },
         description = object : GuidanceDescriptionPort {
-            override fun waits(priority: EventPriority): Boolean = descriptionWaitsBelow?.let { priority < it } ?: false
+            override fun waits(priority: EventPriority): Boolean {
+                descriptionAsks++
+                return descriptionWaitsBelow?.let { priority < it } ?: false
+            }
 
             override fun preempt(reason: String) {
                 calls += "preempt:$reason"
@@ -860,6 +872,111 @@ class GuidanceOutputProtocolTest {
         expiresAt = now + 2_000,
         dedupeKey = messageKey,
     )
+
+    // ---- a hold after a stop
+
+    @Test
+    fun `held, an ordinary prompt reaches no channel and no description, and is revoked as held with its record`() {
+        for ((speech, reader, haptics) in listOf(Triple(true, false, true), Triple(true, true, true), Triple(false, false, true), Triple(false, false, false))) {
+            speechEnabled = speech
+            screenReaderActive = reader
+            hapticsEnabled = haptics
+            descriptionWaitsBelow = EventPriority.CRITICAL
+            calls.clear()
+            outcomes.clear()
+            revokeReasons.clear()
+            descriptionAsks = 0
+            protocol.onFrame(listOf(event()), 7, VisionFaults.NONE, holdOrdinary = true)
+            val case = "speech=$speech reader=$reader haptics=$haptics"
+            assertEquals(case, listOf("revoke"), calls)
+            assertEquals(case, 0, descriptionAsks)
+            assertEquals(case, listOf(PromptRevokeReasons.SAFETY_HOLD), revokeReasons)
+            val held = outcomes.single()
+            assertEquals(case, PromptRevokeReasons.SAFETY_HOLD, held.revokeReason)
+            assertEquals(case, WALL_CLOCK, held.revokedAt)
+            assertEquals(case, null, held.deliveredAt)
+            assertEquals(case, 7L, held.sourceSequenceNumber)
+            assertEquals(case, emptyList<String>(), held.deliveredVia)
+            assertEquals(case, emptyList<SceneEvent>(), reached)
+        }
+    }
+
+    @Test
+    fun `held, a covered lens is told and its event confirmed as without a hold`() {
+        val covered = SceneEvent(
+            timestamp = now, category = EventCategory.SENSOR_QUALITY, priority = EventPriority.CRITICAL,
+            messageKey = SceneEventMessageKeys.CAMERA_BLOCKED, expiresAt = now + 3_000, dedupeKey = "sensor",
+        )
+        val faults = VisionFaults(FrameQuality.OBSTRUCTED, groundUnrecognized = false)
+        fun run(holdOrdinary: Boolean): List<Any> {
+            calls.clear()
+            outcomes.clear()
+            alerts.clear()
+            protocolWith(retryInterrupted = false).onFrame(listOf(covered), 3, faults, holdOrdinary)
+            return listOf(calls.toList(), outcomes.map { it.copy(eventId = "") }, alerts.toList())
+        }
+        val without = run(holdOrdinary = false)
+        assertEquals("confirmed, as the vision-fault alerts'", listOf(PromptDeliveryChannels.VISION_ALERTS), outcomes.single().deliveredVia)
+        assertEquals(without, run(holdOrdinary = true))
+    }
+
+    @Test
+    fun `a hold beginning withdraws the rhythm waiting as the prompt's only channel, revoked as held`() {
+        speechEnabled = false
+        motorQueues = true
+        protocol.onFrame(listOf(event()), 1, VisionFaults.NONE)
+        assertEquals(emptyList<PromptOutcomeTrace>(), outcomes)
+        calls.clear()
+        protocol.holdBegan()
+        assertEquals(listOf("dropQueued", "revoke"), calls)
+        assertEquals(listOf(PromptRevokeReasons.SAFETY_HOLD), revokeReasons)
+        val held = outcomes.single()
+        assertEquals(PromptRevokeReasons.SAFETY_HOLD, held.revokeReason)
+        assertEquals(WALL_CLOCK, held.revokedAt)
+        assertEquals(emptyList<SceneEvent>(), reached)
+
+        calls.clear()
+        protocol.holdBegan()
+        assertEquals("withdrawn once: nothing waits now", emptyList<String>(), calls)
+    }
+
+    @Test
+    fun `a hold beginning withdraws a rhythm going with a channel that took the prompt, and the prompt stays delivered`() {
+        for (reader in listOf(false, true)) {
+            screenReaderActive = reader
+            motorQueues = true
+            calls.clear()
+            outcomes.clear()
+            reached.clear()
+            protocol.onFrame(listOf(event()), 1, VisionFaults.NONE)
+            val delivered = outcomes.single()
+            calls.clear()
+            protocol.holdBegan()
+            assertEquals("reader=$reader", listOf("dropQueued"), calls)
+            assertEquals("reader=$reader", listOf(delivered), outcomes)
+            assertEquals("reader=$reader", emptyList<String>(), revokeReasons)
+            assertEquals("reader=$reader", 1, reached.size)
+        }
+    }
+
+    @Test
+    fun `a hold beginning asks the motor nothing when no rhythm waits`() {
+        protocol.holdBegan()
+        protocol.onFrame(listOf(event()), 1, VisionFaults.NONE)
+        speechEnabled = false
+        motorQueues = true
+        protocol.onFrame(listOf(event()), 2, VisionFaults.NONE)
+        motorAnswer!!(true)
+        calls.clear()
+        protocol.holdBegan()
+        assertEquals("played: nothing waits", emptyList<String>(), calls)
+
+        protocol.onFrame(listOf(event()), 3, VisionFaults.NONE)
+        protocol.reset()
+        calls.clear()
+        protocol.holdBegan()
+        assertEquals("a stopped run's rhythm is the motor's to drop, unanswered", emptyList<String>(), calls)
+    }
 
     private object SilentLog : LogService {
         override fun debug(tag: String, message: String, data: Map<String, Any>?) = Unit

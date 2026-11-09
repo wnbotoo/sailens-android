@@ -24,29 +24,43 @@
 6850 motor queue ahead -> queued
 6900 script background
 6900 state interrupted(lifecycle) since=6900 phase=running interrupted=true stall=none judgement=degraded(ground_unrecognized) faults=[] channel=haptics_only cause=lifecycle_stop hold=lifecycle(since=6900,stopping,fresh=0,span=0)
+6900 motor drop_queued
+6900 motor drop ahead
+6900 receipt revoke e3 safety_hold
+6900 outcome e3 src=59 event_obstacle_center_person CRITICAL revoked=safety_hold
 6900 ui mark_interrupted
 6900 motor alarm interrupted -> played
 6900 alert system interrupted interrupted priority=max channel=haptics result=played
-8400 motor start ahead
-8400 receipt confirm e3
-8400 outcome e3 src=59 event_obstacle_center_person CRITICAL delivered=haptics
 9500 state interrupted(lifecycle) since=6900 phase=running interrupted=true stall=no_results judgement=degraded(ground_unrecognized) faults=[] channel=haptics_only cause=poll hold=lifecycle(since=6900,stopping,fresh=0,span=0)
 11000 script foreground
 11000 state initializing since=11000 phase=awaiting_first_result interrupted=false stall=none judgement=degraded(ground_unrecognized) faults=[] channel=haptics_only cause=lifecycle_start hold=lifecycle(since=6900,recovering,fresh=0,span=0)
 11000 ui clear_interrupted
 11000 script camera_resume
-11050 frames seq=101..101 n=1 from=11050 q=degraded(ground_unrecognized)
+11050 frame seq=101 q=degraded(ground_unrecognized) events=[e4:event_obstacle_center_person:CRITICAL{count=1}@MEDIUM~14050]
 11050 state initializing since=11000 phase=running interrupted=false stall=none judgement=degraded(ground_unrecognized) faults=[] channel=haptics_only cause=result hold=lifecycle(since=6900,recovering,fresh=1,span=0)
-11150 frames seq=102..102 n=1 from=11150 q=degraded(ground_unrecognized)
+11050 receipt revoke e4 safety_hold
+11050 outcome e4 src=101 event_obstacle_center_person CRITICAL revoked=safety_hold
+11150 frame seq=102 q=degraded(ground_unrecognized) events=[e5:event_obstacle_center_person:CRITICAL{count=1}@MEDIUM~14150]
 11150 state initializing since=11000 phase=running interrupted=false stall=none judgement=degraded(ground_unrecognized) faults=[] channel=haptics_only cause=result hold=lifecycle(since=6900,recovering,fresh=2,span=100)
-11250 frames seq=103..103 n=1 from=11250 q=degraded(ground_unrecognized)
+11150 receipt revoke e5 safety_hold
+11150 outcome e5 src=102 event_obstacle_center_person CRITICAL revoked=safety_hold
+11250 frame seq=103 q=degraded(ground_unrecognized) events=[e6:event_obstacle_center_person:CRITICAL{count=1}@MEDIUM~14250]
 11250 state initializing since=11000 phase=running interrupted=false stall=none judgement=degraded(ground_unrecognized) faults=[] channel=haptics_only cause=result hold=lifecycle(since=6900,recovering,fresh=3,span=200)
-11350 frames seq=104..104 n=1 from=11350 q=degraded(ground_unrecognized)
+11250 receipt revoke e6 safety_hold
+11250 outcome e6 src=103 event_obstacle_center_person CRITICAL revoked=safety_hold
+11350 frame seq=104 q=degraded(ground_unrecognized) events=[e7:event_obstacle_center_person:CRITICAL{count=1}@MEDIUM~14350]
 11350 state initializing since=11000 phase=running interrupted=false stall=none judgement=degraded(ground_unrecognized) faults=[] channel=haptics_only cause=result hold=lifecycle(since=6900,recovering,fresh=4,span=300)
-11450 frames seq=105..105 n=1 from=11450 q=degraded(ground_unrecognized)
+11350 receipt revoke e7 safety_hold
+11350 outcome e7 src=104 event_obstacle_center_person CRITICAL revoked=safety_hold
+11450 frame seq=105 q=degraded(ground_unrecognized) events=[e8:event_obstacle_center_person:CRITICAL{count=1}@MEDIUM~14450]
 11450 state initializing since=11000 phase=running interrupted=false stall=none judgement=degraded(ground_unrecognized) faults=[] channel=haptics_only cause=result hold=lifecycle(since=6900,recovering,fresh=5,span=400)
-11550 frames seq=106..106 n=1 from=11550 q=degraded(ground_unrecognized)
+11450 receipt revoke e8 safety_hold
+11450 outcome e8 src=105 event_obstacle_center_person CRITICAL revoked=safety_hold
+11550 frame seq=106 q=degraded(ground_unrecognized) events=[e9:event_obstacle_center_person:CRITICAL{count=1}@MEDIUM~14550]
 11550 state degraded(ground_unrecognized) since=11550 phase=running interrupted=false stall=none judgement=degraded(ground_unrecognized) faults=[] channel=haptics_only cause=result hold=none released=(fresh=6,span=500,src=106,fallbacks=0)
+11550 motor queue ahead -> started
+11550 receipt confirm e9
+11550 outcome e9 src=106 event_obstacle_center_person CRITICAL delivered=haptics
 13850 frames seq=107..129 n=23 from=11650 q=degraded(ground_unrecognized)
 14000 script stop
 14000 speech stop

@@ -62,7 +62,7 @@ field.
 - **Supported: outdoors on pavements, shopping streets and at road crossings; indoors in shopping-mall corridors and
   entrances.** These are where the field recordings were made.
 - **Low light.** Below a fixed brightness Guidance says "Too dark to see" and gives no new prompts about the scene
-  until the light is back (see [When Guidance itself is not working](#when-guidance-itself-is-not-working)).
+  until the light is back and the pictures have been judged again (see [When Guidance itself is not working](#when-guidance-itself-is-not-working)).
 - **A very even picture counts as a covered lens**, and that is checked before darkness: a picture that is uniformly
   dark, or so blurred that it is uniform, can be reported as covered rather than as too dark.
 - **Not verified: dim light above that threshold**, such as dusk or street lighting at night.
@@ -121,6 +121,9 @@ field.
   stops and Guidance detects nothing.** The session is not ended: you feel the interruption vibration (three extra
   long) whatever the vibration setting, and, with speech on, hear "Guidance interrupted". When the app is back in
   front, Guidance resumes by itself and allows 20 s for the first result before it reports anything. Tried on SM8850.
+- **From the moment Guidance learns that the app went to the background** (Android tells it a moment after you switch
+  away), no prompt is given, not even about a picture still being analysed then. Back in front, prompts return once
+  the camera sends pictures again and about half a second of new pictures has been judged.
 - **No prompt here means:** while the app is in the background or the screen is off, nothing is detected at all.
 
 ## Not supported
@@ -143,18 +146,21 @@ automated tests of the code that gives it.
 
 | What happened | What you hear | What you feel | What else happens | Checked |
 |---|---|---|---|---|
-| Lens covered, or a plain wall about 30 cm ahead | "Camera is covered, or too close to a wall", again every 8 s. Once the view has been back for 2 s, Guidance tries to say "Camera is clear again" | The "can't see" vibration (long, short, long) each time, if fault vibration is on; with speech off, that vibration is the alert, every 8 s, and cannot be turned off | No new prompts about the scene. If the sentence has not been heard within 5 s, the vibration comes anyway, whatever the settings | On a phone |
-| Too dark | "Too dark to see", again every 15 s. Once the light is back, Guidance tries to say "Light is back to normal" | The "can't see" vibration when it starts, if fault vibration is on; with speech off, every 15 s | No new prompts about the scene. If not heard within 6 s, the vibration comes anyway | On a phone |
+| Lens covered, or a plain wall about 30 cm ahead | "Camera is covered, or too close to a wall", again every 8 s. Once the view has been back for 2 s, Guidance tries to say "Camera is clear again" | The "can't see" vibration (long, short, long) each time, if fault vibration is on; with speech off, that vibration is the alert, every 8 s, and cannot be turned off | No new prompts about the scene; once the view is back, prompts return only after at least three pictures spanning about half a second have been judged (longer when pictures come slowly). If the sentence has not been heard within 5 s, the vibration comes anyway, whatever the settings | On a phone |
+| Too dark | "Too dark to see", again every 15 s. Once the light is back, Guidance tries to say "Light is back to normal" | The "can't see" vibration when it starts, if fault vibration is on; with speech off, every 15 s | No new prompts about the scene; once the light is back, prompts return only after at least three pictures spanning about half a second have been judged (longer when pictures come slowly). If not heard within 6 s, the vibration comes anyway | On a phone |
 | Ground not recognised for 1.5 s | "Can't see the ground, can't tell if the way ahead is clear", again every 60 s. Once ground has been recognised for 1 s, Guidance tries to say "Ground recognized again, path alerts are back" | The "can't see" vibration when it starts, if fault vibration is on; with speech off, every 60 s | "Path blocked" and other path prompts pause; obstacles are still announced. If not heard within 10 s, the vibration comes anyway | On a phone |
-| No result for 2.5 s while running, or none 20 s after starting | "Guidance is not responding. Stop and check before moving on.", again every 10 s | The interruption vibration (three extra long), whatever the vibration setting | It goes on until results come again | In tests |
+| No result for 2.5 s while running, or none 20 s after starting | "Guidance is not responding. Stop and check before moving on.", again every 10 s | The interruption vibration (three extra long), whatever the vibration setting | No new prompts about the scene until results come again and about half a second of new pictures has been judged; a picture taken before the stall does not bring them back | In tests |
 | Analysis failed: 30 frames in a row, or the models could not load | "Guidance stopped: analysis failed. Do not rely on it until restarted." | The interruption vibration, whatever the vibration setting | All other output stops first; the session ends and shows an error. If frames fail slowly, "not responding" can come first | In tests |
 | App in the background or screen off | "Guidance interrupted" | The interruption vibration, whatever the vibration setting | See [Screen off and background](#screen-off-and-background) | On a phone |
 | The phone's own speech engine stops working, while you rely on it | Nothing: it cannot speak | One "no speech" vibration (short, short, extra long) per outage, whatever the vibration setting | Prompts are given by vibration if navigation vibration is on; if it is off, they are not given at all. "Can't see" alerts fall back to their vibration | In tests |
 | The phone has no vibration motor | — | Nothing: no vibration is felt, and nothing says so | — | Not checked |
 | Earphones disconnected, or speech goes somewhere you cannot hear | — | — | Nothing notices it | Not checked |
 
-- **No new prompts** means that nothing new about the scene is given while the alert holds. A prompt already being
-  spoken or vibrated may carry on, and can keep a less urgent alert waiting.
+- **No new prompts** means that nothing new about the scene is given while the alert holds, nor until the pictures
+  have been judged again as above. A prompt already being spoken or vibrated when it began may carry on, and can keep a
+  less urgent alert waiting; one still waiting for the vibration motor is withdrawn.
+- **The status card** on the screen shows the stop while it holds (the alert's own sentence), then "Checking the view"
+  until prompts return. It does not say "Path looks clear" meanwhile.
 - **A recovery sentence may not be heard.** It is a low-priority try: if no speech takes it within 5 s it is dropped,
   and once taken a more urgent prompt can cut it off. With speech off there is no recovery sentence and no recovery
   vibration.
@@ -174,7 +180,7 @@ automated tests of the code that gives it.
 | Steps, curbs and drops | No dependable prompt | Nothing looks for a change in height. A drop looks like more ground, and a low step has no box |
 | Reflective indoor floors | Ground may go unrecognised; path prompts then pause, and Guidance says it cannot tell whether the way is clear | The segmentation model often gives them a class other than ground |
 | Anything above the phone's view, or below it | No prompt | Out of frame: an overhanging branch, a low bollard close in front |
-| A picture that reaches Guidance late | Judged as if it were current: a prompt can describe where things were | Nothing checks how old a picture is |
+| A picture that reaches Guidance late | Judged as if it were current: a prompt can describe where things were. Except after Guidance had to stop: a picture taken before the stop does not bring prompts back | Nothing checks how old a picture is |
 | A camera that keeps sending the same picture | Guidance goes on judging the old picture, with no alert | Only the absence of results is noticed, not a picture that stops changing |
 
 ## Reading the prompts

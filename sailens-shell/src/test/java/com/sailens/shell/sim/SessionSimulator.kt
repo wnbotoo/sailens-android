@@ -45,6 +45,8 @@ internal class SessionRun(
     val finalUi: SceneAnalysisUiState,
     /** The director's ledger when the session ended: each run's record. */
     val ledger: Map<Int, String>,
+    /** The status card after each result was handled. */
+    val cards: List<CardSample> = emptyList(),
 ) {
     /** Warnings that the screen's facts and the safety monitor disagreed, and observation faults: none is expected. */
     val observationFaults: List<LoggedLine>
@@ -146,10 +148,18 @@ internal object SessionSimulator {
             override fun ui(what: String, detail: String?) = timeline.ui(what, detail)
         }
 
+        val cards = mutableListOf<CardSample>()
+        var screen: () -> SceneAnalysisUiState = { error("no screen yet") }
         val observer = object : MirrorObserver by director.observer {
             override fun resultArrived(run: Int, result: SceneResult) {
                 director.observer.resultArrived(run, result)
                 timeline.frame(result.sequenceNumber, result.qualification.baseline, result.events, result.obstacles.map { it.category }, result.frameReceivedAtMs)
+            }
+
+            override fun resultHandled(run: Int, sequenceNumber: Long) {
+                director.observer.resultHandled(run, sequenceNumber)
+                val ui = screen()
+                cards += CardSample(sequenceNumber, ui.activeStatusEvent?.id?.toString(), held = ui.promptHold != null)
             }
         }
 
@@ -183,6 +193,7 @@ internal object SessionSimulator {
             observer = observer,
             seams = RealSeams,
         )
+        screen = { mirror.uiState.value }
 
         for (action in script.actions) {
             director.schedule(action.atMs, EventKind.SCRIPT) {
@@ -212,7 +223,7 @@ internal object SessionSimulator {
         val lines = TimelineWriter(origin).write(header(script), entries)
         return SessionRun(
             script, entries, lines, log.lines, director.log.toList(), delivered, mirror.uiState.value,
-            director.ledger.mapValues { it.value.toString() },
+            director.ledger.mapValues { it.value.toString() }, cards.toList(),
         )
     }
 
@@ -294,6 +305,7 @@ internal object SessionSimulator {
                 override fun onOutput(engineState: SpeechEngineState, speechEnabled: Boolean, screenReaderActive: Boolean, hapticsEnabled: Boolean) =
                     alerts.onOutput(engineState, speechEnabled, screenReaderActive, hapticsEnabled)
                 override fun poll() = alerts.poll()
+                override val holdsOrdinaryPrompts: Boolean get() = alerts.holdsOrdinaryPrompts
             }
         }
 
@@ -301,14 +313,18 @@ internal object SessionSimulator {
             val wiring = build()
             return object : MirrorOutput {
                 override fun stop(beforeOutputsStop: () -> Unit) = wiring.stop(beforeOutputsStop)
-                override fun onFrame(events: List<SceneEvent>, sequenceNumber: Long, visionFaults: VisionFaults) =
-                    wiring.protocol.onFrame(events, sequenceNumber, visionFaults)
+                override fun onFrame(events: List<SceneEvent>, sequenceNumber: Long, visionFaults: VisionFaults, holdOrdinary: Boolean) =
+                    wiring.protocol.onFrame(events, sequenceNumber, visionFaults, holdOrdinary)
+                override fun holdBegan() = wiring.protocol.holdBegan()
                 override fun settingsChanged() = wiring.protocol.settingsChanged()
                 override fun reset() = wiring.protocol.reset()
             }
         }
     }
 }
+
+/** The status card after a result: the event it shows ([eventId], null for none) and whether prompts were held. */
+internal data class CardSample(val seq: Long, val eventId: String?, val held: Boolean)
 
 /** A model's initialisation failing, as a script made it. */
 internal class ScriptedInitFailure(message: String) : RuntimeException(message)

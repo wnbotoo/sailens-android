@@ -108,6 +108,9 @@ internal inline fun deliverGuidanceEvent(
  * 3. No enabled output channel accepted it (see [deliverGuidanceEvent]: speech outranked or still
  *    starting, the motor refusing, ...): not delivered, revoked as [PromptRevokeReasons.OUTPUT_REFUSED].
  *
+ * Before all three, a prompt [heldAfterStop] is not offered: revoked as [PromptRevokeReasons.SAFETY_HOLD], the
+ * description neither asked nor cut off.
+ *
  * Exactly one of [confirm] and [revoke] is called.
  *
  * A covered lens, low light or an unrecognised floor ([toldByVisionFaultAlerts]) is not offered at all:
@@ -125,10 +128,15 @@ internal inline fun offerGuidancePrompt(
     deliver: () -> GuidanceDeliveryResult,
     confirm: () -> Unit,
     revoke: (reason: String) -> Unit,
+    heldAfterStop: Boolean = false,
 ): GuidanceDeliveryResult {
     if (toldByVisionFaultAlerts) {
         confirm()
         return GuidanceDeliveryResult(listOf(PromptDeliveryChannels.VISION_ALERTS))
+    }
+    if (heldAfterStop) {
+        revoke(PromptRevokeReasons.SAFETY_HOLD)
+        return GuidanceDeliveryResult.NOT_DELIVERED
     }
     if (waitsForDescription) {
         revoke(PromptRevokeReasons.WAITING_FOR_DESCRIPTION)
@@ -159,6 +167,7 @@ data class GuidanceOutputSettings(
  * candidates; this is where that record is made.
  *
  * @param now wall-clock milliseconds, the clock of the frame trace's `pipelineCompletedAt`.
+ * @param heldAfterStop see [offerGuidancePrompt].
  * @param confirm makes the provisional cooldown record final.
  * @param revoke takes back the provisional cooldown record, for one of [PromptRevokeReasons].
  * @return which channels took the prompt; none when it was not delivered.
@@ -174,9 +183,11 @@ internal inline fun offerAndTraceGuidancePrompt(
     confirm: () -> Unit,
     revoke: (reason: String) -> Unit,
     record: (PromptOutcomeTrace) -> Unit,
+    heldAfterStop: Boolean = false,
 ): GuidanceDeliveryResult {
     var revokeReason: String? = null
     val result = offerGuidancePrompt(
+        heldAfterStop = heldAfterStop,
         waitsForDescription = waitsForDescription,
         toldByVisionFaultAlerts = event.isToldByVisionFaultAlerts(),
         preemptDescription = preemptDescription,

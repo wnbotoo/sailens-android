@@ -150,6 +150,31 @@ class GuidanceSafetyHoldTest {
     }
 
     @Test
+    fun `the monitor says which input began a stop, and only that one`() {
+        val session = Session()
+        val began = mutableListOf<String>()
+        fun step(name: String, input: () -> Unit) {
+            input()
+            if (session.monitor.beganStop) began += name
+        }
+        step("start") { session.start(0) }
+        step("result") { session.result(1_000) }
+        step("covered") { session.result(1_100, obstructed) }
+        step("covered again") { session.result(1_200, obstructed) }
+        step("dark, another stop") { session.result(1_300, dark) }
+        step("clear") { session.result(1_400) }
+        step("poll while recovering") { session.poll(1_500) }
+        step("background") { session.background(2_000) }
+        step("background poll") { session.poll(2_500) }
+        step("foreground") { session.foreground(3_000) }
+        // Back in the foreground the detector's startup grace (20 s) starts again.
+        step("stalled, seen by a poll") { session.poll(23_500) }
+        step("stalled still") { session.poll(24_000) }
+        step("stopped") { session.stop(25_000) }
+        assertEquals(listOf("covered", "dark, another stop", "background", "stalled, seen by a poll"), began)
+    }
+
+    @Test
     fun `background twice with no result in between - a frame received between the two stops is stale`() {
         val s = Session()
         s.start(0)

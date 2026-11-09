@@ -60,6 +60,8 @@ android {
             // -PfingerprintBaseline=<an earlier run's copy>, compared with it.
             test.systemProperty("sailens.fingerprint.out", layout.buildDirectory.dir("fingerprint").get().asFile.path)
             test.systemProperty("sailens.fingerprint.baseline", project.findProperty("fingerprintBaseline")?.toString().orEmpty())
+            // -PfingerprintHold: each fingerprint again with the prompt hold enforced, screened against the one without.
+            test.systemProperty("sailens.fingerprint.hold", project.hasProperty("fingerprintHold").toString())
             // The phone height the capture evaluations assume, metres (GroundContactCaptureEvaluationTest,
             // PromptPolicyBaselineTest).
             test.systemProperty("sailens.m3a.phoneHeight", project.findProperty("m3aPhoneHeight")?.toString().orEmpty())

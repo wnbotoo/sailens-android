@@ -59,7 +59,10 @@ interface RegressionRecorder {
     /** The decided events of [frame], highest priority first, or the [failure] that stopped it. */
     fun endFrame(frame: ImageFrame, events: List<SceneEvent>, failure: Throwable?) {}
 
-    /** A revoked cooldown entry, applied after [decisionsBefore] decisions. [reason] is one of `PromptRevokeReasons`. */
+    /**
+     * A revoked cooldown entry, applied after [decisionsBefore] decisions. [reason] is a value of `PromptRevokeReasons`,
+     * recorded as an open string (`RegressionRevokeRecord.reason`).
+     */
     fun onRevoke(eventId: UUID, decisionsBefore: Long, reason: String? = null) {}
 
     /** A prompt cut off without being taken back, after [decisionsBefore] decisions. */

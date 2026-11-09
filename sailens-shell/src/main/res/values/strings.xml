@@ -17,6 +17,7 @@
     <string name="status_label_standby">Standby</string>
     <string name="status_label_latest_guidance">Latest guidance</string>
     <string name="status_label_monitoring">Monitoring ahead</string>
+    <string name="status_label_paused">Prompts paused</string>
     <string name="status_error_title">Analysis stopped</string>
     <string name="error_analysis_start_failed">Unable to start analysis. This device may not meet the requirements for real-time analysis.</string>
     <string name="status_starting_title">Starting guidance</string>
@@ -26,6 +27,9 @@
     <string name="status_idle_detail">Start when ready.</string>
     <string name="status_guidance_detail">Latest cue is active.</string>
     <string name="status_clear_detail">No urgent guidance right now.</string>
+    <string name="status_hold_confirming_title">Checking the view</string>
+    <string name="status_hold_stopping_detail">Prompts are paused. Stop for now.</string>
+    <string name="status_hold_recovering_detail">Prompts resume once the view is steady.</string>
     <string name="status_speech_ready">Voice ready</string>
     <string name="status_speech_initializing">Voice starting</string>
     <string name="status_speech_off">Voice off</string>
@@ -111,6 +115,7 @@
     <string name="settings_perception_apply_hint">Changes take effect the next time navigation starts.</string>
     <string name="title_live_pipeline_debug">Live pipeline debug</string>
     <string name="debug_safety_state">Safety state: %1$s</string>
+    <string name="debug_safety_state_held">Safety state: %1$s; prompts held: %2$s</string>
     <string name="debug_semantic_provider">Semantic provider: %1$s</string>
     <string name="debug_obstacle_provider">Obstacle provider: %1$s</string>
     <string name="debug_perception_profile">Perception profile: %1$s</string>

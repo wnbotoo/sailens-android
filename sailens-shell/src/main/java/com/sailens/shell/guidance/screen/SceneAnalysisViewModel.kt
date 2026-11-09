@@ -141,6 +141,10 @@ class SceneAnalysisViewModel(
         stopGuidanceOutput = { guidanceOutput.stop() },
         clearLatestResult = { latestSceneResult = null },
         preemptDescription = sceneDescriptionCoordinator::preemptForGuidance,
+        holdOrdinaryPrompts = {
+            _uiState.update { it.withHoldBegun() }
+            guidanceOutput.protocol.holdBegan()
+        },
         playAlarm = { haptic -> hapticManager.play(haptic) },
         speakSystemNotice = { text, priority -> speechManager.speakSystemNotice(text, priority = priority) },
         announceToScreenReader = screenReaderAnnouncer::announce,
@@ -173,7 +177,7 @@ class SceneAnalysisViewModel(
         initialOutput = _uiState.value.outputFacts(),
         recordState = traceService::recordSafetyState,
         recordAlert = traceService::recordGuidanceAlert,
-        publishState = { state -> _uiState.update { it.copy(safetyState = state) } },
+        publishState = { state, hold -> _uiState.update { it.copy(safetyState = state, promptHold = hold) } },
         timed = { _uiState.value.showDiagnostics },
         logger = logger,
         clock = clock,
@@ -194,6 +198,7 @@ class SceneAnalysisViewModel(
         announceToScreenReader = screenReaderAnnouncer::announce,
         vibrateEvent = hapticManager::trigger,
         vibrateEventAlone = hapticManager::triggerOrQueue,
+        dropQueuedNavigation = hapticManager::dropQueuedNavigation,
         playOrReserveVisionFault = { priority, onPlayed ->
             hapticManager.playOrReserve(
                 GuidanceHaptic.VISION_UNRELIABLE,
@@ -443,8 +448,9 @@ class SceneAnalysisViewModel(
                 alerts.onFlowFailed(e)
             }.collectLatest { result ->
                 frameCount++
-                // Before the frame's prompts are delivered.
+                // Before the frame's prompts are delivered: they, and the card, go by the hold this result leaves.
                 alerts.onResult(result.qualification.baseline, result.sequenceNumber, result.frameReceivedAtMs)
+                val holdOrdinary = alerts.holdsOrdinaryPrompts
                 latestSceneResult = result
                 val overlayMode = _uiState.value.overlayMode
                 val events = result.events
@@ -452,7 +458,7 @@ class SceneAnalysisViewModel(
                     sceneOverlayConfig.enableDebugPanel && guidanceDiagnosticsStore.state.value.showDiagnostics
                 }
                 _uiState.update {
-                    it.withFrameEvents(events, clock()).copy(
+                    it.withResultEvents(events, clock(), holdOrdinary).copy(
                         frameDisplayWidth = result.frameDisplayWidth,
                         frameDisplayHeight = result.frameDisplayHeight,
                         obstacleDetections = result.obstacleDetectionsForOverlay(overlayMode),
@@ -473,7 +479,7 @@ class SceneAnalysisViewModel(
                         )
                     )
                 }
-                guidanceOutput.protocol.onFrame(events, result.sequenceNumber, result.visionFaults)
+                guidanceOutput.protocol.onFrame(events, result.sequenceNumber, result.visionFaults, holdOrdinary)
             }
         }
     }

@@ -46,8 +46,10 @@ Captures never enter this repository or CI.
   through with a warning). It may not remove or rename a required field or change a field's meaning or
   type; that is a major version. Closed enums inside records are not extended in a minor version.
   Minor versions have added build provenance (1.2), the model-regression record (1.3), recorded
-  geometry (1.4), the speech lifecycle (1.5), speech ranks and cut receipts (1.6) and the frame's
-  qualification (1.7).
+  geometry (1.4), the speech lifecycle (1.5), speech ranks and cut receipts (1.6), the frame's
+  qualification (1.7) and the revoke reason `safety_hold` (1.8). A revoke record's `reason` is an open
+  string, a value of the trace's revoke reasons when written: a reader keeps a value it does not know as
+  it is, and replay does not read it.
 - Sensor cadence is computed from event timestamps; `SENSOR_DELAY_GAME` is only the requested rate.
 - **Counters** are separate from Guidance's dropped frames, so a gap can be explained. For a complete
   capture they account for everything the engine received: `framesOffered` = `framesEncoded` +

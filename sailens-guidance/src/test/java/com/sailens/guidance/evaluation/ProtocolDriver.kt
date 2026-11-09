@@ -186,6 +186,9 @@ internal class ProtocolDriver(
             override fun vibrateVisionFault(priority: EventPriority, onPlayed: () -> Unit) = onPlayed()
 
             override fun cancelVisionFaultVibration() = Unit
+
+            // Nothing waits for the motor here, and the evaluation holds no prompts.
+            override fun dropQueuedNavigation() = Unit
         },
         description = object : GuidanceDescriptionPort {
             override fun waits(priority: EventPriority): Boolean = false

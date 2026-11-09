@@ -88,6 +88,15 @@ class HapticManager(context: Context) {
         motorWait.reschedule()
     }
 
+    /**
+     * Guidance holds prompts after a stop: the navigation rhythm waiting for the motor goes, and is told it did not
+     * play. What plays, and a reserved fault rhythm, are left alone.
+     */
+    fun dropQueuedNavigation() {
+        arbiter.dropQueuedNavigation()
+        motorWait.reschedule()
+    }
+
     /** Drops a reserved rhythm that has not started. */
     fun cancelReservation() {
         arbiter.cancelReservation()
