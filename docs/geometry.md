@@ -318,6 +318,31 @@ modules' tests can use it as well; the tests that run it, such as `SyntheticScen
   scenario reaches the path it is there to exercise. They are not in `Scenarios.all`, where every
   frame must have a result. Regenerate:
   `gradlew :sailens-guidance:testDebugUnitTest --tests "*EdgeScenarioGoldenTest*" -PupdateGoldens`.
+- **Session timelines**: whole Guidance sessions, from the start pressed to the stop, through the
+  real pipeline and on through the shell: the alerts about Guidance itself and the safety state they
+  derive (`GuidanceSystemAlerts`), the delivery of each frame's prompts (`GuidanceOutputWiring`), the
+  run sequencer, the motor's arbiter, the shared engines' owner and the screen's UI state. They are
+  produced in the shell's tests (`sailens-shell/src/test/java/com/sailens/shell/sim/`), because those
+  classes are internal to the shell and the dependency runs from the shell to Guidance; the shell's
+  tests reach the simulator through Guidance's test fixtures. Four pieces of glue that need an
+  Android `Context` are mirrored in the tests instead of run: the guidance screen's view model, the
+  motor manager's calls onto its arbiter, the event-to-announcement mapping and the engines' release
+  in the DI module. Doubles stand only at the devices: the speech engine (it keeps the rules of
+  `SpeechManager` and `UtteranceSettlement`, not their timing), the vibrator, the scene description
+  and the screen reader. Time is virtual; every shell coroutine runs on one queue that the test
+  thread drains, the pipeline still runs on `Dispatchers.Default`, and the two meet only at
+  handshakes, so a session runs the same way every time. Each session is
+  `sailens-shell/src/test/resources/timelines/<name>.timeline.txt`: its description, its settings,
+  then one line per thing that happened, at its millisecond since the start was pressed, in the order
+  it happened: the script's actions, the frames (one with events or a new qualification has its own
+  line, the quiet ones in between are merged), the safety state, the alerts, each prompt's outcome
+  and cooldown receipts, every call the devices got and what they answered, and the state the alerts
+  write on the screen. Ids are numbered by first appearance; no line has a wall-clock time or a
+  floating-point number. `SessionTimelineTest` fails on the first differing line, and checks what
+  each session is there to reach. `SimulatorMirrorPinTest` hashes the mirrored code, and the build
+  makes those files inputs of the test task, so any change to them fails it until the mirror is
+  checked against the change. Regenerate:
+  `gradlew :sailens-shell:testDebugUnitTest --tests "*SessionTimelineTest*" -PupdateGoldens`.
 - **The goldens pin behaviour; they do not endorse it.** A person standing still 3 m away is MEDIUM
   or FAR depending only on pitch and phone height; an indoor floor read as building gives a CRITICAL
   "blocked" before "ground unrecognized"; a 15 cm curb down to the road is invisible; walking to a

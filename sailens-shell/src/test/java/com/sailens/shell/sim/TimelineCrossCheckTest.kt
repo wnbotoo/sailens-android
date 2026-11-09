@@ -1,0 +1,111 @@
+package com.sailens.shell.sim
+
+import com.sailens.guidance.model.common.EventCategory
+import com.sailens.guidance.model.common.EventPriority
+import com.sailens.guidance.model.scene.SceneEvent
+import com.sailens.guidance.model.trace.GuidanceAlertTrace
+import com.sailens.guidance.model.trace.PromptOutcomeTrace
+import com.sailens.guidance.model.trace.SafetyStateTrace
+import com.sailens.guidance.safety.BaselineQualification
+import com.sailens.guidance.safety.UnqualifiedReason
+import com.sailens.shell.device.GuidanceHaptic
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+/** The cross-check on its own, with entries written by hand: what it lets through, and what it must not. */
+class TimelineCrossCheckTest {
+
+    private fun state(atMs: Long, state: String, judgement: String?, cause: String, reasons: List<String> = emptyList(), judgementReasons: List<String> = emptyList()) =
+        TimelineEntry.State(
+            atMs,
+            SafetyStateTrace(
+                at = 0, elapsedMs = atMs, stateSinceElapsedMs = atMs, state = state, reasons = reasons, phase = "running",
+                interrupted = false, stall = "none", judgement = judgement, judgementReasons = judgementReasons,
+                expectedNavigationChannel = "speech", cause = cause,
+            ),
+        )
+
+    private fun frame(atMs: Long, seq: Long, baseline: BaselineQualification = BaselineQualification.Qualified, events: List<SceneEvent> = emptyList()) =
+        TimelineEntry.Frame(atMs, seq, baseline, events)
+
+    private fun systemAlert(atMs: Long, kind: String, channel: String, messageKey: String? = null, haptic: String? = null) = TimelineEntry.Alert(
+        atMs,
+        GuidanceAlertTrace(at = 0, elapsedMs = atMs, source = "system", kind = kind, messageKey = messageKey, haptic = haptic, priority = "max", channel = channel, result = "played"),
+    )
+
+    private val event = SceneEvent(timestamp = 0, category = EventCategory.OBSTACLE, priority = EventPriority.HIGH, messageKey = "event_obstacle_center_person", expiresAt = 1, dedupeKey = "d")
+
+    private fun outcome(atMs: Long, src: Long) = TimelineEntry.Outcome(
+        atMs,
+        PromptOutcomeTrace(
+            eventId = event.id.toString(), sourceSequenceNumber = src, messageKey = event.messageKey, category = "obstacle",
+            priority = "high", deliveredAt = 1, deliveredVia = listOf("speech"), speechEnabled = true, screenReaderActive = false, hapticsEnabled = true,
+        ),
+    )
+
+    @Test
+    fun `the reference qualification is cleared by a start, set by each result, and kept by a stop`() {
+        val session = listOf(
+            TimelineEntry.Script(0, "start"),
+            state(0, "initializing", null, "start_requested"),
+            frame(1050, 1),
+            state(1050, "guiding", "qualified", "result"),
+            TimelineEntry.Script(2000, "stop"),
+            state(2000, "idle", "qualified", "stopped"),
+            TimelineEntry.Script(3000, "start"),
+            state(3000, "initializing", null, "start_requested"),
+        )
+        assertEquals("qualified, stopped, started again, no result yet: none on either side", emptyList<String>(), TimelineCrossCheck.check(session))
+        val keptAfterStart = session.dropLast(1) + state(3000, "initializing", "qualified", "start_requested")
+        assertEquals(1, TimelineCrossCheck.check(keptAfterStart).size)
+        val clearedByStop = session.take(5) + state(2000, "idle", null, "stopped")
+        assertEquals(1, TimelineCrossCheck.check(clearedByStop).size)
+    }
+
+    @Test
+    fun `a stop for the camera comes only after an unqualified frame`() {
+        val unqualified = BaselineQualification.Unqualified(UnqualifiedReason.CAMERA_OBSTRUCTED, emptySet())
+        val stop = state(1150, "stop_required", "unqualified", "result", reasons = listOf("camera_obstructed"), judgementReasons = listOf("camera_obstructed"))
+        assertEquals(emptyList<String>(), TimelineCrossCheck.check(listOf(TimelineEntry.Script(0, "start"), frame(1150, 2, unqualified), stop)))
+        val problems = TimelineCrossCheck.check(listOf(TimelineEntry.Script(0, "start"), frame(1150, 2), stop))
+        assertTrue(problems.toString(), problems.any { "stop_required(camera_obstructed) after a frame judged" in it })
+    }
+
+    @Test
+    fun `each system alert is its device call, just before it, and each alarm and notice is an alert's`() {
+        val alarm = TimelineEntry.Motor(8000, "alarm", GuidanceHaptic.INTERRUPTED, "played")
+        val rhythm = systemAlert(8000, "interrupted", "haptics", haptic = "interrupted")
+        val notice = TimelineEntry.Speech(8000, "notice", "system_notice_1", "notice_guidance_interrupted", Int.MAX_VALUE, 23_000, "accepted")
+        val sentence = systemAlert(8000, "interrupted", "speech", messageKey = "notice_guidance_interrupted")
+        assertEquals(emptyList<String>(), TimelineCrossCheck.check(listOf(alarm, rhythm, notice, sentence)))
+        assertEquals("an alert with no call", 1, TimelineCrossCheck.check(listOf(rhythm)).size)
+        assertEquals("a call with no alert", 1, TimelineCrossCheck.check(listOf(alarm)).size)
+        assertEquals("a call of another rhythm", 2, TimelineCrossCheck.check(listOf(alarm.copy(rhythm = GuidanceHaptic.SPEECH_UNAVAILABLE), rhythm)).size)
+        assertEquals("at another time", 2, TimelineCrossCheck.check(listOf(alarm.copy(atMs = 7000), rhythm)).size)
+        assertEquals("not right after it", 1, TimelineCrossCheck.check(listOf(notice, TimelineEntry.Speech(8000, "stop"), sentence)).size)
+        val reader = TimelineEntry.ScreenReader(8000, "notice_guidance_interrupted")
+        assertEquals("the screen reader's", emptyList<String>(), TimelineCrossCheck.check(listOf(reader, systemAlert(8000, "interrupted", "screen_reader", messageKey = "notice_guidance_interrupted"))))
+    }
+
+    @Test
+    fun `outcomes and receipts are of an event a frame decided, and an outcome names that frame`() {
+        val decided = frame(1050, 1, events = listOf(event))
+        assertEquals(emptyList<String>(), TimelineCrossCheck.check(listOf(decided, TimelineEntry.Receipt(1050, "confirm", event.id.toString(), null), outcome(1050, 1))))
+        assertEquals("another frame", 1, TimelineCrossCheck.check(listOf(decided, outcome(1050, 2))).size)
+        assertEquals("no frame", 1, TimelineCrossCheck.check(listOf(outcome(1050, 1))).size)
+        assertEquals("a receipt of nothing decided", 1, TimelineCrossCheck.check(listOf(TimelineEntry.Receipt(1050, "confirm", event.id.toString(), null))).size)
+    }
+
+    @Test
+    fun `a session's own entries pass, and a judgement changed in one is found`() {
+        val run = SessionSimulator.run(SessionScenarios.speechOutage)
+        assertEquals(emptyList<String>(), TimelineCrossCheck.check(run.entries))
+        val restart = run.entries.indexOfFirst { it is TimelineEntry.State && it.trace.cause == "start_requested" && it.atMs > 0 }
+        val tampered = run.entries.toMutableList().also {
+            val entry = it[restart] as TimelineEntry.State
+            it[restart] = entry.copy(trace = entry.trace.copy(judgement = "qualified"))
+        }
+        assertEquals(1, TimelineCrossCheck.check(tampered).size)
+    }
+}

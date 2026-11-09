@@ -354,8 +354,10 @@ class SimulatedClock(startMs: Long) : () -> Long {
  *
  * @param cancellable false: a waiting `initialize()` ignores cancellation until released or failed, as
  *   a model load that cannot be interrupted.
+ * @param onWaiting told, on the pipeline's thread, each time `initialize()` starts waiting, before it
+ *   waits: a caller that drives time can tell a pipeline held here from one still on its way.
  */
-class ModelInitGate(val cancellable: Boolean = true) {
+class ModelInitGate(val cancellable: Boolean = true, private val onWaiting: () -> Unit = {}) {
     private val outcome = CompletableDeferred<Unit>()
 
     /** Whether the initialisation has succeeded. */
@@ -376,6 +378,7 @@ class ModelInitGate(val cancellable: Boolean = true) {
 
     internal suspend fun await() {
         waits.incrementAndGet()
+        onWaiting()
         if (cancellable) outcome.await() else withContext(NonCancellable) { outcome.await() }
         initialized = true
     }

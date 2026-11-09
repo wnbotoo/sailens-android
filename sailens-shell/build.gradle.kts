@@ -31,8 +31,22 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     testOptions {
-        // SceneEventStringsTest reads the string files themselves: an edited string must re-run it.
-        unitTests.all { test -> test.inputs.dir("src/main/res").withPathSensitivity(PathSensitivity.RELATIVE) }
+        unitTests.all { test ->
+            // SceneEventStringsTest reads the string files themselves: an edited string must re-run it.
+            test.inputs.dir("src/main/res").withPathSensitivity(PathSensitivity.RELATIVE)
+            // SimulatorMirrorPinTest hashes the files the session simulator mirrors: any edit to one, a space
+            // included, must re-run it, though it compiles to the same classes.
+            test.inputs.files(
+                "src/main/java/com/sailens/shell/guidance/screen/SceneAnalysisViewModel.kt",
+                "src/main/java/com/sailens/shell/device/HapticManager.kt",
+                "src/main/java/com/sailens/shell/device/GuidanceAnnouncements.kt",
+                "src/main/java/com/sailens/shell/di/ShellModule.kt",
+            ).withPathSensitivity(PathSensitivity.RELATIVE)
+            // Session timelines (SessionTimelineTest): -PupdateGoldens rewrites them in the source tree.
+            test.systemProperty("sailens.updateGoldens", project.hasProperty("updateGoldens").toString())
+            test.systemProperty("sailens.timelines.dir", file("src/test/resources/timelines").absolutePath)
+            if (project.hasProperty("updateGoldens")) test.outputs.upToDateWhen { false }
+        }
     }
 }
 

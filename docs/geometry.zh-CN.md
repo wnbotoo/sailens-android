@@ -245,6 +245,21 @@ sem/det 一样由张量形状判定。没有类别顺序可弄错；对应的风
   失败的帧没有行（序号跳过）；管线以抛异常结束的一次运行，保留异常之前的行，结束方式由测试断言，不写进
   golden。每个测试还断言场景确实走到了它要测的路径。它们不在 `Scenarios.all` 里，那里每帧都必须有结果。
   重新生成：`gradlew :sailens-guidance:testDebugUnitTest --tests "*EdgeScenarioGoldenTest*" -PupdateGoldens`。
+- **会话时间线**：完整的 Guidance 会话，从按开始到停止，经过真实的管线，再经过 shell：关于 Guidance 自身的
+  告警和它们得出的安全状态（`GuidanceSystemAlerts`）、每帧提示的送达（`GuidanceOutputWiring`）、运行顺序器、
+  马达仲裁器、共享引擎的所有者和界面状态。它们在 shell 的测试里产出（`sailens-shell/src/test/java/com/sailens/shell/sim/`），
+  因为这些类是 shell 的 internal 类，而依赖方向是 shell 到 Guidance；shell 的测试经 Guidance 的 test fixtures
+  用到仿真器。四段需要 Android `Context` 的胶水在测试里镜像，不直接运行：引导界面的 ViewModel、马达管理器对
+  仲裁器的调用、事件到播报的映射，以及 DI 模块里的引擎释放。替身只在设备边界：语音引擎（保留 `SpeechManager`
+  和 `UtteranceSettlement` 的规则，不保留它们的时长）、振动器、场景描述和读屏。时间是虚拟的；shell 的协程全
+  部跑在一个由测试线程抽干的队列上，管线照旧跑在 `Dispatchers.Default` 上，两边只在握手处相遇，所以每次运行
+  都一样。每个会话是 `sailens-shell/src/test/resources/timelines/<name>.timeline.txt`：它的描述、它的设置，之后
+  按发生的先后，每件发生的事一行，标着它距按开始的毫秒数：脚本的动作、帧（有事件或资格变了的帧单独一行，其
+  间安静的帧合并）、安全状态、告警、每条提示的结果和冷却回执、设备收到的每次调用和它们的回答，以及告警写到
+  界面上的状态。id 按首次出现编号；没有一行带墙钟时间或浮点数。`SessionTimelineTest` 在第一处不同的行失败，
+  并检查每个会话确实走到了它要测的地方。`SimulatorMirrorPinTest` 对被镜像的代码算哈希，构建把这些文件声明为
+  测试任务的输入，所以它们的任何改动都会让它失败，直到镜像对照改动核对过。重新生成：
+  `gradlew :sailens-shell:testDebugUnitTest --tests "*SessionTimelineTest*" -PupdateGoldens`。
 - **golden 固定行为，不代表认可。** 静止在 3 m 外的人是 MEDIUM 还是 FAR 只取决于俯角和机高；被读成
   building 的室内地面先给出 CRITICAL 的"前方不通"，再给"识别不到地面"；下到路面的 15 cm 路沿看不见；走向
   1.5 m 落差时阻塞升到 1.0 却没有提示；下半身被墙挡住的人整个走近过程都读作 FAR。打开接地点后，没有任何
