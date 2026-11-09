@@ -158,6 +158,31 @@ class CompletionCreditTest {
     }
 
     @Test
+    fun `observer arrival order does not change credit for a session ending without an outcome`() {
+        rec(E.SUBMITTED, "a")
+        rec(E.UNKNOWN_TERMINAL, "a", reason = "session_ended")
+
+        // The timestamps stay fixed even when the observer receives the terminal record first.
+        for (arrivalOrder in listOf(records.toList(), records.reversed())) {
+            val c = CompletionCredit.of(arrivalOrder)
+            val p = c["p"]!!
+            assertFalse(p.completed)
+            assertNull(p.completedAtNanos)
+            assertFalse(p.neverAccepted)
+            assertEquals(10L, p.firstSubmittedAtNanos)
+            assertNull(p.firstStartedAtNanos)
+            assertEquals(1, p.failedAttempts)
+            assertEquals(listOf("unknown_terminal(session_ended)"), p.failures)
+            assertFalse(p.evidenceConflict)
+            assertEquals(0, c.conflicts)
+            val attempt = p.attempts.single()
+            assertEquals(CompletionCredit.AttemptOutcome.FAILED, attempt.outcome)
+            assertEquals(1L, attempt.generation)
+            assertEquals(records, attempt.records)
+        }
+    }
+
+    @Test
     fun `refused before the engine -- never accepted, a failure with its reason`() {
         rec(E.REFUSED, "p", gen = null, reason = "outranked")
 
