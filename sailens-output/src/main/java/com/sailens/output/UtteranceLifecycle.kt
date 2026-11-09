@@ -105,7 +105,11 @@ public object UtteranceReasons {
     public const val ENGINE_SHUT_DOWN: String = "engine_shut_down"
 }
 
-/** Receives [UtteranceEvent]s. Called on whatever thread observed the event; must not block or throw. */
+/**
+ * Receives [UtteranceEvent]s. Called on whatever thread observed the event; must not block or throw.
+ * Calls may be concurrent, and arrival order need not match event order. Observers must be thread-safe
+ * and use [UtteranceEvent.elapsedRealtimeNanos] for event timing rather than callback arrival order.
+ */
 public fun interface UtteranceLifecycleObserver {
     public fun onUtteranceEvent(event: UtteranceEvent)
 }
