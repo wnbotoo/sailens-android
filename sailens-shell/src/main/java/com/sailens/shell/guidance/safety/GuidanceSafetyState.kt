@@ -2,6 +2,7 @@ package com.sailens.shell.guidance.safety
 
 import com.sailens.guidance.safety.BaselineQualification
 import com.sailens.guidance.safety.DegradeReason
+import com.sailens.guidance.safety.PromptHold
 import com.sailens.guidance.safety.UnqualifiedReason
 import com.sailens.output.SpeechEngineState
 
@@ -62,6 +63,12 @@ enum class OutputFault {
     SPEECH_NOT_READY,
 }
 
+/**
+ * Why ordinary prompts are held: the stop that began it. A stop for the camera or a stall is a [StopReason]; going to the
+ * background is [LIFECYCLE].
+ */
+internal enum class HoldCause { CAMERA_OBSTRUCTED, TOO_DARK, STARTUP_STALLED, PERCEPTION_STALLED, LIFECYCLE }
+
 /** The session's stage, from the facts the view model keeps today (`isLoading`, `isRunning`, a result seen). */
 internal enum class GuidanceRunPhase {
     NOT_STARTED,
@@ -104,6 +111,8 @@ internal enum class NavigationChannel { SCREEN_READER, SPEECH, HAPTICS_ONLY, STA
  * @param judgement the latest result's qualification; null before the first result of a start.
  * @param outputFaults the output's health, by the engine's state, as the speech-unavailable alert reads it.
  * @param expectedNavigationChannel by the `isReady` read for the latest result or output change; never in [state].
+ * @param hold ordinary prompts held after a stop: from the moment a stop began until enough fresh results came after it
+ *   ([PromptHold]). Only while the session runs.
  */
 internal data class GuidanceSafetyAxes(
     val phase: GuidanceRunPhase,
@@ -113,9 +122,11 @@ internal data class GuidanceSafetyAxes(
     val judgement: BaselineQualification?,
     val outputFaults: Set<OutputFault>,
     val expectedNavigationChannel: NavigationChannel,
+    val hold: PromptHold.Held<HoldCause>? = null,
 ) {
     init {
         require((phase == GuidanceRunPhase.FAILED) == (failure != null)) { "A failure is set exactly when the phase is FAILED: $phase $failure" }
+        require(hold == null || phase.isRunning) { "A hold is kept only while the session runs: $phase" }
     }
 }
 
@@ -124,9 +135,11 @@ internal data class GuidanceSafetyAxes(
  *
  * 1. failed; 2. not started; 3. interrupted (the view model skips the stall alarm meanwhile); 4. stalled (the
  * judgement is then stale); 5. starting or waiting for the first result (the judgement is from before the
- * background); 6. the picture cannot be trusted; 7. part of the judgement paused, or the output impaired; 8. guiding.
+ * background); 6. the picture cannot be trusted; 6b. prompts still held after a stop whose cause has gone: the stop
+ * it was, or, after the background, initializing; 7. part of the judgement paused, or the output impaired; 8. guiding.
  *
- * The expected channel is not read: [NavigationChannel.NONE] alone does not change the state.
+ * Without a hold this is the mapping without rule 6b. The expected channel is not read: [NavigationChannel.NONE] alone
+ * does not change the state.
  */
 internal fun GuidanceSafetyAxes.state(): GuidanceSafetyState {
     if (phase == GuidanceRunPhase.FAILED) return GuidanceSafetyState.Failed(checkNotNull(failure))
@@ -143,8 +156,34 @@ internal fun GuidanceSafetyAxes.state(): GuidanceSafetyState {
         is BaselineQualification.Degraded -> judged.reasons
         is BaselineQualification.Unqualified -> return GuidanceSafetyState.StopRequired(judged.reason.toStopReason())
     }
+    hold?.let { held -> return held.cause.recoveringState() }
     if (perception.isNotEmpty() || outputFaults.isNotEmpty()) return GuidanceSafetyState.Degraded(perception, outputFaults)
     return GuidanceSafetyState.Guiding
+}
+
+/** What a hold shows once its stop's cause has gone and it waits for fresh results: the stop it was. */
+private fun HoldCause.recoveringState(): GuidanceSafetyState = when (this) {
+    HoldCause.CAMERA_OBSTRUCTED -> GuidanceSafetyState.StopRequired(StopReason.CAMERA_OBSTRUCTED)
+    HoldCause.TOO_DARK -> GuidanceSafetyState.StopRequired(StopReason.TOO_DARK)
+    HoldCause.STARTUP_STALLED -> GuidanceSafetyState.StopRequired(StopReason.STARTUP_STALLED)
+    HoldCause.PERCEPTION_STALLED -> GuidanceSafetyState.StopRequired(StopReason.PERCEPTION_STALLED)
+    HoldCause.LIFECYCLE -> GuidanceSafetyState.Initializing
+}
+
+/**
+ * The stop these facts call for, by the mapping without the hold: a stop's reason, or [HoldCause.LIFECYCLE] for an
+ * interruption; null when they call for none.
+ */
+internal fun GuidanceSafetyAxes.stopCause(): HoldCause? = when (val state = copy(hold = null).state()) {
+    is GuidanceSafetyState.StopRequired -> when (state.reason) {
+        StopReason.CAMERA_OBSTRUCTED -> HoldCause.CAMERA_OBSTRUCTED
+        StopReason.TOO_DARK -> HoldCause.TOO_DARK
+        StopReason.STARTUP_STALLED -> HoldCause.STARTUP_STALLED
+        StopReason.PERCEPTION_STALLED -> HoldCause.PERCEPTION_STALLED
+    }
+    is GuidanceSafetyState.Interrupted -> HoldCause.LIFECYCLE
+    GuidanceSafetyState.Idle, GuidanceSafetyState.Initializing, GuidanceSafetyState.Guiding,
+    is GuidanceSafetyState.Degraded, is GuidanceSafetyState.Failed -> null
 }
 
 private fun UnqualifiedReason.toStopReason(): StopReason = when (this) {

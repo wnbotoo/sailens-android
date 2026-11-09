@@ -154,13 +154,14 @@ internal class GuidanceSystemAlerts(
     }
 
     /**
-     * A result reached the view model, [baseline] its qualification: the stall detector hears of it, then the monitor,
-     * with `isReady` as it reads then.
+     * A result reached the view model, [baseline] its qualification, [sequenceNumber] its frame and [receivedAtMs] when
+     * the source received that frame (null: not recorded): the stall detector hears of it, then the monitor, with
+     * `isReady` as it reads then.
      */
-    fun onResult(baseline: BaselineQualification) {
+    fun onResult(baseline: BaselineQualification, sequenceNumber: Long, receivedAtMs: Long?) {
         checkFacts(SafetyInput.RESULT)
         stallDetector.onResult(clock())
-        observation.observe { onResult(clock(), baseline, speechReady = speechReady()) }
+        observation.observe { onResult(clock(), baseline, sequenceNumber, receivedAtMs, speechReady = speechReady()) }
     }
 
     /**

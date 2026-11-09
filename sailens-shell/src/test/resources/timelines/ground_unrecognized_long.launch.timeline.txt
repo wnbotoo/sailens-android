@@ -1,12 +1,12 @@
 # ground_unrecognized_long.launch: ground_unrecognized_long with DetFirstConfig.LAUNCH: the same states and alerts. The prompts rank higher and are confirmed once heard, a rhythm goes with them only when the cooldown accepts them, and the mode notice is said on the first frame.
 # config detfirst=launch step=100 speech=on screenReader=off haptics=on faultHaptics=on
-0 state idle since=0 phase=not_started interrupted=false stall=none judgement=none faults=[] channel=speech cause=output
+0 state idle since=0 phase=not_started interrupted=false stall=none judgement=none faults=[] channel=speech cause=output hold=none
 0 script start
-0 state initializing since=0 phase=starting interrupted=false stall=none judgement=none faults=[] channel=speech cause=start_requested
-0 state initializing since=0 phase=awaiting_first_result interrupted=false stall=none judgement=none faults=[] channel=speech cause=flow_started
+0 state initializing since=0 phase=starting interrupted=false stall=none judgement=none faults=[] channel=speech cause=start_requested hold=none
+0 state initializing since=0 phase=awaiting_first_result interrupted=false stall=none judgement=none faults=[] channel=speech cause=flow_started hold=none
 1000 script release_init sem
 1050 frame seq=1 q=qualified events=[]
-1050 state guiding since=1050 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result
+1050 state guiding since=1050 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=none
 1050 speech speak m1 "event_mode_obstacles_and_blocked" scale=15 exp=6050 -> accepted
 2850 frames seq=2..19 n=18 from=1150 q=qualified
 2930 speech done m1
@@ -20,7 +20,7 @@
 6470 speech done e1
 6470 receipt confirm e1
 6550 frame seq=56 q=degraded(ground_unrecognized) events=[e2:event_ground_unrecognized:LOW@-~11550]
-6550 state degraded(ground_unrecognized) since=6550 phase=running interrupted=false stall=none judgement=degraded(ground_unrecognized) faults=[] channel=speech cause=result
+6550 state degraded(ground_unrecognized) since=6550 phase=running interrupted=false stall=none judgement=degraded(ground_unrecognized) faults=[] channel=speech cause=result hold=none
 6550 receipt confirm e2
 6550 outcome e2 src=56 event_ground_unrecognized LOW delivered=vision_alerts
 6550 speech speak n1 "event_ground_unrecognized" scale=0 exp=16550 -> accepted
@@ -58,7 +58,7 @@
 68150 speech done n2
 75950 frames seq=672..750 n=79 from=68150 q=degraded(ground_unrecognized)
 76050 frame seq=751 q=qualified events=[]
-76050 state guiding since=76050 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result
+76050 state guiding since=76050 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=none
 76050 speech speak n3 "event_ground_recognized" scale=0 exp=81050 -> accepted
 76050 alert vision fault_recovery event_ground_recognized priority=low channel=speech result=accepted
 77550 frames seq=752..766 n=15 from=76150 q=qualified
@@ -67,4 +67,4 @@
 80000 script stop
 80000 speech stop
 80000 motor cancel
-80000 state idle since=80000 phase=not_started interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=stopped
+80000 state idle since=80000 phase=not_started interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=stopped hold=none

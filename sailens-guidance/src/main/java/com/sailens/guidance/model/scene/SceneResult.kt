@@ -27,4 +27,9 @@ data class SceneResult(
     val visionFaults: VisionFaults = VisionFaults.NONE,
     /** Whether this frame let Guidance judge the way ahead, and how the optional inputs stood. Observed, not acted on. */
     val qualification: GuidanceQualification = GuidanceQualification.QUALIFIED,
+    /**
+     * When the frame source received the frame, elapsed-realtime milliseconds; null when it did not record it. The
+     * safety state judges by it whether a result is fresh after a stop; the frame trace records the same value.
+     */
+    val frameReceivedAtMs: Long? = null,
 )

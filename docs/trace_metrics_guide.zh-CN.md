@@ -647,6 +647,7 @@ bbox 接地带（det∩sem 交叉验证）从 sem 可行走区抠除后的占比
 - `qualification`：`qualified`（合格）、`degraded`（一部分提示暂停，其余照常）或 `unqualified`（画面不可信，所有提示都被压掉）。`qualificationReasons` 是小写的原因列表，不合格的原因排在最前：`camera_obstructed`、`too_dark`、`ground_unrecognized`。级别和事件生成器用的是同一个判据：一帧不合格当且仅当它生成了镜头遮挡或光线过暗事件，所以 `unqualified` 的帧正是其余提示被压掉的那些帧。
 - `capabilities`：各可选输入（`orientation`、`camera_geometry`、`ground_contact_distance`）的状况，各有 `status`（`not_configured` / `available` / `degraded` / `unavailable`）和 `issues`。只进 trace，不属于资格。
 - `receiptToDecisionMs`：从帧源收到这一帧到做出决策，两者都是 elapsed realtime。不含曝光到接收的那一段，不是完整帧龄。帧源没记录接收时间时没有这个字段。
+- `receivedElapsedMs`：帧源收到这一帧的时刻，elapsed realtime 毫秒：停止之后，安全状态按它判断一个结果是否新鲜（见下面的 `hold`），和安全状态读到的是同一个值。帧源没记录接收时间时没有这个字段。
 
 ### `guidance_alert`
 
@@ -702,6 +703,8 @@ Guidance 此刻对用户处在什么状态，合成为一个值，由 shell 从�
 状态比窗口长。没有会话打开时最近一条记录会被保留，会话打开时作为这段会话的第一条状态记录再写一次（`cause` 为 `session_start`，`seq` 为 1，`elapsedMs` 为打开时刻，`stateSinceElapsedMs` 保持原值）：开始请求和流的开始都发生在 trace 打开之前，会话的时间线照样从开头几行就有。`session_start.safetyTrace` 表示这份 trace 记录状态；没有它的 trace 没有时间线，这和"状态从没变过"不是一回事。`session_summary.safetyStateCount` 是这段会话放进队列的状态记录条数。
 
 分析流在 shell 处理它的错误之前就关闭了 trace，所以 `failed` 和对应的告警永远不在 trace 里。流以错误结束时报告会写明。
+
+有 `hold` 时表示停止之后普通提示正被挡着：`cause`（开始它的那次停止：`camera_obstructed`、`too_dark`、`startup_stalled`、`perception_stalled`、`lifecycle`）、`sinceElapsedMs`（那次停止开始的时刻：帧的接收时刻不晚于它的结果是过期的，不计数）、`stopping`（停止的原因还在；原因消失、等待新鲜结果时为 false）、`freshResults` 和 `freshSpanMs`（之后计入的新鲜结果个数，以及第一个和最后一个的接收时刻相差多少，`firstFreshReceivedElapsedMs` / `lastFreshReceivedElapsedMs`）、`receiptFallbacks`（其中有几个没有接收时刻、按到达时刻计入）和 `lastFreshSequenceNumber`（最近计入的那一帧：帧的 `sequenceNumber`，不是记录的 `seq`）。凑满三个、接收时刻跨 500 ms 画面的那个结果释放保持；那条记录带 `holdReleased`，字段同上，是计入那个结果之后的值，`sourceSequenceNumber` 是它的帧。只有那条带：从它再写一次的会话第一条记录是释放之后的状态，不带 `holdReleased`。恢复期间状态仍是原来的停止（`stop_required` 和原因，从后台回来是 `initializing`），所以停止状态的时长包含等待新鲜结果的时间。`session_start.holdTrace` 表示这份 trace 记录保持、帧带接收时刻；没有它时没有 `hold` 只表示没记录。`scripts/capture/hold_releases.py` 按导致每次释放的记录逐次核验：一致、不一致，或在记录或帧缺失时不可核验。
 
 ### `safetyStatesInWindow`
 

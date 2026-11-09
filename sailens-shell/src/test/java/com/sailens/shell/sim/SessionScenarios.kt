@@ -563,6 +563,230 @@ internal object SessionScenarios {
         endAtMs = 12_000,
     )
 
+    // ---- prompts held after a stop
+
+    /** A person standing to the left, seen from a standing user: a prompt below critical, offered again each cooldown. */
+    private fun standingByPerson() = standing(personLeft)
+
+    /** In [staleResultsAfterStall]: the last result, the first of four stale results, and the first fresh frame. */
+    const val STALL_LAST_RESULT_MS = 5_950L
+    const val STALE_ARRIVE_MS = 10_050L
+    const val STALE_FRESH_MS = 10_450L
+
+    /** Four results of pictures received 10 ms apart just after the last result, then fresh frames. */
+    private fun staleAfterStallFrame(index: Int): ScenarioFrame {
+        val atMs = at(index)
+        return when {
+            atMs <= STALL_LAST_RESULT_MS || atMs >= STALE_FRESH_MS -> standingByPerson()
+            atMs < STALE_ARRIVE_MS -> standingByPerson().copy(delivery = FrameDelivery.Lost)
+            else -> standingByPerson().copy(receiptLagMs = atMs - (STALL_LAST_RESULT_MS + 10 + (atMs - STALE_ARRIVE_MS) / 10))
+        }
+    }
+
+    val staleResultsAfterStall = SessionScript(
+        name = "stale_results_after_stall",
+        description = "Standing by a person to the left, no result after 5950: guidance stalls at 8500, said until " +
+            "10020. From 10050 four results arrive whose pictures were received just after the last result, before " +
+            "the stall; from 10450 the frames are fresh.",
+        scenario = scenario("stale_results_after_stall", List(indexAt(12_000)) { staleAfterStallFrame(it) }),
+        actions = SessionScript.defaultActions(ScriptAction.Stop(12_000)),
+        endAtMs = 13_000,
+    )
+
+    val staleResultsAfterStallLaunch = launch(staleResultsAfterStall, "the same states and alerts, prompts by its ranks.")
+
+    /** In [staleResultAfterForeground]: the picture received before the background whose result comes after it. */
+    const val BEFORE_BACKGROUND_RECEIVED_MS = 7_950L
+    const val LATE_AFTER_FOREGROUND_MS = 9_750L
+
+    val staleResultAfterForeground = SessionScript(
+        name = "stale_result_after_foreground",
+        description = "Standing by a person to the left; the app goes to the background at 8000 (the interruption " +
+            "said until 9680) and is back at 9000. The first result after it, at 9750, is of a picture received at " +
+            "7950, before the background; the frames after it are fresh.",
+        scenario = scenario(
+            "stale_result_after_foreground",
+            List(indexAt(12_000)) { i ->
+                if (at(i) == LATE_AFTER_FOREGROUND_MS) {
+                    standingByPerson().copy(receiptLagMs = LATE_AFTER_FOREGROUND_MS - BEFORE_BACKGROUND_RECEIVED_MS)
+                } else {
+                    standingByPerson()
+                }
+            },
+        ),
+        actions = SessionScript.defaultActions(
+            ScriptAction.Background(8_000),
+            ScriptAction.Foreground(9_000),
+            ScriptAction.CameraResume(9_700),
+            ScriptAction.Stop(12_000),
+        ),
+        endAtMs = 13_000,
+    )
+
+    /** In [backgroundTwiceLateFrame]: the picture received between the two backgrounds, and when its result comes. */
+    const val BETWEEN_BACKGROUNDS_RECEIVED_MS = 10_250L
+    const val LATE_AFTER_SECOND_FOREGROUND_MS = 12_050L
+
+    val backgroundTwiceLateFrame = SessionScript(
+        name = "background_twice_late_frame",
+        description = "Standing by a person to the left; the app goes to the background at 8000 and is back at 10000, " +
+            "the camera at 10200; to the background again at 10300 and back at 12000. The picture received at 10250, " +
+            "after the first return but before the second background, gives its result only at 12050, once both " +
+            "interruptions have been said.",
+        scenario = scenario(
+            "background_twice_late_frame",
+            List(indexAt(15_000)) { i ->
+                when (at(i)) {
+                    BETWEEN_BACKGROUNDS_RECEIVED_MS -> standingByPerson().copy(delivery = FrameDelivery.Lost)
+                    LATE_AFTER_SECOND_FOREGROUND_MS -> standingByPerson().copy(receiptLagMs = LATE_AFTER_SECOND_FOREGROUND_MS - BETWEEN_BACKGROUNDS_RECEIVED_MS)
+                    else -> standingByPerson()
+                }
+            },
+        ),
+        actions = SessionScript.defaultActions(
+            ScriptAction.Background(8_000),
+            ScriptAction.Foreground(10_000),
+            ScriptAction.CameraResume(10_200),
+            ScriptAction.Background(10_300),
+            ScriptAction.Foreground(12_000),
+            ScriptAction.CameraResume(12_000),
+            ScriptAction.Stop(15_000),
+        ),
+        endAtMs = 16_000,
+    )
+
+    /** In [resultWhileInBackground]: the result that comes in the background, of a picture received before it. */
+    const val IN_BACKGROUND_RESULT_MS = 9_850L
+
+    val resultWhileInBackground = SessionScript(
+        name = "result_while_in_background",
+        description = "Standing by a person to the left; the app goes to the background at 8000, the interruption said " +
+            "until 9680. At 9850, still in the background, a result comes of a picture received at 7950; no other " +
+            "frame comes until the app is back at 13000 and the camera delivers from 13350.",
+        scenario = scenario(
+            "result_while_in_background",
+            List(indexAt(16_000)) { i ->
+                val atMs = at(i)
+                when {
+                    atMs == IN_BACKGROUND_RESULT_MS -> standingByPerson().copy(receiptLagMs = IN_BACKGROUND_RESULT_MS - BEFORE_BACKGROUND_RECEIVED_MS)
+                    atMs > IN_BACKGROUND_RESULT_MS && atMs < 13_350 -> standingByPerson().copy(delivery = FrameDelivery.Lost)
+                    else -> standingByPerson()
+                }
+            },
+        ),
+        actions = SessionScript.defaultActions(
+            ScriptAction.Background(8_000),
+            ScriptAction.CameraResume(9_800),
+            ScriptAction.Foreground(13_000),
+            ScriptAction.Stop(16_000),
+        ),
+        endAtMs = 17_000,
+    )
+
+    /** In [rhythmQueuedWhenBackgrounded]: when the app goes to the background, the person's rhythm still waiting. */
+    const val QUEUED_BACKGROUND_MS = 6_900L
+
+    val rhythmQueuedWhenBackgrounded = SessionScript(
+        name = "rhythm_queued_when_backgrounded",
+        description = "With speech off, standing on the unrecognised floor of ground_unrecognized_long: its entry rhythm " +
+            "holds the motor from 6550, and a person stepping in ahead at 6650 is prompted by vibration alone and " +
+            "waits behind it. The app goes to the background at 6900, before the person's rhythm has played; back at " +
+            "11000.",
+        scenario = scenario(
+            "rhythm_queued_when_backgrounded",
+            List(indexAt(14_000)) { i ->
+                val world = when {
+                    at(i) >= HAPTICS_PERSON_FROM_MS -> indoor(personAt(0.0, 1.5))
+                    at(i) >= FLOOR_FROM_MS -> indoor()
+                    else -> sidewalk
+                }
+                standing(world)
+            },
+        ),
+        actions = SessionScript.defaultActions(
+            ScriptAction.Background(QUEUED_BACKGROUND_MS),
+            ScriptAction.Foreground(11_000),
+            ScriptAction.CameraResume(11_000),
+            ScriptAction.Stop(14_000),
+        ),
+        endAtMs = 15_000,
+        settings = GuidanceFeedbackSettings(speechEnabled = false),
+    )
+
+    val stopAndRecoveryScreenReader = stopAndRecoverySpeech.copy(
+        name = "stop_and_recovery_screen_reader",
+        description = "stop_and_recovery_speech with the screen reader on: the prompts and the covered lens's sentences " +
+            "go to it.",
+        scenario = scenario("stop_and_recovery_screen_reader", List(indexAt(16_000)) { recoveryFrame(it) }),
+        screenReader = true,
+    )
+
+    /** Frames 33 ms apart: frame [index] of a session at that step. */
+    private fun at33(index: Int) = SessionScript.DEFAULT_FIRST_FRAME_MS + index * 33L
+
+    /**
+     * In the 33 ms sessions: covered from frame [FAST_COVER_FROM] for 91 frames (3 s), a person ahead from 30 frames
+     * (1 s) into the cover on: the cover is confirmed by then, so the person can be prompted only once it is lifted.
+     */
+    const val FAST_COVER_FROM = 91
+    const val FAST_COVER_FRAMES = 91
+    const val FAST_PERSON_FROM = FAST_COVER_FROM + 30
+
+    private fun fastFrame(index: Int, covered: Boolean): ScenarioFrame =
+        standing(if (index >= FAST_PERSON_FROM) personAhead else sidewalk).copy(lensCovered = covered)
+
+    val recoveryFastFrames = SessionScript(
+        name = "recovery_fast_frames",
+        description = "Frames 33 ms apart, standing; the lens covered for 3 s from the 92nd frame, a person stepping in " +
+            "1.5 m ahead 1 s into it, and uncovered with the person still there.",
+        scenario = scenario(
+            "recovery_fast_frames",
+            List(FAST_COVER_FROM + FAST_COVER_FRAMES + 90) { i -> fastFrame(i, i in FAST_COVER_FROM until FAST_COVER_FROM + FAST_COVER_FRAMES) },
+            stepMs = 33,
+        ),
+        actions = SessionScript.defaultActions(ScriptAction.Stop(at33(FAST_COVER_FROM + FAST_COVER_FRAMES + 90))),
+        endAtMs = at33(FAST_COVER_FROM + FAST_COVER_FRAMES + 90) + 1_000,
+    )
+
+    /** In [recoveryRestartedByCover]: after the cover, nine clear frames, then fifteen covered ones, then clear. */
+    const val RESTART_CLEAR_FRAMES = 9
+    const val RESTART_COVER_FRAMES = 15
+
+    val recoveryRestartedByCover = SessionScript(
+        name = "recovery_restarted_by_cover",
+        description = "recovery_fast_frames, but nine frames after the cover (about 300 ms) the lens is covered again " +
+            "for fifteen frames, long enough for the covered lens to be confirmed again, and then uncovered.",
+        scenario = scenario(
+            "recovery_restarted_by_cover",
+            List(FAST_COVER_FROM + FAST_COVER_FRAMES + RESTART_CLEAR_FRAMES + RESTART_COVER_FRAMES + 90) { i ->
+                val secondFrom = FAST_COVER_FROM + FAST_COVER_FRAMES + RESTART_CLEAR_FRAMES
+                fastFrame(i, i in FAST_COVER_FROM until FAST_COVER_FROM + FAST_COVER_FRAMES || i in secondFrom until secondFrom + RESTART_COVER_FRAMES)
+            },
+            stepMs = 33,
+        ),
+        actions = SessionScript.defaultActions(
+            ScriptAction.Stop(at33(FAST_COVER_FROM + FAST_COVER_FRAMES + RESTART_CLEAR_FRAMES + RESTART_COVER_FRAMES + 90)),
+        ),
+        endAtMs = at33(FAST_COVER_FROM + FAST_COVER_FRAMES + RESTART_CLEAR_FRAMES + RESTART_COVER_FRAMES + 90) + 1_000,
+    )
+
+    /** In [recoveryOneFps]: frames 1 s apart from 1050, covered from the third (3050) to the twelfth (12050). */
+    const val ONE_FPS_COVER_FROM = 2
+    const val ONE_FPS_COVER_UNTIL = 12
+
+    val recoveryOneFps = SessionScript(
+        name = "recovery_one_fps",
+        description = "Frames 1 s apart, standing by a person to the left; the lens covered from 3050 to 12050. The " +
+            "sixth covered frame (8050) stops guidance and the sixth clear one (18050) judges again.",
+        scenario = scenario(
+            "recovery_one_fps",
+            List(22) { i -> standingByPerson().copy(lensCovered = i in ONE_FPS_COVER_FROM until ONE_FPS_COVER_UNTIL) },
+            stepMs = 1_000,
+        ),
+        actions = SessionScript.defaultActions(ScriptAction.Stop(23_000)),
+        endAtMs = 24_000,
+    )
+
     /** When the guidance screen goes away in the two sessions that leave it. */
     const val LEAVE_MS = 3_000L
 
@@ -681,6 +905,16 @@ internal object SessionScenarios {
         stopAndRecoverySpeechLaunch,
         stopAndRecoveryHaptics,
         accompanyingRhythmReplaced,
+        staleResultsAfterStall,
+        staleResultsAfterStallLaunch,
+        staleResultAfterForeground,
+        backgroundTwiceLateFrame,
+        resultWhileInBackground,
+        rhythmQueuedWhenBackgrounded,
+        stopAndRecoveryScreenReader,
+        recoveryFastFrames,
+        recoveryRestartedByCover,
+        recoveryOneFps,
         screenLeavesOtherLease,
         screenLeavesLastLease,
         restartWhilePreviousRunHolds,

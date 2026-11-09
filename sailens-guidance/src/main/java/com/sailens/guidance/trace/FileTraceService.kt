@@ -72,7 +72,7 @@ class FileTraceService internal constructor(
             flushToDisk()
             activeSessionId = metadata.sessionId
             traceFile = createTraceFile(metadata.sessionId)
-            ledger.attach(metadata.copy(safetyTrace = true))
+            ledger.attach(metadata.copy(safetyTrace = true, holdTrace = true))
             trim()
         }
     }

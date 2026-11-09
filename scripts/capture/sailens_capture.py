@@ -220,6 +220,8 @@ class Trace:
     # safety_state records, in file order: where Guidance stood for the user, and the facts it was derived from.
     # Durations come from elapsedMs and stateSinceElapsedMs, never from the wall-clock "at"; a gap in "seq" is unknown.
     safety_states: list = field(default_factory=list)
+    # The session_start record: whether the trace records the safety state and the prompt hold (safetyTrace, holdTrace).
+    session_start: dict = None
     warnings: list = field(default_factory=list)
 
 
@@ -244,6 +246,8 @@ def load_trace(path: str) -> Trace:
                 trace.alerts.append(record)
             elif kind == "safety_state":
                 trace.safety_states.append(record)
+            elif kind == "session_start" and trace.session_start is None:
+                trace.session_start = record
     return trace
 
 

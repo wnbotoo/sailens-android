@@ -806,6 +806,9 @@ Each is absent in traces written before it existed, which means "not recorded", 
 - `receiptToDecisionMs`: from the frame source receiving the frame to the decision, both elapsed
   realtime. It leaves out exposure to receipt, so it is not the frame's whole age. Absent when the
   source did not record the receipt.
+- `receivedElapsedMs`: when the frame source received the frame, elapsed-realtime milliseconds: the
+  time the safety state judges a result's freshness by after a stop (see `hold` below). The same value
+  the safety state reads. Absent when the source did not record the receipt.
 
 ### `guidance_alert`
 
@@ -920,6 +923,23 @@ trace records these; without it a trace has no timeline, which is not one in whi
 
 The analysis flow closes the trace before the shell handles its error, so `failed` and the alert for
 it are never in a trace. The report says when a trace's flow ended on an error.
+
+`hold`, when present, says ordinary prompts are held after a stop: `cause` (the stop that began it:
+`camera_obstructed`, `too_dark`, `startup_stalled`, `perception_stalled`, `lifecycle`), `sinceElapsedMs`
+(when that stop began: a result whose frame was received at or before it is stale and does not count),
+`stopping` (the stop's cause still holds; false once it has gone and fresh results are awaited),
+`freshResults` and `freshSpanMs` (the fresh results counted since, and how far apart the first and last
+were received, `firstFreshReceivedElapsedMs` / `lastFreshReceivedElapsedMs`), `receiptFallbacks` (how
+many of them had no recorded receipt and counted at their arrival) and `lastFreshSequenceNumber` (the
+frame of the latest one counted: a frame's `sequenceNumber`, not a record's `seq`). The hold is released
+by the result that makes three fresh results spanning 500 ms of picture; that record has `holdReleased`
+with the same fields for the end of it, that result counted in, and `sourceSequenceNumber` its frame.
+Only that record: a session's opening, written again from it, carries the state after the release.
+While a hold recovers the state stays the stop it was (`stop_required` with its reason, or
+`initializing` after the background), so the time a stop holds includes the wait for fresh results.
+`session_start.holdTrace` says the trace records holds and frames their receipt; without it no `hold`
+means none was recorded. `scripts/capture/hold_releases.py` checks every release against the records
+that led to it: consistent, inconsistent, or unverifiable when records or frames are missing.
 
 ### `safetyStatesInWindow`
 

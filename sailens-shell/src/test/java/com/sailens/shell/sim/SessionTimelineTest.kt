@@ -52,7 +52,12 @@ class SessionTimelineTest {
         assertEquals("on that frame the notice is taken and the rhythm requested and played", listOf("fault_notice accepted", "fault_rhythm requested", "fault_rhythm played"), run.visionAlertsAt(confirmed))
         assertEquals("a cycle later, said and felt again", listOf("fault_notice accepted", "fault_rhythm requested", "fault_rhythm played"), run.visionAlertsAt(confirmed + 8_000))
         val clear = script.frameAtMs(SessionScenarios.LENS_COVERED.last + 6)
-        assertEquals("the sixth clear frame guides again", "$clear guiding result", run.states().first { it.at > confirmed && it.label == "guiding" }.describe())
+        assertEquals(
+            "the sixth clear frame judges again, the stop holding prompts",
+            "$clear stop_required(camera_obstructed) result",
+            run.states().first { it.at > confirmed && it.cause == "result" && it.judgement == "qualified" }.describe(),
+        )
+        assertEquals("fresh results for 500 ms release them", "${clear + 500} guiding result", run.states().first { it.at > confirmed && it.label == "guiding" }.describe())
         assertEquals("the lens is said clear once it has stayed clear for 2 s", listOf("fault_recovery accepted"), run.visionAlertsAt(clear + 2_000))
         val underCover = run.entries.filterIsInstance<TimelineEntry.Frame>().filter { it.atMs in confirmed until clear }
         assertTrue("a person is tracked ahead under the cover", underCover.any { ObstacleCategory.PERSON in it.tracked })
@@ -77,7 +82,12 @@ class SessionTimelineTest {
         assertTrue("the stall condition comes in the background", inBackground.any { it.cause == "poll" && it.stall == "no_results" && it.label == "interrupted(lifecycle)" })
         assertEquals("the foreground starts over", "13000 initializing lifecycle_start", run.states().single { it.cause == "lifecycle_start" }.describe())
         assertTrue("the interruption is cleared", run.entries.any { it is TimelineEntry.Ui && it.atMs == 13_000L && it.what == "clear_interrupted" })
-        assertEquals("the first frame back guides", "13350 guiding result", run.states().first { it.at > 13_000 && it.label == "guiding" }.describe())
+        assertEquals(
+            "the first frame back initializes still: prompts are held",
+            "13350 initializing result",
+            run.states().first { it.at > 13_000 && it.cause == "result" }.describe(),
+        )
+        assertEquals("fresh results for 500 ms release it", "13850 guiding result", run.states().first { it.at > 13_000 && it.label == "guiding" }.describe())
         assertTrue("nothing stalls", run.systemAlerts().none { it.kind == GuidanceAlertKinds.STALLED })
     }
 
@@ -128,7 +138,12 @@ class SessionTimelineTest {
             listOf("motor alarm interrupted", "alert stalled haptics played", "speech notice notice_guidance_stalled 16", "alert stalled speech requested"),
             run.deviceAndAlertsAt(stalls[0].at),
         )
-        assertEquals("the first result back guides", "25050 guiding result", run.states().first { it.at > stalls[1].at && it.label == "guiding" }.describe())
+        assertEquals(
+            "the first result back ends the stall, not the stop: prompts are held",
+            "25050 stop_required(perception_stalled) result",
+            run.states().first { it.at > stalls[1].at && it.cause == "result" }.describe(),
+        )
+        assertEquals("fresh results for 500 ms release it", "25550 guiding result", run.states().first { it.at > stalls[1].at && it.label == "guiding" }.describe())
     }
 
     @Test
@@ -142,7 +157,8 @@ class SessionTimelineTest {
             run.states().filter { it.at in 12_000..21_999 }.all { it.label == "interrupted(lifecycle)" },
         )
         assertEquals("the foreground starts over", "22000 initializing lifecycle_start", run.states().single { it.cause == "lifecycle_start" }.describe())
-        assertEquals("the first result back guides", "25050 guiding result", run.states().first { it.at > 22_000 && it.label == "guiding" }.describe())
+        assertEquals("the first result back initializes still", "25050 initializing result", run.states().first { it.at > 22_000 && it.cause == "result" }.describe())
+        assertEquals("fresh results for 500 ms release it", "25550 guiding result", run.states().first { it.at > 22_000 && it.label == "guiding" }.describe())
     }
 
     @Test
@@ -176,7 +192,12 @@ class SessionTimelineTest {
         }
         assertEquals("and at no other time", listOf(confirmed, confirmed + 8_000, confirmed + 16_000), run.visionAlerts().filter { it.kind == GuidanceAlertKinds.FAULT_NOTICE }.map { it.at })
         val clear = script.frameAtMs(SessionScenarios.COVERED_NEAR_WALL.last + 6)
-        assertEquals("the sixth clear frame guides again", "$clear guiding result", run.states().first { it.at > confirmed && it.label == "guiding" }.describe())
+        assertEquals(
+            "the sixth clear frame judges again, the stop holding prompts",
+            "$clear stop_required(camera_obstructed) result",
+            run.states().first { it.at > confirmed && it.cause == "result" && it.judgement == "qualified" }.describe(),
+        )
+        assertEquals("fresh results for 500 ms release them", "${clear + 500} guiding result", run.states().first { it.at > confirmed && it.label == "guiding" }.describe())
         assertEquals("the lens is said clear 2 s later", listOf("fault_recovery accepted"), run.visionAlertsAt(clear + 2_000))
         assertTrue("2 m short of the wall, no blocked prompt either side of the cover", run.decided().none { it.messageKey == SceneEventMessageKeys.BLOCKED })
         assertTrue("no system alert", run.systemAlerts().isEmpty())
@@ -192,7 +213,12 @@ class SessionTimelineTest {
         assertEquals("said again 15 s later, without the rhythm", listOf("fault_notice accepted"), run.visionAlertsAt(dark + 15_000))
         assertEquals("and at no other time", listOf(dark, dark + 15_000), run.visionAlerts().filter { it.kind == GuidanceAlertKinds.FAULT_NOTICE }.map { it.at })
         val lit = script.frameAtMs(SessionScenarios.LOW_LIGHT.last + 6)
-        assertEquals("the sixth lit frame guides again", "$lit guiding result", run.states().first { it.at > dark && it.label == "guiding" }.describe())
+        assertEquals(
+            "the sixth lit frame judges again, the stop holding prompts",
+            "$lit stop_required(too_dark) result",
+            run.states().first { it.at > dark && it.cause == "result" && it.judgement == "qualified" }.describe(),
+        )
+        assertEquals("fresh results for 500 ms release them", "${lit + 500} guiding result", run.states().first { it.at > dark && it.label == "guiding" }.describe())
         assertEquals("the light is said back 2 s later", listOf("fault_recovery ${SceneEventMessageKeys.LIGHT_RESTORED} accepted"), run.visionAlerts().filter { it.at == lit + 2_000 }.map { "${it.kind} ${it.key} ${it.result}" })
         assertTrue("no system alert", run.systemAlerts().isEmpty())
     }
@@ -230,7 +256,11 @@ class SessionTimelineTest {
         assertEquals("the sixth covered frame stops guidance", covered, stop.at)
         assertEquals("the floor still in its judgement", "unqualified(camera_obstructed,ground_unrecognized)", stop.judgement)
         val clear = script.frameAtMs(SessionScenarios.COVERED_ON_GROUND.last + 6)
-        assertEquals("the sixth clear frame: degraded by the floor again", "$clear degraded(ground_unrecognized) result", run.states().first { it.at > covered && it.label != stop.label }.describe())
+        assertEquals(
+            "the sixth clear frame judges again, degraded results count toward the release",
+            "${clear + 500} degraded(ground_unrecognized) result",
+            run.states().first { it.at > covered && it.label != stop.label }.describe(),
+        )
         assertEquals("the lens is said clear 2 s later", listOf("fault_recovery ${SceneEventMessageKeys.CAMERA_RESTORED} accepted"), run.visionAlerts().filter { it.at == clear + 2_000 }.map { "${it.kind} ${it.key} ${it.result}" })
         val floor = run.visionAlerts().filter { it.key == SceneEventMessageKeys.GROUND_UNRECOGNIZED || (it.kind == GuidanceAlertKinds.FAULT_RHYTHM && it.priority == "low") }
         assertEquals(
@@ -423,7 +453,12 @@ class SessionTimelineTest {
             listOf("20000 stalled haptics played", "20000 stalled speech requested"),
             run.systemAlerts().map { "${it.at} ${it.kind} ${it.channel} ${it.result}" },
         )
-        assertEquals("the first result guides", "${ready + 50} guiding result", run.states().first { it.label == "guiding" }.describe())
+        assertEquals(
+            "the first result ends the stall, not the stop",
+            "${ready + 50} stop_required(startup_stalled) result",
+            run.states().first { it.at > ready && it.cause == "result" }.describe(),
+        )
+        assertEquals("fresh results for 500 ms release it", "${ready + 550} guiding result", run.states().first { it.label == "guiding" }.describe())
     }
 
     @Test
@@ -499,6 +534,134 @@ class SessionTimelineTest {
         }
         assertEquals("one outcome per prompt", outcomes.size, outcomes.map { it.trace.eventId }.toSet().size)
         assertTrue("the cooldown is never told to take one back", run.receipts().none { it.kind == "revoke" })
+    }
+
+    @Test
+    fun stale_results_after_stall() {
+        assertStaleAfterStall(check(SessionScenarios.staleResultsAfterStall))
+    }
+
+    @Test
+    fun stale_results_after_stall_launch() {
+        val (run, _) = checkLaunch(SessionScenarios.staleResultsAfterStallLaunch, SessionScenarios.staleResultsAfterStall)
+        assertStaleAfterStall(run)
+    }
+
+    /** Four results of pictures taken before the stall, arriving once its notice is said: none counts, and today the first is said. */
+    private fun assertStaleAfterStall(run: SessionRun) {
+        val stall = run.holdStates().first { it.trace.hold?.cause == "perception_stalled" }
+        assertEquals("the stall begins the hold", 8_500L, stall.atMs)
+        val stale = run.frames().filter { it.lagMs > 0 }
+        assertEquals("four stale results", listOf(10_050L, 10_150L, 10_250L, 10_350L), stale.map { it.atMs })
+        assertTrue("received before the stall", stale.all { checkNotNull(it.receivedAtMs) < stall.atMs })
+        assertTrue("the stall's notice is over when they come", run.speech().any { it.kind == "done" && it.atMs < SessionScenarios.STALE_ARRIVE_MS })
+        assertTrue("none counts", run.holdStates().filter { it.atMs in 10_050..10_350 }.all { it.trace.hold?.freshResults == 0 })
+        val said = run.outcomes().first { it.at > stall.atMs && it.key.startsWith("event_obstacle_") }
+        assertEquals("today the first stale result's prompt is said", "10050 speech", "${said.at} ${said.via.first()}")
+        assertRelease(run, at = 10_950, fresh = 6, span = 500)
+    }
+
+    @Test
+    fun stale_result_after_foreground() {
+        val run = check(SessionScenarios.staleResultAfterForeground)
+        val late = run.frames().single { it.lagMs > 0 }
+        assertEquals("the first result back is of a picture from before the background", SessionScenarios.BEFORE_BACKGROUND_RECEIVED_MS, late.receivedAtMs)
+        assertTrue("the interruption is said before it comes", run.speech().any { it.kind == "done" && it.atMs < late.atMs })
+        assertEquals("it does not count", 0, run.holdStates().single { it.atMs == late.atMs }.trace.hold?.freshResults)
+        assertEquals("today its prompt is said", "9750 speech", run.outcomes().first { it.at >= late.atMs }.let { "${it.at} ${it.via.first()}" })
+        assertRelease(run, at = 10_350, fresh = 6, span = 500)
+    }
+
+    @Test
+    fun background_twice_late_frame() {
+        val run = check(SessionScenarios.backgroundTwiceLateFrame)
+        val second = run.holdStates().filter { it.trace.cause == "lifecycle_stop" }
+        assertEquals("each background begins a stop of its own", listOf(8_000L, 10_300L), second.map { it.trace.hold?.sinceElapsedMs?.let { since -> since - (it.trace.elapsedMs - it.atMs) } })
+        val late = run.frames().single { it.lagMs > 0 }
+        assertEquals(SessionScenarios.BETWEEN_BACKGROUNDS_RECEIVED_MS, late.receivedAtMs)
+        assertEquals("received before the second stop: it does not count", 0, run.holdStates().single { it.atMs == late.atMs }.trace.hold?.freshResults)
+        assertEquals("both interruptions are said before it comes", 2, run.speech().count { it.kind == "done" && it.id?.startsWith("s") == true && it.atMs < late.atMs })
+        assertEquals("today its prompt is said", "12050 speech", run.outcomes().first { it.at >= late.atMs }.let { "${it.at} ${it.via.first()}" })
+        assertRelease(run, at = 12_650, fresh = 6, span = 500)
+    }
+
+    @Test
+    fun result_while_in_background() {
+        val run = check(SessionScenarios.resultWhileInBackground)
+        val late = run.frames().single { it.lagMs > 0 }
+        assertEquals(SessionScenarios.IN_BACKGROUND_RESULT_MS, late.atMs)
+        val heldThen = run.holdStates().last { it.atMs <= late.atMs }
+        assertEquals("still in the background, the stop holds", "interrupted(lifecycle) true", "${heldThen.trace.stateLabel} ${heldThen.trace.hold?.stopping}")
+        assertEquals("today its prompt is said in the background", "9850 speech", run.outcomes().first { it.at >= late.atMs }.let { "${it.at} ${it.via.first()}" })
+        assertRelease(run, at = 13_850, fresh = 6, span = 500)
+    }
+
+    @Test
+    fun rhythm_queued_when_backgrounded() {
+        val run = check(SessionScenarios.rhythmQueuedWhenBackgrounded)
+        val background = SessionScenarios.QUEUED_BACKGROUND_MS
+        val queued = run.motor().single { it.kind == "queue" && it.result == "queued" }
+        assertTrue("a person's rhythm waits for the motor when the app goes", queued.atMs < background)
+        assertTrue("not started or dropped by then", run.motor().none { it.rhythm == queued.rhythm && it.atMs in queued.atMs..background && (it.kind == "start" || it.kind == "drop") })
+        val started = run.motor().first { it.kind == "start" && it.rhythm == queued.rhythm }
+        val stateThen = run.holdStates().last { it.atMs <= started.atMs }
+        assertEquals("today it plays in the background", "interrupted(lifecycle)", stateThen.trace.stateLabel)
+    }
+
+    @Test
+    fun stop_and_recovery_screen_reader() {
+        val run = check(SessionScenarios.stopAndRecoveryScreenReader)
+        val recovered = SessionScenarios.RECOVERY_LAST_UNCOVER_MS + 500
+        val handed = run.outcomes().first { it.at > SessionScenarios.RECOVERY_COVER_MS + 1_000 && it.key.startsWith("event_obstacle_") }
+        assertEquals("today the person goes to the screen reader on the sixth clear frame", "$recovered screen_reader", "${handed.at} ${handed.via.first()}")
+        assertRelease(run, at = recovered + 500, fresh = 6, span = 500)
+    }
+
+    @Test
+    fun recovery_fast_frames() {
+        val run = check(SessionScenarios.recoveryFastFrames)
+        val back = run.holdStates().first { it.trace.hold?.stopping == false }
+        val said = run.outcomes().single { it.key.startsWith("event_obstacle_") }
+        assertEquals("today the person ahead is said on the first frame judged again", "${back.atMs} CRITICAL", "${said.at} ${said.priority}")
+        val release = assertRelease(run, at = null, fresh = null, span = null)
+        assertTrue("the span settles it: the first result 500 ms of picture on (${release.atMs - back.atMs})", release.atMs - back.atMs in 500L..532L)
+    }
+
+    @Test
+    fun recovery_restarted_by_cover() {
+        val run = check(SessionScenarios.recoveryRestartedByCover)
+        val stops = run.holdStates().filter { it.trace.hold?.stopping == true && it.trace.cause == "result" && it.trace.judgement == "unqualified" }
+            .map { it.trace.hold!!.sinceElapsedMs - (it.trace.elapsedMs - it.atMs) }.distinct()
+        assertEquals("two stops for the lens", 2, stops.size)
+        val beforeSecond = run.holdStates().last { it.atMs < stops[1] }.trace.hold!!
+        assertTrue("the first recovery had begun", !beforeSecond.stopping && beforeSecond.freshResults >= 3)
+        assertTrue("and was short of 500 ms (${beforeSecond.freshSpanMs})", beforeSecond.freshSpanMs < 500)
+        assertTrue("so no release before the second stop", run.holdStates().none { it.trace.holdReleased != null && it.atMs < stops[1] })
+        val release = assertRelease(run, at = null, fresh = null, span = null)
+        assertTrue("released after the second stop", release.atMs > stops[1])
+    }
+
+    @Test
+    fun recovery_one_fps() {
+        val run = check(SessionScenarios.recoveryOneFps)
+        val back = run.holdStates().first { it.trace.hold?.stopping == false }
+        assertEquals("the sixth clear frame judges again", 18_050L, back.atMs)
+        assertEquals("today the person is said then", "18050 speech", run.outcomes().first { it.at >= back.atMs && it.key.startsWith("event_obstacle_") }.let { "${it.at} ${it.via.first()}" })
+        assertRelease(run, at = 20_050, fresh = 3, span = 2_000)
+    }
+
+    /**
+     * The one release of the session, by the result at [at] with [fresh] results spanning [span] ms (each checked when
+     * given), the release naming that result's frame.
+     */
+    private fun assertRelease(run: SessionRun, at: Long?, fresh: Int?, span: Long?): TimelineEntry.State {
+        val release = run.holdStates().single { it.trace.holdReleased != null }
+        val evidence = release.trace.holdReleased!!
+        at?.let { assertEquals("released at", it, release.atMs) }
+        fresh?.let { assertEquals("fresh results", it, evidence.freshResults) }
+        span?.let { assertEquals("span", it, evidence.freshSpanMs) }
+        assertEquals("by the frame that arrived then", run.frames().single { it.atMs == release.atMs }.seq, evidence.sourceSequenceNumber)
+        return release
     }
 
     @Test
@@ -616,6 +779,8 @@ class SessionTimelineTest {
         Timelines.check(script.name, run.lines)
         assertEquals("no disagreement and no observation fault", emptyList<LoggedLine>(), run.observationFaults)
         assertEquals("the cross-check", emptyList<String>(), TimelineCrossCheck.check(run.entries))
+        // Ordinary prompts that reached the user while prompts were held: what holding them would change.
+        TimelineCrossCheck.heldDeliveries(run.entries).forEach { println("held delivery ${script.name} $it") }
         return run
     }
 
@@ -683,14 +848,18 @@ class SessionTimelineTest {
         return confirmed
     }
 
-    /** The brief uncover changes nothing; the sixth clear frame after the last uncover judges again and prompts the person at once. */
+    /**
+     * The brief uncover changes nothing; the sixth clear frame after the last uncover judges again and prompts the
+     * person at once, while the stop holds until fresh results for 500 ms release it.
+     */
     private fun assertRecovers(run: SessionRun, confirmed: Long) {
         val recovered = SessionScenarios.RECOVERY_LAST_UNCOVER_MS + 500
         assertEquals(
-            "the brief uncover changes nothing; the sixth clear frame after the last one guides",
-            listOf("$confirmed stop_required(camera_obstructed) result", "$recovered guiding result"),
+            "the brief uncover changes nothing; the sixth clear frame after the last one judges again",
+            listOf("$confirmed stop_required(camera_obstructed) result", "$recovered stop_required(camera_obstructed) result"),
             run.states().filter { it.at >= confirmed }.take(2).map { it.describe() },
         )
+        assertEquals("fresh results for 500 ms release the stop", "${recovered + 500} guiding result", run.states().first { it.at > confirmed && it.label == "guiding" }.describe())
         val again = run.outcomes().first { it.at > confirmed && it.key.startsWith("event_obstacle_") }
         assertEquals("the person is prompted on that frame, and said", "$recovered event_obstacle_left_person true", "${again.at} ${again.key} ${PromptDeliveryChannels.SPEECH in again.via}")
     }
@@ -772,6 +941,10 @@ class SessionTimelineTest {
     }
 
     private fun SessionRun.speech() = entries.filterIsInstance<TimelineEntry.Speech>()
+
+    private fun SessionRun.holdStates() = entries.filterIsInstance<TimelineEntry.State>()
+
+    private fun SessionRun.frames() = entries.filterIsInstance<TimelineEntry.Frame>()
 
     /** The device calls, the system alerts and the UI ports at [atMs], in order, without ids or times. */
     private fun SessionRun.deviceAndAlertsAt(atMs: Long): List<String> = entries.filter { it.atMs == atMs }.mapNotNull { entry ->

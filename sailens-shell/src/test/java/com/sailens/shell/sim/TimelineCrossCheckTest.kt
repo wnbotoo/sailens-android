@@ -4,8 +4,10 @@ import com.sailens.guidance.model.common.EventCategory
 import com.sailens.guidance.model.common.EventPriority
 import com.sailens.guidance.model.scene.SceneEvent
 import com.sailens.guidance.model.trace.GuidanceAlertTrace
+import com.sailens.guidance.model.trace.HoldTrace
 import com.sailens.guidance.model.trace.PromptOutcomeTrace
 import com.sailens.guidance.model.trace.SafetyStateTrace
+import com.sailens.guidance.model.trace.SafetyTraceNames
 import com.sailens.guidance.safety.BaselineQualification
 import com.sailens.guidance.safety.UnqualifiedReason
 import com.sailens.shell.device.GuidanceHaptic
@@ -16,6 +18,7 @@ import org.junit.Test
 /** The cross-check on its own, with entries written by hand: what it lets through, and what it must not. */
 class TimelineCrossCheckTest {
 
+    /** A state record; a stop holds prompts from its own moment, as the monitor's does. */
     private fun state(atMs: Long, state: String, judgement: String?, cause: String, reasons: List<String> = emptyList(), judgementReasons: List<String> = emptyList()) =
         TimelineEntry.State(
             atMs,
@@ -23,6 +26,7 @@ class TimelineCrossCheckTest {
                 at = 0, elapsedMs = atMs, stateSinceElapsedMs = atMs, state = state, reasons = reasons, phase = "running",
                 interrupted = false, stall = "none", judgement = judgement, judgementReasons = judgementReasons,
                 expectedNavigationChannel = "speech", cause = cause,
+                hold = if (state == SafetyTraceNames.States.STOP_REQUIRED) HoldTrace(reasons.single(), atMs, stopping = true, freshResults = 0, freshSpanMs = 0) else null,
             ),
         )
 
@@ -72,6 +76,25 @@ class TimelineCrossCheckTest {
         assertTrue(problems.toString(), problems.any { "stop_required(camera_obstructed) after a frame of this start judged" in it })
         val tooDark = state(1150, "stop_required", "unqualified", "result", reasons = listOf("too_dark"), judgementReasons = listOf("camera_obstructed"))
         assertTrue("for another reason than the frame's", TimelineCrossCheck.check(listOf(TimelineEntry.Script(0, "start"), frame(1150, 2, unqualified), tooDark)).any { "stop_required(too_dark)" in it })
+    }
+
+    @Test
+    fun `a stop for the camera without a hold answers to the latest frame, and one held after its cause went to the frame that began it`() {
+        val unqualified = BaselineQualification.Unqualified(UnqualifiedReason.CAMERA_OBSTRUCTED, emptySet())
+        val stop = state(1150, "stop_required", "unqualified", "result", reasons = listOf("camera_obstructed"), judgementReasons = listOf("camera_obstructed"))
+        val unheld = stop.copy(trace = stop.trace.copy(hold = null))
+        val unheldProblems = TimelineCrossCheck.check(listOf(TimelineEntry.Script(0, "start"), frame(1150, 2), unheld))
+        assertTrue(unheldProblems.toString(), unheldProblems.any { "1150: stop_required(camera_obstructed) after a frame of this start judged" in it })
+
+        fun recovering(sinceMs: Long) = state(1450, "stop_required", "qualified", "result", reasons = listOf("camera_obstructed")).let {
+            it.copy(trace = it.trace.copy(hold = HoldTrace("camera_obstructed", sinceMs, stopping = false, freshResults = 1, freshSpanMs = 0, firstFreshReceivedElapsedMs = 1450, lastFreshReceivedElapsedMs = 1450, lastFreshSequenceNumber = 3)))
+        }
+        val begun = listOf(TimelineEntry.Script(0, "start"), frame(1150, 2, unqualified), stop, frame(1450, 3))
+        assertEquals("held by the stop its frame began", emptyList<String>(), TimelineCrossCheck.check(begun + recovering(1150)))
+        val notBegun = TimelineCrossCheck.check(begun + recovering(1300))
+        assertTrue(notBegun.toString(), notBegun.any { "1450: stop_required(camera_obstructed) held by camera_obstructed since 1300, no frame of this start began it" in it })
+        val restarted = listOf(TimelineEntry.Script(0, "start"), frame(1150, 2, unqualified), stop, TimelineEntry.Script(1300, "start"), frame(1450, 3))
+        assertTrue("a frame of an earlier start began no stop of this one", TimelineCrossCheck.check(restarted + recovering(1150)).any { "since 1150, no frame of this start began it" in it })
     }
 
     @Test

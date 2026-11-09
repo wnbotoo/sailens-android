@@ -444,7 +444,7 @@ class SceneAnalysisViewModel(
             }.collectLatest { result ->
                 frameCount++
                 // Before the frame's prompts are delivered.
-                alerts.onResult(result.qualification.baseline)
+                alerts.onResult(result.qualification.baseline, result.sequenceNumber, result.frameReceivedAtMs)
                 latestSceneResult = result
                 val overlayMode = _uiState.value.overlayMode
                 val events = result.events

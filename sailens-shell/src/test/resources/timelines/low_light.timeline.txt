@@ -1,15 +1,15 @@
 # low_light: Standing on a sidewalk in the dark for 20 s from 5050. The sixth dark frame stops guidance, said and felt on entering, and said again 15 s later without the rhythm; the sixth lit frame judges again, and the light is said back 2 s later.
 # config detfirst=off step=100 speech=on screenReader=off haptics=on faultHaptics=on
-0 state idle since=0 phase=not_started interrupted=false stall=none judgement=none faults=[] channel=speech cause=output
+0 state idle since=0 phase=not_started interrupted=false stall=none judgement=none faults=[] channel=speech cause=output hold=none
 0 script start
-0 state initializing since=0 phase=starting interrupted=false stall=none judgement=none faults=[] channel=speech cause=start_requested
-0 state initializing since=0 phase=awaiting_first_result interrupted=false stall=none judgement=none faults=[] channel=speech cause=flow_started
+0 state initializing since=0 phase=starting interrupted=false stall=none judgement=none faults=[] channel=speech cause=start_requested hold=none
+0 state initializing since=0 phase=awaiting_first_result interrupted=false stall=none judgement=none faults=[] channel=speech cause=flow_started hold=none
 1000 script release_init sem
 1050 frame seq=1 q=qualified events=[]
-1050 state guiding since=1050 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result
+1050 state guiding since=1050 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=none
 5450 frames seq=2..45 n=44 from=1150 q=qualified
 5550 frame seq=46 q=unqualified(too_dark) events=[e1:event_low_light:HIGH@-~11550]
-5550 state stop_required(too_dark) since=5550 phase=running interrupted=false stall=none judgement=unqualified(too_dark) faults=[] channel=speech cause=result
+5550 state stop_required(too_dark) since=5550 phase=running interrupted=false stall=none judgement=unqualified(too_dark) faults=[] channel=speech cause=result hold=too_dark(since=5550,stopping,fresh=0,span=0)
 5550 receipt confirm e1
 5550 outcome e1 src=46 event_low_light HIGH delivered=vision_alerts
 5550 speech speak n1 "event_low_light" scale=16 exp=11550 -> accepted
@@ -29,8 +29,18 @@
 21750 speech done n2
 25450 frames seq=208..245 n=38 from=21750 q=unqualified(too_dark)
 25550 frame seq=246 q=qualified events=[]
-25550 state guiding since=25550 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result
-27550 frames seq=247..266 n=20 from=25650 q=qualified
+25550 state stop_required(too_dark) since=5550 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=too_dark(since=5550,recovering,fresh=1,span=0)
+25650 frames seq=247..247 n=1 from=25650 q=qualified
+25650 state stop_required(too_dark) since=5550 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=too_dark(since=5550,recovering,fresh=2,span=100)
+25750 frames seq=248..248 n=1 from=25750 q=qualified
+25750 state stop_required(too_dark) since=5550 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=too_dark(since=5550,recovering,fresh=3,span=200)
+25850 frames seq=249..249 n=1 from=25850 q=qualified
+25850 state stop_required(too_dark) since=5550 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=too_dark(since=5550,recovering,fresh=4,span=300)
+25950 frames seq=250..250 n=1 from=25950 q=qualified
+25950 state stop_required(too_dark) since=5550 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=too_dark(since=5550,recovering,fresh=5,span=400)
+26050 frames seq=251..251 n=1 from=26050 q=qualified
+26050 state guiding since=26050 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=none released=(fresh=6,span=500,src=251,fallbacks=0)
+27550 frames seq=252..266 n=15 from=26150 q=qualified
 27550 speech speak n3 "event_light_restored" scale=0 exp=32550 -> accepted
 27550 alert vision fault_recovery event_light_restored priority=low channel=speech result=accepted
 28850 frames seq=267..279 n=13 from=27650 q=qualified
@@ -39,4 +49,4 @@
 30000 script stop
 30000 speech stop
 30000 motor cancel
-30000 state idle since=30000 phase=not_started interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=stopped
+30000 state idle since=30000 phase=not_started interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=stopped hold=none

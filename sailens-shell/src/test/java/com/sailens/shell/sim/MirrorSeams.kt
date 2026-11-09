@@ -71,7 +71,7 @@ internal interface MirrorAlerts {
     fun onStallWatchStarted()
     fun onStallWatchStopped()
     fun onFlowStarted()
-    fun onResult(baseline: BaselineQualification)
+    fun onResult(baseline: BaselineQualification, sequenceNumber: Long, receivedAtMs: Long?)
     fun onFlowFailed(error: Throwable)
     fun onStopped()
     fun endOfSession()

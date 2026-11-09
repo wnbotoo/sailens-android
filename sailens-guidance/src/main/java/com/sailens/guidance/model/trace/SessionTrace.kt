@@ -18,6 +18,12 @@ data class SessionTraceMetadata(
      * before these were: it then has no state timeline, which is not the same as one in which nothing changed.
      */
     val safetyTrace: Boolean = false,
+    /**
+     * The safety records carry the prompt hold ([SafetyStateTrace.hold], [SafetyStateTrace.holdReleased]) and frames
+     * their receipt ([FrameTrace.receivedElapsedMs]). Set by the trace service. False in a trace written before these
+     * were: no hold there means none was recorded, not that none held, and a frame without a receipt says nothing.
+     */
+    val holdTrace: Boolean = false,
 )
 
 data class FrameTrace(
@@ -143,6 +149,11 @@ data class FrameTrace(
      * receipt.
      */
     val receiptToDecisionMs: Double? = null,
+    /**
+     * When the frame source received the frame, elapsed-realtime milliseconds: the time the safety state judges a
+     * result's freshness by. Null when the source did not record it, and in traces written before it existed.
+     */
+    val receivedElapsedMs: Long? = null,
 )
 
 /** One optional input's status ("not_configured" / "available" / "degraded" / "unavailable") and issues, lower case. */
@@ -412,6 +423,9 @@ object GuidanceAlertResults {
  * @param judgement the latest result's qualification level (`qualified` / `degraded` / `unqualified`), null before
  *   the first result; [judgementReasons] its reasons.
  * @param outputFaults the output's health, by the speech engine's state. An open set.
+ * @param hold ordinary prompts held after a stop, and how far the recovery has come; null when none are.
+ * @param holdReleased on the record of the result that ended a hold: its evidence, that result counted in. Only
+ *   there: a session's opening record, written again from it, has none.
  */
 data class SafetyStateTrace(
     val sessionId: String = "",
@@ -429,9 +443,14 @@ data class SafetyStateTrace(
     val outputFaults: List<String> = emptyList(),
     val expectedNavigationChannel: String,
     val cause: String,
+    val hold: HoldTrace? = null,
+    val holdReleased: HoldReleaseTrace? = null,
 ) {
     init {
         require(state in SafetyTraceNames.States.all) { "Unknown safety state '$state'" }
+        require(holdReleased == null || (hold == null && cause == SafetyTraceNames.Causes.RESULT)) {
+            "A hold is released by a result, and is gone after it: cause '$cause', hold $hold"
+        }
         require(phase in SafetyTraceNames.Phases.all) { "Unknown run phase '$phase'" }
         require(stall in SafetyTraceNames.Stalls.all) { "Unknown stall condition '$stall'" }
         require(expectedNavigationChannel in SafetyTraceNames.Channels.all) { "Unknown navigation channel '$expectedNavigationChannel'" }
@@ -443,6 +462,51 @@ data class SafetyStateTrace(
     /** The state with its reasons, as one label: `degraded(ground_unrecognized)`, or `guiding`. Equal labels are the same state. */
     val stateLabel: String
         get() = if (reasons.isEmpty()) state else reasons.sorted().joinToString(prefix = "$state(", postfix = ")", separator = ",")
+}
+
+/**
+ * Ordinary prompts held after a stop ([SafetyStateTrace.hold]).
+ *
+ * @param cause the stop that began it, one of [SafetyTraceNames.HoldCauses].
+ * @param sinceElapsedMs when that stop began: a result whose frame was received at or before it is stale.
+ * @param stopping the stop's cause still holds; false once it has gone and fresh results are awaited.
+ * @param freshResults the fresh results counted since; [freshSpanMs] how far apart the first and last were received.
+ * @param receiptFallbacks how many of those had no recorded receipt and counted at their arrival.
+ * @param lastFreshSequenceNumber the frame of the latest counted result: a frame's `sequenceNumber`, not a record's `seq`.
+ */
+data class HoldTrace(
+    val cause: String,
+    val sinceElapsedMs: Long,
+    val stopping: Boolean,
+    val freshResults: Int,
+    val freshSpanMs: Long,
+    val firstFreshReceivedElapsedMs: Long? = null,
+    val lastFreshReceivedElapsedMs: Long? = null,
+    val receiptFallbacks: Int = 0,
+    val lastFreshSequenceNumber: Long? = null,
+) {
+    init {
+        require(cause in SafetyTraceNames.HoldCauses.all) { "Unknown hold cause '$cause'" }
+    }
+}
+
+/**
+ * What ended a hold ([SafetyStateTrace.holdReleased]), the releasing result counted in: as [HoldTrace], with
+ * [sourceSequenceNumber] the frame of that result.
+ */
+data class HoldReleaseTrace(
+    val cause: String,
+    val sinceElapsedMs: Long,
+    val freshResults: Int,
+    val firstFreshReceivedElapsedMs: Long,
+    val lastFreshReceivedElapsedMs: Long,
+    val freshSpanMs: Long,
+    val receiptFallbacks: Int,
+    val sourceSequenceNumber: Long,
+) {
+    init {
+        require(cause in SafetyTraceNames.HoldCauses.all) { "Unknown hold cause '$cause'" }
+    }
 }
 
 /** The closed sets of names a [SafetyStateTrace] carries. */
@@ -507,6 +571,17 @@ object SafetyTraceNames {
             START_REQUESTED, STALL_WATCH_STARTED, FLOW_STARTED, RESULT, FLOW_FAILED, STOPPED, LIFECYCLE_STOP,
             LIFECYCLE_START, OUTPUT, POLL, SESSION_START,
         )
+    }
+
+    /** Why ordinary prompts are held: the stop that began the hold. */
+    object HoldCauses {
+        const val CAMERA_OBSTRUCTED = "camera_obstructed"
+        const val TOO_DARK = "too_dark"
+        const val STARTUP_STALLED = "startup_stalled"
+        const val PERCEPTION_STALLED = "perception_stalled"
+        const val LIFECYCLE = "lifecycle"
+
+        val all: Set<String> = setOf(CAMERA_OBSTRUCTED, TOO_DARK, STARTUP_STALLED, PERCEPTION_STALLED, LIFECYCLE)
     }
 
     /** The qualification levels, as frames write them. */

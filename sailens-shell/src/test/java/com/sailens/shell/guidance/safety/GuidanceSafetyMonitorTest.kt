@@ -47,9 +47,12 @@ class GuidanceSafetyMonitorTest {
             running = true
         }
 
-        fun result(now: Long, baseline: BaselineQualification = BaselineQualification.Qualified, ready: Boolean = true) {
+        private var frame = 0L
+
+        /** A result at [now], its frame received [lagMs] before. */
+        fun result(now: Long, baseline: BaselineQualification = BaselineQualification.Qualified, ready: Boolean = true, lagMs: Long = 0) {
             detector.onResult(now)
-            monitor.onResult(now, baseline, ready)
+            monitor.onResult(now, baseline, ++frame, now - lagMs, ready)
         }
 
         fun poll(now: Long) = monitor.poll(now)
@@ -127,21 +130,32 @@ class GuidanceSafetyMonitorTest {
         s.result(4_000, obstructed)
         assertState(s, GuidanceSafetyState.StopRequired(StopReason.CAMERA_OBSTRUCTED), GuidanceRunPhase.RUNNING)
         assertEquals(obstructed, s.lastChange(4).axes.judgement)
+        assertEquals("the stop begins a hold", HoldCause.CAMERA_OBSTRUCTED, s.monitor.axes.hold?.cause)
 
+        // The view is back: the stop holds until three fresh results span 500 ms of picture.
         s.result(6_000)
+        assertState(s, GuidanceSafetyState.StopRequired(StopReason.CAMERA_OBSTRUCTED), GuidanceRunPhase.RUNNING)
+        s.result(6_200)
+        assertState(s, GuidanceSafetyState.StopRequired(StopReason.CAMERA_OBSTRUCTED), GuidanceRunPhase.RUNNING)
+        s.result(6_500)
         assertState(s, GuidanceSafetyState.Guiding, GuidanceRunPhase.RUNNING)
+        assertEquals("released by the third, 500 ms after the first", 3, s.lastChange(7).release?.fresh)
 
         s.result(7_000, ground)
         assertState(s, GuidanceSafetyState.Degraded(setOf(DegradeReason.GROUND_UNRECOGNIZED), emptySet()), GuidanceRunPhase.RUNNING)
-        assertEquals(6, s.changes.size)
+        assertEquals(8, s.changes.size)
 
         assertEquals(null, s.poll(9_000))
-        assertEquals("before the stall limit nothing changes", 6, s.changes.size)
+        assertEquals("before the stall limit nothing changes", 8, s.changes.size)
         assertEquals(SystemAlert.STALLED, s.poll(9_500))
         assertState(s, GuidanceSafetyState.StopRequired(StopReason.PERCEPTION_STALLED), GuidanceRunPhase.RUNNING, StallCondition.NO_RESULTS)
-        s.lastChange(7).let { assertEquals(SafetyInput.POLL, it.cause); assertEquals(9_500L, it.stateSinceElapsedMs) }
+        s.lastChange(9).let { assertEquals(SafetyInput.POLL, it.cause); assertEquals(9_500L, it.stateSinceElapsedMs) }
 
+        // Results again: the stall is over, the stop holds until fresh results release it.
         s.result(11_000)
+        assertState(s, GuidanceSafetyState.StopRequired(StopReason.PERCEPTION_STALLED), GuidanceRunPhase.RUNNING)
+        s.result(11_200)
+        s.result(11_500)
         assertState(s, GuidanceSafetyState.Guiding, GuidanceRunPhase.RUNNING)
 
         assertEquals("the session runs: the interruption is told", SystemAlert.INTERRUPTED, s.background(12_000))
@@ -152,19 +166,23 @@ class GuidanceSafetyMonitorTest {
         // alarm is given.
         assertEquals(null, s.poll(14_000))
         assertState(s, GuidanceSafetyState.Interrupted(InterruptReason.LIFECYCLE), GuidanceRunPhase.RUNNING, StallCondition.NO_RESULTS)
-        s.lastChange(10).let { assertEquals(SafetyInput.POLL, it.cause); assertEquals(interruptedSince, it.stateSinceElapsedMs) }
+        s.lastChange(14).let { assertEquals(SafetyInput.POLL, it.cause); assertEquals(interruptedSince, it.stateSinceElapsedMs) }
 
         s.foreground(20_000)
         assertState(s, GuidanceSafetyState.Initializing, GuidanceRunPhase.AWAITING_FIRST_RESULT)
         assertEquals("a new startup grace, not a stall", null, s.poll(25_000))
         assertState(s, GuidanceSafetyState.Initializing, GuidanceRunPhase.AWAITING_FIRST_RESULT)
 
+        // After the background the screen initializes until fresh results release the hold.
         s.result(26_000)
+        assertState(s, GuidanceSafetyState.Initializing, GuidanceRunPhase.RUNNING)
+        s.result(26_200)
+        s.result(26_500)
         assertState(s, GuidanceSafetyState.Guiding, GuidanceRunPhase.RUNNING)
 
         s.stopped(30_000)
         assertState(s, GuidanceSafetyState.Idle, GuidanceRunPhase.NOT_STARTED)
-        s.lastChange(13).let { assertEquals(SafetyInput.STOPPED, it.cause); assertEquals(30_000L, it.stateSinceElapsedMs) }
+        s.lastChange(19).let { assertEquals(SafetyInput.STOPPED, it.cause); assertEquals(30_000L, it.stateSinceElapsedMs) }
 
         // Every change written, in order: what caused it, the state, since when, and when it was observed.
         assertEquals(
@@ -173,14 +191,21 @@ class GuidanceSafetyMonitorTest {
                 "FLOW_STARTED initializing since=0 at=100",
                 "RESULT guiding since=3000 at=3000",
                 "RESULT stop_required(camera_obstructed) since=4000 at=4000",
-                "RESULT guiding since=6000 at=6000",
+                // The view back: each fresh result is a change of the hold, the stop holds until the third.
+                "RESULT stop_required(camera_obstructed) since=4000 at=6000",
+                "RESULT stop_required(camera_obstructed) since=4000 at=6200",
+                "RESULT guiding since=6500 at=6500",
                 "RESULT degraded(ground_unrecognized) since=7000 at=7000",
                 "POLL stop_required(perception_stalled) since=9500 at=9500",
-                "RESULT guiding since=11000 at=11000",
+                "RESULT stop_required(perception_stalled) since=9500 at=11000",
+                "RESULT stop_required(perception_stalled) since=9500 at=11200",
+                "RESULT guiding since=11500 at=11500",
                 "LIFECYCLE_STOP interrupted(lifecycle) since=12000 at=12000",
                 "POLL interrupted(lifecycle) since=12000 at=14000",
                 "LIFECYCLE_START initializing since=20000 at=20000",
-                "RESULT guiding since=26000 at=26000",
+                "RESULT initializing since=20000 at=26000",
+                "RESULT initializing since=20000 at=26200",
+                "RESULT guiding since=26500 at=26500",
                 "STOPPED idle since=30000 at=30000",
             ),
             s.changes.map { "${it.cause} ${it.state.label} since=${it.stateSinceElapsedMs} at=${it.elapsedMs}" },

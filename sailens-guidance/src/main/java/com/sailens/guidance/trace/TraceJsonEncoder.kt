@@ -18,6 +18,7 @@ internal object TraceJsonEncoder {
         put("targetHardwareProfile", metadata.targetHardwareProfile)
         metadata.openedElapsedMs?.let { put("openedElapsedMs", it) }
         if (metadata.safetyTrace) put("safetyTrace", true)
+        if (metadata.holdTrace) put("holdTrace", true)
     }
 
     fun encodeSafetyState(state: SafetyStateTrace): JSONObject = JSONObject().apply {
@@ -39,6 +40,37 @@ internal object TraceJsonEncoder {
         put("outputFaults", JSONArray(state.outputFaults))
         put("expectedNavigationChannel", state.expectedNavigationChannel)
         put("cause", state.cause)
+        state.hold?.let { hold ->
+            put(
+                "hold",
+                JSONObject().apply {
+                    put("cause", hold.cause)
+                    put("sinceElapsedMs", hold.sinceElapsedMs)
+                    put("stopping", hold.stopping)
+                    put("freshResults", hold.freshResults)
+                    put("freshSpanMs", hold.freshSpanMs)
+                    hold.firstFreshReceivedElapsedMs?.let { put("firstFreshReceivedElapsedMs", it) }
+                    hold.lastFreshReceivedElapsedMs?.let { put("lastFreshReceivedElapsedMs", it) }
+                    put("receiptFallbacks", hold.receiptFallbacks)
+                    hold.lastFreshSequenceNumber?.let { put("lastFreshSequenceNumber", it) }
+                },
+            )
+        }
+        state.holdReleased?.let { release ->
+            put(
+                "holdReleased",
+                JSONObject().apply {
+                    put("cause", release.cause)
+                    put("sinceElapsedMs", release.sinceElapsedMs)
+                    put("freshResults", release.freshResults)
+                    put("firstFreshReceivedElapsedMs", release.firstFreshReceivedElapsedMs)
+                    put("lastFreshReceivedElapsedMs", release.lastFreshReceivedElapsedMs)
+                    put("freshSpanMs", release.freshSpanMs)
+                    put("receiptFallbacks", release.receiptFallbacks)
+                    put("sourceSequenceNumber", release.sourceSequenceNumber)
+                },
+            )
+        }
     }
 
     fun encodeFrame(frameTrace: FrameTrace): JSONObject = JSONObject().apply {
@@ -166,6 +198,7 @@ internal object TraceJsonEncoder {
             )
         }
         frameTrace.receiptToDecisionMs?.let { put("receiptToDecisionMs", it) }
+        frameTrace.receivedElapsedMs?.let { put("receivedElapsedMs", it) }
     }
 
     fun encodeOverlayRender(

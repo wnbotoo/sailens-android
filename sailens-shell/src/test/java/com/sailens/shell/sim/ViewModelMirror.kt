@@ -376,7 +376,7 @@ internal class ViewModelMirror(
                 observer.resultArrived(run, result)
                 // :445-461
                 frameCount++
-                alerts.onResult(result.qualification.baseline)
+                alerts.onResult(result.qualification.baseline, result.sequenceNumber, result.frameReceivedAtMs)
                 latestSceneResult = result
                 val events = result.events
                 uiState.update {

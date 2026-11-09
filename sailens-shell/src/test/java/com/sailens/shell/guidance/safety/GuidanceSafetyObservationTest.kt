@@ -81,7 +81,7 @@ class GuidanceSafetyObservationTest {
         observation.observe { onStartRequested(0) }
         observation.observe { onStallWatchStarted(0) }
         observation.observe { onFlowStarted(0) }
-        observation.observe { onResult(1_000, BaselineQualification.Qualified, speechReady = true) }
+        observation.observe { onResult(1_000, BaselineQualification.Qualified, 1, 1_000, speechReady = true) }
     }
 
     @Test
@@ -109,7 +109,7 @@ class GuidanceSafetyObservationTest {
         running()
         now = 4_000
         observation.observe {
-            onResult(4_000, BaselineQualification.Unqualified(UnqualifiedReason.TOO_DARK, setOf(DegradeReason.GROUND_UNRECOGNIZED)), speechReady = false)
+            onResult(4_000, BaselineQualification.Unqualified(UnqualifiedReason.TOO_DARK, setOf(DegradeReason.GROUND_UNRECOGNIZED)), 2, 4_000, speechReady = false)
         }
         observation.observe { onOutput(4_100, output.copy(engineState = SpeechEngineState.UNAVAILABLE, speechReady = false, hapticsEnabled = false)) }
 

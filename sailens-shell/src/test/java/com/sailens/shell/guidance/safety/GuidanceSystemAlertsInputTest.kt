@@ -80,9 +80,9 @@ class GuidanceSystemAlertsInputTest {
             real.onFlowStarted(nowMs)
         }
 
-        override fun onResult(nowMs: Long, baseline: BaselineQualification, speechReady: Boolean) {
+        override fun onResult(nowMs: Long, baseline: BaselineQualification, sequenceNumber: Long, receivedAtMs: Long?, speechReady: Boolean) {
             inputs += SafetyInput.RESULT
-            real.onResult(nowMs, baseline, speechReady)
+            real.onResult(nowMs, baseline, sequenceNumber, receivedAtMs, speechReady)
         }
 
         override fun onFlowFailed(nowMs: Long, error: Throwable): SystemAlert? {
@@ -179,7 +179,7 @@ class GuidanceSystemAlertsInputTest {
         startPressed()
         flowStarted()
         now = 1_000L
-        onResult(BaselineQualification.Qualified)
+        onResult(BaselineQualification.Qualified, 1, null)
         return this
     }
 
@@ -206,7 +206,7 @@ class GuidanceSystemAlertsInputTest {
         once(SafetyInput.FLOW_STARTED) { alerts.onFlowStarted() }
         running = true
         now = 1_000L
-        once(SafetyInput.RESULT) { alerts.onResult(BaselineQualification.Qualified) }
+        once(SafetyInput.RESULT) { alerts.onResult(BaselineQualification.Qualified, 1, null) }
         now = 3_000L
         once(SafetyInput.POLL) { alerts.poll() }
         // The stall alarm is due: still one input, which gives the alarm.
@@ -263,7 +263,7 @@ class GuidanceSystemAlertsInputTest {
         Case(SafetyInput.START_REQUESTED, before = {}, entry = { onStartRequested() }),
         Case(SafetyInput.STALL_WATCH_STARTED, before = { onStartRequested() }, entry = { onStallWatchStarted() }),
         Case(SafetyInput.FLOW_STARTED, before = { startPressed() }, entry = { onFlowStarted() }),
-        Case(SafetyInput.RESULT, before = { startPressed(); flowStarted() }, entry = { onResult(BaselineQualification.Qualified) }),
+        Case(SafetyInput.RESULT, before = { startPressed(); flowStarted() }, entry = { onResult(BaselineQualification.Qualified, 1, null) }),
         Case(SafetyInput.FLOW_FAILED, before = { guiding() }, entry = { onFlowFailed(IllegalStateException("model lost")) }),
         Case(SafetyInput.STOPPED, before = { guiding(); onStallWatchStopped() }, entry = { onStopped() }),
         Case(SafetyInput.LIFECYCLE_STOP, before = { guiding() }, entry = { onLifecycleStop("interrupted words") }),
@@ -416,7 +416,7 @@ class GuidanceSystemAlertsInputTest {
         alerts.poll()
 
         now = 3_750L
-        alerts.onResult(BaselineQualification.Qualified)
+        alerts.onResult(BaselineQualification.Qualified, 1, null)
         now = 4_000L
         alerts.poll()
 

@@ -28,14 +28,16 @@ For what each metric means, how it is computed, and how to read it when tuning, 
   - `isBlocked` / `isNarrowing` / `isRoadDangerous`
   - `messageKeys`
   - `frameQuality` / `frameQualityClassified`, `qualification` / `qualificationReasons`,
-    `capabilities`, `receiptToDecisionMs` (see
+    `capabilities`, `receiptToDecisionMs`, `receivedElapsedMs` (see
     [Qualification and alerts](trace_metrics_guide.md#qualification-and-alerts))
 - Every alert given or offered records a `guidance_alert` in the session open when it is recorded,
   numbered by `seq`: the vision faults' and, from the shell, a stall, a failure, an interruption and
   speech going unavailable.
 - Every change of the safety state or a fact behind it records a `safety_state`, numbered by `seq`;
   the one kept from before the session opened is its first, right after `session_start` (see
-  [Safety state](trace_metrics_guide.md#safety-state)).
+  [Safety state](trace_metrics_guide.md#safety-state)). While ordinary prompts are held after a stop
+  it carries `hold`, and the record that releases them `holdReleased`;
+  `scripts/capture/hold_releases.py TRACE.jsonl` checks each release against the records before it.
 - At session end a `session summary` is emitted:
   - `totalFrames`
   - `droppedFrames`
