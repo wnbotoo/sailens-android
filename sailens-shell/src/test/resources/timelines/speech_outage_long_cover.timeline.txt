@@ -1,0 +1,85 @@
+# speech_outage_long_cover: Standing on a sidewalk while own speech is unavailable from 6000 to 22000, the lens covered for 7 s from 12050. On the sixth covered frame the notice is refused, the engine not being ready, and the entry rhythm plays, which does not count as telling; 5 s later the fallback rhythm plays, whatever the switches say.
+# config detfirst=off step=100 speech=on screenReader=off haptics=on faultHaptics=on
+0 state idle since=0 phase=not_started interrupted=false stall=none judgement=none faults=[] channel=speech cause=output
+0 script start
+0 state initializing since=0 phase=starting interrupted=false stall=none judgement=none faults=[] channel=speech cause=start_requested
+0 state initializing since=0 phase=awaiting_first_result interrupted=false stall=none judgement=none faults=[] channel=speech cause=flow_started
+1000 script release_init sem
+1050 frame seq=1 q=qualified events=[]
+1050 state guiding since=1050 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result
+5950 frames seq=2..50 n=49 from=1150 q=qualified
+6000 script engine unavailable ready=false
+6000 state degraded(speech_unavailable) since=6000 phase=running interrupted=false stall=none judgement=qualified faults=[speech_unavailable] channel=haptics_only cause=output
+6000 motor alarm speech_unavailable -> played
+6000 alert system speech_unavailable speech_unavailable priority=max channel=haptics result=played
+12450 frames seq=51..115 n=65 from=6050 q=qualified
+12550 frame seq=116 q=unqualified(camera_obstructed) events=[e1:event_camera_blocked:CRITICAL@-~18550]
+12550 state stop_required(camera_obstructed) since=12550 phase=running interrupted=false stall=none judgement=unqualified(camera_obstructed) faults=[speech_unavailable] channel=haptics_only cause=result
+12550 receipt confirm e1
+12550 outcome e1 src=116 event_camera_blocked CRITICAL delivered=vision_alerts
+12550 speech speak n1 "event_camera_blocked" scale=24 exp=17550 -> refused(not_ready)
+12550 alert vision fault_notice event_camera_blocked priority=critical channel=speech result=refused
+12550 alert vision fault_rhythm vision_unreliable priority=critical channel=haptics result=requested
+12550 motor reserve vision_unreliable -> started
+12550 alert vision fault_rhythm vision_unreliable priority=critical channel=haptics result=played
+13050 frames seq=117..121 n=5 from=12650 q=unqualified(camera_obstructed)
+13050 speech speak n2 "event_camera_blocked" scale=24 exp=18050 -> refused(not_ready)
+13050 alert vision fault_notice event_camera_blocked priority=critical channel=speech result=refused
+13550 frames seq=122..126 n=5 from=13150 q=unqualified(camera_obstructed)
+13550 speech speak n3 "event_camera_blocked" scale=24 exp=18550 -> refused(not_ready)
+13550 alert vision fault_notice event_camera_blocked priority=critical channel=speech result=refused
+14050 frames seq=127..131 n=5 from=13650 q=unqualified(camera_obstructed)
+14050 speech speak n4 "event_camera_blocked" scale=24 exp=19050 -> refused(not_ready)
+14050 alert vision fault_notice event_camera_blocked priority=critical channel=speech result=refused
+14550 frames seq=132..136 n=5 from=14150 q=unqualified(camera_obstructed)
+14550 speech speak n5 "event_camera_blocked" scale=24 exp=19550 -> refused(not_ready)
+14550 alert vision fault_notice event_camera_blocked priority=critical channel=speech result=refused
+15050 frames seq=137..141 n=5 from=14650 q=unqualified(camera_obstructed)
+15050 speech speak n6 "event_camera_blocked" scale=24 exp=20050 -> refused(not_ready)
+15050 alert vision fault_notice event_camera_blocked priority=critical channel=speech result=refused
+15550 frames seq=142..146 n=5 from=15150 q=unqualified(camera_obstructed)
+15550 speech speak n7 "event_camera_blocked" scale=24 exp=20550 -> refused(not_ready)
+15550 alert vision fault_notice event_camera_blocked priority=critical channel=speech result=refused
+16050 frames seq=147..151 n=5 from=15650 q=unqualified(camera_obstructed)
+16050 speech speak n8 "event_camera_blocked" scale=24 exp=21050 -> refused(not_ready)
+16050 alert vision fault_notice event_camera_blocked priority=critical channel=speech result=refused
+16550 frames seq=152..156 n=5 from=16150 q=unqualified(camera_obstructed)
+16550 speech speak n9 "event_camera_blocked" scale=24 exp=21550 -> refused(not_ready)
+16550 alert vision fault_notice event_camera_blocked priority=critical channel=speech result=refused
+17050 frames seq=157..161 n=5 from=16650 q=unqualified(camera_obstructed)
+17050 speech speak n10 "event_camera_blocked" scale=24 exp=22050 -> refused(not_ready)
+17050 alert vision fault_notice event_camera_blocked priority=critical channel=speech result=refused
+17550 frames seq=162..166 n=5 from=17150 q=unqualified(camera_obstructed)
+17550 speech speak n11 "event_camera_blocked" scale=24 exp=22550 -> refused(not_ready)
+17550 alert vision fault_notice event_camera_blocked priority=critical channel=speech result=refused
+17550 alert vision fault_rhythm vision_unreliable priority=critical channel=haptics result=requested
+17550 motor reserve vision_unreliable -> started
+17550 alert vision fault_rhythm vision_unreliable priority=critical channel=haptics result=played
+18050 frames seq=167..171 n=5 from=17650 q=unqualified(camera_obstructed)
+18050 speech speak n12 "event_camera_blocked" scale=24 exp=23050 -> refused(not_ready)
+18050 alert vision fault_notice event_camera_blocked priority=critical channel=speech result=refused
+18550 frames seq=172..176 n=5 from=18150 q=unqualified(camera_obstructed)
+18550 speech speak n13 "event_camera_blocked" scale=24 exp=23550 -> refused(not_ready)
+18550 alert vision fault_notice event_camera_blocked priority=critical channel=speech result=refused
+19050 frames seq=177..181 n=5 from=18650 q=unqualified(camera_obstructed)
+19050 speech speak n14 "event_camera_blocked" scale=24 exp=24050 -> refused(not_ready)
+19050 alert vision fault_notice event_camera_blocked priority=critical channel=speech result=refused
+19450 frames seq=182..185 n=4 from=19150 q=unqualified(camera_obstructed)
+19550 frame seq=186 q=qualified events=[]
+19550 state degraded(speech_unavailable) since=19550 phase=running interrupted=false stall=none judgement=qualified faults=[speech_unavailable] channel=haptics_only cause=result
+21550 frames seq=187..206 n=20 from=19650 q=qualified
+21550 speech speak n15 "event_camera_restored" scale=0 exp=26550 -> refused(not_ready)
+21550 alert vision fault_recovery event_camera_restored priority=low channel=speech result=refused
+21950 frames seq=207..210 n=4 from=21650 q=qualified
+22000 script engine ready ready=true
+22000 state guiding since=22000 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=output
+22050 frames seq=211..211 n=1 from=22050 q=qualified
+22050 speech speak n16 "event_camera_restored" scale=0 exp=26550 -> accepted
+22050 alert vision fault_recovery event_camera_restored priority=low channel=speech result=accepted
+23450 frames seq=212..225 n=14 from=22150 q=qualified
+23490 speech done n16
+24850 frames seq=226..239 n=14 from=23550 q=qualified
+25000 script stop
+25000 speech stop
+25000 motor cancel
+25000 state idle since=25000 phase=not_started interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=stopped

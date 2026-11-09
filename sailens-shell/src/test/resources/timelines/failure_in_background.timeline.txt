@@ -1,0 +1,25 @@
+# failure_in_background: The app goes to the background at 500, the segmentation model still loading, and the model fails at 3000: the interruption is alerted, then the failure too, which ends the session; failed outranks interrupted, and the interruption stays marked.
+# config detfirst=off step=100 speech=on screenReader=off haptics=on faultHaptics=on
+0 state idle since=0 phase=not_started interrupted=false stall=none judgement=none faults=[] channel=speech cause=output
+0 script start
+0 state initializing since=0 phase=starting interrupted=false stall=none judgement=none faults=[] channel=speech cause=start_requested
+0 state initializing since=0 phase=awaiting_first_result interrupted=false stall=none judgement=none faults=[] channel=speech cause=flow_started
+500 script background
+500 state interrupted(lifecycle) since=500 phase=awaiting_first_result interrupted=true stall=none judgement=none faults=[] channel=speech cause=lifecycle_stop
+500 ui mark_interrupted
+500 motor alarm interrupted -> played
+500 alert system interrupted interrupted priority=max channel=haptics result=played
+500 speech notice s1 "notice_guidance_interrupted" scale=max exp=15500 -> accepted
+500 alert system interrupted notice_guidance_interrupted priority=max channel=speech result=requested
+2180 speech done s1
+3000 script fail_init sem "the model could not be loaded"
+3000 state failed(error) since=3000 phase=failed interrupted=true stall=none judgement=none faults=[] channel=speech cause=flow_failed
+3000 speech stop
+3000 motor cancel
+3000 ui clear_latest_result
+3000 motor alarm interrupted -> played
+3000 alert system failed interrupted priority=max channel=haptics result=played
+3000 speech notice s2 "notice_guidance_failed" scale=max exp=18000 -> accepted
+3000 alert system failed notice_guidance_failed priority=max channel=speech result=requested
+3000 ui mark_failed "the model could not be loaded"
+4480 speech done s2

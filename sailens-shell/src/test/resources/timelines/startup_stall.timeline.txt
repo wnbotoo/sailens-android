@@ -1,0 +1,20 @@
+# startup_stall: The segmentation model takes until 25000 to initialise, and no frame is received until then. 20 s after start the startup stall stops guidance and is alarmed, felt and said; the first result at 25050 guides, before a repeat would come.
+# config detfirst=off step=100 speech=on screenReader=off haptics=on faultHaptics=on
+0 state idle since=0 phase=not_started interrupted=false stall=none judgement=none faults=[] channel=speech cause=output
+0 script start
+0 state initializing since=0 phase=starting interrupted=false stall=none judgement=none faults=[] channel=speech cause=start_requested
+0 state initializing since=0 phase=awaiting_first_result interrupted=false stall=none judgement=none faults=[] channel=speech cause=flow_started
+20000 state stop_required(startup_stalled) since=20000 phase=awaiting_first_result interrupted=false stall=startup_timeout judgement=none faults=[] channel=speech cause=poll
+20000 motor alarm interrupted -> played
+20000 alert system stalled interrupted priority=high channel=haptics result=played
+20000 speech notice s1 "notice_guidance_stalled" scale=16 exp=35000 -> accepted
+20000 alert system stalled notice_guidance_stalled priority=high channel=speech result=requested
+21520 speech done s1
+25000 script release_init sem
+25050 frame seq=241 q=qualified events=[]
+25050 state guiding since=25050 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result
+27850 frames seq=242..269 n=28 from=25150 q=qualified
+28000 script stop
+28000 speech stop
+28000 motor cancel
+28000 state idle since=28000 phase=not_started interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=stopped

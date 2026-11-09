@@ -1,0 +1,127 @@
+# speech_outage_haptics_off: The first outage of speech_outage with navigation vibration off: a prompt in the outage has no channel left and is withdrawn on every frame it is offered; the outage is still alerted once, by vibration.
+# config detfirst=off step=100 speech=on screenReader=off haptics=off faultHaptics=on
+0 state idle since=0 phase=not_started interrupted=false stall=none judgement=none faults=[] channel=speech cause=output
+0 script start
+0 state initializing since=0 phase=starting interrupted=false stall=none judgement=none faults=[] channel=speech cause=start_requested
+0 state initializing since=0 phase=awaiting_first_result interrupted=false stall=none judgement=none faults=[] channel=speech cause=flow_started
+1000 script release_init sem
+1050 frame seq=1 q=qualified events=[]
+1050 state guiding since=1050 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result
+2150 frames seq=2..12 n=11 from=1150 q=qualified
+2250 frame seq=13 q=qualified events=[e1:event_obstacle_center_person:CRITICAL{count=1}@MEDIUM~5250]
+2250 speech speak e1 "event_obstacle_center_person{count=1}" scale=24 exp=5250 -> accepted
+2250 receipt confirm e1
+2250 outcome e1 src=13 event_obstacle_center_person CRITICAL delivered=speech
+3950 frames seq=14..30 n=17 from=2350 q=qualified
+3970 speech done e1
+5950 frames seq=31..50 n=20 from=4050 q=qualified
+6000 script engine unavailable ready=false
+6000 state degraded(speech_unavailable) since=6000 phase=running interrupted=false stall=none judgement=qualified faults=[speech_unavailable] channel=none cause=output
+6000 motor alarm speech_unavailable -> played
+6000 alert system speech_unavailable speech_unavailable priority=max channel=haptics result=played
+7150 frames seq=51..62 n=12 from=6050 q=qualified
+7250 frame seq=63 q=qualified events=[e2:event_obstacle_left_person:HIGH{count=1}@MEDIUM~10250]
+7250 speech speak e2 "event_obstacle_left_person{count=1}" scale=16 exp=10250 -> refused(not_ready)
+7250 receipt revoke e2 output_refused
+7250 outcome e2 src=63 event_obstacle_left_person HIGH revoked=output_refused
+7350 frame seq=64 q=qualified events=[e3:event_obstacle_left_person:HIGH{count=1}@MEDIUM~10350]
+7350 speech speak e3 "event_obstacle_left_person{count=1}" scale=16 exp=10350 -> refused(not_ready)
+7350 receipt revoke e3 output_refused
+7350 outcome e3 src=64 event_obstacle_left_person HIGH revoked=output_refused
+7450 frame seq=65 q=qualified events=[e4:event_obstacle_left_person:HIGH{count=1}@MEDIUM~10450]
+7450 speech speak e4 "event_obstacle_left_person{count=1}" scale=16 exp=10450 -> refused(not_ready)
+7450 receipt revoke e4 output_refused
+7450 outcome e4 src=65 event_obstacle_left_person HIGH revoked=output_refused
+7550 frame seq=66 q=qualified events=[e5:event_obstacle_left_person:HIGH{count=1}@MEDIUM~10550]
+7550 speech speak e5 "event_obstacle_left_person{count=1}" scale=16 exp=10550 -> refused(not_ready)
+7550 receipt revoke e5 output_refused
+7550 outcome e5 src=66 event_obstacle_left_person HIGH revoked=output_refused
+7650 frame seq=67 q=qualified events=[e6:event_obstacle_left_person:HIGH{count=1}@MEDIUM~10650]
+7650 speech speak e6 "event_obstacle_left_person{count=1}" scale=16 exp=10650 -> refused(not_ready)
+7650 receipt revoke e6 output_refused
+7650 outcome e6 src=67 event_obstacle_left_person HIGH revoked=output_refused
+7750 frame seq=68 q=qualified events=[e7:event_obstacle_left_person:HIGH{count=1}@MEDIUM~10750]
+7750 speech speak e7 "event_obstacle_left_person{count=1}" scale=16 exp=10750 -> refused(not_ready)
+7750 receipt revoke e7 output_refused
+7750 outcome e7 src=68 event_obstacle_left_person HIGH revoked=output_refused
+7850 frame seq=69 q=qualified events=[e8:event_obstacle_left_person:HIGH{count=1}@MEDIUM~10850]
+7850 speech speak e8 "event_obstacle_left_person{count=1}" scale=16 exp=10850 -> refused(not_ready)
+7850 receipt revoke e8 output_refused
+7850 outcome e8 src=69 event_obstacle_left_person HIGH revoked=output_refused
+7950 frame seq=70 q=qualified events=[e9:event_obstacle_left_person:HIGH{count=1}@MEDIUM~10950]
+7950 speech speak e9 "event_obstacle_left_person{count=1}" scale=16 exp=10950 -> refused(not_ready)
+7950 receipt revoke e9 output_refused
+7950 outcome e9 src=70 event_obstacle_left_person HIGH revoked=output_refused
+8050 frame seq=71 q=qualified events=[e10:event_obstacle_left_person:HIGH{count=1}@MEDIUM~11050]
+8050 speech speak e10 "event_obstacle_left_person{count=1}" scale=16 exp=11050 -> refused(not_ready)
+8050 receipt revoke e10 output_refused
+8050 outcome e10 src=71 event_obstacle_left_person HIGH revoked=output_refused
+8150 frame seq=72 q=qualified events=[e11:event_obstacle_left_person:HIGH{count=1}@MEDIUM~11150]
+8150 speech speak e11 "event_obstacle_left_person{count=1}" scale=16 exp=11150 -> refused(not_ready)
+8150 receipt revoke e11 output_refused
+8150 outcome e11 src=72 event_obstacle_left_person HIGH revoked=output_refused
+8250 frame seq=73 q=qualified events=[e12:event_obstacle_left_person:HIGH{count=1}@MEDIUM~11250]
+8250 speech speak e12 "event_obstacle_left_person{count=1}" scale=16 exp=11250 -> refused(not_ready)
+8250 receipt revoke e12 output_refused
+8250 outcome e12 src=73 event_obstacle_left_person HIGH revoked=output_refused
+8350 frame seq=74 q=qualified events=[e13:event_obstacle_left_person:HIGH{count=1}@MEDIUM~11350]
+8350 speech speak e13 "event_obstacle_left_person{count=1}" scale=16 exp=11350 -> refused(not_ready)
+8350 receipt revoke e13 output_refused
+8350 outcome e13 src=74 event_obstacle_left_person HIGH revoked=output_refused
+8450 frame seq=75 q=qualified events=[e14:event_obstacle_left_person:HIGH{count=1}@MEDIUM~11450]
+8450 speech speak e14 "event_obstacle_left_person{count=1}" scale=16 exp=11450 -> refused(not_ready)
+8450 receipt revoke e14 output_refused
+8450 outcome e14 src=75 event_obstacle_left_person HIGH revoked=output_refused
+8550 frame seq=76 q=qualified events=[e15:event_obstacle_left_person:HIGH{count=1}@MEDIUM~11550]
+8550 speech speak e15 "event_obstacle_left_person{count=1}" scale=16 exp=11550 -> refused(not_ready)
+8550 receipt revoke e15 output_refused
+8550 outcome e15 src=76 event_obstacle_left_person HIGH revoked=output_refused
+8650 frame seq=77 q=qualified events=[e16:event_obstacle_left_person:HIGH{count=1}@MEDIUM~11650]
+8650 speech speak e16 "event_obstacle_left_person{count=1}" scale=16 exp=11650 -> refused(not_ready)
+8650 receipt revoke e16 output_refused
+8650 outcome e16 src=77 event_obstacle_left_person HIGH revoked=output_refused
+8750 frame seq=78 q=qualified events=[e17:event_obstacle_left_person:HIGH{count=1}@MEDIUM~11750]
+8750 speech speak e17 "event_obstacle_left_person{count=1}" scale=16 exp=11750 -> refused(not_ready)
+8750 receipt revoke e17 output_refused
+8750 outcome e17 src=78 event_obstacle_left_person HIGH revoked=output_refused
+8850 frame seq=79 q=qualified events=[e18:event_obstacle_left_person:HIGH{count=1}@MEDIUM~11850]
+8850 speech speak e18 "event_obstacle_left_person{count=1}" scale=16 exp=11850 -> refused(not_ready)
+8850 receipt revoke e18 output_refused
+8850 outcome e18 src=79 event_obstacle_left_person HIGH revoked=output_refused
+8950 frame seq=80 q=qualified events=[e19:event_obstacle_left_person:HIGH{count=1}@MEDIUM~11950]
+8950 speech speak e19 "event_obstacle_left_person{count=1}" scale=16 exp=11950 -> refused(not_ready)
+8950 receipt revoke e19 output_refused
+8950 outcome e19 src=80 event_obstacle_left_person HIGH revoked=output_refused
+9050 frame seq=81 q=qualified events=[e20:event_obstacle_left_person:HIGH{count=1}@MEDIUM~12050]
+9050 speech speak e20 "event_obstacle_left_person{count=1}" scale=16 exp=12050 -> refused(not_ready)
+9050 receipt revoke e20 output_refused
+9050 outcome e20 src=81 event_obstacle_left_person HIGH revoked=output_refused
+9150 frame seq=82 q=qualified events=[e21:event_obstacle_left_person:HIGH{count=1}@MEDIUM~12150]
+9150 speech speak e21 "event_obstacle_left_person{count=1}" scale=16 exp=12150 -> refused(not_ready)
+9150 receipt revoke e21 output_refused
+9150 outcome e21 src=82 event_obstacle_left_person HIGH revoked=output_refused
+9250 frame seq=83 q=qualified events=[e22:event_obstacle_left_person:HIGH{count=1}@MEDIUM~12250]
+9250 speech speak e22 "event_obstacle_left_person{count=1}" scale=16 exp=12250 -> refused(not_ready)
+9250 receipt revoke e22 output_refused
+9250 outcome e22 src=83 event_obstacle_left_person HIGH revoked=output_refused
+9350 frame seq=84 q=qualified events=[e23:event_obstacle_left_person:HIGH{count=1}@MEDIUM~12350]
+9350 speech speak e23 "event_obstacle_left_person{count=1}" scale=16 exp=12350 -> refused(not_ready)
+9350 receipt revoke e23 output_refused
+9350 outcome e23 src=84 event_obstacle_left_person HIGH revoked=output_refused
+11950 frames seq=85..110 n=26 from=9450 q=qualified
+12000 script engine ready=true
+12050 frames seq=111..111 n=1 from=12050 q=qualified
+12050 state degraded(speech_unavailable) since=6000 phase=running interrupted=false stall=none judgement=qualified faults=[speech_unavailable] channel=speech cause=result
+12650 frames seq=112..117 n=6 from=12150 q=qualified
+12750 frame seq=118 q=qualified events=[e24:event_obstacle_center_person:CRITICAL{count=1}@MEDIUM~15750]
+12750 speech speak e24 "event_obstacle_center_person{count=1}" scale=24 exp=15750 -> accepted
+12750 receipt confirm e24
+12750 outcome e24 src=118 event_obstacle_center_person CRITICAL delivered=speech
+12750 state guiding since=12750 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=output
+14450 frames seq=119..135 n=17 from=12850 q=qualified
+14470 speech done e24
+15850 frames seq=136..149 n=14 from=14550 q=qualified
+16000 script stop
+16000 speech stop
+16000 motor cancel
+16000 state idle since=16000 phase=not_started interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=stopped
