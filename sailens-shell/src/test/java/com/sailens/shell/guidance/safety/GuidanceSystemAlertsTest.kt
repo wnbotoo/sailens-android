@@ -144,7 +144,7 @@ class GuidanceSystemAlertsTest {
     }
 
     /** A result in `collectLatest` (`9f2deb3:444-445`). */
-    private fun GuidanceSystemAlerts.result() = onResult(BaselineQualification.Qualified)
+    private fun GuidanceSystemAlerts.result() = onResult(BaselineQualification.Qualified, 1, null)
 
     /** `checkSpeechUnavailable` (`9f2deb3:289-296`), from any of its three callers: the output as the screen holds it. */
     private fun GuidanceSystemAlerts.output() = onOutput(engine, speechEnabled, screenReader, hapticsEnabled)
@@ -594,11 +594,10 @@ class GuidanceSystemAlertsTest {
 
         // 1a99f6e:411: the result is progress, so the next alarm is 2.5 s after it, then every 10 s.
         assertEquals(listOf(3_500L, 11_000L, 21_000L), stallAlarmTimes())
+        // The stall is over, but the stop holds ordinary prompts until fresh results release it: the state stays a
+        // stall's stop, so nothing is published.
         assertEquals(
-            listOf(
-                "safety_state guiding phase=running channel=speech <- result", // 9f2deb3:445
-                "publish guiding",
-            ),
+            listOf("safety_state stop_required(perception_stalled) phase=running channel=speech <- result"),
             recordedAt(8_200L),
         )
     }

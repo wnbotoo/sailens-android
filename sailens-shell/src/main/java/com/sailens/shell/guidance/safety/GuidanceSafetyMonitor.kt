@@ -1,6 +1,7 @@
 package com.sailens.shell.guidance.safety
 
 import com.sailens.guidance.safety.BaselineQualification
+import com.sailens.guidance.safety.PromptHold
 import com.sailens.guidance.usecase.scene.GuidancePipelineFailedException
 import com.sailens.output.SpeechEngineState
 
@@ -19,13 +20,17 @@ internal enum class SafetyInput {
     OUTPUT, POLL,
 }
 
-/** One change: the axes and state after [cause], observed at [elapsedMs]; the state has held since [stateSinceElapsedMs]. */
+/**
+ * One change: the axes and state after [cause], observed at [elapsedMs]; the state has held since [stateSinceElapsedMs].
+ * [release] is set on the change in which a hold ended: its evidence, kept here since the axes no longer hold it.
+ */
 internal data class GuidanceSafetySnapshot(
     val axes: GuidanceSafetyAxes,
     val state: GuidanceSafetyState,
     val stateSinceElapsedMs: Long,
     val elapsedMs: Long,
     val cause: SafetyInput,
+    val release: PromptHold.Release<HoldCause>? = null,
 )
 
 /** The alerts about Guidance itself: what an input to the safety monitor can call for. */
@@ -50,7 +55,9 @@ internal interface SafetyMonitor {
     fun onStartRequested(nowMs: Long)
     fun onStallWatchStarted(nowMs: Long)
     fun onFlowStarted(nowMs: Long)
-    fun onResult(nowMs: Long, baseline: BaselineQualification, speechReady: Boolean)
+
+    /** [sequenceNumber] is the result's frame, [receivedAtMs] when its source received it (null: not recorded). */
+    fun onResult(nowMs: Long, baseline: BaselineQualification, sequenceNumber: Long, receivedAtMs: Long?, speechReady: Boolean)
 
     /** Always [SystemAlert.FAILED]. */
     fun onFlowFailed(nowMs: Long, error: Throwable): SystemAlert?
@@ -78,6 +85,9 @@ internal interface SafetyMonitor {
  * input, not a change of state: a stall that goes on is alarmed again every repeat, and only going to the background
  * is an interruption to tell.
  *
+ * Each input also steps the prompt hold ([PromptHold]) once, after the facts changed: with the stop the facts call for
+ * ([stopCause]) and, for a usable result, its frame and receipt. The hold is an axis, so the state shows it.
+ *
  * The state itself is not announced. Pure and clock-driven, like the stall detector, and like it not thread-safe: the
  * view model calls it from the main thread only.
  *
@@ -104,6 +114,9 @@ internal class GuidanceSafetyMonitor(
      */
     private var speechOutageTold = false
 
+    /** Ordinary prompts held after a stop; kept only while the session runs. */
+    private val promptHold = PromptHold<HoldCause>()
+
     override var axes: GuidanceSafetyAxes = axesAt(nowMs)
         private set
     override var state: GuidanceSafetyState = axes.state()
@@ -129,10 +142,13 @@ internal class GuidanceSafetyMonitor(
     }
 
     /** A result reached the view model, after the stall detector heard of it. */
-    override fun onResult(nowMs: Long, baseline: BaselineQualification, speechReady: Boolean) = update(nowMs, SafetyInput.RESULT) {
-        if (phase == GuidanceRunPhase.AWAITING_FIRST_RESULT) phase = GuidanceRunPhase.RUNNING
-        judgement = baseline
-        output = output.copy(speechReady = speechReady)
+    override fun onResult(nowMs: Long, baseline: BaselineQualification, sequenceNumber: Long, receivedAtMs: Long?, speechReady: Boolean) {
+        val usable = if (baseline is BaselineQualification.Unqualified) null else PromptHold.Result(sequenceNumber, receivedAtMs)
+        update(nowMs, SafetyInput.RESULT, usable) {
+            if (phase == GuidanceRunPhase.AWAITING_FIRST_RESULT) phase = GuidanceRunPhase.RUNNING
+            judgement = baseline
+            output = output.copy(speechReady = speechReady)
+        }
     }
 
     /**
@@ -207,15 +223,22 @@ internal class GuidanceSafetyMonitor(
         return if (stallAlarmDue(nowMs)) SystemAlert.STALLED else null
     }
 
-    private inline fun update(nowMs: Long, cause: SafetyInput, change: () -> Unit) {
+    private inline fun update(nowMs: Long, cause: SafetyInput, result: PromptHold.Result? = null, change: () -> Unit) {
         change()
-        val next = axesAt(nowMs)
+        val facts = axesAt(nowMs)
+        val release = if (facts.phase.isRunning) {
+            (promptHold.step(nowMs, facts.stopCause(), result) as? PromptHold.Change.Released)?.release
+        } else {
+            promptHold.clear()
+            null
+        }
+        val next = facts.copy(hold = promptHold.held)
         if (next == axes) return
         val nextState = next.state()
         if (nextState != state) stateSinceElapsedMs = nowMs
         axes = next
         state = nextState
-        onChange(GuidanceSafetySnapshot(axes, state, stateSinceElapsedMs, nowMs, cause))
+        onChange(GuidanceSafetySnapshot(axes, state, stateSinceElapsedMs, nowMs, cause, release))
     }
 
     private fun axesAt(nowMs: Long) = GuidanceSafetyAxes(

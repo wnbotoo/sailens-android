@@ -1,0 +1,67 @@
+# background_twice_late_frame: Standing by a person to the left; the app goes to the background at 8000 and is back at 10000, the camera at 10200; to the background again at 10300 and back at 12000. The picture received at 10250, after the first return but before the second background, gives its result only at 12050, once both interruptions have been said.
+# config detfirst=off step=100 speech=on screenReader=off haptics=on faultHaptics=on
+0 state idle since=0 phase=not_started interrupted=false stall=none judgement=none faults=[] channel=speech cause=output hold=none
+0 script start
+0 state initializing since=0 phase=starting interrupted=false stall=none judgement=none faults=[] channel=speech cause=start_requested hold=none
+0 state initializing since=0 phase=awaiting_first_result interrupted=false stall=none judgement=none faults=[] channel=speech cause=flow_started hold=none
+1000 script release_init sem
+1050 frame seq=1 q=qualified events=[]
+1050 state guiding since=1050 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=none
+1150 frames seq=2..2 n=1 from=1150 q=qualified
+1250 frame seq=3 q=qualified events=[e1:event_obstacle_left_person:HIGH{count=1}@MEDIUM~4250]
+1250 speech speak e1 "event_obstacle_left_person{count=1}" scale=16 exp=4250 -> accepted
+1250 motor queue left -> started
+1250 receipt confirm e1
+1250 outcome e1 src=3 event_obstacle_left_person HIGH delivered=speech,haptics
+2850 frames seq=4..19 n=16 from=1350 q=qualified
+2890 speech done e1
+7950 frames seq=20..70 n=51 from=2950 q=qualified
+8000 script background
+8000 state interrupted(lifecycle) since=8000 phase=running interrupted=true stall=none judgement=qualified faults=[] channel=speech cause=lifecycle_stop hold=lifecycle(since=8000,stopping,fresh=0,span=0)
+8000 ui mark_interrupted
+8000 motor alarm interrupted -> played
+8000 alert system interrupted interrupted priority=max channel=haptics result=played
+8000 speech notice s1 "notice_guidance_interrupted" scale=max exp=23000 -> accepted
+8000 alert system interrupted notice_guidance_interrupted priority=max channel=speech result=requested
+9680 speech done s1
+10000 script foreground
+10000 state initializing since=10000 phase=awaiting_first_result interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=lifecycle_start hold=lifecycle(since=8000,recovering,fresh=0,span=0)
+10000 ui clear_interrupted
+10200 script camera_resume
+10300 script background
+10300 state interrupted(lifecycle) since=10300 phase=awaiting_first_result interrupted=true stall=none judgement=qualified faults=[] channel=speech cause=lifecycle_stop hold=lifecycle(since=10300,stopping,fresh=0,span=0)
+10300 ui mark_interrupted
+10300 motor alarm interrupted -> played
+10300 alert system interrupted interrupted priority=max channel=haptics result=played
+10300 speech notice s2 "notice_guidance_interrupted" scale=max exp=25300 -> accepted
+10300 alert system interrupted notice_guidance_interrupted priority=max channel=speech result=requested
+11980 speech done s2
+12000 script foreground
+12000 state initializing since=12000 phase=awaiting_first_result interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=lifecycle_start hold=lifecycle(since=10300,recovering,fresh=0,span=0)
+12000 ui clear_interrupted
+12000 script camera_resume
+12050 frame seq=111 lag=1800 q=qualified events=[e2:event_obstacle_left_person:HIGH{count=1}@MEDIUM~15050]
+12050 state initializing since=12000 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=lifecycle(since=10300,recovering,fresh=0,span=0)
+12050 speech speak e2 "event_obstacle_left_person{count=1}" scale=16 exp=15050 -> accepted
+12050 motor queue left -> started
+12050 receipt confirm e2
+12050 outcome e2 src=111 event_obstacle_left_person HIGH delivered=speech,haptics
+12150 frames seq=112..112 n=1 from=12150 q=qualified
+12150 state initializing since=12000 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=lifecycle(since=10300,recovering,fresh=1,span=0)
+12250 frames seq=113..113 n=1 from=12250 q=qualified
+12250 state initializing since=12000 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=lifecycle(since=10300,recovering,fresh=2,span=100)
+12350 frames seq=114..114 n=1 from=12350 q=qualified
+12350 state initializing since=12000 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=lifecycle(since=10300,recovering,fresh=3,span=200)
+12450 frames seq=115..115 n=1 from=12450 q=qualified
+12450 state initializing since=12000 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=lifecycle(since=10300,recovering,fresh=4,span=300)
+12550 frames seq=116..116 n=1 from=12550 q=qualified
+12550 state initializing since=12000 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=lifecycle(since=10300,recovering,fresh=5,span=400)
+12650 frames seq=117..117 n=1 from=12650 q=qualified
+12650 state guiding since=12650 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=none released=(fresh=6,span=500,src=117,fallbacks=0)
+13650 frames seq=118..127 n=10 from=12750 q=qualified
+13690 speech done e2
+14850 frames seq=128..139 n=12 from=13750 q=qualified
+15000 script stop
+15000 speech stop
+15000 motor cancel
+15000 state idle since=15000 phase=not_started interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=stopped hold=none

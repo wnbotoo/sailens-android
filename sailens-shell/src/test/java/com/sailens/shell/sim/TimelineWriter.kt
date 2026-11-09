@@ -23,7 +23,9 @@ internal sealed interface TimelineEntry {
 
     /**
      * A result reached the collector: the frame's qualification and the events decided on it. [tracked], what the
-     * tracker output on it, is kept for the tests and is not on the frame's line.
+     * tracker output on it, is kept for the tests and is not on the frame's line. [receivedAtMs] is when the source
+     * received the frame, relative like [atMs]; null when it did not record it. A frame received before it arrived
+     * writes its lag on its line.
      */
     data class Frame(
         override val atMs: Long,
@@ -31,7 +33,11 @@ internal sealed interface TimelineEntry {
         val baseline: BaselineQualification,
         val events: List<SceneEvent>,
         val tracked: List<ObstacleCategory> = emptyList(),
-    ) : TimelineEntry
+        val receivedAtMs: Long? = null,
+    ) : TimelineEntry {
+        /** How long before it arrived the frame was received; 0 when unknown. */
+        val lagMs: Long get() = receivedAtMs?.let { atMs - it } ?: 0L
+    }
 
     /** What the safety observation handed to `recordState`. */
     data class State(override val atMs: Long, val trace: SafetyStateTrace) : TimelineEntry
@@ -86,8 +92,8 @@ internal class Timeline(private val now: () -> Long, val origin: Long) {
 
     fun script(action: String) = add { TimelineEntry.Script(it, action) }
 
-    fun frame(seq: Long, baseline: BaselineQualification, events: List<SceneEvent>, tracked: List<ObstacleCategory>) =
-        add { TimelineEntry.Frame(it, seq, baseline, events, tracked) }
+    fun frame(seq: Long, baseline: BaselineQualification, events: List<SceneEvent>, tracked: List<ObstacleCategory>, receivedAtMs: Long?) =
+        add { TimelineEntry.Frame(it, seq, baseline, events, tracked, receivedAtMs?.let(::relative)) }
 
     fun state(trace: SafetyStateTrace) = add { TimelineEntry.State(it, trace) }
 
@@ -184,7 +190,7 @@ internal class TimelineWriter(private val origin: Long) {
     private fun frame(frame: TimelineEntry.Frame) {
         val changed = previousBaseline != frame.baseline
         previousBaseline = frame.baseline
-        if (frame.events.isEmpty() && !changed) {
+        if (frame.events.isEmpty() && !changed && frame.lagMs == 0L) {
             val run = quiet
             if (run != null) {
                 run.lastMs = frame.atMs
@@ -201,7 +207,8 @@ internal class TimelineWriter(private val origin: Long) {
                 (if (params.isEmpty()) "" else "{$params}") +
                 "@${event.distance?.name ?: "-"}~${rel(event.expiresAt)}"
         }
-        line(frame.atMs, "frame seq=${frame.seq} q=${qualification(frame.baseline)} events=[$events]")
+        val lag = if (frame.lagMs == 0L) "" else " lag=${frame.lagMs}"
+        line(frame.atMs, "frame seq=${frame.seq}$lag q=${qualification(frame.baseline)} events=[$events]")
     }
 
     private fun qualification(baseline: BaselineQualification): String = when (baseline) {
@@ -224,6 +231,21 @@ internal class TimelineWriter(private val origin: Long) {
         append(" faults=[").append(trace.outputFaults.joinToString(",")).append(']')
         append(" channel=").append(trace.expectedNavigationChannel)
         append(" cause=").append(trace.cause)
+        append(" hold=")
+        val hold = trace.hold
+        if (hold == null) {
+            append("none")
+        } else {
+            append(hold.cause).append("(since=").append(rel(hold.sinceElapsedMs))
+            append(if (hold.stopping) ",stopping" else ",recovering")
+            append(",fresh=").append(hold.freshResults).append(",span=").append(hold.freshSpanMs)
+            if (hold.receiptFallbacks > 0) append(",fallbacks=").append(hold.receiptFallbacks)
+            append(')')
+        }
+        trace.holdReleased?.let { release ->
+            append(" released=(fresh=").append(release.freshResults).append(",span=").append(release.freshSpanMs)
+            append(",src=").append(release.sourceSequenceNumber).append(",fallbacks=").append(release.receiptFallbacks).append(')')
+        }
     }
 
     private fun alert(trace: GuidanceAlertTrace): String =

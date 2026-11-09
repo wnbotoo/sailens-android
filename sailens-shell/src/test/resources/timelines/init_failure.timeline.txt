@@ -1,11 +1,11 @@
 # init_failure: The segmentation model fails to initialise at 1000: the session fails at once, its outputs stopped before the failure is felt and said, and the screen shows it last. No frame is received.
 # config detfirst=off step=100 speech=on screenReader=off haptics=on faultHaptics=on
-0 state idle since=0 phase=not_started interrupted=false stall=none judgement=none faults=[] channel=speech cause=output
+0 state idle since=0 phase=not_started interrupted=false stall=none judgement=none faults=[] channel=speech cause=output hold=none
 0 script start
-0 state initializing since=0 phase=starting interrupted=false stall=none judgement=none faults=[] channel=speech cause=start_requested
-0 state initializing since=0 phase=awaiting_first_result interrupted=false stall=none judgement=none faults=[] channel=speech cause=flow_started
+0 state initializing since=0 phase=starting interrupted=false stall=none judgement=none faults=[] channel=speech cause=start_requested hold=none
+0 state initializing since=0 phase=awaiting_first_result interrupted=false stall=none judgement=none faults=[] channel=speech cause=flow_started hold=none
 1000 script fail_init sem "the model could not be loaded"
-1000 state failed(error) since=1000 phase=failed interrupted=false stall=none judgement=none faults=[] channel=speech cause=flow_failed
+1000 state failed(error) since=1000 phase=failed interrupted=false stall=none judgement=none faults=[] channel=speech cause=flow_failed hold=none
 1000 speech stop
 1000 motor cancel
 1000 ui clear_latest_result

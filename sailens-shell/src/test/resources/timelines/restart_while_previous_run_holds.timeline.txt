@@ -1,25 +1,25 @@
 # restart_while_previous_run_holds: The segmentation model's initialisation does not give way to a stop until 4000. Stopped at 1000 and started again at 1500, the new run waits for the old one: the screen is starting meanwhile, with no stall watch, and the background from 2000 to 2500 alerts nothing, nothing running yet. At 4000 the old run ends and the new one begins at once, on the model already initialised, and is watched from then.
 # config detfirst=off step=100 speech=on screenReader=off haptics=on faultHaptics=on
-0 state idle since=0 phase=not_started interrupted=false stall=none judgement=none faults=[] channel=speech cause=output
+0 state idle since=0 phase=not_started interrupted=false stall=none judgement=none faults=[] channel=speech cause=output hold=none
 0 script start
-0 state initializing since=0 phase=starting interrupted=false stall=none judgement=none faults=[] channel=speech cause=start_requested
-0 state initializing since=0 phase=awaiting_first_result interrupted=false stall=none judgement=none faults=[] channel=speech cause=flow_started
+0 state initializing since=0 phase=starting interrupted=false stall=none judgement=none faults=[] channel=speech cause=start_requested hold=none
+0 state initializing since=0 phase=awaiting_first_result interrupted=false stall=none judgement=none faults=[] channel=speech cause=flow_started hold=none
 1000 script stop
 1000 speech stop
 1000 motor cancel
-1000 state idle since=1000 phase=not_started interrupted=false stall=none judgement=none faults=[] channel=speech cause=stopped
+1000 state idle since=1000 phase=not_started interrupted=false stall=none judgement=none faults=[] channel=speech cause=stopped hold=none
 1500 script start
-1500 state initializing since=1500 phase=starting interrupted=false stall=none judgement=none faults=[] channel=speech cause=start_requested
+1500 state initializing since=1500 phase=starting interrupted=false stall=none judgement=none faults=[] channel=speech cause=start_requested hold=none
 2000 script background
 2500 script foreground
 2500 ui clear_interrupted
 2800 script camera_resume
 4000 script release_init sem
-4000 state initializing since=1500 phase=awaiting_first_result interrupted=false stall=none judgement=none faults=[] channel=speech cause=flow_started
+4000 state initializing since=1500 phase=awaiting_first_result interrupted=false stall=none judgement=none faults=[] channel=speech cause=flow_started hold=none
 4050 frame seq=31 q=qualified events=[]
-4050 state guiding since=4050 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result
+4050 state guiding since=4050 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=none
 7850 frames seq=32..69 n=38 from=4150 q=qualified
 8000 script stop
 8000 speech stop
 8000 motor cancel
-8000 state idle since=8000 phase=not_started interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=stopped
+8000 state idle since=8000 phase=not_started interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=stopped hold=none

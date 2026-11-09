@@ -269,6 +269,7 @@ object TraceReplayParser {
         targetHardwareProfile = entry.requireString("targetHardwareProfile", lineIndex),
         openedElapsedMs = entry.optionalLong("openedElapsedMs"),
         safetyTrace = entry.optionalBoolean("safetyTrace") ?: false,
+        holdTrace = entry.optionalBoolean("holdTrace") ?: false,
     )
 
     private fun parseFrame(entry: JsonObject, lineIndex: Int) = FrameTrace(
@@ -380,6 +381,7 @@ object TraceReplayParser {
             )
         },
         receiptToDecisionMs = entry.optionalDouble("receiptToDecisionMs"),
+        receivedElapsedMs = entry.optionalLong("receivedElapsedMs"),
     )
 
     private fun parseOverlayRender(entry: JsonObject, lineIndex: Int) = OverlayRenderTrace(
@@ -485,6 +487,31 @@ object TraceReplayParser {
                 outputFaults = entry.optionalStringArray("outputFaults").orEmpty(),
                 expectedNavigationChannel = channel,
                 cause = cause,
+                hold = (entry["hold"] as? JsonObject)?.let { hold ->
+                    HoldTrace(
+                        cause = hold.requireString("cause", lineIndex),
+                        sinceElapsedMs = hold.requireLong("sinceElapsedMs", lineIndex),
+                        stopping = hold.requireBoolean("stopping", lineIndex),
+                        freshResults = hold.requireLong("freshResults", lineIndex).toInt(),
+                        freshSpanMs = hold.requireLong("freshSpanMs", lineIndex),
+                        firstFreshReceivedElapsedMs = hold.optionalLong("firstFreshReceivedElapsedMs"),
+                        lastFreshReceivedElapsedMs = hold.optionalLong("lastFreshReceivedElapsedMs"),
+                        receiptFallbacks = hold.optionalLong("receiptFallbacks")?.toInt() ?: 0,
+                        lastFreshSequenceNumber = hold.optionalLong("lastFreshSequenceNumber"),
+                    )
+                },
+                holdReleased = (entry["holdReleased"] as? JsonObject)?.let { release ->
+                    HoldReleaseTrace(
+                        cause = release.requireString("cause", lineIndex),
+                        sinceElapsedMs = release.requireLong("sinceElapsedMs", lineIndex),
+                        freshResults = release.requireLong("freshResults", lineIndex).toInt(),
+                        firstFreshReceivedElapsedMs = release.requireLong("firstFreshReceivedElapsedMs", lineIndex),
+                        lastFreshReceivedElapsedMs = release.requireLong("lastFreshReceivedElapsedMs", lineIndex),
+                        freshSpanMs = release.requireLong("freshSpanMs", lineIndex),
+                        receiptFallbacks = release.requireLong("receiptFallbacks", lineIndex).toInt(),
+                        sourceSequenceNumber = release.requireLong("sourceSequenceNumber", lineIndex),
+                    )
+                },
             )
         } catch (error: IllegalArgumentException) {
             throw IllegalArgumentException("Invalid safety_state at line ${lineIndex + 1}: ${error.message}", error)

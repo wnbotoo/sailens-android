@@ -1,0 +1,49 @@
+# stop_and_recovery_screen_reader: stop_and_recovery_speech with the screen reader on: the prompts and the covered lens's sentences go to it.
+# config detfirst=off step=100 speech=on screenReader=on haptics=on faultHaptics=on
+0 script start
+0 state initializing since=0 phase=starting interrupted=false stall=none judgement=none faults=[] channel=screen_reader cause=start_requested hold=none
+0 state initializing since=0 phase=awaiting_first_result interrupted=false stall=none judgement=none faults=[] channel=screen_reader cause=flow_started hold=none
+1000 script release_init sem
+1050 frame seq=1 q=qualified events=[]
+1050 state guiding since=1050 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=screen_reader cause=result hold=none
+3950 frames seq=2..30 n=29 from=1150 q=qualified
+4050 frame seq=31 q=qualified events=[e1:event_obstacle_left_person:HIGH{count=1}@MEDIUM~7050]
+4050 screen_reader "event_obstacle_left_person{count=1}"
+4050 motor queue left -> started
+4050 receipt confirm e1
+4050 outcome e1 src=31 event_obstacle_left_person HIGH delivered=screen_reader,haptics
+4750 frames seq=32..38 n=7 from=4150 q=qualified
+4850 frame seq=39 q=unqualified(camera_obstructed) events=[e2:event_camera_blocked:CRITICAL@-~10850]
+4850 state stop_required(camera_obstructed) since=4850 phase=running interrupted=false stall=none judgement=unqualified(camera_obstructed) faults=[] channel=screen_reader cause=result hold=camera_obstructed(since=4850,stopping,fresh=0,span=0)
+4850 receipt confirm e2
+4850 outcome e2 src=39 event_camera_blocked CRITICAL delivered=vision_alerts
+4850 screen_reader "event_camera_blocked"
+4850 alert vision fault_notice event_camera_blocked priority=critical channel=screen_reader result=published
+4850 alert vision fault_rhythm vision_unreliable priority=critical channel=haptics result=requested
+4850 motor reserve vision_unreliable -> started
+4850 alert vision fault_rhythm vision_unreliable priority=critical channel=haptics result=played
+12050 frames seq=40..111 n=72 from=4950 q=unqualified(camera_obstructed)
+12150 frame seq=112 q=qualified events=[e3:event_obstacle_left_person:HIGH{count=1}@MEDIUM~15150]
+12150 state stop_required(camera_obstructed) since=4850 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=screen_reader cause=result hold=camera_obstructed(since=4850,recovering,fresh=1,span=0)
+12150 screen_reader "event_obstacle_left_person{count=1}"
+12150 motor queue left -> started
+12150 receipt confirm e3
+12150 outcome e3 src=112 event_obstacle_left_person HIGH delivered=screen_reader,haptics
+12250 frames seq=113..113 n=1 from=12250 q=qualified
+12250 state stop_required(camera_obstructed) since=4850 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=screen_reader cause=result hold=camera_obstructed(since=4850,recovering,fresh=2,span=100)
+12350 frames seq=114..114 n=1 from=12350 q=qualified
+12350 state stop_required(camera_obstructed) since=4850 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=screen_reader cause=result hold=camera_obstructed(since=4850,recovering,fresh=3,span=200)
+12450 frames seq=115..115 n=1 from=12450 q=qualified
+12450 state stop_required(camera_obstructed) since=4850 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=screen_reader cause=result hold=camera_obstructed(since=4850,recovering,fresh=4,span=300)
+12550 frames seq=116..116 n=1 from=12550 q=qualified
+12550 state stop_required(camera_obstructed) since=4850 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=screen_reader cause=result hold=camera_obstructed(since=4850,recovering,fresh=5,span=400)
+12650 frames seq=117..117 n=1 from=12650 q=qualified
+12650 state guiding since=12650 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=screen_reader cause=result hold=none released=(fresh=6,span=500,src=117,fallbacks=0)
+14150 frames seq=118..132 n=15 from=12750 q=qualified
+14150 screen_reader "event_camera_restored"
+14150 alert vision fault_recovery event_camera_restored priority=low channel=screen_reader result=published
+15850 frames seq=133..149 n=17 from=14250 q=qualified
+16000 script stop
+16000 speech stop
+16000 motor cancel
+16000 state idle since=16000 phase=not_started interrupted=false stall=none judgement=qualified faults=[] channel=screen_reader cause=stopped hold=none

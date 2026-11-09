@@ -149,7 +149,7 @@ internal object SessionSimulator {
         val observer = object : MirrorObserver by director.observer {
             override fun resultArrived(run: Int, result: SceneResult) {
                 director.observer.resultArrived(run, result)
-                timeline.frame(result.sequenceNumber, result.qualification.baseline, result.events, result.obstacles.map { it.category })
+                timeline.frame(result.sequenceNumber, result.qualification.baseline, result.events, result.obstacles.map { it.category }, result.frameReceivedAtMs)
             }
         }
 
@@ -284,7 +284,8 @@ internal object SessionSimulator {
                 override fun onStallWatchStarted() = alerts.onStallWatchStarted()
                 override fun onStallWatchStopped() = alerts.onStallWatchStopped()
                 override fun onFlowStarted() = alerts.onFlowStarted()
-                override fun onResult(baseline: BaselineQualification) = alerts.onResult(baseline)
+                override fun onResult(baseline: BaselineQualification, sequenceNumber: Long, receivedAtMs: Long?) =
+                    alerts.onResult(baseline, sequenceNumber, receivedAtMs)
                 override fun onFlowFailed(error: Throwable) = alerts.onFlowFailed(error)
                 override fun onStopped() = alerts.onStopped()
                 override fun endOfSession() = alerts.endOfSession()

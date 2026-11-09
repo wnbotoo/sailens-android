@@ -1,20 +1,20 @@
 # speech_outage_long_cover: Standing on a sidewalk while own speech is unavailable from 6000 to 22000, the lens covered for 7 s from 12050. On the sixth covered frame the notice is refused, the engine not being ready, and the entry rhythm plays, which does not count as telling; 5 s later the fallback rhythm plays, whatever the switches say.
 # config detfirst=off step=100 speech=on screenReader=off haptics=on faultHaptics=on
-0 state idle since=0 phase=not_started interrupted=false stall=none judgement=none faults=[] channel=speech cause=output
+0 state idle since=0 phase=not_started interrupted=false stall=none judgement=none faults=[] channel=speech cause=output hold=none
 0 script start
-0 state initializing since=0 phase=starting interrupted=false stall=none judgement=none faults=[] channel=speech cause=start_requested
-0 state initializing since=0 phase=awaiting_first_result interrupted=false stall=none judgement=none faults=[] channel=speech cause=flow_started
+0 state initializing since=0 phase=starting interrupted=false stall=none judgement=none faults=[] channel=speech cause=start_requested hold=none
+0 state initializing since=0 phase=awaiting_first_result interrupted=false stall=none judgement=none faults=[] channel=speech cause=flow_started hold=none
 1000 script release_init sem
 1050 frame seq=1 q=qualified events=[]
-1050 state guiding since=1050 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result
+1050 state guiding since=1050 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=none
 5950 frames seq=2..50 n=49 from=1150 q=qualified
 6000 script engine unavailable ready=false
-6000 state degraded(speech_unavailable) since=6000 phase=running interrupted=false stall=none judgement=qualified faults=[speech_unavailable] channel=haptics_only cause=output
+6000 state degraded(speech_unavailable) since=6000 phase=running interrupted=false stall=none judgement=qualified faults=[speech_unavailable] channel=haptics_only cause=output hold=none
 6000 motor alarm speech_unavailable -> played
 6000 alert system speech_unavailable speech_unavailable priority=max channel=haptics result=played
 12450 frames seq=51..115 n=65 from=6050 q=qualified
 12550 frame seq=116 q=unqualified(camera_obstructed) events=[e1:event_camera_blocked:CRITICAL@-~18550]
-12550 state stop_required(camera_obstructed) since=12550 phase=running interrupted=false stall=none judgement=unqualified(camera_obstructed) faults=[speech_unavailable] channel=haptics_only cause=result
+12550 state stop_required(camera_obstructed) since=12550 phase=running interrupted=false stall=none judgement=unqualified(camera_obstructed) faults=[speech_unavailable] channel=haptics_only cause=result hold=camera_obstructed(since=12550,stopping,fresh=0,span=0)
 12550 receipt confirm e1
 12550 outcome e1 src=116 event_camera_blocked CRITICAL delivered=vision_alerts
 12550 speech speak n1 "event_camera_blocked" scale=24 exp=17550 -> refused(not_ready)
@@ -66,13 +66,23 @@
 19050 alert vision fault_notice event_camera_blocked priority=critical channel=speech result=refused
 19450 frames seq=182..185 n=4 from=19150 q=unqualified(camera_obstructed)
 19550 frame seq=186 q=qualified events=[]
-19550 state degraded(speech_unavailable) since=19550 phase=running interrupted=false stall=none judgement=qualified faults=[speech_unavailable] channel=haptics_only cause=result
-21550 frames seq=187..206 n=20 from=19650 q=qualified
+19550 state stop_required(camera_obstructed) since=12550 phase=running interrupted=false stall=none judgement=qualified faults=[speech_unavailable] channel=haptics_only cause=result hold=camera_obstructed(since=12550,recovering,fresh=1,span=0)
+19650 frames seq=187..187 n=1 from=19650 q=qualified
+19650 state stop_required(camera_obstructed) since=12550 phase=running interrupted=false stall=none judgement=qualified faults=[speech_unavailable] channel=haptics_only cause=result hold=camera_obstructed(since=12550,recovering,fresh=2,span=100)
+19750 frames seq=188..188 n=1 from=19750 q=qualified
+19750 state stop_required(camera_obstructed) since=12550 phase=running interrupted=false stall=none judgement=qualified faults=[speech_unavailable] channel=haptics_only cause=result hold=camera_obstructed(since=12550,recovering,fresh=3,span=200)
+19850 frames seq=189..189 n=1 from=19850 q=qualified
+19850 state stop_required(camera_obstructed) since=12550 phase=running interrupted=false stall=none judgement=qualified faults=[speech_unavailable] channel=haptics_only cause=result hold=camera_obstructed(since=12550,recovering,fresh=4,span=300)
+19950 frames seq=190..190 n=1 from=19950 q=qualified
+19950 state stop_required(camera_obstructed) since=12550 phase=running interrupted=false stall=none judgement=qualified faults=[speech_unavailable] channel=haptics_only cause=result hold=camera_obstructed(since=12550,recovering,fresh=5,span=400)
+20050 frames seq=191..191 n=1 from=20050 q=qualified
+20050 state degraded(speech_unavailable) since=20050 phase=running interrupted=false stall=none judgement=qualified faults=[speech_unavailable] channel=haptics_only cause=result hold=none released=(fresh=6,span=500,src=191,fallbacks=0)
+21550 frames seq=192..206 n=15 from=20150 q=qualified
 21550 speech speak n15 "event_camera_restored" scale=0 exp=26550 -> refused(not_ready)
 21550 alert vision fault_recovery event_camera_restored priority=low channel=speech result=refused
 21950 frames seq=207..210 n=4 from=21650 q=qualified
 22000 script engine ready ready=true
-22000 state guiding since=22000 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=output
+22000 state guiding since=22000 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=output hold=none
 22050 frames seq=211..211 n=1 from=22050 q=qualified
 22050 speech speak n16 "event_camera_restored" scale=0 exp=26550 -> accepted
 22050 alert vision fault_recovery event_camera_restored priority=low channel=speech result=accepted
@@ -82,4 +92,4 @@
 25000 script stop
 25000 speech stop
 25000 motor cancel
-25000 state idle since=25000 phase=not_started interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=stopped
+25000 state idle since=25000 phase=not_started interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=stopped hold=none

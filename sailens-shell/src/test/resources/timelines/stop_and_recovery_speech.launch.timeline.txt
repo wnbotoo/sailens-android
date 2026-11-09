@@ -1,12 +1,12 @@
 # stop_and_recovery_speech.launch: stop_and_recovery_speech with DetFirstConfig.LAUNCH: interrupted prompts are retried, so the cut prompt is reported to the cooldown.
 # config detfirst=launch step=100 speech=on screenReader=off haptics=on faultHaptics=on
-0 state idle since=0 phase=not_started interrupted=false stall=none judgement=none faults=[] channel=speech cause=output
+0 state idle since=0 phase=not_started interrupted=false stall=none judgement=none faults=[] channel=speech cause=output hold=none
 0 script start
-0 state initializing since=0 phase=starting interrupted=false stall=none judgement=none faults=[] channel=speech cause=start_requested
-0 state initializing since=0 phase=awaiting_first_result interrupted=false stall=none judgement=none faults=[] channel=speech cause=flow_started
+0 state initializing since=0 phase=starting interrupted=false stall=none judgement=none faults=[] channel=speech cause=start_requested hold=none
+0 state initializing since=0 phase=awaiting_first_result interrupted=false stall=none judgement=none faults=[] channel=speech cause=flow_started hold=none
 1000 script release_init sem
 1050 frame seq=1 q=qualified events=[]
-1050 state guiding since=1050 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result
+1050 state guiding since=1050 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=none
 1050 speech speak m1 "event_mode_obstacles_and_blocked" scale=15 exp=6050 -> accepted
 2850 frames seq=2..19 n=18 from=1150 q=qualified
 2930 speech done m1
@@ -18,7 +18,7 @@
 4050 outcome e1 src=31 event_obstacle_left_person HIGH delivered=speech,haptics
 4750 frames seq=32..38 n=7 from=4150 q=qualified
 4850 frame seq=39 q=unqualified(camera_obstructed) events=[e2:event_camera_blocked:CRITICAL@-~10850]
-4850 state stop_required(camera_obstructed) since=4850 phase=running interrupted=false stall=none judgement=unqualified(camera_obstructed) faults=[] channel=speech cause=result
+4850 state stop_required(camera_obstructed) since=4850 phase=running interrupted=false stall=none judgement=unqualified(camera_obstructed) faults=[] channel=speech cause=result hold=camera_obstructed(since=4850,stopping,fresh=0,span=0)
 4850 receipt confirm e2
 4850 outcome e2 src=39 event_camera_blocked CRITICAL delivered=vision_alerts
 4850 speech speak n1 "event_camera_blocked" scale=31 exp=9850 -> accepted
@@ -32,11 +32,21 @@
 6250 speech done n1
 12050 frames seq=53..111 n=59 from=6250 q=unqualified(camera_obstructed)
 12150 frame seq=112 q=qualified events=[e3:event_obstacle_left_person:HIGH{count=1}@MEDIUM~15150]
-12150 state guiding since=12150 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result
+12150 state stop_required(camera_obstructed) since=4850 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=camera_obstructed(since=4850,recovering,fresh=1,span=0)
 12150 speech speak e3 "event_obstacle_left_person{count=1}" scale=20 exp=15150 -> accepted
 12150 receipt accepted e3 -> false
 12150 outcome e3 src=112 event_obstacle_left_person HIGH delivered=speech
-13750 frames seq=113..128 n=16 from=12250 q=qualified
+12250 frames seq=113..113 n=1 from=12250 q=qualified
+12250 state stop_required(camera_obstructed) since=4850 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=camera_obstructed(since=4850,recovering,fresh=2,span=100)
+12350 frames seq=114..114 n=1 from=12350 q=qualified
+12350 state stop_required(camera_obstructed) since=4850 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=camera_obstructed(since=4850,recovering,fresh=3,span=200)
+12450 frames seq=115..115 n=1 from=12450 q=qualified
+12450 state stop_required(camera_obstructed) since=4850 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=camera_obstructed(since=4850,recovering,fresh=4,span=300)
+12550 frames seq=116..116 n=1 from=12550 q=qualified
+12550 state stop_required(camera_obstructed) since=4850 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=camera_obstructed(since=4850,recovering,fresh=5,span=400)
+12650 frames seq=117..117 n=1 from=12650 q=qualified
+12650 state guiding since=12650 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=none released=(fresh=6,span=500,src=117,fallbacks=0)
+13750 frames seq=118..128 n=11 from=12750 q=qualified
 13790 speech done e3
 13790 receipt confirm e3
 14150 frames seq=129..132 n=4 from=13850 q=qualified
@@ -48,4 +58,4 @@
 16000 script stop
 16000 speech stop
 16000 motor cancel
-16000 state idle since=16000 phase=not_started interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=stopped
+16000 state idle since=16000 phase=not_started interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=stopped hold=none

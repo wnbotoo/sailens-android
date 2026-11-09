@@ -1,12 +1,12 @@
 # speech_outage_haptics_off: The first outage of speech_outage with navigation vibration off: a prompt in the outage has no channel left and is withdrawn on every frame it is offered; the outage is still alerted once, by vibration.
 # config detfirst=off step=100 speech=on screenReader=off haptics=off faultHaptics=on
-0 state idle since=0 phase=not_started interrupted=false stall=none judgement=none faults=[] channel=speech cause=output
+0 state idle since=0 phase=not_started interrupted=false stall=none judgement=none faults=[] channel=speech cause=output hold=none
 0 script start
-0 state initializing since=0 phase=starting interrupted=false stall=none judgement=none faults=[] channel=speech cause=start_requested
-0 state initializing since=0 phase=awaiting_first_result interrupted=false stall=none judgement=none faults=[] channel=speech cause=flow_started
+0 state initializing since=0 phase=starting interrupted=false stall=none judgement=none faults=[] channel=speech cause=start_requested hold=none
+0 state initializing since=0 phase=awaiting_first_result interrupted=false stall=none judgement=none faults=[] channel=speech cause=flow_started hold=none
 1000 script release_init sem
 1050 frame seq=1 q=qualified events=[]
-1050 state guiding since=1050 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result
+1050 state guiding since=1050 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=none
 2150 frames seq=2..12 n=11 from=1150 q=qualified
 2250 frame seq=13 q=qualified events=[e1:event_obstacle_center_person:CRITICAL{count=1}@MEDIUM~5250]
 2250 speech speak e1 "event_obstacle_center_person{count=1}" scale=24 exp=5250 -> accepted
@@ -16,7 +16,7 @@
 3970 speech done e1
 5950 frames seq=31..50 n=20 from=4050 q=qualified
 6000 script engine unavailable ready=false
-6000 state degraded(speech_unavailable) since=6000 phase=running interrupted=false stall=none judgement=qualified faults=[speech_unavailable] channel=none cause=output
+6000 state degraded(speech_unavailable) since=6000 phase=running interrupted=false stall=none judgement=qualified faults=[speech_unavailable] channel=none cause=output hold=none
 6000 motor alarm speech_unavailable -> played
 6000 alert system speech_unavailable speech_unavailable priority=max channel=haptics result=played
 7150 frames seq=51..62 n=12 from=6050 q=qualified
@@ -111,17 +111,17 @@
 11950 frames seq=85..110 n=26 from=9450 q=qualified
 12000 script engine ready=true
 12050 frames seq=111..111 n=1 from=12050 q=qualified
-12050 state degraded(speech_unavailable) since=6000 phase=running interrupted=false stall=none judgement=qualified faults=[speech_unavailable] channel=speech cause=result
+12050 state degraded(speech_unavailable) since=6000 phase=running interrupted=false stall=none judgement=qualified faults=[speech_unavailable] channel=speech cause=result hold=none
 12650 frames seq=112..117 n=6 from=12150 q=qualified
 12750 frame seq=118 q=qualified events=[e24:event_obstacle_center_person:CRITICAL{count=1}@MEDIUM~15750]
 12750 speech speak e24 "event_obstacle_center_person{count=1}" scale=24 exp=15750 -> accepted
 12750 receipt confirm e24
 12750 outcome e24 src=118 event_obstacle_center_person CRITICAL delivered=speech
-12750 state guiding since=12750 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=output
+12750 state guiding since=12750 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=output hold=none
 14450 frames seq=119..135 n=17 from=12850 q=qualified
 14470 speech done e24
 15850 frames seq=136..149 n=14 from=14550 q=qualified
 16000 script stop
 16000 speech stop
 16000 motor cancel
-16000 state idle since=16000 phase=not_started interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=stopped
+16000 state idle since=16000 phase=not_started interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=stopped hold=none

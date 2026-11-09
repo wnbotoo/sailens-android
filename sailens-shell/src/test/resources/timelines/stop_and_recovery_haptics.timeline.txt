@@ -1,11 +1,11 @@
 # stop_and_recovery_haptics: With speech off, standing on the unrecognised floor of ground_unrecognized_long: its entry rhythm holds the motor from 6550. A person stepping in ahead at 6650 is prompted by vibration alone and queues behind it; the lens, covered from 6650, is confirmed covered at 7150, and its rhythm reserves the motor. When the floor's rhythm ends the reserved one plays first, and the queued person's after it.
 # config detfirst=off step=100 speech=off screenReader=off haptics=on faultHaptics=on
 0 script start
-0 state initializing since=0 phase=starting interrupted=false stall=none judgement=none faults=[] channel=haptics_only cause=start_requested
-0 state initializing since=0 phase=awaiting_first_result interrupted=false stall=none judgement=none faults=[] channel=haptics_only cause=flow_started
+0 state initializing since=0 phase=starting interrupted=false stall=none judgement=none faults=[] channel=haptics_only cause=start_requested hold=none
+0 state initializing since=0 phase=awaiting_first_result interrupted=false stall=none judgement=none faults=[] channel=haptics_only cause=flow_started hold=none
 1000 script release_init sem
 1050 frame seq=1 q=qualified events=[]
-1050 state guiding since=1050 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=haptics_only cause=result
+1050 state guiding since=1050 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=haptics_only cause=result hold=none
 5250 frames seq=2..43 n=42 from=1150 q=qualified
 5350 frame seq=44 q=qualified events=[e1:event_blocked:CRITICAL@-~10350]
 5350 motor queue blocked -> started
@@ -13,7 +13,7 @@
 5350 outcome e1 src=44 event_blocked CRITICAL delivered=haptics
 6450 frames seq=45..55 n=11 from=5450 q=qualified
 6550 frame seq=56 q=degraded(ground_unrecognized) events=[e2:event_ground_unrecognized:LOW@-~11550]
-6550 state degraded(ground_unrecognized) since=6550 phase=running interrupted=false stall=none judgement=degraded(ground_unrecognized) faults=[] channel=haptics_only cause=result
+6550 state degraded(ground_unrecognized) since=6550 phase=running interrupted=false stall=none judgement=degraded(ground_unrecognized) faults=[] channel=haptics_only cause=result hold=none
 6550 receipt confirm e2
 6550 outcome e2 src=56 event_ground_unrecognized LOW delivered=vision_alerts
 6550 alert vision fault_rhythm vision_unreliable priority=low channel=haptics result=requested
@@ -24,7 +24,7 @@
 6850 motor queue ahead -> queued
 7050 frames seq=60..61 n=2 from=6950 q=degraded(ground_unrecognized)
 7150 frame seq=62 q=unqualified(camera_obstructed;also=ground_unrecognized) events=[e4:event_camera_blocked:CRITICAL@-~13150]
-7150 state stop_required(camera_obstructed) since=7150 phase=running interrupted=false stall=none judgement=unqualified(camera_obstructed,ground_unrecognized) faults=[] channel=haptics_only cause=result
+7150 state stop_required(camera_obstructed) since=7150 phase=running interrupted=false stall=none judgement=unqualified(camera_obstructed,ground_unrecognized) faults=[] channel=haptics_only cause=result hold=camera_obstructed(since=7150,stopping,fresh=0,span=0)
 7150 receipt confirm e4
 7150 outcome e4 src=62 event_camera_blocked CRITICAL delivered=vision_alerts
 7150 alert vision fault_rhythm vision_unreliable priority=critical channel=haptics result=requested
@@ -38,9 +38,19 @@
 8430 outcome e3 src=59 event_obstacle_center_person CRITICAL delivered=haptics
 11050 frames seq=75..101 n=27 from=8450 q=unqualified(camera_obstructed;also=ground_unrecognized)
 11150 frame seq=102 q=degraded(ground_unrecognized) events=[]
-11150 state degraded(ground_unrecognized) since=11150 phase=running interrupted=false stall=none judgement=degraded(ground_unrecognized) faults=[] channel=haptics_only cause=result
-13850 frames seq=103..129 n=27 from=11250 q=degraded(ground_unrecognized)
+11150 state stop_required(camera_obstructed) since=7150 phase=running interrupted=false stall=none judgement=degraded(ground_unrecognized) faults=[] channel=haptics_only cause=result hold=camera_obstructed(since=7150,recovering,fresh=1,span=0)
+11250 frames seq=103..103 n=1 from=11250 q=degraded(ground_unrecognized)
+11250 state stop_required(camera_obstructed) since=7150 phase=running interrupted=false stall=none judgement=degraded(ground_unrecognized) faults=[] channel=haptics_only cause=result hold=camera_obstructed(since=7150,recovering,fresh=2,span=100)
+11350 frames seq=104..104 n=1 from=11350 q=degraded(ground_unrecognized)
+11350 state stop_required(camera_obstructed) since=7150 phase=running interrupted=false stall=none judgement=degraded(ground_unrecognized) faults=[] channel=haptics_only cause=result hold=camera_obstructed(since=7150,recovering,fresh=3,span=200)
+11450 frames seq=105..105 n=1 from=11450 q=degraded(ground_unrecognized)
+11450 state stop_required(camera_obstructed) since=7150 phase=running interrupted=false stall=none judgement=degraded(ground_unrecognized) faults=[] channel=haptics_only cause=result hold=camera_obstructed(since=7150,recovering,fresh=4,span=300)
+11550 frames seq=106..106 n=1 from=11550 q=degraded(ground_unrecognized)
+11550 state stop_required(camera_obstructed) since=7150 phase=running interrupted=false stall=none judgement=degraded(ground_unrecognized) faults=[] channel=haptics_only cause=result hold=camera_obstructed(since=7150,recovering,fresh=5,span=400)
+11650 frames seq=107..107 n=1 from=11650 q=degraded(ground_unrecognized)
+11650 state degraded(ground_unrecognized) since=11650 phase=running interrupted=false stall=none judgement=degraded(ground_unrecognized) faults=[] channel=haptics_only cause=result hold=none released=(fresh=6,span=500,src=107,fallbacks=0)
+13850 frames seq=108..129 n=22 from=11750 q=degraded(ground_unrecognized)
 14000 script stop
 14000 speech stop
 14000 motor cancel
-14000 state idle since=14000 phase=not_started interrupted=false stall=none judgement=degraded(ground_unrecognized) faults=[] channel=haptics_only cause=stopped
+14000 state idle since=14000 phase=not_started interrupted=false stall=none judgement=degraded(ground_unrecognized) faults=[] channel=haptics_only cause=stopped hold=none

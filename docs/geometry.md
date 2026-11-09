@@ -335,7 +335,10 @@ modules' tests can use it as well; the tests that run it, such as `SyntheticScen
   `sailens-shell/src/test/resources/timelines/<name>.timeline.txt`: its description, its settings,
   then one line per thing that happened, at its millisecond since the start was pressed, in the order
   it happened: the script's actions, the frames (one with events or a new qualification has its own
-  line, the quiet ones in between are merged), the safety state, the alerts, each prompt's outcome
+  line, the quiet ones in between are merged; one the camera handed over late has its own line with
+  `lag=`, how much earlier it was received), the safety state (with `hold=`: whether ordinary prompts
+  are held after a stop, since when, and the fresh results counted; `released=` on the result that
+  ends a hold), the alerts, each prompt's outcome
   and cooldown receipts, every call the devices got and what they answered, and the state the alerts
   write on the screen. Ids are numbered by first appearance; no line has a wall-clock time or a
   floating-point number. `SessionTimelineTest` fails on the first differing line, and checks what

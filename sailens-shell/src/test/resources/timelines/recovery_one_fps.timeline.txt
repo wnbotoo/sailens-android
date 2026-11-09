@@ -1,0 +1,60 @@
+# recovery_one_fps: Frames 1 s apart, standing by a person to the left; the lens covered from 3050 to 12050. The sixth covered frame (8050) stops guidance and the sixth clear one (18050) judges again.
+# config detfirst=off step=1000 speech=on screenReader=off haptics=on faultHaptics=on
+0 state idle since=0 phase=not_started interrupted=false stall=none judgement=none faults=[] channel=speech cause=output hold=none
+0 script start
+0 state initializing since=0 phase=starting interrupted=false stall=none judgement=none faults=[] channel=speech cause=start_requested hold=none
+0 state initializing since=0 phase=awaiting_first_result interrupted=false stall=none judgement=none faults=[] channel=speech cause=flow_started hold=none
+1000 script release_init sem
+1050 frame seq=1 q=qualified events=[]
+1050 state guiding since=1050 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=none
+2050 frames seq=2..2 n=1 from=2050 q=qualified
+3050 frame seq=3 q=qualified events=[e1:event_obstacle_left_person:HIGH{count=1}@MEDIUM~6050]
+3050 speech speak e1 "event_obstacle_left_person{count=1}" scale=16 exp=6050 -> accepted
+3050 motor queue left -> started
+3050 receipt confirm e1
+3050 outcome e1 src=3 event_obstacle_left_person HIGH delivered=speech,haptics
+4050 frames seq=4..4 n=1 from=4050 q=qualified
+4690 speech done e1
+7050 frames seq=5..7 n=3 from=5050 q=qualified
+8050 frame seq=8 q=unqualified(camera_obstructed) events=[e2:event_camera_blocked:CRITICAL@-~14050]
+8050 state stop_required(camera_obstructed) since=8050 phase=running interrupted=false stall=none judgement=unqualified(camera_obstructed) faults=[] channel=speech cause=result hold=camera_obstructed(since=8050,stopping,fresh=0,span=0)
+8050 receipt confirm e2
+8050 outcome e2 src=8 event_camera_blocked CRITICAL delivered=vision_alerts
+8050 speech speak n1 "event_camera_blocked" scale=24 exp=13050 -> accepted
+8050 alert vision fault_notice event_camera_blocked priority=critical channel=speech result=accepted
+8050 alert vision fault_rhythm vision_unreliable priority=critical channel=haptics result=requested
+8050 motor reserve vision_unreliable -> started
+8050 alert vision fault_rhythm vision_unreliable priority=critical channel=haptics result=played
+9050 frames seq=9..9 n=1 from=9050 q=unqualified(camera_obstructed)
+9450 speech done n1
+15050 frames seq=10..15 n=6 from=10050 q=unqualified(camera_obstructed)
+16050 frame seq=16 q=unqualified(camera_obstructed) events=[e3:event_camera_blocked:CRITICAL@-~22050]
+16050 receipt confirm e3
+16050 outcome e3 src=16 event_camera_blocked CRITICAL delivered=vision_alerts
+16050 speech speak n2 "event_camera_blocked" scale=24 exp=21050 -> accepted
+16050 alert vision fault_notice event_camera_blocked priority=critical channel=speech result=accepted
+16050 alert vision fault_rhythm vision_unreliable priority=critical channel=haptics result=requested
+16050 motor reserve vision_unreliable -> started
+16050 alert vision fault_rhythm vision_unreliable priority=critical channel=haptics result=played
+17050 frames seq=17..17 n=1 from=17050 q=unqualified(camera_obstructed)
+17450 speech done n2
+18050 frame seq=18 q=qualified events=[e4:event_obstacle_left_person:HIGH{count=1}@MEDIUM~21050]
+18050 state stop_required(camera_obstructed) since=8050 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=camera_obstructed(since=8050,recovering,fresh=1,span=0)
+18050 speech speak e4 "event_obstacle_left_person{count=1}" scale=16 exp=21050 -> accepted
+18050 motor queue left -> started
+18050 receipt confirm e4
+18050 outcome e4 src=18 event_obstacle_left_person HIGH delivered=speech,haptics
+19050 frames seq=19..19 n=1 from=19050 q=qualified
+19050 state stop_required(camera_obstructed) since=8050 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=camera_obstructed(since=8050,recovering,fresh=2,span=1000)
+19690 speech done e4
+20050 frames seq=20..20 n=1 from=20050 q=qualified
+20050 state guiding since=20050 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=none released=(fresh=3,span=2000,src=20,fallbacks=0)
+20050 speech speak n3 "event_camera_restored" scale=0 exp=25050 -> accepted
+20050 alert vision fault_recovery event_camera_restored priority=low channel=speech result=accepted
+21050 frames seq=21..21 n=1 from=21050 q=qualified
+21490 speech done n3
+22050 frames seq=22..22 n=1 from=22050 q=qualified
+23000 script stop
+23000 speech stop
+23000 motor cancel
+23000 state idle since=23000 phase=not_started interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=stopped hold=none

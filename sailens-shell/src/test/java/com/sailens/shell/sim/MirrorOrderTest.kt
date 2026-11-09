@@ -101,7 +101,7 @@ class MirrorOrderTest {
         override fun onStallWatchStarted() { calls += "alerts.onStallWatchStarted" }
         override fun onStallWatchStopped() { calls += "alerts.onStallWatchStopped" }
         override fun onFlowStarted() { calls += "alerts.onFlowStarted running=${ui.isRunning}" }
-        override fun onResult(baseline: BaselineQualification) { calls += "alerts.onResult ${baseline.traceLevel}" }
+        override fun onResult(baseline: BaselineQualification, sequenceNumber: Long, receivedAtMs: Long?) { calls += "alerts.onResult ${baseline.traceLevel}" }
         override fun onFlowFailed(error: Throwable) { calls += "alerts.onFlowFailed ${error.message}" }
         override fun onStopped() { calls += "alerts.onStopped running=${ui.isRunning} scope=${if (mirror.viewModelScope.isActive) "active" else "cancelled"}" }
         override fun endOfSession() { calls += "alerts.endOfSession" }

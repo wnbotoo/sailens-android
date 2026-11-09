@@ -3,7 +3,10 @@ package com.sailens.shell.guidance.safety
 import com.sailens.guidance.model.common.EventPriority
 import com.sailens.guidance.model.trace.GuidanceAlertKinds
 import com.sailens.guidance.model.trace.GuidanceAlertTrace
+import com.sailens.guidance.model.trace.HoldReleaseTrace
+import com.sailens.guidance.model.trace.HoldTrace
 import com.sailens.guidance.model.trace.SafetyStateTrace
+import com.sailens.guidance.safety.PromptHold
 import com.sailens.guidance.model.trace.SafetyTraceNames
 import com.sailens.guidance.safety.traceLevel
 import com.sailens.guidance.safety.traceReasons
@@ -63,6 +66,38 @@ internal val NavigationChannel.traceName: String
         NavigationChannel.STATUS_CARD_ONLY -> SafetyTraceNames.Channels.STATUS_CARD_ONLY
         NavigationChannel.NONE -> SafetyTraceNames.Channels.NONE
     }
+
+internal val HoldCause.traceName: String
+    get() = when (this) {
+        HoldCause.CAMERA_OBSTRUCTED -> SafetyTraceNames.HoldCauses.CAMERA_OBSTRUCTED
+        HoldCause.TOO_DARK -> SafetyTraceNames.HoldCauses.TOO_DARK
+        HoldCause.STARTUP_STALLED -> SafetyTraceNames.HoldCauses.STARTUP_STALLED
+        HoldCause.PERCEPTION_STALLED -> SafetyTraceNames.HoldCauses.PERCEPTION_STALLED
+        HoldCause.LIFECYCLE -> SafetyTraceNames.HoldCauses.LIFECYCLE
+    }
+
+internal fun PromptHold.Held<HoldCause>.toTrace(): HoldTrace = HoldTrace(
+    cause = cause.traceName,
+    sinceElapsedMs = sinceMs,
+    stopping = stopping,
+    freshResults = fresh,
+    freshSpanMs = freshSpanMs,
+    firstFreshReceivedElapsedMs = firstFreshReceivedAtMs,
+    lastFreshReceivedElapsedMs = lastFreshReceivedAtMs,
+    receiptFallbacks = receiptFallbacks,
+    lastFreshSequenceNumber = lastFreshSequenceNumber,
+)
+
+internal fun PromptHold.Release<HoldCause>.toTrace(): HoldReleaseTrace = HoldReleaseTrace(
+    cause = cause.traceName,
+    sinceElapsedMs = sinceMs,
+    freshResults = fresh,
+    firstFreshReceivedElapsedMs = firstFreshReceivedAtMs,
+    lastFreshReceivedElapsedMs = lastFreshReceivedAtMs,
+    freshSpanMs = freshSpanMs,
+    receiptFallbacks = receiptFallbacks,
+    sourceSequenceNumber = sequenceNumber,
+)
 
 internal val SafetyInput.traceName: String
     get() = when (this) {
@@ -124,4 +159,6 @@ internal fun GuidanceSafetySnapshot.toTrace(at: Long): SafetyStateTrace = Safety
     outputFaults = axes.outputFaults.sorted().map { it.name.lowercase() },
     expectedNavigationChannel = axes.expectedNavigationChannel.traceName,
     cause = cause.traceName,
+    hold = axes.hold?.toTrace(),
+    holdReleased = release?.toTrace(),
 )

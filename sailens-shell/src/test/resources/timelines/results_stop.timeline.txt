@@ -1,14 +1,14 @@
 # results_stop: Walking an empty sidewalk while the camera delivers nothing after 6950 until 25050. 2.5 s without a result is a stall: guidance stops and the stall is alarmed, felt and said, and again every 10 s while it lasts; the first result back guides again.
 # config detfirst=off step=100 speech=on screenReader=off haptics=on faultHaptics=on
-0 state idle since=0 phase=not_started interrupted=false stall=none judgement=none faults=[] channel=speech cause=output
+0 state idle since=0 phase=not_started interrupted=false stall=none judgement=none faults=[] channel=speech cause=output hold=none
 0 script start
-0 state initializing since=0 phase=starting interrupted=false stall=none judgement=none faults=[] channel=speech cause=start_requested
-0 state initializing since=0 phase=awaiting_first_result interrupted=false stall=none judgement=none faults=[] channel=speech cause=flow_started
+0 state initializing since=0 phase=starting interrupted=false stall=none judgement=none faults=[] channel=speech cause=start_requested hold=none
+0 state initializing since=0 phase=awaiting_first_result interrupted=false stall=none judgement=none faults=[] channel=speech cause=flow_started hold=none
 1000 script release_init sem
 1050 frame seq=1 q=qualified events=[]
-1050 state guiding since=1050 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result
+1050 state guiding since=1050 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=none
 6950 frames seq=2..60 n=59 from=1150 q=qualified
-9500 state stop_required(perception_stalled) since=9500 phase=running interrupted=false stall=no_results judgement=qualified faults=[] channel=speech cause=poll
+9500 state stop_required(perception_stalled) since=9500 phase=running interrupted=false stall=no_results judgement=qualified faults=[] channel=speech cause=poll hold=perception_stalled(since=9500,stopping,fresh=0,span=0)
 9500 motor alarm interrupted -> played
 9500 alert system stalled interrupted priority=high channel=haptics result=played
 9500 speech notice s1 "notice_guidance_stalled" scale=16 exp=24500 -> accepted
@@ -20,9 +20,19 @@
 19500 alert system stalled notice_guidance_stalled priority=high channel=speech result=requested
 21020 speech done s2
 25050 frames seq=241..241 n=1 from=25050 q=qualified
-25050 state guiding since=25050 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result
-26850 frames seq=242..259 n=18 from=25150 q=qualified
+25050 state stop_required(perception_stalled) since=9500 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=perception_stalled(since=9500,recovering,fresh=1,span=0)
+25150 frames seq=242..242 n=1 from=25150 q=qualified
+25150 state stop_required(perception_stalled) since=9500 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=perception_stalled(since=9500,recovering,fresh=2,span=100)
+25250 frames seq=243..243 n=1 from=25250 q=qualified
+25250 state stop_required(perception_stalled) since=9500 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=perception_stalled(since=9500,recovering,fresh=3,span=200)
+25350 frames seq=244..244 n=1 from=25350 q=qualified
+25350 state stop_required(perception_stalled) since=9500 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=perception_stalled(since=9500,recovering,fresh=4,span=300)
+25450 frames seq=245..245 n=1 from=25450 q=qualified
+25450 state stop_required(perception_stalled) since=9500 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=perception_stalled(since=9500,recovering,fresh=5,span=400)
+25550 frames seq=246..246 n=1 from=25550 q=qualified
+25550 state guiding since=25550 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=none released=(fresh=6,span=500,src=246,fallbacks=0)
+26850 frames seq=247..259 n=13 from=25650 q=qualified
 27000 script stop
 27000 speech stop
 27000 motor cancel
-27000 state idle since=27000 phase=not_started interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=stopped
+27000 state idle since=27000 phase=not_started interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=stopped hold=none

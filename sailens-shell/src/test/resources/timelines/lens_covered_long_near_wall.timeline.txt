@@ -1,15 +1,15 @@
 # lens_covered_long_near_wall: Walking toward a wall across the sidewalk and stopping 2 m short of it at 6050, the lens covered there for 20 s. The sixth covered frame stops guidance, said and felt then and every 8 s; the sixth clear frame judges again, and the lens is said clear 2 s later. At 2 m the wall is not judged blocked, on the covered frames before the sixth or after the cover, so no blocked prompt comes either side of it; connectivity figures are the Kotlin fallback's.
 # config detfirst=off step=100 speech=on screenReader=off haptics=on faultHaptics=on
-0 state idle since=0 phase=not_started interrupted=false stall=none judgement=none faults=[] channel=speech cause=output
+0 state idle since=0 phase=not_started interrupted=false stall=none judgement=none faults=[] channel=speech cause=output hold=none
 0 script start
-0 state initializing since=0 phase=starting interrupted=false stall=none judgement=none faults=[] channel=speech cause=start_requested
-0 state initializing since=0 phase=awaiting_first_result interrupted=false stall=none judgement=none faults=[] channel=speech cause=flow_started
+0 state initializing since=0 phase=starting interrupted=false stall=none judgement=none faults=[] channel=speech cause=start_requested hold=none
+0 state initializing since=0 phase=awaiting_first_result interrupted=false stall=none judgement=none faults=[] channel=speech cause=flow_started hold=none
 1000 script release_init sem
 1050 frame seq=1 q=qualified events=[]
-1050 state guiding since=1050 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result
+1050 state guiding since=1050 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=none
 6450 frames seq=2..55 n=54 from=1150 q=qualified
 6550 frame seq=56 q=unqualified(camera_obstructed) events=[e1:event_camera_blocked:CRITICAL@-~12550]
-6550 state stop_required(camera_obstructed) since=6550 phase=running interrupted=false stall=none judgement=unqualified(camera_obstructed) faults=[] channel=speech cause=result
+6550 state stop_required(camera_obstructed) since=6550 phase=running interrupted=false stall=none judgement=unqualified(camera_obstructed) faults=[] channel=speech cause=result hold=camera_obstructed(since=6550,stopping,fresh=0,span=0)
 6550 receipt confirm e1
 6550 outcome e1 src=56 event_camera_blocked CRITICAL delivered=vision_alerts
 6550 speech speak n1 "event_camera_blocked" scale=24 exp=11550 -> accepted
@@ -43,8 +43,18 @@
 23950 speech done n3
 26450 frames seq=230..255 n=26 from=23950 q=unqualified(camera_obstructed)
 26550 frame seq=256 q=qualified events=[]
-26550 state guiding since=26550 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result
-28550 frames seq=257..276 n=20 from=26650 q=qualified
+26550 state stop_required(camera_obstructed) since=6550 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=camera_obstructed(since=6550,recovering,fresh=1,span=0)
+26650 frames seq=257..257 n=1 from=26650 q=qualified
+26650 state stop_required(camera_obstructed) since=6550 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=camera_obstructed(since=6550,recovering,fresh=2,span=100)
+26750 frames seq=258..258 n=1 from=26750 q=qualified
+26750 state stop_required(camera_obstructed) since=6550 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=camera_obstructed(since=6550,recovering,fresh=3,span=200)
+26850 frames seq=259..259 n=1 from=26850 q=qualified
+26850 state stop_required(camera_obstructed) since=6550 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=camera_obstructed(since=6550,recovering,fresh=4,span=300)
+26950 frames seq=260..260 n=1 from=26950 q=qualified
+26950 state stop_required(camera_obstructed) since=6550 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=camera_obstructed(since=6550,recovering,fresh=5,span=400)
+27050 frames seq=261..261 n=1 from=27050 q=qualified
+27050 state guiding since=27050 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=none released=(fresh=6,span=500,src=261,fallbacks=0)
+28550 frames seq=262..276 n=15 from=27150 q=qualified
 28550 speech speak n4 "event_camera_restored" scale=0 exp=33550 -> accepted
 28550 alert vision fault_recovery event_camera_restored priority=low channel=speech result=accepted
 29950 frames seq=277..290 n=14 from=28650 q=qualified
@@ -53,4 +63,4 @@
 32000 script stop
 32000 speech stop
 32000 motor cancel
-32000 state idle since=32000 phase=not_started interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=stopped
+32000 state idle since=32000 phase=not_started interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=stopped hold=none

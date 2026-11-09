@@ -25,6 +25,9 @@ import com.sailens.guidance.processor.decision.EventMerger
 import com.sailens.guidance.processor.decision.SpeechRanks
 import com.sailens.guidance.processor.decision.SpeechScale
 import com.sailens.guidance.repository.DeviceSensorRepository
+import com.sailens.guidance.safety.BaselineQualification
+import com.sailens.guidance.safety.PromptHold
+import com.sailens.guidance.safety.UnqualifiedReason
 import com.sailens.guidance.safety.visionFaults
 import com.sailens.guidance.trace.capture.CaptureSchema
 import com.sailens.guidance.trace.capture.EventRecord
@@ -314,6 +317,7 @@ internal class FingerprintPipeline(
             "frame ${frame.seq}: $qualification projects to ${qualification.visionFaults()}, the generator said ${frame.visionFaults}"
         }
         observed("qualification", qualification.toRecord().toString())
+        observeHold(frame, qualification)
         protocol.onFrame(events, frame.seq, frame.visionFaults)
     }
 
@@ -345,6 +349,23 @@ internal class FingerprintPipeline(
 
     private fun line(kind: String, detail: String) {
         out += if (detail.isEmpty()) "$seq $kind" else "$seq $kind $detail"
+    }
+
+    /**
+     * The prompt hold the shell would keep for a stop for the camera, driven by each frame's qualification alone: a
+     * stall or the background cannot be told from a recording. The recording keeps no frame receipt, so every result
+     * counts at its decision; within one replay no result is from before the stop it follows. Observed only.
+     */
+    private val hold = PromptHold<UnqualifiedReason>()
+
+    private fun observeHold(frame: FingerprintFrame, qualification: BaselineQualification) {
+        val cause = (qualification as? BaselineQualification.Unqualified)?.reason
+        val change = hold.step(frame.decidedAt, cause, if (cause == null) PromptHold.Result(frame.seq, receivedAtMs = null) else null)
+        val held = hold.held
+        when {
+            change is PromptHold.Change.Released -> observed("hold", "released ${change.release}")
+            held != null -> observed("hold", held.toString())
+        }
     }
 
     /** What Guidance observed rather than delivered: a line a comparison leaves out. */

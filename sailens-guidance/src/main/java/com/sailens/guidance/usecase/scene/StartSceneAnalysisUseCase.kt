@@ -24,6 +24,7 @@ import com.sailens.guidance.processor.analysis.FrameQualityAnalyzer
 import com.sailens.guidance.safety.GuidanceQualification
 import com.sailens.guidance.safety.GuidanceQualifier
 import com.sailens.guidance.safety.receiptToDecisionMs
+import com.sailens.guidance.safety.receivedElapsedMs
 import com.sailens.guidance.safety.visionFaults
 import com.sailens.guidance.safety.withQualification
 import com.sailens.guidance.repository.ObstacleProvider
@@ -380,7 +381,7 @@ class StartSceneAnalysisUseCase(
                     obstaclePostprocessBackend = perceptionResult.obstacleRuntimeInfo.postprocessBackend,
                 ).withGeometry(geometry, motion)
                     .withObstacleDistances(perceptionResult.obstacles, perceptionConfig.groundContact.enabled)
-                    .withQualification(quality, qualification, receiptToDecisionMs(frame, decideEventsUseCase.lastDecisionAtMs))
+                    .withQualification(quality, qualification, receiptToDecisionMs(frame, decideEventsUseCase.lastDecisionAtMs), receivedElapsedMs(frame))
                 val runtimeStats = runtimeWindow.record(frameTrace, pipelineBudget)
 
                 return@mapNotNullReleasing PipelineFrameResult(
@@ -457,6 +458,7 @@ class StartSceneAnalysisUseCase(
                         motion = motion,
                         visionFaults = baseline.visionFaults(),
                         qualification = qualification,
+                        frameReceivedAtMs = receivedElapsedMs(frame),
                     ),
                     frameTrace = frameTrace,
                 )
