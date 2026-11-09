@@ -205,11 +205,13 @@ internal object SessionSimulator {
         } finally {
             mirror.viewModelScope.cancel()
             mirror.releaseScope.cancel()
-            otherScreen?.close()
         }
-        val lines = TimelineWriter(origin).write(header(script), timeline.entries)
+        // The session is over: what the other screen does with the engine when the test lets go of it is not part of it.
+        val entries = timeline.entries.toList()
+        otherScreen?.close()
+        val lines = TimelineWriter(origin).write(header(script), entries)
         return SessionRun(
-            script, timeline.entries, lines, log.lines, director.log.toList(), delivered, mirror.uiState.value,
+            script, entries, lines, log.lines, director.log.toList(), delivered, mirror.uiState.value,
             director.ledger.mapValues { it.value.toString() },
         )
     }

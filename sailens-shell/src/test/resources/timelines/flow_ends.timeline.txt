@@ -1,0 +1,31 @@
+# flow_ends: The camera's frame flow ends normally after 6950. Nothing handles the end: the screen still runs, 2.5 s without a result is a stall, alarmed and repeated every 10 s, and the session never fails.
+# config detfirst=off step=100 speech=on screenReader=off haptics=on faultHaptics=on
+0 state idle since=0 phase=not_started interrupted=false stall=none judgement=none faults=[] channel=speech cause=output
+0 script start
+0 state initializing since=0 phase=starting interrupted=false stall=none judgement=none faults=[] channel=speech cause=start_requested
+0 state initializing since=0 phase=awaiting_first_result interrupted=false stall=none judgement=none faults=[] channel=speech cause=flow_started
+1000 script release_init sem
+1050 frame seq=1 q=qualified events=[]
+1050 state guiding since=1050 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result
+6950 frames seq=2..60 n=59 from=1150 q=qualified
+7000 script end_frames
+9500 state stop_required(perception_stalled) since=9500 phase=running interrupted=false stall=no_results judgement=qualified faults=[] channel=speech cause=poll
+9500 motor alarm interrupted -> played
+9500 alert system stalled interrupted priority=high channel=haptics result=played
+9500 speech notice s1 "notice_guidance_stalled" scale=16 exp=24500 -> accepted
+9500 alert system stalled notice_guidance_stalled priority=high channel=speech result=requested
+11020 speech done s1
+19500 motor alarm interrupted -> played
+19500 alert system stalled interrupted priority=high channel=haptics result=played
+19500 speech notice s2 "notice_guidance_stalled" scale=16 exp=34500 -> accepted
+19500 alert system stalled notice_guidance_stalled priority=high channel=speech result=requested
+21020 speech done s2
+29500 motor alarm interrupted -> played
+29500 alert system stalled interrupted priority=high channel=haptics result=played
+29500 speech notice s3 "notice_guidance_stalled" scale=16 exp=44500 -> accepted
+29500 alert system stalled notice_guidance_stalled priority=high channel=speech result=requested
+31000 script stop
+31000 speech stop
+31000 speech cut s3
+31000 motor cancel
+31000 state idle since=31000 phase=not_started interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=stopped

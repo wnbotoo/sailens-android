@@ -1,0 +1,22 @@
+# screen_leaves_last_lease: screen_leaves_other_lease with no other screen holding the engine: the screen's lease is the last, so closing it stops the engine, cutting the sentence off, and releases it.
+# config detfirst=off step=100 speech=on screenReader=off haptics=on faultHaptics=on
+0 state idle since=0 phase=not_started interrupted=false stall=none judgement=none faults=[] channel=speech cause=output
+0 script start
+0 state initializing since=0 phase=starting interrupted=false stall=none judgement=none faults=[] channel=speech cause=start_requested
+0 state initializing since=0 phase=awaiting_first_result interrupted=false stall=none judgement=none faults=[] channel=speech cause=flow_started
+1000 script release_init sem
+1050 frame seq=1 q=qualified events=[]
+1050 state guiding since=1050 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result
+2150 frames seq=2..12 n=11 from=1150 q=qualified
+2250 frame seq=13 q=qualified events=[e1:event_obstacle_center_person:CRITICAL{count=1}@MEDIUM~5250]
+2250 speech speak e1 "event_obstacle_center_person{count=1}" scale=24 exp=5250 -> accepted
+2250 motor queue ahead -> started
+2250 receipt confirm e1
+2250 outcome e1 src=13 event_obstacle_center_person CRITICAL delivered=speech,haptics
+2950 frames seq=14..20 n=7 from=2350 q=qualified
+3000 script leave_screen
+3000 state idle since=3000 phase=not_started interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=stopped
+3000 motor cancel
+3000 speech stop
+3000 speech cut e1
+3000 speech release
