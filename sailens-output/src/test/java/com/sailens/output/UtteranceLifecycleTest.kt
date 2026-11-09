@@ -295,7 +295,12 @@ class UtteranceLifecycleTest {
         ending.join(5_000)
 
         assertEquals(0, ended.count)
-        assertEquals("the submission, then unknown: the session ended before any outcome", listOf("s1:submitted", "s1:unknown_terminal"), gate.seen)
+        // The two threads deliver outside the lifecycle lock, so either event can arrive first.
+        assertEquals(
+            "one submission and one unknown outcome, regardless of observer arrival order",
+            listOf("s1:submitted", "s1:unknown_terminal"),
+            gate.seen.sorted(),
+        )
         assertEquals(2, produced)
     }
 
