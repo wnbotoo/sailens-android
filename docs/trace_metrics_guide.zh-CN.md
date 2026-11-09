@@ -704,7 +704,7 @@ Guidance 此刻对用户处在什么状态，合成为一个值，由 shell 从�
 
 分析流在 shell 处理它的错误之前就关闭了 trace，所以 `failed` 和对应的告警永远不在 trace 里。流以错误结束时报告会写明。
 
-有 `hold` 时表示停止之后普通提示正被挡着：`cause`（开始它的那次停止：`camera_obstructed`、`too_dark`、`startup_stalled`、`perception_stalled`、`lifecycle`）、`sinceElapsedMs`（那次停止开始的时刻：帧的接收时刻不晚于它的结果是过期的，不计数）、`stopping`（停止的原因还在；原因消失、等待新鲜结果时为 false）、`freshResults` 和 `freshSpanMs`（之后计入的新鲜结果个数，以及第一个和最后一个的接收时刻相差多少，`firstFreshReceivedElapsedMs` / `lastFreshReceivedElapsedMs`）、`receiptFallbacks`（其中有几个没有接收时刻、按到达时刻计入）和 `lastFreshSequenceNumber`（最近计入的那一帧：帧的 `sequenceNumber`，不是记录的 `seq`）。凑满三个、接收时刻跨 500 ms 画面的那个结果释放保持；那条记录带 `holdReleased`，字段同上，是计入那个结果之后的值，`sourceSequenceNumber` 是它的帧。恢复期间状态仍是原来的停止（`stop_required` 和原因，从后台回来是 `initializing`），所以停止状态的时长包含等待新鲜结果的时间。`session_start.holdTrace` 表示这份 trace 记录保持、帧带接收时刻；没有它时没有 `hold` 只表示没记录。`scripts/capture/hold_releases.py` 按导致每次释放的记录逐次核验：一致、不一致，或在记录或帧缺失时不可核验。
+有 `hold` 时表示停止之后普通提示正被挡着：`cause`（开始它的那次停止：`camera_obstructed`、`too_dark`、`startup_stalled`、`perception_stalled`、`lifecycle`）、`sinceElapsedMs`（那次停止开始的时刻：帧的接收时刻不晚于它的结果是过期的，不计数）、`stopping`（停止的原因还在；原因消失、等待新鲜结果时为 false）、`freshResults` 和 `freshSpanMs`（之后计入的新鲜结果个数，以及第一个和最后一个的接收时刻相差多少，`firstFreshReceivedElapsedMs` / `lastFreshReceivedElapsedMs`）、`receiptFallbacks`（其中有几个没有接收时刻、按到达时刻计入）和 `lastFreshSequenceNumber`（最近计入的那一帧：帧的 `sequenceNumber`，不是记录的 `seq`）。凑满三个、接收时刻跨 500 ms 画面的那个结果释放保持；那条记录带 `holdReleased`，字段同上，是计入那个结果之后的值，`sourceSequenceNumber` 是它的帧。只有那条带：从它再写一次的会话第一条记录是释放之后的状态，不带 `holdReleased`。恢复期间状态仍是原来的停止（`stop_required` 和原因，从后台回来是 `initializing`），所以停止状态的时长包含等待新鲜结果的时间。`session_start.holdTrace` 表示这份 trace 记录保持、帧带接收时刻；没有它时没有 `hold` 只表示没记录。`scripts/capture/hold_releases.py` 按导致每次释放的记录逐次核验：一致、不一致，或在记录或帧缺失时不可核验。
 
 ### `safetyStatesInWindow`
 

@@ -3,8 +3,9 @@
 A hold keeps ordinary prompts back after Guidance had to stop, until fresh results show it can judge again; the
 release record (`safety_state.holdReleased`) carries the evidence. Each release gets one verdict:
 
-- consistent: the records from the stop that began the hold to the release recount to the same evidence, and every
-  counted result's frame record agrees with it;
+- consistent: the records from the stop that began the hold to the release recount to the same evidence, each of them
+  carries exactly the progress replayed so far, a result counts only on its own usable input, and every counted
+  result's frame record agrees with it;
 - inconsistent: the evidence is complete and contradicts itself or the frames: a logic error;
 - unverifiable: evidence is missing (records dropped by the trace's bound, frames left out by sampling, a trace written
   before holds were recorded), so nothing can be said either way.
@@ -23,6 +24,8 @@ from sailens_capture import load_trace
 
 MIN_FRESH_RESULTS = 3
 MIN_FRESH_SPAN_MS = 500
+# A result counts unless Guidance could not judge the frame: `degraded` counts.
+USABLE_JUDGEMENTS = ("qualified", "degraded")
 
 CONSISTENT = "consistent"
 INCONSISTENT = "inconsistent"
@@ -70,15 +73,29 @@ def _release_verdict(trace, states, index, hold_trace):
     if seqs != list(range(seqs[0], seqs[0] + len(seqs))):
         return Verdict(release["seq"], evidence["sourceSequenceNumber"], UNVERIFIABLE, ["records are missing in the window"])
 
-    # Layer 1: replay the progress the safety records give.
-    fresh, first, last, fallbacks = 0, None, None, 0
+    # Layer 1: replay the progress the safety records give. Every hold record carries the whole progress, and must
+    # carry exactly the replayed one: a record written for another reason changes none of it, and one result counts
+    # at most once per record.
+    fresh, first, last, fallbacks, last_frame = 0, None, None, 0, None
     steps = []
 
-    def count(received, total_fallbacks, frame_seq, arrival):
-        nonlocal fresh, first, last, fallbacks
+    def replayed():
+        return fresh, first, last, (last - first) if first is not None else 0, fallbacks, last_frame
+
+    def recorded(hold):
+        return (hold["freshResults"], hold.get("firstFreshReceivedElapsedMs"), hold.get("lastFreshReceivedElapsedMs"),
+                hold["freshSpanMs"], hold.get("receiptFallbacks", 0), hold.get("lastFreshSequenceNumber"))
+
+    def count(record, received, total_fallbacks, frame_seq):
+        nonlocal fresh, first, last, fallbacks, last_frame
+        # A result counts only on its own input, and only when it was usable.
+        if record.get("cause") != "result" or record.get("judgement") not in USABLE_JUDGEMENTS:
+            inconsistent.append(f"record {record['seq']} counts on a {record.get('cause')} input with judgement {record.get('judgement')}")
         step = total_fallbacks - fallbacks
         if step not in (0, 1):
             inconsistent.append(f"fallbacks jump from {fallbacks} to {total_fallbacks}")
+        if frame_seq is None:
+            inconsistent.append(f"record {record['seq']} counts a result without its frame")
         if received is None or received <= since:
             inconsistent.append(f"frame {frame_seq} counted with receipt {received}, not after {since}")
         fresh += 1
@@ -86,12 +103,16 @@ def _release_verdict(trace, states, index, hold_trace):
         if first is None:
             first = received
         last = received
-        steps.append(Step(frame_seq, received, step == 1, arrival))
+        last_frame = frame_seq
+        steps.append(Step(frame_seq, received, step == 1, record["elapsedMs"]))
 
+    if recorded(window[0]["hold"]) != replayed():
+        inconsistent.append(f"record {window[0]['seq']} begins the stop with progress {recorded(window[0]['hold'])}")
+    recovering = False
     for record in window[1:]:
         hold, released = record.get("hold"), record.get("holdReleased")
         if released is not None:
-            count(released["lastFreshReceivedElapsedMs"], released["receiptFallbacks"], released["sourceSequenceNumber"], record["elapsedMs"])
+            count(record, released["lastFreshReceivedElapsedMs"], released["receiptFallbacks"], released["sourceSequenceNumber"])
             if released["freshResults"] != fresh or released["firstFreshReceivedElapsedMs"] != first or released["freshSpanMs"] != last - first:
                 inconsistent.append(f"the release says {released['freshResults']} in {released['freshSpanMs']} ms, the records {fresh} in {last - first} ms")
             if fresh < MIN_FRESH_RESULTS or last - first < MIN_FRESH_SPAN_MS:
@@ -103,18 +124,20 @@ def _release_verdict(trace, states, index, hold_trace):
         if hold["cause"] != evidence["cause"] or hold["sinceElapsedMs"] != since:
             inconsistent.append(f"record {record['seq']} holds for another stop")
             continue
-        if hold["stopping"]:
-            if hold["freshResults"] != 0:
-                inconsistent.append(f"record {record['seq']} counts while the stop holds")
-            continue
+        if hold["stopping"] and recovering:
+            inconsistent.append(f"record {record['seq']} stops again without a stop of its own")
+        recovering = recovering or not hold["stopping"]
         if hold["freshResults"] == fresh + 1:
-            count(hold.get("lastFreshReceivedElapsedMs"), hold.get("receiptFallbacks", 0), hold.get("lastFreshSequenceNumber"), record["elapsedMs"])
-            if hold.get("firstFreshReceivedElapsedMs") != first or hold["freshSpanMs"] != last - first:
-                inconsistent.append(f"record {record['seq']} says first {hold.get('firstFreshReceivedElapsedMs')}, span {hold['freshSpanMs']}")
+            if hold["stopping"]:
+                inconsistent.append(f"record {record['seq']} counts while the stop holds")
+            count(record, hold.get("lastFreshReceivedElapsedMs"), hold.get("receiptFallbacks", 0), hold.get("lastFreshSequenceNumber"))
             if fresh >= MIN_FRESH_RESULTS and last - first >= MIN_FRESH_SPAN_MS:
                 inconsistent.append(f"frame {steps[-1].frame_seq} met both thresholds before the release")
         elif hold["freshResults"] != fresh:
             inconsistent.append(f"record {record['seq']} jumps from {fresh} to {hold['freshResults']} results")
+            continue
+        if recorded(hold) != replayed():
+            inconsistent.append(f"record {record['seq']} says progress {recorded(hold)}, the records {replayed()}")
     if steps and steps[-1].frame_seq != evidence["sourceSequenceNumber"]:
         inconsistent.append(f"the release names frame {evidence['sourceSequenceNumber']}, the last counted is {steps[-1].frame_seq}")
 

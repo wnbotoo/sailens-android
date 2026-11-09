@@ -424,7 +424,8 @@ object GuidanceAlertResults {
  *   the first result; [judgementReasons] its reasons.
  * @param outputFaults the output's health, by the speech engine's state. An open set.
  * @param hold ordinary prompts held after a stop, and how far the recovery has come; null when none are.
- * @param holdReleased on the record of the result that ended a hold: its evidence, that result counted in.
+ * @param holdReleased on the record of the result that ended a hold: its evidence, that result counted in. Only
+ *   there: a session's opening record, written again from it, has none.
  */
 data class SafetyStateTrace(
     val sessionId: String = "",

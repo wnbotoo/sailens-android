@@ -76,7 +76,8 @@ internal class SafetyTraceLedger(
     /**
      * Queues the session's opening, with `openedElapsedMs` read now, and attaches it: what is recorded from now on
      * belongs to it, numbered from 1. The kept state, if any, follows the opening at once as `seq` 1, observed at the
-     * opening and with its own `stateSinceElapsedMs`.
+     * opening and with its own `stateSinceElapsedMs`. A release's evidence is not written again: it belongs to the
+     * result that ended the hold, and stays on that record; the opening carries the state after it.
      */
     fun attach(metadata: SessionTraceMetadata) = synchronized(lock) {
         val openedElapsedMs = elapsedClock()
@@ -95,6 +96,7 @@ internal class SafetyTraceLedger(
                         at = openedAt,
                         elapsedMs = openedElapsedMs,
                         cause = SafetyTraceNames.Causes.SESSION_START,
+                        holdReleased = null,
                     ),
                 ),
             )

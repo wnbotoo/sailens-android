@@ -934,6 +934,7 @@ many of them had no recorded receipt and counted at their arrival) and `lastFres
 frame of the latest one counted: a frame's `sequenceNumber`, not a record's `seq`). The hold is released
 by the result that makes three fresh results spanning 500 ms of picture; that record has `holdReleased`
 with the same fields for the end of it, that result counted in, and `sourceSequenceNumber` its frame.
+Only that record: a session's opening, written again from it, carries the state after the release.
 While a hold recovers the state stays the stop it was (`stop_required` with its reason, or
 `initializing` after the background), so the time a stop holds includes the wait for fresh results.
 `session_start.holdTrace` says the trace records holds and frames their receipt; without it no `hold`

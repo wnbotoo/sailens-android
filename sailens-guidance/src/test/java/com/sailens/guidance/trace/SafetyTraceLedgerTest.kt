@@ -7,11 +7,13 @@ import com.sailens.guidance.model.trace.GuidanceAlertKinds
 import com.sailens.guidance.model.trace.GuidanceAlertResults
 import com.sailens.guidance.model.trace.GuidanceAlertSources
 import com.sailens.guidance.model.trace.GuidanceAlertTrace
+import com.sailens.guidance.model.trace.HoldReleaseTrace
 import com.sailens.guidance.model.trace.SafetyStateTrace
 import com.sailens.guidance.model.trace.SafetyTraceNames
 import com.sailens.guidance.model.trace.SessionTraceMetadata
 import com.sailens.guidance.model.trace.SessionTraceSummary
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -225,6 +227,51 @@ class SafetyTraceLedgerTest {
             listOf("start a opened=21000", "state a#1 stop_required(startup_stalled) at=21000 since=20000 cause=session_start"),
             drain(queue),
         )
+    }
+
+    private fun released(elapsedMs: Long) = state("guiding", elapsedMs = elapsedMs).copy(
+        judgement = "qualified",
+        holdReleased = HoldReleaseTrace(
+            cause = SafetyTraceNames.HoldCauses.CAMERA_OBSTRUCTED,
+            sinceElapsedMs = 100,
+            freshResults = 3,
+            firstFreshReceivedElapsedMs = 200,
+            lastFreshReceivedElapsedMs = 700,
+            freshSpanMs = 500,
+            receiptFallbacks = 0,
+            sourceSequenceNumber = 9,
+        ),
+    )
+
+    @Test
+    fun `a release kept as the latest state opens the next session as the state after it, its evidence left on its own record`() {
+        val queue = CountedTraceQueue<TraceQueueEntry>()
+        val ledger = newLedger(queue)
+        ledger.open("a", openedElapsedMs = 100)
+        assertEquals(true, ledger.recordState(released(elapsedMs = 750)))
+        ledger.close("a", closedElapsedMs = 800)
+        val first = generateSequence { queue.pollCounted() }.filterIsInstance<TraceQueueEntry.SafetyState>().single().state
+
+        ledger.open("b", openedElapsedMs = 900)
+        val opening = generateSequence { queue.pollCounted() }.filterIsInstance<TraceQueueEntry.SafetyState>().single().state
+
+        assertEquals("the release keeps its evidence in the session it happened in", 9L, first.holdReleased?.sourceSequenceNumber)
+        assertEquals("b#1 guiding at=900 since=750 cause=session_start", opening.let { "${it.sessionId}#${it.seq} ${it.stateLabel} at=${it.elapsedMs} since=${it.stateSinceElapsedMs} cause=${it.cause}" })
+        assertNull(opening.holdReleased)
+        assertNull(opening.hold)
+    }
+
+    @Test
+    fun `a release recorded with no session attached opens the next one without its evidence`() {
+        val queue = CountedTraceQueue<TraceQueueEntry>()
+        val ledger = newLedger(queue)
+        assertEquals(false, ledger.recordState(released(elapsedMs = 750)))
+
+        ledger.open("a", openedElapsedMs = 900)
+
+        val opening = generateSequence { queue.pollCounted() }.filterIsInstance<TraceQueueEntry.SafetyState>().single().state
+        assertEquals(SafetyTraceNames.Causes.SESSION_START, opening.cause)
+        assertNull(opening.holdReleased)
     }
 
     @Test
