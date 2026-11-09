@@ -241,12 +241,20 @@ class GuidanceOutputProtocol(
         private var takenByVoice = false
         private var rhythmGoesWithIt = true
 
+        /**
+         * Own speech or the screen reader took it, whatever [retryInterrupted] says: a rhythm then only goes with it.
+         * The prompt was delivered when it was taken, so what the motor does with that rhythm later changes neither
+         * the cooldown nor the trace.
+         */
+        private var takenByAnotherChannel = false
+
         /** Vibration is its only channel and the motor is not free yet: its receipts and its trace wait. */
         var waitsForMotor = false
             private set
         var traceWhenMotorAnswers: PromptOutcomeTrace? = null
 
         fun taken() {
+            takenByAnotherChannel = true
             if (!retryInterrupted) return
             takenByVoice = true
             rhythmGoesWithIt = cooldown.accepted(event)
@@ -261,13 +269,20 @@ class GuidanceOutputProtocol(
             return taken
         }
 
-        /** Going with speech or the screen reader it can stay silent; on its own it is the channel, and always plays. */
+        /**
+         * Going with speech or the screen reader it can stay silent; on its own it is the channel, and always plays.
+         *
+         * With [retryInterrupted] off, a rhythm going with a prompt another channel took still asks the motor as one
+         * that may wait for it. Held off, it waits, and the motor's later answer is about the rhythm alone: the prompt
+         * keeps the receipts and the trace it had when it was taken, and the rhythm is not added to its channels.
+         */
         fun vibrate(): Boolean {
             if (takenByVoice) return rhythmGoesWithIt && motor.vibrate(event)
             val thisRun = run
-            val offer = motor.vibrateAlone(event) { played -> if (thisRun == run) motorAnswered(played) }
+            val accompanies = takenByAnotherChannel
+            val offer = motor.vibrateAlone(event) { played -> if (thisRun == run && !accompanies) motorAnswered(played) }
             if (offer == MotorOffer.PLAYED && retryInterrupted) cooldown.accepted(event)
-            waitsForMotor = offer == MotorOffer.QUEUED
+            waitsForMotor = offer == MotorOffer.QUEUED && !accompanies
             return offer == MotorOffer.PLAYED
         }
 

@@ -480,6 +480,28 @@ class SessionTimelineTest {
     }
 
     @Test
+    fun accompanying_rhythm_replaced() {
+        val run = check(SessionScenarios.accompanyingRhythmReplaced)
+        val queued = run.motor().filter { it.kind == "queue" && it.result == "queued" }
+        assertTrue("two rhythms going with spoken prompts wait for the motor: $queued", queued.size >= 2)
+        val first = queued.first()
+        assertTrue(
+            "the first goes with words speech took at the same moment",
+            run.speech().any { it.atMs == first.atMs && it.kind == "speak" && it.result == "accepted" },
+        )
+        val dropped = run.motor().first { it.kind == "drop" && it.rhythm == first.rhythm }
+        assertTrue("and is replaced by the next before it plays", dropped.atMs == queued[1].atMs)
+        assertTrue("it never starts", run.motor().none { it.kind == "start" && it.rhythm == first.rhythm && it.atMs in first.atMs..dropped.atMs })
+        val outcomes = run.entries.filterIsInstance<TimelineEntry.Outcome>().filter { it.trace.category == "obstacle" }
+        assertTrue("both prompts have an outcome", outcomes.size >= 2)
+        for (outcome in outcomes) {
+            assertEquals("delivered on the channel that took it: $outcome", listOf(PromptDeliveryChannels.SPEECH), outcome.trace.deliveredVia)
+        }
+        assertEquals("one outcome per prompt", outcomes.size, outcomes.map { it.trace.eventId }.toSet().size)
+        assertTrue("the cooldown is never told to take one back", run.receipts().none { it.kind == "revoke" })
+    }
+
+    @Test
     fun screen_leaves_other_lease() {
         val run = check(SessionScenarios.screenLeavesOtherLease)
         val said = assertLeavesWhileSaying(run)

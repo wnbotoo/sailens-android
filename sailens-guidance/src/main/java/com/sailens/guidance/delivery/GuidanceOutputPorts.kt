@@ -71,8 +71,9 @@ interface GuidanceMotorPort {
     fun vibrate(event: SceneEvent): Boolean
 
     /**
-     * Plays the rhythm for [event] when it is the prompt's only channel. Held off by an alarm or a fault
-     * rhythm it waits for the motor instead of being refused.
+     * Plays the rhythm for [event] where it may wait for the motor: always when it is the prompt's only channel, and,
+     * with interrupted prompts not retried, when it goes with speech or the screen reader as well. Held off by an
+     * alarm or a fault rhythm it waits for the motor instead of being refused.
      *
      * @param onQueuedResult for [MotorOffer.QUEUED]: whether it played in the end. Not called after a stop.
      */

@@ -538,6 +538,31 @@ internal object SessionScenarios {
         settings = GuidanceFeedbackSettings(speechEnabled = false),
     )
 
+    /** In [accompanyingRhythmReplaced], a person to the left from here, and one ahead from [ACCOMPANYING_AHEAD_FROM_MS]. */
+    const val ACCOMPANYING_SIDE_FROM_MS = 6_550L
+    const val ACCOMPANYING_AHEAD_FROM_MS = 6_850L
+
+    val accompanyingRhythmReplaced = SessionScript(
+        name = "accompanying_rhythm_replaced",
+        description = "Speech and navigation vibration on, standing on the unrecognised floor of ground_unrecognized_long: " +
+            "its entry rhythm holds the motor from 6550. A person to the left is said while it plays, and the rhythm " +
+            "going with the words waits for the motor; a person ahead, more urgent, is said next and its rhythm takes " +
+            "the place of the first. Each prompt was delivered when speech took it: what the motor does with their " +
+            "rhythms afterwards changes neither the cooldown nor the record.",
+        scenario = scenario(
+            "accompanying_rhythm_replaced",
+            List(indexAt(11_000)) { i ->
+                val people = listOfNotNull(
+                    personAt(-1.0, 2.0).takeIf { at(i) >= ACCOMPANYING_SIDE_FROM_MS },
+                    personAt(0.0, 1.5).takeIf { at(i) >= ACCOMPANYING_AHEAD_FROM_MS },
+                )
+                standing(if (at(i) >= FLOOR_FROM_MS) indoor(*people.toTypedArray()) else sidewalk)
+            },
+        ),
+        actions = SessionScript.defaultActions(ScriptAction.Stop(11_000)),
+        endAtMs = 12_000,
+    )
+
     /** When the guidance screen goes away in the two sessions that leave it. */
     const val LEAVE_MS = 3_000L
 
@@ -655,6 +680,7 @@ internal object SessionScenarios {
         stopAndRecoverySpeech,
         stopAndRecoverySpeechLaunch,
         stopAndRecoveryHaptics,
+        accompanyingRhythmReplaced,
         screenLeavesOtherLease,
         screenLeavesLastLease,
         restartWhilePreviousRunHolds,
