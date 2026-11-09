@@ -268,6 +268,62 @@ class GuidanceOutputProtocolTest {
         assertEquals(emptyList<SceneEvent>(), reached)
     }
 
+    /**
+     * With interrupted prompts not retried, a rhythm going with a prompt speech or the screen reader took asks the
+     * motor as one that may wait. The prompt is delivered when it is taken; whatever the motor does with the rhythm
+     * afterwards is about the rhythm alone.
+     */
+    private fun assertTakenPromptKeptWhenItsRhythmIs(played: Boolean, channel: String) {
+        motorQueues = true
+        protocol.onFrame(listOf(event()), 1, VisionFaults.NONE)
+        val delivered = outcomes.single()
+        assertEquals(listOf(channel), delivered.deliveredVia)
+        assertEquals(WALL_CLOCK, delivered.deliveredAt)
+        assertEquals(1, calls.count { it == "confirm" })
+        assertEquals(1, reached.size)
+
+        calls.clear()
+        motorAnswer!!(played)
+        assertEquals(emptyList<String>(), calls)
+        assertEquals(listOf(delivered), outcomes)
+        assertEquals(1, reached.size)
+        assertEquals(emptyList<String>(), revokeReasons)
+    }
+
+    @Test
+    fun `a rhythm going with spoken words that waited and never played leaves the prompt delivered`() {
+        assertTakenPromptKeptWhenItsRhythmIs(played = false, channel = PromptDeliveryChannels.SPEECH)
+    }
+
+    @Test
+    fun `a rhythm going with spoken words that waited and then played leaves the prompt as spoken`() {
+        assertTakenPromptKeptWhenItsRhythmIs(played = true, channel = PromptDeliveryChannels.SPEECH)
+    }
+
+    @Test
+    fun `a rhythm going with the screen reader that waited and never played leaves the prompt delivered`() {
+        screenReaderActive = true
+        assertTakenPromptKeptWhenItsRhythmIs(played = false, channel = PromptDeliveryChannels.SCREEN_READER)
+    }
+
+    @Test
+    fun `a rhythm going with the screen reader that waited and then played leaves the prompt as handed over`() {
+        screenReaderActive = true
+        assertTakenPromptKeptWhenItsRhythmIs(played = true, channel = PromptDeliveryChannels.SCREEN_READER)
+    }
+
+    @Test
+    fun `a rhythm that waited after speech refused the prompt is still its only channel`() {
+        speechAccepts = false
+        engineReady = false
+        motorQueues = true
+        protocol.onFrame(listOf(event()), 1, VisionFaults.NONE)
+        assertEquals(emptyList<PromptOutcomeTrace>(), outcomes)
+        motorAnswer!!(false)
+        assertEquals(listOf(PromptRevokeReasons.HAPTIC_DROPPED), revokeReasons)
+        assertEquals(PromptRevokeReasons.HAPTIC_DROPPED, outcomes.single().revokeReason)
+    }
+
     @Test
     fun `a rhythm waiting when Guidance stops reports nothing`() {
         speechEnabled = false

@@ -33,12 +33,10 @@
 29 speak e1 key=event_obstacle_center_person scale=16 at=102800 expires=105800 -> taken
 29 vibrate_alone e1 -> Queued(atMs=103300, plays=true)
 29 receipt confirm e1
+29 outcome PromptOutcomeTrace(sessionId=, eventId=e1, sourceSequenceNumber=29, messageKey=event_obstacle_center_person, category=obstacle, priority=high, deliveredAt=102800, revokedAt=null, revokeReason=null, deliveredVia=[speech], speechEnabled=true, screenReaderActive=false, hapticsEnabled=true)
 29 reached e1
 30 decided []
 30 motor_answered e1 played=true
-30 receipt confirm e1
-30 reached e1
-30 outcome PromptOutcomeTrace(sessionId=, eventId=e1, sourceSequenceNumber=29, messageKey=event_obstacle_center_person, category=obstacle, priority=high, deliveredAt=103300, revokedAt=null, revokeReason=null, deliveredVia=[haptics], speechEnabled=true, screenReaderActive=false, hapticsEnabled=true)
 30 spoken speak e1
 30 stop
 # V1 stopped
@@ -76,6 +74,7 @@
 29 speak e1 key=event_obstacle_center_person scale=16 at=102800 expires=105800 -> taken
 29 vibrate_alone e1 -> Queued(atMs=103300, plays=true)
 29 receipt confirm e1
+29 outcome PromptOutcomeTrace(sessionId=, eventId=e1, sourceSequenceNumber=29, messageKey=event_obstacle_center_person, category=obstacle, priority=high, deliveredAt=102800, revokedAt=null, revokeReason=null, deliveredVia=[speech], speechEnabled=true, screenReaderActive=false, hapticsEnabled=true)
 29 reached e1
 30 decided []
 30 stop
