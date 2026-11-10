@@ -42,11 +42,11 @@ class SessionTimelineTest {
         assertEquals("the stop", "11000 idle stopped", states.last().describe())
         assertTrue("nothing is alerted", run.entries.none { it is TimelineEntry.Alert })
         assertEquals(
-            "the card: off, starting until the first result, then the clear way, then off",
+            "the card: off, starting until the first result, then no new guidance, then off",
             listOf(StatusTitle.Idle, StatusTitle.Starting, StatusTitle.Clear, StatusTitle.Idle),
             run.screens.map { it.card.title }.collapseRuns(),
         )
-        assertEquals("the clear way from the first result on", 1_050L, run.screens.first { it.card.title == StatusTitle.Clear }.atMs)
+        assertEquals("no new guidance from the first result on", 1_050L, run.screens.first { it.card.title == StatusTitle.Clear }.atMs)
     }
 
     @Test
@@ -259,7 +259,7 @@ class SessionTimelineTest {
             listOf(FLOOR_CARD.toString(), "event_obstacle_center_person", FLOOR_CARD.toString(), "event_obstacle_left_person", FLOOR_CARD.toString()),
             cards.map { (it as? StatusTitle.Event)?.event?.messageKey ?: it.toString() }.collapseRuns(),
         )
-        assertTrue("the clear way only once it is", run.screens.filter { it.atMs >= back }.any { it.card.title == StatusTitle.Clear })
+        assertTrue("no new guidance only once it is recognised", run.screens.filter { it.atMs >= back }.any { it.card.title == StatusTitle.Clear })
     }
 
     @Test
@@ -286,9 +286,58 @@ class SessionTimelineTest {
         val back = script.frameAtMs(SessionScenarios.GROUND_THEN_COVERED.last + 1) + 1_000
         assertEquals("back on the sidewalk, the floor is said recognised", listOf("fault_recovery ${SceneEventMessageKeys.GROUND_RECOGNIZED} accepted"), run.visionAlerts().filter { it.at == back }.map { "${it.kind} ${it.key} ${it.result}" })
         assertEquals(
-            "the card: the floor, the cover, the view confirmed, the floor again once the stop is released, then the clear way",
+            "the card: the floor, the cover, the view confirmed, the floor again once the stop is released, then no new guidance",
             listOf(FLOOR_CARD, StatusTitle.HeldFault(SceneEventMessageKeys.CAMERA_BLOCKED), StatusTitle.Confirming, FLOOR_CARD, StatusTitle.Clear),
             run.screens.filter { it.atMs >= SessionScenarios.FLOOR_CONFIRMED_MS && it.atMs <= back }.map { it.card.title }.collapseRuns(),
+        )
+    }
+
+    @Test
+    fun ground_unrecognized_twice() {
+        val script = SessionScenarios.groundUnrecognizedTwice
+        val run = check(script)
+        val again = SessionScenarios.FLOOR_AGAIN_CONFIRMED_MS
+        val confirmations = run.states().zipWithNext().filter { (before, after) -> after.label == "degraded(ground_unrecognized)" && before.label != after.label }
+        assertEquals("confirmed twice", listOf(SessionScenarios.FLOOR_CONFIRMED_MS, again), confirmations.map { it.second.at })
+        val blocked = run.outcomes().filter { it.key == SceneEventMessageKeys.BLOCKED }
+        assertTrue("the path is judged blocked before the second confirmation too (${blocked.map { it.at }})", blocked.any { it.at in 20_050 until again })
+        val confirming = run.entries.filterIsInstance<TimelineEntry.Frame>().single { it.atMs == again }
+        assertEquals("the floor's event is still cooling down: the confirming frame decides nothing", emptyList<String>(), confirming.events.map { it.messageKey })
+        assertEquals("the floor is said again on entering", listOf("fault_notice accepted"), run.visionAlertsAt(again).filter { it.startsWith("fault_notice") })
+        val back = script.frameAtMs(SessionScenarios.GROUND_TWICE_SECOND.last + 1) + 1_000
+        assertEquals("1 s back on the sidewalk the floor is recognised", "$back guiding result", run.states().first { it.at > again && it.label == "guiding" }.describe())
+        assertEquals(
+            "from the second confirmation the card names the floor, never the blocked path, until it is recognised",
+            listOf(FLOOR_CARD),
+            run.screens.filter { it.atMs in again until back }.map { it.card.title }.collapseRuns(),
+        )
+        val blockedFrame = run.entries.filterIsInstance<TimelineEntry.Frame>().last { frame -> frame.atMs < again && frame.events.any { it.messageKey == SceneEventMessageKeys.BLOCKED } }
+        val blockedEvent = blockedFrame.events.first { it.messageKey == SceneEventMessageKeys.BLOCKED }
+        val blockedUntil = blockedFrame.atMs + (blockedEvent.expiresAt - blockedEvent.timestamp)
+        assertTrue("the floor is recognised while the blocked path would still be current ($back < $blockedUntil)", back < blockedUntil)
+        assertTrue(
+            "and it does not come back",
+            run.screens.filter { it.atMs >= back }.none { (it.card.title as? StatusTitle.Event)?.event?.messageKey == SceneEventMessageKeys.BLOCKED },
+        )
+    }
+
+    @Test
+    fun person_stays_ahead() {
+        val run = check(SessionScenarios.personStaysAhead)
+        val key = "event_obstacle_center_person"
+        val prompts = run.outcomes().filter { it.key == key }.map { it.at }
+        assertEquals("prompted, and again once the stationary cooldown lets it", listOf(1_250L, 9_250L), prompts)
+        val frames = run.entries.filterIsInstance<TimelineEntry.Frame>()
+        val first = frames.first { frame -> frame.events.any { it.messageKey == key } }
+        val event = first.events.first { it.messageKey == key }
+        val expiredAt = first.atMs + (event.expiresAt - event.timestamp)
+        assertEquals("its event expires 3 s after it", 4_250L, expiredAt)
+        val gap = frames.filter { it.atMs > expiredAt && it.atMs < prompts[1] }
+        assertTrue("the person is tracked ahead on every frame between", gap.isNotEmpty() && gap.all { ObstacleCategory.PERSON in it.tracked })
+        assertEquals(
+            "and the card says there is no new guidance: words about prompts, not about the way",
+            listOf(StatusTitle.Clear),
+            run.screens.filter { it.atMs >= gap.first().atMs && it.atMs < prompts[1] }.map { it.card.title }.distinct(),
         )
     }
 

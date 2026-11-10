@@ -1,0 +1,64 @@
+# ground_unrecognized_twice: On the unrecognised floor of ground_unrecognized_long from 5050 for 10 s, the sidewalk for 5 s, the floor again from 20050 for 4 s, then the sidewalk. Each time the path is judged blocked before the floor is confirmed. The second time the floor's own event is still cooling down from the first, so the frame that confirms it decides nothing; the status card names the floor and forgets the blocked path, which does not come back when the floor is recognised again before it would have expired.
+# config detfirst=off step=100 speech=on screenReader=off haptics=on faultHaptics=on
+0 state idle since=0 phase=not_started interrupted=false stall=none judgement=none faults=[] channel=speech cause=output hold=none
+0 script start
+0 state initializing since=0 phase=starting interrupted=false stall=none judgement=none faults=[] channel=speech cause=start_requested hold=none
+0 state initializing since=0 phase=awaiting_first_result interrupted=false stall=none judgement=none faults=[] channel=speech cause=flow_started hold=none
+1000 script release_init sem
+1050 frame seq=1 q=qualified events=[]
+1050 state guiding since=1050 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=none
+5250 frames seq=2..43 n=42 from=1150 q=qualified
+5350 frame seq=44 q=qualified events=[e1:event_blocked:CRITICAL@-~10350]
+5350 speech speak e1 "event_blocked" scale=24 exp=10350 -> accepted
+5350 motor queue blocked -> started
+5350 receipt confirm e1
+5350 outcome e1 src=44 event_blocked CRITICAL delivered=speech,haptics
+6450 frames seq=45..55 n=11 from=5450 q=qualified
+6470 speech done e1
+6550 frame seq=56 q=degraded(ground_unrecognized) events=[e2:event_ground_unrecognized:LOW@-~11550]
+6550 state degraded(ground_unrecognized) since=6550 phase=running interrupted=false stall=none judgement=degraded(ground_unrecognized) faults=[] channel=speech cause=result hold=none
+6550 receipt confirm e2
+6550 outcome e2 src=56 event_ground_unrecognized LOW delivered=vision_alerts
+6550 speech speak n1 "event_ground_unrecognized" scale=0 exp=16550 -> accepted
+6550 alert vision fault_notice event_ground_unrecognized priority=low channel=speech result=accepted
+6550 alert vision fault_rhythm vision_unreliable priority=low channel=haptics result=requested
+6550 motor reserve vision_unreliable -> started
+6550 alert vision fault_rhythm vision_unreliable priority=low channel=haptics result=played
+8050 frames seq=57..71 n=15 from=6650 q=degraded(ground_unrecognized)
+8150 speech done n1
+15950 frames seq=72..150 n=79 from=8150 q=degraded(ground_unrecognized)
+16050 frame seq=151 q=qualified events=[]
+16050 state guiding since=16050 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=none
+16050 speech speak n2 "event_ground_recognized" scale=0 exp=21050 -> accepted
+16050 alert vision fault_recovery event_ground_recognized priority=low channel=speech result=accepted
+17550 frames seq=152..166 n=15 from=16150 q=qualified
+17570 speech done n2
+20250 frames seq=167..193 n=27 from=17650 q=qualified
+20350 frame seq=194 q=qualified events=[e3:event_blocked:CRITICAL@-~25350]
+20350 speech speak e3 "event_blocked" scale=24 exp=25350 -> accepted
+20350 motor queue blocked -> started
+20350 receipt confirm e3
+20350 outcome e3 src=194 event_blocked CRITICAL delivered=speech,haptics
+21450 frames seq=195..205 n=11 from=20450 q=qualified
+21470 speech done e3
+21550 frame seq=206 q=degraded(ground_unrecognized) events=[]
+21550 state degraded(ground_unrecognized) since=21550 phase=running interrupted=false stall=none judgement=degraded(ground_unrecognized) faults=[] channel=speech cause=result hold=none
+21550 speech speak n3 "event_ground_unrecognized" scale=0 exp=31550 -> accepted
+21550 alert vision fault_notice event_ground_unrecognized priority=low channel=speech result=accepted
+21550 alert vision fault_rhythm vision_unreliable priority=low channel=haptics result=requested
+21550 motor reserve vision_unreliable -> started
+21550 alert vision fault_rhythm vision_unreliable priority=low channel=haptics result=played
+23050 frames seq=207..221 n=15 from=21650 q=degraded(ground_unrecognized)
+23150 speech done n3
+24950 frames seq=222..240 n=19 from=23150 q=degraded(ground_unrecognized)
+25050 frame seq=241 q=qualified events=[]
+25050 state guiding since=25050 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=none
+25050 speech speak n4 "event_ground_recognized" scale=0 exp=30050 -> accepted
+25050 alert vision fault_recovery event_ground_recognized priority=low channel=speech result=accepted
+26550 frames seq=242..256 n=15 from=25150 q=qualified
+26570 speech done n4
+34850 frames seq=257..339 n=83 from=26650 q=qualified
+35000 script stop
+35000 speech stop
+35000 motor cancel
+35000 state idle since=35000 phase=not_started interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=stopped hold=none

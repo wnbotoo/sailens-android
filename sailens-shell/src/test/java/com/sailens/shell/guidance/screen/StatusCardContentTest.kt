@@ -28,6 +28,7 @@ class StatusCardContentTest {
         messageKey = "event_obstacle_center_person", expiresAt = 3_000, dedupeKey = "obstacle_CENTER",
     )
     private val light = person.copy(category = EventCategory.TRAFFIC_LIGHT, priority = EventPriority.LOW, messageKey = "event_traffic_light")
+    private val blocked = person.copy(category = EventCategory.BLOCKED, messageKey = SceneEventMessageKeys.BLOCKED, dedupeKey = "blocked")
     private val floorEvent = person.copy(
         category = EventCategory.GROUND_UNRECOGNIZED, priority = EventPriority.LOW, messageKey = SceneEventMessageKeys.GROUND_UNRECOGNIZED,
         dedupeKey = "ground_unrecognized",
@@ -87,6 +88,11 @@ class StatusCardContentTest {
                 StatusTitle.Event(light), StatusDetail.GUIDANCE, StatusLabel.LATEST_GUIDANCE, false,
             ),
             row(
+                "floor unrecognised, a blocked path judged before it", card(safety = degraded(ground, emptySet()), event = blocked),
+                floorTitle, StatusDetail.PATH_PAUSED, StatusLabel.PATH_PAUSED, false,
+            ),
+            row("guiding, a blocked path", card(event = blocked), StatusTitle.Event(blocked), StatusDetail.GUIDANCE, StatusLabel.LATEST_GUIDANCE, true),
+            row(
                 "speech not ready", card(safety = degraded(emptySet(), setOf(OutputFault.SPEECH_NOT_READY))),
                 StatusTitle.Clear, StatusDetail.CLEAR, StatusLabel.MONITORING, false,
             ),
@@ -143,7 +149,7 @@ class StatusCardContentTest {
     }
 
     @Test
-    fun `the card says the way looks clear only while Guidance judges it in full`() {
+    fun `the card says there is no new guidance only while Guidance judges it in full`() {
         val states = listOf(
             GuidanceSafetyState.Idle, GuidanceSafetyState.Initializing, GuidanceSafetyState.Guiding,
             GuidanceSafetyState.StopRequired(StopReason.CAMERA_OBSTRUCTED), GuidanceSafetyState.Interrupted(InterruptReason.LIFECYCLE),
@@ -156,7 +162,8 @@ class StatusCardContentTest {
         val holds = listOf(null) + HoldCause.entries.flatMap { listOf(PromptHoldView(it, stopping = true), PromptHoldView(it, stopping = false)) }
         val flags = listOf(false, true)
         var checked = 0
-        for (safety in states) for (hold in holds) for (event in listOf(null, person, light, floorEvent)) {
+        val events = listOf(null, person, light, blocked, floorEvent)
+        for (safety in states) for (hold in holds) for (event in events) {
             for (error in flags) for (interrupted in flags) for (speechBroken in flags) for (loading in flags) for (running in flags) {
                 val content = card(error, interrupted, speechBroken, loading, running, safety, hold, event)
                 val judges = safety == GuidanceSafetyState.Guiding || safety is GuidanceSafetyState.Degraded
@@ -165,12 +172,13 @@ class StatusCardContentTest {
                 if (content.title == StatusTitle.Clear) assertTrue(case, judgesInFull)
                 if (content.title is StatusTitle.Event) assertTrue(case, judges)
                 if (safety is GuidanceSafetyState.Degraded && safety.perception.isNotEmpty() && content.title is StatusTitle.Event) {
-                    assertTrue("only an ordinary prompt goes above a paused judgement: $case", (content.title as StatusTitle.Event).event != floorEvent)
+                    val shown = (content.title as StatusTitle.Event).event
+                    assertTrue("only an ordinary prompt the pause does not keep back goes above it: $case", shown != floorEvent && shown != blocked)
                 }
                 checked++
             }
         }
-        assertEquals(states.size * holds.size * 4 * 32, checked)
+        assertEquals(states.size * holds.size * events.size * 32, checked)
     }
 
     @Test
@@ -184,7 +192,7 @@ class StatusCardContentTest {
     }
 
     @Test
-    fun `a hold sits above the event and the clear way, below an error, an interruption and speech gone`() {
+    fun `a hold sits above the event and no new guidance, below an error, an interruption and speech gone`() {
         val held = PromptHoldView(HoldCause.CAMERA_OBSTRUCTED, stopping = false)
         assertEquals("above an event the screen would not keep anyway", StatusTitle.Confirming, card(hold = held, event = person).title)
         assertEquals(StatusTitle.Error, card(error = true, hold = held).title)
@@ -243,6 +251,28 @@ class StatusCardContentTest {
             val xml = File("src/main/res/$values/strings.xml").readText()
             for (name in listOf("status_label_path_paused", "status_path_paused_detail", SceneEventMessageKeys.GROUND_UNRECOGNIZED)) {
                 assertTrue("$values: no string named $name", Regex("""<string name="${Regex.escape(name)}"[^>]*>[^<]+</string>""").containsMatchIn(xml))
+            }
+        }
+    }
+
+    /**
+     * [StatusTitle.Clear] shows while an obstacle prompted a few seconds ago is still ahead, its event expired and its
+     * next prompt not yet due (`ground_unrecognized_long`'s people, `person_stays_ahead`). So its words speak of prompts:
+     * none says that no risk was found or that the way is clear, and the detail says that no prompt is not a clear way.
+     */
+    @Test
+    fun `no new guidance is said as such, never as no risk or a clear way`() {
+        val expected = mapOf(
+            "values" to ("No new guidance right now" to "No prompt does not mean the way is clear."),
+            "values-zh" to ("当前没有新提示" to "没有提示不等于前方能走。"),
+        )
+        for ((values, words) in expected) {
+            val xml = File("src/main/res/$values/strings.xml").readText()
+            fun text(name: String) = Regex("""<string name="$name"[^>]*>([^<]+)</string>""").find(xml)?.groupValues?.get(1)
+            assertEquals("$values title", words.first, text("status_clear_title"))
+            assertEquals("$values detail", words.second, text("status_clear_detail"))
+            for (claim in listOf("risk", "clear", "safe", "风险", "安全", "通行")) {
+                assertFalse("$values: the title claims '$claim'", text("status_clear_title")!!.contains(claim, ignoreCase = true))
             }
         }
     }

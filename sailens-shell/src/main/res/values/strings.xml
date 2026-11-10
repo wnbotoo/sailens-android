@@ -23,11 +23,11 @@
     <string name="error_analysis_start_failed">Unable to start analysis. This device may not meet the requirements for real-time analysis.</string>
     <string name="status_starting_title">Starting guidance</string>
     <string name="status_idle_title">Guidance is off</string>
-    <string name="status_clear_title">Path looks clear</string>
+    <string name="status_clear_title">No new guidance right now</string>
     <string name="status_starting_detail">Preparing guidance.</string>
     <string name="status_idle_detail">Start when ready.</string>
     <string name="status_guidance_detail">Latest cue is active.</string>
-    <string name="status_clear_detail">No urgent guidance right now.</string>
+    <string name="status_clear_detail">No prompt does not mean the way is clear.</string>
     <string name="status_hold_confirming_title">Checking the view</string>
     <string name="status_hold_stopping_detail">Prompts are paused. Stop for now.</string>
     <string name="status_hold_recovering_detail">Prompts resume once the view is steady.</string>

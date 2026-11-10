@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import com.sailens.guidance.model.perception.ObstacleDetection
 import com.sailens.guidance.model.scene.SceneEvent
 import com.sailens.guidance.model.scene.SceneDebugInfo
+import com.sailens.guidance.safety.pausedEventCategories
 import com.sailens.output.SpeechEngineState
 import com.sailens.shell.guidance.overlay.SceneOverlayMode
 import com.sailens.shell.guidance.safety.GuidanceSafetyState
@@ -49,7 +50,7 @@ data class SceneAnalysisUiState(
     val lastEvents: List<SceneEvent> = emptyList(),
     /**
      * 当前仍有效的状态提示。新事件到来时替换；没有新事件时保留到 [SceneEvent.expiresAt]，
-     * 避免冷却造成的空帧让卡片瞬间闪回"无风险"。
+     * 避免冷却造成的空帧让卡片瞬间闪回"当前没有新提示"。
      *
      * 这个字段只描述当前场景，不能用于重播；过期后必须清空。
      */
@@ -67,7 +68,7 @@ data class SceneAnalysisUiState(
      * announced; the monitor it comes from decides when the alerts about Guidance itself are due
      * ([com.sailens.shell.guidance.safety.GuidanceSystemAlerts]). Nothing reads this field to decide what is delivered:
      * the status card reads from it only whether a result has come yet and which judgements are paused
-     * ([statusCardContent]), so that it never says the way looks clear without a judgement.
+     * ([statusCardContent]), so that it never says there is no new guidance without a judgement.
      */
     val safetyState: GuidanceSafetyState = GuidanceSafetyState.Idle,
     /**
@@ -136,10 +137,20 @@ internal fun SceneAnalysisUiState.withFrameEvents(
 /**
  * A result's decisions on the screen. While ordinary prompts are held after a stop ([holdsPrompts]) the card keeps no
  * event, a vision fault's included: the hold shows the stop, and an event kept now would come back once the hold is
- * released. Only the debug list takes them then. Otherwise as [withFrameEvents].
+ * released. Only the debug list takes them then. Otherwise as [withFrameEvents], except that while a judgement is
+ * paused the card forgets an event of the prompts that pause keeps back ([pausedEventCategories]), decided before it
+ * began: a blocked path judged in the moments before the floor was confirmed unrecognised neither shows during the
+ * pause nor comes back after it. The pause is this result's: the safety monitor publishes
+ * [SceneAnalysisUiState.safetyState] before the result's decisions reach the screen.
  */
 internal fun SceneAnalysisUiState.withResultEvents(events: List<SceneEvent>, now: Long, holdsPrompts: Boolean): SceneAnalysisUiState =
-    if (holdsPrompts) copy(lastEvents = events) else withFrameEvents(events, now)
+    if (holdsPrompts) copy(lastEvents = events) else withFrameEvents(events, now).withoutPausedEvent()
+
+private fun SceneAnalysisUiState.withoutPausedEvent(): SceneAnalysisUiState {
+    val event = activeStatusEvent ?: return this
+    val perception = (safetyState as? GuidanceSafetyState.Degraded)?.perception ?: return this
+    return if (perception.any { event.category in it.pausedEventCategories }) copy(activeStatusEvent = null) else this
+}
 
 /**
  * A hold began: the card forgets its event, so the event neither shows during the stop nor comes back after it. The

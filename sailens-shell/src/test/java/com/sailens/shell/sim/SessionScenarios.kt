@@ -309,6 +309,41 @@ internal object SessionScenarios {
         endAtMs = 41_000,
     )
 
+    /**
+     * The frames of [groundUnrecognizedTwice] on the unrecognised floor: from 5050 for 10 s, and again from 20050 for 4 s,
+     * short enough for the floor to be recognised again while the blocked path judged before it is still unexpired.
+     */
+    val GROUND_TWICE_FIRST = indexAt(FLOOR_FROM_MS) until indexAt(15_050)
+    val GROUND_TWICE_SECOND = indexAt(20_050) until indexAt(24_050)
+
+    /** When the floor of [GROUND_TWICE_SECOND] is confirmed unrecognised: 1.5 s on it. */
+    const val FLOOR_AGAIN_CONFIRMED_MS = 20_050L + 1_500
+
+    val groundUnrecognizedTwice = SessionScript(
+        name = "ground_unrecognized_twice",
+        description = "On the unrecognised floor of ground_unrecognized_long from 5050 for 10 s, the sidewalk for 5 s, " +
+            "the floor again from 20050 for 4 s, then the sidewalk. Each time the path is judged blocked before the " +
+            "floor is confirmed. The second time the floor's own event is still cooling down from the first, so the " +
+            "frame that confirms it decides nothing; the status card names the floor and forgets the blocked path, " +
+            "which does not come back when the floor is recognised again before it would have expired.",
+        scenario = scenario(
+            "ground_unrecognized_twice",
+            List(indexAt(35_000)) { i -> standing(if (i in GROUND_TWICE_FIRST || i in GROUND_TWICE_SECOND) indoor() else sidewalk) },
+        ),
+        actions = SessionScript.defaultActions(ScriptAction.Stop(35_000)),
+        endAtMs = 36_000,
+    )
+
+    val personStaysAhead = SessionScript(
+        name = "person_stays_ahead",
+        description = "Standing on a sidewalk with a person 1.5 m ahead the whole time, then stopping. The person is " +
+            "prompted, its event expires 3 s later, and the stationary cooldown keeps it from being prompted again for " +
+            "8 s: meanwhile the person is tracked on every frame and the status card says there is no new guidance.",
+        scenario = scenario("person_stays_ahead", List(indexAt(12_000)) { standing(personAhead) }),
+        actions = SessionScript.defaultActions(ScriptAction.Stop(12_000)),
+        endAtMs = 13_000,
+    )
+
     val speechOffLensCovered = lensCoveredShort.copy(
         name = "speech_off_lens_covered",
         description = "lens_covered_short with speech off. The rhythm is the notice, every cycle, and fault vibration " +
@@ -887,6 +922,8 @@ internal object SessionScenarios {
         lowLight,
         groundUnrecognizedLong,
         groundUnrecognizedThenCovered,
+        groundUnrecognizedTwice,
+        personStaysAhead,
         speechOffLensCovered,
         screenReaderLensCovered,
         descriptionHoldsFloor,

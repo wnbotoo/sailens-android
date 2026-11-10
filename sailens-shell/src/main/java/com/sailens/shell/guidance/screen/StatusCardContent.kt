@@ -6,12 +6,16 @@ import com.sailens.guidance.model.common.EventPriority
 import com.sailens.guidance.model.scene.SceneEvent
 import com.sailens.guidance.model.scene.SceneEventMessageKeys
 import com.sailens.guidance.safety.DegradeReason
+import com.sailens.guidance.safety.pausedEventCategories
 import com.sailens.output.SpeechEngineState
 import com.sailens.shell.guidance.safety.GuidanceSafetyState
 import com.sailens.shell.guidance.safety.HoldCause
 import com.sailens.shell.guidance.safety.PromptHoldView
 
-/** The status card's headline: a fixed sentence, a held stop's own sentence, a paused judgement's, or the current event's. */
+/**
+ * The status card's headline: a fixed sentence, a held stop's own sentence, a paused judgement's, or the current event's.
+ * [Clear] is "no new guidance right now", never a claim that nothing is ahead.
+ */
 internal sealed interface StatusTitle {
     data object Error : StatusTitle
     data object Interrupted : StatusTitle
@@ -44,9 +48,10 @@ internal data class StatusCardContent(val title: StatusTitle, val detail: Status
 
 /**
  * The status card, by priority: an error, an interruption, speech gone, starting, not running, a hold, no result yet,
- * an ordinary prompt, a paused judgement, any other event, and otherwise a clear way. The card says the way looks clear
- * only when Guidance judges it in full: never before the first result of a start, nor while part of the judgement is
- * paused.
+ * an ordinary prompt, a paused judgement, any other event, and otherwise no new guidance ([StatusTitle.Clear]). The
+ * card says there is no new guidance only when Guidance judges the way in full: never before the first result of a
+ * start, nor while part of the judgement is paused. Even then it speaks of prompts, not of the way: a prompt stays
+ * current for a few seconds while its obstacle may stay ahead for longer, unprompted under the cooldown.
  *
  * While prompts are held the card shows the stop or that the view is being confirmed, never an event: the screen keeps
  * none then. When speech gone takes the title during a hold, the detail is still the hold's, so the card says that
@@ -54,14 +59,16 @@ internal data class StatusCardContent(val title: StatusTitle, val detail: Status
  *
  * A paused judgement is named by the sentence its notice is spoken with, and stays on the card for as long as it holds,
  * not only while its event is current. An ordinary prompt (an obstacle's, say) goes above it, as it does on every
- * channel; the paused judgement's own event does not, so the card's label and detail do not change when that event
- * expires. Not coloured as an alert: it is a low-priority state, like its notice, and lasts as long as the floor does.
+ * channel. Its own event does not, so the card's label and detail do not change when that event expires; nor does a
+ * prompt it keeps back ([pausedEventCategories]: a blocked path judged just before the floor was confirmed
+ * unrecognised), which the screen also forgets ([withResultEvents]). Not coloured as an alert: it is a low-priority
+ * state, like its notice, and lasts as long as the floor does.
  *
  * Of [safety] only two things are read: whether Guidance judges at all ([GuidanceSafetyState.Guiding] or
  * [GuidanceSafetyState.Degraded]; otherwise, below the hold, the card says it is starting, which is the case of no
- * result since the start), and the judgements paused ([GuidanceSafetyState.Degraded.perception]). A degraded output alone changes
- * nothing here: the judgement is whole, and speech gone has its own tier. Every other tier comes from the screen's own
- * facts and the hold.
+ * result since the start), and the judgements paused ([GuidanceSafetyState.Degraded.perception]). A degraded output
+ * alone changes nothing here: the judgement is whole, and speech gone has its own tier. Every other tier comes from the
+ * screen's own facts and the hold.
  *
  * @param speechBroken the session runs on own speech and the engine is unavailable.
  * @param safety where Guidance stands, as the safety monitor last published it.
@@ -82,8 +89,9 @@ internal fun statusCardContent(
     // which Guidance does not judge has a tier above whenever the screen's facts agree with the monitor; should they
     // not, the card still claims nothing.
     val awaiting = held == null && safety != GuidanceSafetyState.Guiding && safety !is GuidanceSafetyState.Degraded
-    val paused = (safety as? GuidanceSafetyState.Degraded)?.perception?.minOrNull()
-    val prompt = event?.takeIf { it.isOrdinaryPrompt }
+    val pausedReasons = (safety as? GuidanceSafetyState.Degraded)?.perception.orEmpty()
+    val paused = pausedReasons.minOrNull()
+    val prompt = event?.takeIf { shown -> shown.isOrdinaryPrompt && pausedReasons.none { shown.category in it.pausedEventCategories } }
     val title = when {
         errorShown -> StatusTitle.Error
         interrupted -> StatusTitle.Interrupted
