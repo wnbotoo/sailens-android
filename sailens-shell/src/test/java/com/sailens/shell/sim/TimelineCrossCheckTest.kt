@@ -196,6 +196,7 @@ class TimelineCrossCheckTest {
         fun screen(title: StatusTitle, state: SafetyStateTrace?) = ScreenSample(7, StatusCardContent(title, StatusDetail.CLEAR, StatusLabel.MONITORING, alert = false), state)
         val floor = StatusTitle.Paused(SceneEventMessageKeys.GROUND_UNRECOGNIZED)
         val floorEvent = event.copy(category = EventCategory.GROUND_UNRECOGNIZED, priority = EventPriority.LOW, messageKey = SceneEventMessageKeys.GROUND_UNRECOGNIZED)
+        val blockedEvent = event.copy(category = EventCategory.BLOCKED, messageKey = SceneEventMessageKeys.BLOCKED)
         val guiding = traced("guiding")
         val degradedFloor = traced("degraded", listOf("ground_unrecognized"))
         val speechNotReady = traced("degraded", listOf("speech_not_ready"), outputFaults = listOf("speech_not_ready"))
@@ -219,15 +220,17 @@ class TimelineCrossCheckTest {
                 "7: wet_floor paused, a judgement this check does not know",
                 "7: degraded(wet_floor), the card shows Clear",
                 "7: the card says the way looks clear while degraded(wet_floor)",
+                "7: degraded(ground_unrecognized), the card shows ${StatusTitle.Event(blockedEvent)}",
             ).sorted(),
             TimelineCrossCheck.cardClaims(
                 listOf(
                     screen(StatusTitle.Clear, degradedFloor), screen(StatusTitle.Clear, initializing), screen(StatusTitle.Clear, null),
                     screen(StatusTitle.Event(event), initializing), screen(StatusTitle.Event(floorEvent), degradedFloor), screen(floor, guiding),
-                    screen(StatusTitle.Clear, traced("degraded", listOf("wet_floor"))),
+                    screen(StatusTitle.Clear, traced("degraded", listOf("wet_floor"))), screen(StatusTitle.Event(blockedEvent), degradedFloor),
                 ),
             ).sorted(),
         )
+        assertEquals("a blocked path while guiding", emptyList<String>(), TimelineCrossCheck.cardClaims(listOf(screen(StatusTitle.Event(blockedEvent), guiding))))
     }
 
     @Test

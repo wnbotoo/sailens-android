@@ -11,6 +11,7 @@ import com.sailens.guidance.model.analysis.FrameQuality
 import com.sailens.guidance.model.analysis.GroundRecognition
 import com.sailens.guidance.model.analysis.SceneSnapshot
 import com.sailens.guidance.model.analysis.VisionFaults
+import com.sailens.guidance.model.common.EventCategory
 import com.sailens.guidance.motion.MotionState
 import com.sailens.guidance.motion.OrientationQuality
 
@@ -62,6 +63,17 @@ enum class DegradeReason {
     /** The floor is confirmed unrecognised: blocked, path-complex and narrowing prompts pause, obstacles go on. */
     GROUND_UNRECOGNIZED,
 }
+
+/**
+ * The prompts a paused judgement keeps back, by category: the ones the event generator stops making while it holds
+ * (`EventGeneratorBaselineGateTest` holds the two to the same set).
+ */
+val DegradeReason.pausedEventCategories: Set<EventCategory>
+    get() = when (this) {
+        DegradeReason.GROUND_UNRECOGNIZED -> PATH_PROMPT_CATEGORIES
+    }
+
+private val PATH_PROMPT_CATEGORIES: Set<EventCategory> = setOf(EventCategory.BLOCKED, EventCategory.PATH_COMPLEX, EventCategory.NARROWING)
 
 /**
  * Optional inputs that have a source today. Runtime state, not the edition's static capability model

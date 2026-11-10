@@ -4,6 +4,9 @@ import com.sailens.guidance.model.common.EventCategory
 import com.sailens.guidance.model.common.EventPriority
 import com.sailens.guidance.model.scene.SceneEvent
 import com.sailens.guidance.model.scene.SceneEventMessageKeys
+import com.sailens.guidance.safety.DegradeReason
+import com.sailens.shell.guidance.safety.GuidanceSafetyState
+import com.sailens.shell.guidance.safety.OutputFault
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -11,7 +14,7 @@ import org.junit.Test
 /**
  * The card's current event across a hold: cleared when the hold begins, not written while it lasts, written afresh from
  * the frame that releases it. Filtering a frame's own events would not do: [withFrameEvents] keeps an unexpired older
- * event when a frame has none.
+ * event when a frame has none. Likewise across the floor's pause, for the path prompts it keeps back.
  */
 class StatusCardHoldTest {
 
@@ -45,6 +48,32 @@ class StatusCardHoldTest {
         assertEquals("the debug list takes every decision", listOf(covered), state.lastEvents)
         state = state.withResultEvents(emptyList(), now = 1_800, holdsPrompts = false)
         assertNull(state.activeStatusEvent)
+    }
+
+    @Test
+    fun `a path prompt from before the floor's pause is forgotten once the pause begins, and does not come back`() {
+        val floor = GuidanceSafetyState.Degraded(setOf(DegradeReason.GROUND_UNRECOGNIZED), emptySet())
+        for (category in listOf(EventCategory.BLOCKED, EventCategory.PATH_COMPLEX, EventCategory.NARROWING)) {
+            val path = event("path_$category", category, decidedAt = 1_000)
+            var state = SceneAnalysisUiState(safetyState = GuidanceSafetyState.Guiding).withResultEvents(listOf(path), now = 1_000, holdsPrompts = false)
+            assertEquals(category.name, path, state.activeStatusEvent)
+            // Confirmed unrecognised at 1 500, the floor's own event cooled down: the frame decides nothing.
+            state = state.copy(safetyState = floor).withResultEvents(emptyList(), now = 1_500, holdsPrompts = false)
+            assertNull(category.name, state.activeStatusEvent)
+            // Recognised again at 2 500, the path prompt's record still unexpired: it stays forgotten.
+            state = state.copy(safetyState = GuidanceSafetyState.Guiding).withResultEvents(emptyList(), now = 2_500, holdsPrompts = false)
+            assertNull(category.name, state.activeStatusEvent)
+        }
+    }
+
+    @Test
+    fun `an obstacle's prompt stays through the floor's pause, and a degraded output forgets nothing`() {
+        val floor = GuidanceSafetyState.Degraded(setOf(DegradeReason.GROUND_UNRECOGNIZED), emptySet())
+        val kept = SceneAnalysisUiState(activeStatusEvent = person, safetyState = floor).withResultEvents(emptyList(), now = 1_500, holdsPrompts = false)
+        assertEquals(person, kept.activeStatusEvent)
+        val blocked = event(SceneEventMessageKeys.BLOCKED, EventCategory.BLOCKED, decidedAt = 1_000)
+        val speechOnly = GuidanceSafetyState.Degraded(emptySet(), setOf(OutputFault.SPEECH_NOT_READY))
+        assertEquals(blocked, SceneAnalysisUiState(activeStatusEvent = blocked, safetyState = speechOnly).withResultEvents(emptyList(), now = 1_500, holdsPrompts = false).activeStatusEvent)
     }
 
     @Test

@@ -10,6 +10,8 @@ import com.sailens.guidance.model.analysis.VisionFaults
 import com.sailens.guidance.model.common.EventCategory
 import com.sailens.guidance.model.common.Severity
 import com.sailens.guidance.model.scene.SceneEventMessageKeys
+import com.sailens.guidance.safety.DegradeReason
+import com.sailens.guidance.safety.pausedEventCategories
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -22,7 +24,8 @@ import org.junit.Test
  */
 class EventGeneratorBaselineGateTest {
 
-    private val pathCategories = setOf(EventCategory.BLOCKED, EventCategory.PATH_COMPLEX, EventCategory.NARROWING)
+    /** The categories the floor's pause declares it keeps back, which the status card reads: held here to the generator's. */
+    private val pathCategories = DegradeReason.GROUND_UNRECOGNIZED.pausedEventCategories
 
     private val gated = setOf(EventCategory.SENSOR_QUALITY, EventCategory.GROUND_UNRECOGNIZED) + pathCategories
 

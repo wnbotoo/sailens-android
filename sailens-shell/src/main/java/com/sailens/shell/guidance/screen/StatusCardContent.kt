@@ -6,6 +6,7 @@ import com.sailens.guidance.model.common.EventPriority
 import com.sailens.guidance.model.scene.SceneEvent
 import com.sailens.guidance.model.scene.SceneEventMessageKeys
 import com.sailens.guidance.safety.DegradeReason
+import com.sailens.guidance.safety.pausedEventCategories
 import com.sailens.output.SpeechEngineState
 import com.sailens.shell.guidance.safety.GuidanceSafetyState
 import com.sailens.shell.guidance.safety.HoldCause
@@ -54,14 +55,16 @@ internal data class StatusCardContent(val title: StatusTitle, val detail: Status
  *
  * A paused judgement is named by the sentence its notice is spoken with, and stays on the card for as long as it holds,
  * not only while its event is current. An ordinary prompt (an obstacle's, say) goes above it, as it does on every
- * channel; the paused judgement's own event does not, so the card's label and detail do not change when that event
- * expires. Not coloured as an alert: it is a low-priority state, like its notice, and lasts as long as the floor does.
+ * channel. Its own event does not, so the card's label and detail do not change when that event expires; nor does a
+ * prompt it keeps back ([pausedEventCategories]: a blocked path judged just before the floor was confirmed
+ * unrecognised), which the screen also forgets ([withResultEvents]). Not coloured as an alert: it is a low-priority
+ * state, like its notice, and lasts as long as the floor does.
  *
  * Of [safety] only two things are read: whether Guidance judges at all ([GuidanceSafetyState.Guiding] or
  * [GuidanceSafetyState.Degraded]; otherwise, below the hold, the card says it is starting, which is the case of no
- * result since the start), and the judgements paused ([GuidanceSafetyState.Degraded.perception]). A degraded output alone changes
- * nothing here: the judgement is whole, and speech gone has its own tier. Every other tier comes from the screen's own
- * facts and the hold.
+ * result since the start), and the judgements paused ([GuidanceSafetyState.Degraded.perception]). A degraded output
+ * alone changes nothing here: the judgement is whole, and speech gone has its own tier. Every other tier comes from the
+ * screen's own facts and the hold.
  *
  * @param speechBroken the session runs on own speech and the engine is unavailable.
  * @param safety where Guidance stands, as the safety monitor last published it.
@@ -82,8 +85,9 @@ internal fun statusCardContent(
     // which Guidance does not judge has a tier above whenever the screen's facts agree with the monitor; should they
     // not, the card still claims nothing.
     val awaiting = held == null && safety != GuidanceSafetyState.Guiding && safety !is GuidanceSafetyState.Degraded
-    val paused = (safety as? GuidanceSafetyState.Degraded)?.perception?.minOrNull()
-    val prompt = event?.takeIf { it.isOrdinaryPrompt }
+    val pausedReasons = (safety as? GuidanceSafetyState.Degraded)?.perception.orEmpty()
+    val paused = pausedReasons.minOrNull()
+    val prompt = event?.takeIf { shown -> shown.isOrdinaryPrompt && pausedReasons.none { shown.category in it.pausedEventCategories } }
     val title = when {
         errorShown -> StatusTitle.Error
         interrupted -> StatusTitle.Interrupted

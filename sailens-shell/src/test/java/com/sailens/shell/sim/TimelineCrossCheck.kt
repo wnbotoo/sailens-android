@@ -7,6 +7,8 @@ import com.sailens.guidance.model.trace.PromptRevokeReasons
 import com.sailens.guidance.model.trace.GuidanceAlertSources
 import com.sailens.guidance.model.trace.SafetyTraceNames
 import com.sailens.guidance.safety.BaselineQualification
+import com.sailens.guidance.safety.DegradeReason
+import com.sailens.guidance.safety.pausedEventCategories
 import com.sailens.guidance.safety.traceLevel
 import com.sailens.guidance.safety.traceReasons
 import com.sailens.shell.guidance.screen.StatusTitle
@@ -160,7 +162,7 @@ internal object TimelineCrossCheck {
      * What the status card claims, each time the session settled ([screens]), against the safety state the trace last
      * recorded: it says the way looks clear only while that state is guiding, or degraded by the output alone; it names
      * an event only while Guidance judges; and while a judgement is paused it names that judgement, unless an ordinary
-     * prompt or speech gone has the card. Before the first record it claims nothing.
+     * prompt the pause does not keep back, or speech gone, has the card. Before the first record it claims nothing.
      */
     fun cardClaims(screens: List<ScreenSample>): List<String> {
         val problems = mutableListOf<String>()
@@ -176,7 +178,8 @@ internal object TimelineCrossCheck {
             if (title is StatusTitle.Paused && title.messageKey !in paused.mapNotNull(PAUSED_SENTENCES::get)) {
                 problems += "${screen.atMs}: the card names ${title.messageKey} while $label"
             }
-            val namesOrdinaryPrompt = title is StatusTitle.Event && title.event.isOrdinaryPrompt
+            val keptBack = paused.flatMap { name -> DegradeReason.entries.singleOrNull { it.name.lowercase() == name }?.pausedEventCategories.orEmpty() }
+            val namesOrdinaryPrompt = title is StatusTitle.Event && title.event.isOrdinaryPrompt && title.event.category !in keptBack
             if (paused.isNotEmpty() && title !is StatusTitle.Paused && !namesOrdinaryPrompt && title != StatusTitle.SpeechUnavailable) {
                 problems += "${screen.atMs}: $label, the card shows $title"
             }

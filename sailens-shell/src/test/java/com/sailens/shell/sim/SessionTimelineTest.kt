@@ -293,6 +293,35 @@ class SessionTimelineTest {
     }
 
     @Test
+    fun ground_unrecognized_twice() {
+        val script = SessionScenarios.groundUnrecognizedTwice
+        val run = check(script)
+        val again = SessionScenarios.FLOOR_AGAIN_CONFIRMED_MS
+        val confirmations = run.states().zipWithNext().filter { (before, after) -> after.label == "degraded(ground_unrecognized)" && before.label != after.label }
+        assertEquals("confirmed twice", listOf(SessionScenarios.FLOOR_CONFIRMED_MS, again), confirmations.map { it.second.at })
+        val blocked = run.outcomes().filter { it.key == SceneEventMessageKeys.BLOCKED }
+        assertTrue("the path is judged blocked before the second confirmation too (${blocked.map { it.at }})", blocked.any { it.at in 20_050 until again })
+        val confirming = run.entries.filterIsInstance<TimelineEntry.Frame>().single { it.atMs == again }
+        assertEquals("the floor's event is still cooling down: the confirming frame decides nothing", emptyList<String>(), confirming.events.map { it.messageKey })
+        assertEquals("the floor is said again on entering", listOf("fault_notice accepted"), run.visionAlertsAt(again).filter { it.startsWith("fault_notice") })
+        val back = script.frameAtMs(SessionScenarios.GROUND_TWICE_SECOND.last + 1) + 1_000
+        assertEquals("1 s back on the sidewalk the floor is recognised", "$back guiding result", run.states().first { it.at > again && it.label == "guiding" }.describe())
+        assertEquals(
+            "from the second confirmation the card names the floor, never the blocked path, until it is recognised",
+            listOf(FLOOR_CARD),
+            run.screens.filter { it.atMs in again until back }.map { it.card.title }.collapseRuns(),
+        )
+        val blockedFrame = run.entries.filterIsInstance<TimelineEntry.Frame>().last { frame -> frame.atMs < again && frame.events.any { it.messageKey == SceneEventMessageKeys.BLOCKED } }
+        val blockedEvent = blockedFrame.events.first { it.messageKey == SceneEventMessageKeys.BLOCKED }
+        val blockedUntil = blockedFrame.atMs + (blockedEvent.expiresAt - blockedEvent.timestamp)
+        assertTrue("the floor is recognised while the blocked path would still be current ($back < $blockedUntil)", back < blockedUntil)
+        assertTrue(
+            "and it does not come back",
+            run.screens.filter { it.atMs >= back }.none { (it.card.title as? StatusTitle.Event)?.event?.messageKey == SceneEventMessageKeys.BLOCKED },
+        )
+    }
+
+    @Test
     fun speech_off_lens_covered() {
         val run = check(SessionScenarios.speechOffLensCovered)
         val withSpeech = SessionSimulator.run(SessionScenarios.lensCoveredShort)

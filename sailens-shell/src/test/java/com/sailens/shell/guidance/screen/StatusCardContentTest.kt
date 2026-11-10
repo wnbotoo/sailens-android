@@ -28,6 +28,7 @@ class StatusCardContentTest {
         messageKey = "event_obstacle_center_person", expiresAt = 3_000, dedupeKey = "obstacle_CENTER",
     )
     private val light = person.copy(category = EventCategory.TRAFFIC_LIGHT, priority = EventPriority.LOW, messageKey = "event_traffic_light")
+    private val blocked = person.copy(category = EventCategory.BLOCKED, messageKey = SceneEventMessageKeys.BLOCKED, dedupeKey = "blocked")
     private val floorEvent = person.copy(
         category = EventCategory.GROUND_UNRECOGNIZED, priority = EventPriority.LOW, messageKey = SceneEventMessageKeys.GROUND_UNRECOGNIZED,
         dedupeKey = "ground_unrecognized",
@@ -86,6 +87,11 @@ class StatusCardContentTest {
                 "floor unrecognised, a traffic light", card(safety = degraded(ground, emptySet()), event = light),
                 StatusTitle.Event(light), StatusDetail.GUIDANCE, StatusLabel.LATEST_GUIDANCE, false,
             ),
+            row(
+                "floor unrecognised, a blocked path judged before it", card(safety = degraded(ground, emptySet()), event = blocked),
+                floorTitle, StatusDetail.PATH_PAUSED, StatusLabel.PATH_PAUSED, false,
+            ),
+            row("guiding, a blocked path", card(event = blocked), StatusTitle.Event(blocked), StatusDetail.GUIDANCE, StatusLabel.LATEST_GUIDANCE, true),
             row(
                 "speech not ready", card(safety = degraded(emptySet(), setOf(OutputFault.SPEECH_NOT_READY))),
                 StatusTitle.Clear, StatusDetail.CLEAR, StatusLabel.MONITORING, false,
@@ -156,7 +162,8 @@ class StatusCardContentTest {
         val holds = listOf(null) + HoldCause.entries.flatMap { listOf(PromptHoldView(it, stopping = true), PromptHoldView(it, stopping = false)) }
         val flags = listOf(false, true)
         var checked = 0
-        for (safety in states) for (hold in holds) for (event in listOf(null, person, light, floorEvent)) {
+        val events = listOf(null, person, light, blocked, floorEvent)
+        for (safety in states) for (hold in holds) for (event in events) {
             for (error in flags) for (interrupted in flags) for (speechBroken in flags) for (loading in flags) for (running in flags) {
                 val content = card(error, interrupted, speechBroken, loading, running, safety, hold, event)
                 val judges = safety == GuidanceSafetyState.Guiding || safety is GuidanceSafetyState.Degraded
@@ -165,12 +172,13 @@ class StatusCardContentTest {
                 if (content.title == StatusTitle.Clear) assertTrue(case, judgesInFull)
                 if (content.title is StatusTitle.Event) assertTrue(case, judges)
                 if (safety is GuidanceSafetyState.Degraded && safety.perception.isNotEmpty() && content.title is StatusTitle.Event) {
-                    assertTrue("only an ordinary prompt goes above a paused judgement: $case", (content.title as StatusTitle.Event).event != floorEvent)
+                    val shown = (content.title as StatusTitle.Event).event
+                    assertTrue("only an ordinary prompt the pause does not keep back goes above it: $case", shown != floorEvent && shown != blocked)
                 }
                 checked++
             }
         }
-        assertEquals(states.size * holds.size * 4 * 32, checked)
+        assertEquals(states.size * holds.size * events.size * 32, checked)
     }
 
     @Test
