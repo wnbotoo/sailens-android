@@ -1,15 +1,24 @@
 package com.sailens.shell.guidance.screen
 
+import com.sailens.guidance.delivery.VisionFaultAlerts
 import com.sailens.guidance.model.common.EventCategory
 import com.sailens.guidance.model.common.EventPriority
 import com.sailens.guidance.model.scene.SceneEvent
 import com.sailens.guidance.model.scene.SceneEventMessageKeys
+import com.sailens.guidance.safety.DegradeReason
+import com.sailens.output.SpeechEngineState
+import com.sailens.shell.guidance.safety.FailureReason
+import com.sailens.shell.guidance.safety.GuidanceSafetyState
 import com.sailens.shell.guidance.safety.HoldCause
+import com.sailens.shell.guidance.safety.InterruptReason
+import com.sailens.shell.guidance.safety.OutputFault
 import com.sailens.shell.guidance.safety.PromptHoldView
+import com.sailens.shell.guidance.safety.StopReason
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.File
 
 /** The status card's choice of sentence, tier by tier, before any word is looked up. */
 class StatusCardContentTest {
@@ -18,7 +27,14 @@ class StatusCardContentTest {
         timestamp = 0, category = EventCategory.OBSTACLE, priority = EventPriority.HIGH,
         messageKey = "event_obstacle_center_person", expiresAt = 3_000, dedupeKey = "obstacle_CENTER",
     )
-    private val light = person.copy(priority = EventPriority.LOW, messageKey = "event_traffic_light")
+    private val light = person.copy(category = EventCategory.TRAFFIC_LIGHT, priority = EventPriority.LOW, messageKey = "event_traffic_light")
+    private val floorEvent = person.copy(
+        category = EventCategory.GROUND_UNRECOGNIZED, priority = EventPriority.LOW, messageKey = SceneEventMessageKeys.GROUND_UNRECOGNIZED,
+        dedupeKey = "ground_unrecognized",
+    )
+
+    private val ground = setOf(DegradeReason.GROUND_UNRECOGNIZED)
+    private val floorTitle = StatusTitle.Paused(SceneEventMessageKeys.GROUND_UNRECOGNIZED)
 
     private fun card(
         error: Boolean = false,
@@ -26,40 +42,145 @@ class StatusCardContentTest {
         speechBroken: Boolean = false,
         loading: Boolean = false,
         running: Boolean = true,
+        safety: GuidanceSafetyState = GuidanceSafetyState.Guiding,
         hold: PromptHoldView? = null,
         event: SceneEvent? = null,
-    ) = statusCardContent(error, interrupted, speechBroken, loading, running, hold, event)
+    ) = statusCardContent(error, interrupted, speechBroken, loading, running, safety, hold, event)
+
+    /** One state of Guidance with the screen's facts as they stand in it, and the card expected. */
+    private data class Row(val name: String, val actual: StatusCardContent, val expected: StatusCardContent)
+
+    private fun row(name: String, actual: StatusCardContent, title: StatusTitle, detail: StatusDetail, label: StatusLabel, alert: Boolean) =
+        Row(name, actual, StatusCardContent(title, detail, label, alert))
 
     @Test
-    fun `without a hold the card is as it was`() {
-        assertEquals(StatusCardContent(StatusTitle.Error, StatusDetail.ERROR, StatusLabel.ERROR, alert = true), card(error = true, running = false, event = person))
-        assertEquals(StatusCardContent(StatusTitle.Interrupted, StatusDetail.INTERRUPTED, StatusLabel.ERROR, alert = true), card(interrupted = true))
-        assertEquals(StatusCardContent(StatusTitle.SpeechUnavailable, StatusDetail.SPEECH_UNAVAILABLE, StatusLabel.ERROR, alert = true), card(speechBroken = true, event = light))
-        assertEquals(StatusCardContent(StatusTitle.Starting, StatusDetail.STARTING, StatusLabel.STARTING, alert = false), card(loading = true, running = false))
-        assertEquals(StatusCardContent(StatusTitle.Idle, StatusDetail.IDLE, StatusLabel.STANDBY, alert = false), card(running = false))
-        assertEquals(StatusCardContent(StatusTitle.Event(person), StatusDetail.GUIDANCE, StatusLabel.LATEST_GUIDANCE, alert = true), card(event = person))
-        assertEquals(StatusCardContent(StatusTitle.Event(light), StatusDetail.GUIDANCE, StatusLabel.LATEST_GUIDANCE, alert = false), card(event = light))
-        assertEquals(StatusCardContent(StatusTitle.Clear, StatusDetail.CLEAR, StatusLabel.MONITORING, alert = false), card())
-    }
-
-    @Test
-    fun `a stop that still holds is named by its own sentence, prompts paused`() {
-        val expected = mapOf(
-            HoldCause.CAMERA_OBSTRUCTED to StatusTitle.HeldFault(SceneEventMessageKeys.CAMERA_BLOCKED),
-            HoldCause.TOO_DARK to StatusTitle.HeldFault(SceneEventMessageKeys.LOW_LIGHT),
-            HoldCause.STARTUP_STALLED to StatusTitle.HeldStall,
-            HoldCause.PERCEPTION_STALLED to StatusTitle.HeldStall,
+    fun `every state of Guidance, as the screen holds it, gives its card`() {
+        val degraded = { perception: Set<DegradeReason>, output: Set<OutputFault> -> GuidanceSafetyState.Degraded(perception, output) }
+        val rows = listOf(
+            row("idle", card(running = false, safety = GuidanceSafetyState.Idle), StatusTitle.Idle, StatusDetail.IDLE, StatusLabel.STANDBY, false),
+            row(
+                "initializing, start pressed", card(loading = true, running = false, safety = GuidanceSafetyState.Initializing),
+                StatusTitle.Starting, StatusDetail.STARTING, StatusLabel.STARTING, false,
+            ),
+            row(
+                "initializing, running with no result yet", card(safety = GuidanceSafetyState.Initializing),
+                StatusTitle.Starting, StatusDetail.STARTING, StatusLabel.STARTING, false,
+            ),
+            row(
+                "initializing, back from the background", card(safety = GuidanceSafetyState.Initializing, hold = PromptHoldView(HoldCause.LIFECYCLE, stopping = false)),
+                StatusTitle.Confirming, StatusDetail.HOLD_RECOVERING, StatusLabel.PAUSED, true,
+            ),
+            row("guiding", card(), StatusTitle.Clear, StatusDetail.CLEAR, StatusLabel.MONITORING, false),
+            row("guiding, a person", card(event = person), StatusTitle.Event(person), StatusDetail.GUIDANCE, StatusLabel.LATEST_GUIDANCE, true),
+            row("guiding, a traffic light", card(event = light), StatusTitle.Event(light), StatusDetail.GUIDANCE, StatusLabel.LATEST_GUIDANCE, false),
+            row("floor unrecognised", card(safety = degraded(ground, emptySet())), floorTitle, StatusDetail.PATH_PAUSED, StatusLabel.PATH_PAUSED, false),
+            row(
+                "floor unrecognised, its own event current", card(safety = degraded(ground, emptySet()), event = floorEvent),
+                floorTitle, StatusDetail.PATH_PAUSED, StatusLabel.PATH_PAUSED, false,
+            ),
+            row(
+                "floor unrecognised, a person", card(safety = degraded(ground, emptySet()), event = person),
+                StatusTitle.Event(person), StatusDetail.GUIDANCE, StatusLabel.LATEST_GUIDANCE, true,
+            ),
+            row(
+                "floor unrecognised, a traffic light", card(safety = degraded(ground, emptySet()), event = light),
+                StatusTitle.Event(light), StatusDetail.GUIDANCE, StatusLabel.LATEST_GUIDANCE, false,
+            ),
+            row(
+                "speech not ready", card(safety = degraded(emptySet(), setOf(OutputFault.SPEECH_NOT_READY))),
+                StatusTitle.Clear, StatusDetail.CLEAR, StatusLabel.MONITORING, false,
+            ),
+            row(
+                "speech not ready, a person", card(safety = degraded(emptySet(), setOf(OutputFault.SPEECH_NOT_READY)), event = person),
+                StatusTitle.Event(person), StatusDetail.GUIDANCE, StatusLabel.LATEST_GUIDANCE, true,
+            ),
+            row(
+                "floor unrecognised, speech not ready", card(safety = degraded(ground, setOf(OutputFault.SPEECH_NOT_READY))),
+                floorTitle, StatusDetail.PATH_PAUSED, StatusLabel.PATH_PAUSED, false,
+            ),
+            row(
+                "speech unavailable", card(speechBroken = true, safety = degraded(emptySet(), setOf(OutputFault.SPEECH_UNAVAILABLE))),
+                StatusTitle.SpeechUnavailable, StatusDetail.SPEECH_UNAVAILABLE, StatusLabel.ERROR, true,
+            ),
+            row(
+                "floor unrecognised, speech unavailable", card(speechBroken = true, safety = degraded(ground, setOf(OutputFault.SPEECH_UNAVAILABLE))),
+                StatusTitle.SpeechUnavailable, StatusDetail.SPEECH_UNAVAILABLE, StatusLabel.ERROR, true,
+            ),
+            row(
+                "lens covered", card(safety = GuidanceSafetyState.StopRequired(StopReason.CAMERA_OBSTRUCTED), hold = PromptHoldView(HoldCause.CAMERA_OBSTRUCTED, stopping = true)),
+                StatusTitle.HeldFault(SceneEventMessageKeys.CAMERA_BLOCKED), StatusDetail.HOLD_STOPPING, StatusLabel.PAUSED, true,
+            ),
+            row(
+                "lens clear again, the stop held", card(safety = GuidanceSafetyState.StopRequired(StopReason.CAMERA_OBSTRUCTED), hold = PromptHoldView(HoldCause.CAMERA_OBSTRUCTED, stopping = false)),
+                StatusTitle.Confirming, StatusDetail.HOLD_RECOVERING, StatusLabel.PAUSED, true,
+            ),
+            row(
+                "too dark", card(safety = GuidanceSafetyState.StopRequired(StopReason.TOO_DARK), hold = PromptHoldView(HoldCause.TOO_DARK, stopping = true)),
+                StatusTitle.HeldFault(SceneEventMessageKeys.LOW_LIGHT), StatusDetail.HOLD_STOPPING, StatusLabel.PAUSED, true,
+            ),
+            row(
+                "no first result in time", card(safety = GuidanceSafetyState.StopRequired(StopReason.STARTUP_STALLED), hold = PromptHoldView(HoldCause.STARTUP_STALLED, stopping = true)),
+                StatusTitle.HeldStall, StatusDetail.HOLD_STOPPING, StatusLabel.PAUSED, true,
+            ),
+            row(
+                "results stopped coming", card(safety = GuidanceSafetyState.StopRequired(StopReason.PERCEPTION_STALLED), hold = PromptHoldView(HoldCause.PERCEPTION_STALLED, stopping = true)),
+                StatusTitle.HeldStall, StatusDetail.HOLD_STOPPING, StatusLabel.PAUSED, true,
+            ),
+            row(
+                "interrupted", card(interrupted = true, safety = GuidanceSafetyState.Interrupted(InterruptReason.LIFECYCLE), hold = PromptHoldView(HoldCause.LIFECYCLE, stopping = true)),
+                StatusTitle.Interrupted, StatusDetail.INTERRUPTED, StatusLabel.ERROR, true,
+            ),
+            row(
+                "failed", card(error = true, running = false, safety = GuidanceSafetyState.Failed(FailureReason.PIPELINE_FAILED)),
+                StatusTitle.Error, StatusDetail.ERROR, StatusLabel.ERROR, true,
+            ),
+            row(
+                "the screen running while the monitor judges nothing: no claim", card(safety = GuidanceSafetyState.Idle, event = person),
+                StatusTitle.Starting, StatusDetail.STARTING, StatusLabel.STARTING, false,
+            ),
         )
-        for ((cause, title) in expected) {
-            assertEquals(cause.name, StatusCardContent(title, StatusDetail.HOLD_STOPPING, StatusLabel.PAUSED, alert = true), card(hold = PromptHoldView(cause, stopping = true)))
-        }
+        for (row in rows) assertEquals(row.name, row.expected, row.actual)
     }
 
     @Test
-    fun `once the cause has gone the card says the view is being confirmed, back from the background too`() {
-        for (cause in HoldCause.entries) {
-            assertEquals(cause.name, StatusCardContent(StatusTitle.Confirming, StatusDetail.HOLD_RECOVERING, StatusLabel.PAUSED, alert = true), card(hold = PromptHoldView(cause, stopping = false)))
+    fun `the card says the way looks clear only while Guidance judges it in full`() {
+        val states = listOf(
+            GuidanceSafetyState.Idle, GuidanceSafetyState.Initializing, GuidanceSafetyState.Guiding,
+            GuidanceSafetyState.StopRequired(StopReason.CAMERA_OBSTRUCTED), GuidanceSafetyState.Interrupted(InterruptReason.LIFECYCLE),
+            GuidanceSafetyState.Failed(FailureReason.ERROR),
+        ) + listOf(emptySet(), ground).flatMap { perception ->
+            listOf(emptySet(), setOf(OutputFault.SPEECH_NOT_READY), setOf(OutputFault.SPEECH_UNAVAILABLE))
+                .filter { perception.isNotEmpty() || it.isNotEmpty() }
+                .map { GuidanceSafetyState.Degraded(perception, it) }
         }
+        val holds = listOf(null) + HoldCause.entries.flatMap { listOf(PromptHoldView(it, stopping = true), PromptHoldView(it, stopping = false)) }
+        val flags = listOf(false, true)
+        var checked = 0
+        for (safety in states) for (hold in holds) for (event in listOf(null, person, light, floorEvent)) {
+            for (error in flags) for (interrupted in flags) for (speechBroken in flags) for (loading in flags) for (running in flags) {
+                val content = card(error, interrupted, speechBroken, loading, running, safety, hold, event)
+                val judges = safety == GuidanceSafetyState.Guiding || safety is GuidanceSafetyState.Degraded
+                val judgesInFull = safety == GuidanceSafetyState.Guiding || (safety is GuidanceSafetyState.Degraded && safety.perception.isEmpty())
+                val case = "$safety $hold $event error=$error interrupted=$interrupted speech=$speechBroken loading=$loading running=$running: $content"
+                if (content.title == StatusTitle.Clear) assertTrue(case, judgesInFull)
+                if (content.title is StatusTitle.Event) assertTrue(case, judges)
+                if (safety is GuidanceSafetyState.Degraded && safety.perception.isNotEmpty() && content.title is StatusTitle.Event) {
+                    assertTrue("only an ordinary prompt goes above a paused judgement: $case", (content.title as StatusTitle.Event).event != floorEvent)
+                }
+                checked++
+            }
+        }
+        assertEquals(states.size * holds.size * 4 * 32, checked)
+    }
+
+    @Test
+    fun `a paused floor is named by the sentence its notice is spoken with, for as long as it holds`() {
+        assertEquals(VisionFaultAlerts.Fault.GROUND_UNRECOGNIZED.messageKey, floorTitle.messageKey)
+        val floor = GuidanceSafetyState.Degraded(ground, emptySet())
+        assertEquals("before its event", floorTitle, card(safety = floor).title)
+        assertEquals("while its event is current", floorTitle, card(safety = floor, event = floorEvent).title)
+        assertEquals("after its event expired", floorTitle, card(safety = floor, event = null).title)
+        assertEquals("the floor recognised again, its event still current: as before", StatusTitle.Event(floorEvent), card(event = floorEvent).title)
     }
 
     @Test
@@ -87,8 +208,42 @@ class StatusCardContentTest {
             card(error = true, event = person), card(interrupted = true, event = person), card(speechBroken = true, event = person),
             card(loading = true, event = person), card(running = false, event = person),
             card(hold = PromptHoldView(HoldCause.PERCEPTION_STALLED, stopping = true), event = person),
+            card(safety = GuidanceSafetyState.Initializing, event = person),
         )
         for (content in tiers) assertFalse(content.toString(), content.title is StatusTitle.Event)
         assertTrue(card(event = person).title is StatusTitle.Event)
+    }
+
+    @Test
+    fun `the screen's state gives the card its facts, speech counting as gone only when the session relies on it`() {
+        val floor = GuidanceSafetyState.Degraded(ground, setOf(OutputFault.SPEECH_UNAVAILABLE))
+        val relying = SceneAnalysisUiState(
+            isRunning = true, isSpeechEnabled = true, isScreenReaderActive = false, speechEngineState = SpeechEngineState.UNAVAILABLE,
+            safetyState = floor,
+        )
+        assertEquals(StatusTitle.SpeechUnavailable, relying.statusCardContent().title)
+        assertEquals("a screen reader speaks instead", floorTitle, relying.copy(isScreenReaderActive = true).statusCardContent().title)
+        assertEquals("speech is off", floorTitle, relying.copy(isSpeechEnabled = false).statusCardContent().title)
+        assertEquals("the engine is only starting", floorTitle, relying.copy(speechEngineState = SpeechEngineState.INITIALIZING).statusCardContent().title)
+        assertEquals("not running", StatusTitle.Idle, relying.copy(isRunning = false).statusCardContent().title)
+
+        val ui = SceneAnalysisUiState(isRunning = true, safetyState = GuidanceSafetyState.Guiding, speechEngineState = SpeechEngineState.READY)
+        assertEquals(StatusTitle.Clear, ui.statusCardContent().title)
+        assertEquals(StatusTitle.Starting, ui.copy(safetyState = GuidanceSafetyState.Initializing).statusCardContent().title)
+        assertEquals(StatusTitle.Starting, ui.copy(isRunning = false, isLoading = true).statusCardContent().title)
+        assertEquals(StatusTitle.Event(person), ui.copy(activeStatusEvent = person).statusCardContent().title)
+        assertEquals(StatusTitle.Confirming, ui.copy(promptHold = PromptHoldView(HoldCause.TOO_DARK, stopping = false)).statusCardContent().title)
+        assertEquals(StatusTitle.Interrupted, ui.copy(wasInterrupted = true).statusCardContent().title)
+        assertEquals(StatusTitle.Error, ui.copy(errorMessage = "failed").statusCardContent().title)
+    }
+
+    @Test
+    fun `the paused floor's own words are in both languages`() {
+        for (values in listOf("values", "values-zh")) {
+            val xml = File("src/main/res/$values/strings.xml").readText()
+            for (name in listOf("status_label_path_paused", "status_path_paused_detail", SceneEventMessageKeys.GROUND_UNRECOGNIZED)) {
+                assertTrue("$values: no string named $name", Regex("""<string name="${Regex.escape(name)}"[^>]*>[^<]+</string>""").containsMatchIn(xml))
+            }
+        }
     }
 }

@@ -280,9 +280,16 @@ internal class Director(
 
     // ---- the loop
 
+    /**
+     * Called once nothing is left to do after the session's start and after each event: the screen then shows what the
+     * event led to, and is what a user would see until the next one.
+     */
+    var settled: () -> Unit = {}
+
     /** Runs every event at or before [endMs], in order. */
     fun runUntil(endMs: Long) {
         settle("the session's start")
+        settled()
         while (true) {
             val event = events.peek() ?: break
             if (event.atMs > endMs) break
@@ -291,6 +298,7 @@ internal class Director(
             clock.advanceTo(event.atMs)
             event.action()
             settle("the event at ${event.atMs}")
+            settled()
         }
     }
 

@@ -18,6 +18,7 @@
     <string name="status_label_latest_guidance">Latest guidance</string>
     <string name="status_label_monitoring">Monitoring ahead</string>
     <string name="status_label_paused">Prompts paused</string>
+    <string name="status_label_path_paused">Path alerts paused</string>
     <string name="status_error_title">Analysis stopped</string>
     <string name="error_analysis_start_failed">Unable to start analysis. This device may not meet the requirements for real-time analysis.</string>
     <string name="status_starting_title">Starting guidance</string>
@@ -30,6 +31,7 @@
     <string name="status_hold_confirming_title">Checking the view</string>
     <string name="status_hold_stopping_detail">Prompts are paused. Stop for now.</string>
     <string name="status_hold_recovering_detail">Prompts resume once the view is steady.</string>
+    <string name="status_path_paused_detail">Obstacles are still announced.</string>
     <string name="status_speech_ready">Voice ready</string>
     <string name="status_speech_initializing">Voice starting</string>
     <string name="status_speech_off">Voice off</string>

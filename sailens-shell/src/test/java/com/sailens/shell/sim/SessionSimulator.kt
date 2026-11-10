@@ -23,6 +23,8 @@ import com.sailens.shell.guidance.safety.GuidanceSafetyObservation
 import com.sailens.shell.guidance.safety.GuidanceSystemAlerts
 import com.sailens.shell.guidance.screen.GuidanceOutputWiring
 import com.sailens.shell.guidance.screen.SceneAnalysisUiState
+import com.sailens.shell.guidance.screen.StatusCardContent
+import com.sailens.shell.guidance.screen.statusCardContent
 import com.sailens.shell.guidance.settings.GuidanceFeedbackSettings
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.cancel
@@ -47,6 +49,8 @@ internal class SessionRun(
     val ledger: Map<Int, String>,
     /** The status card after each result was handled. */
     val cards: List<CardSample> = emptyList(),
+    /** The status card's content each time the session settled, from its start. */
+    val screens: List<ScreenSample> = emptyList(),
 ) {
     /** Warnings that the screen's facts and the safety monitor disagreed, and observation faults: none is expected. */
     val observationFaults: List<LoggedLine>
@@ -141,8 +145,12 @@ internal object SessionSimulator {
             override fun accepted(event: SceneEvent): Boolean = acceptedPrompt(event).also { timeline.receipt("accepted", event, "-> $it") }
         }
 
+        var lastTraced: SafetyStateTrace? = null
         val record = object : SessionRecord {
-            override fun recordSafetyState(trace: SafetyStateTrace) = timeline.state(trace)
+            override fun recordSafetyState(trace: SafetyStateTrace) {
+                lastTraced = trace
+                timeline.state(trace)
+            }
             override fun recordGuidanceAlert(trace: GuidanceAlertTrace) = timeline.alert(trace)
             override fun recordPromptOutcome(trace: PromptOutcomeTrace) = timeline.outcome(trace)
             override fun ui(what: String, detail: String?) = timeline.ui(what, detail)
@@ -194,6 +202,8 @@ internal object SessionSimulator {
             seams = RealSeams,
         )
         screen = { mirror.uiState.value }
+        val screens = mutableListOf<ScreenSample>()
+        director.settled = { screens += ScreenSample(now(), mirror.uiState.value.statusCardContent(), lastTraced) }
 
         for (action in script.actions) {
             director.schedule(action.atMs, EventKind.SCRIPT) {
@@ -223,7 +233,7 @@ internal object SessionSimulator {
         val lines = TimelineWriter(origin).write(header(script), entries)
         return SessionRun(
             script, entries, lines, log.lines, director.log.toList(), delivered, mirror.uiState.value,
-            director.ledger.mapValues { it.value.toString() }, cards.toList(),
+            director.ledger.mapValues { it.value.toString() }, cards.toList(), screens.toList(),
         )
     }
 
@@ -325,6 +335,12 @@ internal object SessionSimulator {
 
 /** The status card after a result: the event it shows ([eventId], null for none) and whether prompts were held. */
 internal data class CardSample(val seq: Long, val eventId: String?, val held: Boolean)
+
+/**
+ * What the status card says once the session settled at [atMs] ([Director.settled]), with the safety state the trace
+ * last recorded then: the trace's own record, not the screen's copy of the state. Null before the first record.
+ */
+internal data class ScreenSample(val atMs: Long, val card: StatusCardContent, val traced: SafetyStateTrace?)
 
 /** A model's initialisation failing, as a script made it. */
 internal class ScriptedInitFailure(message: String) : RuntimeException(message)
