@@ -162,8 +162,9 @@ automated tests of the code that gives it.
 - **The status card** on the screen shows the stop while it holds (the alert's own sentence), then "Checking the view"
   until prompts return. While the ground is not recognised it shows "Can't see the ground, can't tell if the way ahead
   is clear" for as long as that lasts, unless a prompt about the scene, such as an obstacle, is current. From pressing
-  start until the first picture has been judged it shows "Starting guidance". It does not say "Path looks clear" in
-  any of these.
+  start until the first picture has been judged it shows "Starting guidance". Only when Guidance judges the way in
+  full and has no prompt does it say "No obvious risk detected yet", which, like having no prompt, does not mean the
+  way is clear.
 - **A recovery sentence may not be heard.** It is a low-priority try: if no speech takes it within 5 s it is dropped,
   and once taken a more urgent prompt can cut it off. With speech off there is no recovery sentence and no recovery
   vibration.
