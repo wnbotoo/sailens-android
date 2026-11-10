@@ -11,6 +11,7 @@ import com.sailens.guidance.model.trace.GuidanceAlertSources
 import com.sailens.guidance.model.trace.PromptDeliveryChannels
 import com.sailens.guidance.model.trace.PromptRevokeReasons
 import com.sailens.shell.device.GuidanceHaptic
+import com.sailens.shell.guidance.screen.StatusTitle
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -40,6 +41,12 @@ class SessionTimelineTest {
         assertEquals("the first result guides", "1050 guiding result", states.first { it.cause == "result" }.describe())
         assertEquals("the stop", "11000 idle stopped", states.last().describe())
         assertTrue("nothing is alerted", run.entries.none { it is TimelineEntry.Alert })
+        assertEquals(
+            "the card: off, starting until the first result, then the clear way, then off",
+            listOf(StatusTitle.Idle, StatusTitle.Starting, StatusTitle.Clear, StatusTitle.Idle),
+            run.screens.map { it.card.title }.collapseRuns(),
+        )
+        assertEquals("the clear way from the first result on", 1_050L, run.screens.first { it.card.title == StatusTitle.Clear }.atMs)
     }
 
     @Test
@@ -245,6 +252,14 @@ class SessionTimelineTest {
         assertEquals("1 s back on the sidewalk the floor is recognised", "$back guiding result", run.states().first { it.at > confirmed && it.label == "guiding" }.describe())
         assertEquals("and said so", listOf("fault_recovery ${SceneEventMessageKeys.GROUND_RECOGNIZED} accepted"), run.visionAlerts().filter { it.at == back }.map { "${it.kind} ${it.key} ${it.result}" })
         assertTrue("no system alert", run.systemAlerts().isEmpty())
+        val cards = run.screens.filter { it.atMs in confirmed until back }.map { it.card.title }
+        assertEquals("the card names the floor from the moment it is confirmed", FLOOR_CARD, cards.first())
+        assertEquals(
+            "and keeps naming it, a person's prompt aside, until the floor is recognised",
+            listOf(FLOOR_CARD.toString(), "event_obstacle_center_person", FLOOR_CARD.toString(), "event_obstacle_left_person", FLOOR_CARD.toString()),
+            cards.map { (it as? StatusTitle.Event)?.event?.messageKey ?: it.toString() }.collapseRuns(),
+        )
+        assertTrue("the clear way only once it is", run.screens.filter { it.atMs >= back }.any { it.card.title == StatusTitle.Clear })
     }
 
     @Test
@@ -270,6 +285,11 @@ class SessionTimelineTest {
         )
         val back = script.frameAtMs(SessionScenarios.GROUND_THEN_COVERED.last + 1) + 1_000
         assertEquals("back on the sidewalk, the floor is said recognised", listOf("fault_recovery ${SceneEventMessageKeys.GROUND_RECOGNIZED} accepted"), run.visionAlerts().filter { it.at == back }.map { "${it.kind} ${it.key} ${it.result}" })
+        assertEquals(
+            "the card: the floor, the cover, the view confirmed, the floor again once the stop is released, then the clear way",
+            listOf(FLOOR_CARD, StatusTitle.HeldFault(SceneEventMessageKeys.CAMERA_BLOCKED), StatusTitle.Confirming, FLOOR_CARD, StatusTitle.Clear),
+            run.screens.filter { it.atMs >= SessionScenarios.FLOOR_CONFIRMED_MS && it.atMs <= back }.map { it.card.title }.collapseRuns(),
+        )
     }
 
     @Test
@@ -798,12 +818,19 @@ class SessionTimelineTest {
 
     // ---- helpers
 
+    /** The card while the floor is unrecognised and no ordinary prompt is current. */
+    private val FLOOR_CARD = StatusTitle.Paused(SceneEventMessageKeys.GROUND_UNRECOGNIZED)
+
+    /** Each run of equal neighbours as one. */
+    private fun <T> List<T>.collapseRuns(): List<T> = filterIndexed { i, item -> i == 0 || this[i - 1] != item }
+
     private fun check(script: SessionScript): SessionRun {
         val run = SessionSimulator.run(script)
         Timelines.check(script.name, run.lines)
         assertEquals("no disagreement and no observation fault", emptyList<LoggedLine>(), run.observationFaults)
         assertEquals("the cross-check", emptyList<String>(), TimelineCrossCheck.check(run.entries))
         assertEquals("the card across holds", emptyList<String>(), TimelineCrossCheck.cardsAcrossHolds(run.entries, run.cards))
+        assertEquals("what the card claims", emptyList<String>(), TimelineCrossCheck.cardClaims(run.screens))
         return run
     }
 

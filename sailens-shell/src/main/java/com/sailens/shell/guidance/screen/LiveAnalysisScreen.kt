@@ -434,22 +434,8 @@ private fun PrimaryStatusView(
     val textResolver = remember(context) { SceneEventTextResolver(context) }
     // 实时卡片与重播历史必须分开：冷却后的空帧不能让卡片闪退，但已经过期的旧风险也不能
     // 因为还能重播就在屏幕上无限停留。
-    // 语音是主要输出通道，它挂了等于用户什么都收不到，所以优先级仅次于分析本身失败。
-    // 屏幕阅读器接管时自带引擎本就不启动，不算故障。
-    val isSpeechBroken = state.isRunning &&
-        state.isSpeechEnabled &&
-        !state.isScreenReaderActive &&
-        state.speechEngineState == SpeechEngineState.UNAVAILABLE
     // Which sentence each line takes is decided by a pure function; here the words are only looked up.
-    val content = statusCardContent(
-        errorShown = state.errorMessage != null,
-        interrupted = state.wasInterrupted,
-        speechBroken = isSpeechBroken,
-        loading = state.isLoading,
-        running = state.isRunning,
-        hold = state.promptHold,
-        event = state.activeStatusEvent,
-    )
+    val content = state.statusCardContent()
 
     val title = when (val headline = content.title) {
         StatusTitle.Error -> stringResource(R.string.status_error_title)
@@ -461,6 +447,8 @@ private fun PrimaryStatusView(
         is StatusTitle.HeldFault -> textResolver.resolve(SceneEventText(messageKey = headline.messageKey))
         StatusTitle.HeldStall -> stringResource(R.string.notice_guidance_stalled)
         StatusTitle.Confirming -> stringResource(R.string.status_hold_confirming_title)
+        // The sentence its notice is spoken with, word for word: the same renderer as speech.
+        is StatusTitle.Paused -> textResolver.resolve(SceneEventText(messageKey = headline.messageKey))
         is StatusTitle.Event -> textResolver.resolve(headline.event.toSceneEventText())
         StatusTitle.Clear -> stringResource(R.string.status_clear_title)
     }
@@ -473,6 +461,7 @@ private fun PrimaryStatusView(
             StatusDetail.IDLE -> R.string.status_idle_detail
             StatusDetail.HOLD_STOPPING -> R.string.status_hold_stopping_detail
             StatusDetail.HOLD_RECOVERING -> R.string.status_hold_recovering_detail
+            StatusDetail.PATH_PAUSED -> R.string.status_path_paused_detail
             StatusDetail.GUIDANCE -> R.string.status_guidance_detail
             StatusDetail.CLEAR -> R.string.status_clear_detail
         }
@@ -483,6 +472,7 @@ private fun PrimaryStatusView(
             StatusLabel.STARTING -> R.string.status_label_starting
             StatusLabel.STANDBY -> R.string.status_label_standby
             StatusLabel.PAUSED -> R.string.status_label_paused
+            StatusLabel.PATH_PAUSED -> R.string.status_label_path_paused
             StatusLabel.LATEST_GUIDANCE -> R.string.status_label_latest_guidance
             StatusLabel.MONITORING -> R.string.status_label_monitoring
         }

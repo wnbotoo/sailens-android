@@ -14,6 +14,10 @@ import com.sailens.guidance.model.trace.SafetyTraceNames
 import com.sailens.guidance.safety.BaselineQualification
 import com.sailens.guidance.safety.UnqualifiedReason
 import com.sailens.shell.device.GuidanceHaptic
+import com.sailens.shell.guidance.screen.StatusCardContent
+import com.sailens.shell.guidance.screen.StatusDetail
+import com.sailens.shell.guidance.screen.StatusLabel
+import com.sailens.shell.guidance.screen.StatusTitle
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -180,6 +184,49 @@ class TimelineCrossCheckTest {
         assertEquals(
             listOf("frame 6: the card shows an event from before the release at frame 6"),
             TimelineCrossCheck.cardsAcrossHolds(entries, listOf(CardSample(2, null, held = true), CardSample(6, before, held = false))),
+        )
+    }
+
+    @Test
+    fun `the card claims a clear way only while Guidance judges in full, and names a paused judgement`() {
+        fun traced(state: String, reasons: List<String> = emptyList(), outputFaults: List<String> = emptyList()) = SafetyStateTrace(
+            at = 0, elapsedMs = 0, stateSinceElapsedMs = 0, state = state, reasons = reasons, phase = "running", interrupted = false,
+            stall = "none", outputFaults = outputFaults, expectedNavigationChannel = "speech", cause = "result",
+        )
+        fun screen(title: StatusTitle, state: SafetyStateTrace?) = ScreenSample(7, StatusCardContent(title, StatusDetail.CLEAR, StatusLabel.MONITORING, alert = false), state)
+        val floor = StatusTitle.Paused(SceneEventMessageKeys.GROUND_UNRECOGNIZED)
+        val floorEvent = event.copy(category = EventCategory.GROUND_UNRECOGNIZED, priority = EventPriority.LOW, messageKey = SceneEventMessageKeys.GROUND_UNRECOGNIZED)
+        val guiding = traced("guiding")
+        val degradedFloor = traced("degraded", listOf("ground_unrecognized"))
+        val speechNotReady = traced("degraded", listOf("speech_not_ready"), outputFaults = listOf("speech_not_ready"))
+        val floorAndSpeech = traced("degraded", listOf("ground_unrecognized", "speech_unavailable"), outputFaults = listOf("speech_unavailable"))
+        val initializing = traced("initializing")
+        val allowed = listOf(
+            screen(StatusTitle.Clear, guiding), screen(StatusTitle.Clear, speechNotReady), screen(StatusTitle.Event(event), guiding),
+            screen(floor, degradedFloor), screen(StatusTitle.Event(event), degradedFloor), screen(StatusTitle.SpeechUnavailable, floorAndSpeech),
+            screen(floor, floorAndSpeech), screen(StatusTitle.Starting, initializing), screen(StatusTitle.Idle, null),
+        )
+        assertEquals(emptyList<String>(), TimelineCrossCheck.cardClaims(allowed))
+        assertEquals(
+            listOf(
+                "7: the card says the way looks clear while degraded(ground_unrecognized)",
+                "7: degraded(ground_unrecognized), the card shows Clear",
+                "7: the card says the way looks clear while initializing",
+                "7: the card says the way looks clear while no state recorded",
+                "7: the card names event_obstacle_center_person while initializing",
+                "7: degraded(ground_unrecognized), the card shows ${StatusTitle.Event(floorEvent)}",
+                "7: the card names ${SceneEventMessageKeys.GROUND_UNRECOGNIZED} while guiding",
+                "7: wet_floor paused, a judgement this check does not know",
+                "7: degraded(wet_floor), the card shows Clear",
+                "7: the card says the way looks clear while degraded(wet_floor)",
+            ).sorted(),
+            TimelineCrossCheck.cardClaims(
+                listOf(
+                    screen(StatusTitle.Clear, degradedFloor), screen(StatusTitle.Clear, initializing), screen(StatusTitle.Clear, null),
+                    screen(StatusTitle.Event(event), initializing), screen(StatusTitle.Event(floorEvent), degradedFloor), screen(floor, guiding),
+                    screen(StatusTitle.Clear, traced("degraded", listOf("wet_floor"))),
+                ),
+            ).sorted(),
         )
     }
 

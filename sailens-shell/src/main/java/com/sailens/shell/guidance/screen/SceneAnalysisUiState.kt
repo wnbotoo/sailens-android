@@ -65,7 +65,9 @@ data class SceneAnalysisUiState(
     /**
      * Where Guidance stands for the user, as the safety monitor derives it. The debug panel shows it and it is not
      * announced; the monitor it comes from decides when the alerts about Guidance itself are due
-     * ([com.sailens.shell.guidance.safety.GuidanceSystemAlerts]). Nothing reads this field to decide.
+     * ([com.sailens.shell.guidance.safety.GuidanceSystemAlerts]). Nothing reads this field to decide what is delivered:
+     * the status card reads from it only whether a result has come yet and which judgements are paused
+     * ([statusCardContent]), so that it never says the way looks clear without a judgement.
      */
     val safetyState: GuidanceSafetyState = GuidanceSafetyState.Idle,
     /**

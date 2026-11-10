@@ -1,6 +1,7 @@
 package com.sailens.shell.sim
 
 import com.sailens.guidance.delivery.isOrdinaryPrompt
+import com.sailens.guidance.model.scene.SceneEventMessageKeys
 import com.sailens.guidance.model.trace.GuidanceAlertChannels
 import com.sailens.guidance.model.trace.PromptRevokeReasons
 import com.sailens.guidance.model.trace.GuidanceAlertSources
@@ -8,6 +9,7 @@ import com.sailens.guidance.model.trace.SafetyTraceNames
 import com.sailens.guidance.safety.BaselineQualification
 import com.sailens.guidance.safety.traceLevel
 import com.sailens.guidance.safety.traceReasons
+import com.sailens.shell.guidance.screen.StatusTitle
 
 /**
  * Checks a session's entries against each other, from records the safety monitor does not keep itself:
@@ -153,6 +155,37 @@ internal object TimelineCrossCheck {
         }
         return problems
     }
+
+    /**
+     * What the status card claims, each time the session settled ([screens]), against the safety state the trace last
+     * recorded: it says the way looks clear only while that state is guiding, or degraded by the output alone; it names
+     * an event only while Guidance judges; and while a judgement is paused it names that judgement, unless an ordinary
+     * prompt or speech gone has the card. Before the first record it claims nothing.
+     */
+    fun cardClaims(screens: List<ScreenSample>): List<String> {
+        val problems = mutableListOf<String>()
+        for (screen in screens) {
+            val title = screen.card.title
+            val traced = screen.traced
+            val label = traced?.stateLabel ?: "no state recorded"
+            val judges = traced?.state == SafetyTraceNames.States.GUIDING || traced?.state == SafetyTraceNames.States.DEGRADED
+            val paused = if (traced?.state == SafetyTraceNames.States.DEGRADED) traced.reasons - traced.outputFaults.toSet() else emptyList()
+            if (title == StatusTitle.Clear && !(judges && paused.isEmpty())) problems += "${screen.atMs}: the card says the way looks clear while $label"
+            if (title is StatusTitle.Event && !judges) problems += "${screen.atMs}: the card names ${title.event.messageKey} while $label"
+            paused.filter { it !in PAUSED_SENTENCES }.forEach { problems += "${screen.atMs}: $it paused, a judgement this check does not know" }
+            if (title is StatusTitle.Paused && title.messageKey !in paused.mapNotNull(PAUSED_SENTENCES::get)) {
+                problems += "${screen.atMs}: the card names ${title.messageKey} while $label"
+            }
+            val namesOrdinaryPrompt = title is StatusTitle.Event && title.event.isOrdinaryPrompt
+            if (paused.isNotEmpty() && title !is StatusTitle.Paused && !namesOrdinaryPrompt && title != StatusTitle.SpeechUnavailable) {
+                problems += "${screen.atMs}: $label, the card shows $title"
+            }
+        }
+        return problems
+    }
+
+    /** Each paused judgement as the trace names it, and the sentence its notice is spoken with. */
+    private val PAUSED_SENTENCES = mapOf("ground_unrecognized" to SceneEventMessageKeys.GROUND_UNRECOGNIZED)
 
     private val com.sailens.shell.device.GuidanceHaptic.isNavigation: Boolean
         get() = this != com.sailens.shell.device.GuidanceHaptic.VISION_UNRELIABLE &&
