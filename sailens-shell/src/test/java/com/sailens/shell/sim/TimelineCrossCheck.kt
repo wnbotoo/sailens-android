@@ -160,7 +160,7 @@ internal object TimelineCrossCheck {
 
     /**
      * What the status card claims, each time the session settled ([screens]), against the safety state the trace last
-     * recorded: it says the way looks clear only while that state is guiding, or degraded by the output alone; it names
+     * recorded: it says there is no new guidance only while that state is guiding, or degraded by the output alone; it names
      * an event only while Guidance judges; and while a judgement is paused it names that judgement, unless an ordinary
      * prompt the pause does not keep back, or speech gone, has the card. Before the first record it claims nothing.
      */
@@ -172,7 +172,7 @@ internal object TimelineCrossCheck {
             val label = traced?.stateLabel ?: "no state recorded"
             val judges = traced?.state == SafetyTraceNames.States.GUIDING || traced?.state == SafetyTraceNames.States.DEGRADED
             val paused = if (traced?.state == SafetyTraceNames.States.DEGRADED) traced.reasons - traced.outputFaults.toSet() else emptyList()
-            if (title == StatusTitle.Clear && !(judges && paused.isEmpty())) problems += "${screen.atMs}: the card says the way looks clear while $label"
+            if (title == StatusTitle.Clear && !(judges && paused.isEmpty())) problems += "${screen.atMs}: the card says there is no new guidance while $label"
             if (title is StatusTitle.Event && !judges) problems += "${screen.atMs}: the card names ${title.event.messageKey} while $label"
             paused.filter { it !in PAUSED_SENTENCES }.forEach { problems += "${screen.atMs}: $it paused, a judgement this check does not know" }
             if (title is StatusTitle.Paused && title.messageKey !in paused.mapNotNull(PAUSED_SENTENCES::get)) {

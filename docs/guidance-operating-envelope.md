@@ -163,8 +163,9 @@ automated tests of the code that gives it.
   until prompts return. While the ground is not recognised it shows "Can't see the ground, can't tell if the way ahead
   is clear" for as long as that lasts, unless a prompt about the scene, such as an obstacle, is current; a path prompt
   such as "Path blocked" given just before is taken off the card. From pressing start until the first picture has been
-  judged it shows "Starting guidance". Only when Guidance judges the way in full and has no prompt does it say "No
-  obvious risk detected yet", which, like having no prompt, does not mean the way is clear.
+  judged it shows "Starting guidance". Only when Guidance judges the way in full and no prompt is current does it say
+  "No new guidance right now", with "No prompt does not mean the way is clear." beneath. A prompt stays on the card
+  for a few seconds, so this shows too while an obstacle already announced is still ahead, not yet prompted again.
 - **A recovery sentence may not be heard.** It is a low-priority try: if no speech takes it within 5 s it is dropped,
   and once taken a more urgent prompt can cut it off. With speech off there is no recovery sentence and no recovery
   vibration.

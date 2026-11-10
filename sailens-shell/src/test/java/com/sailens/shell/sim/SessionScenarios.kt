@@ -334,6 +334,16 @@ internal object SessionScenarios {
         endAtMs = 36_000,
     )
 
+    val personStaysAhead = SessionScript(
+        name = "person_stays_ahead",
+        description = "Standing on a sidewalk with a person 1.5 m ahead the whole time, then stopping. The person is " +
+            "prompted, its event expires 3 s later, and the stationary cooldown keeps it from being prompted again for " +
+            "8 s: meanwhile the person is tracked on every frame and the status card says there is no new guidance.",
+        scenario = scenario("person_stays_ahead", List(indexAt(12_000)) { standing(personAhead) }),
+        actions = SessionScript.defaultActions(ScriptAction.Stop(12_000)),
+        endAtMs = 13_000,
+    )
+
     val speechOffLensCovered = lensCoveredShort.copy(
         name = "speech_off_lens_covered",
         description = "lens_covered_short with speech off. The rhythm is the notice, every cycle, and fault vibration " +
@@ -913,6 +923,7 @@ internal object SessionScenarios {
         groundUnrecognizedLong,
         groundUnrecognizedThenCovered,
         groundUnrecognizedTwice,
+        personStaysAhead,
         speechOffLensCovered,
         screenReaderLensCovered,
         descriptionHoldsFloor,

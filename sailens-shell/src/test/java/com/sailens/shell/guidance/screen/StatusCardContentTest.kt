@@ -149,7 +149,7 @@ class StatusCardContentTest {
     }
 
     @Test
-    fun `the card says the way looks clear only while Guidance judges it in full`() {
+    fun `the card says there is no new guidance only while Guidance judges it in full`() {
         val states = listOf(
             GuidanceSafetyState.Idle, GuidanceSafetyState.Initializing, GuidanceSafetyState.Guiding,
             GuidanceSafetyState.StopRequired(StopReason.CAMERA_OBSTRUCTED), GuidanceSafetyState.Interrupted(InterruptReason.LIFECYCLE),
@@ -192,7 +192,7 @@ class StatusCardContentTest {
     }
 
     @Test
-    fun `a hold sits above the event and the clear way, below an error, an interruption and speech gone`() {
+    fun `a hold sits above the event and no new guidance, below an error, an interruption and speech gone`() {
         val held = PromptHoldView(HoldCause.CAMERA_OBSTRUCTED, stopping = false)
         assertEquals("above an event the screen would not keep anyway", StatusTitle.Confirming, card(hold = held, event = person).title)
         assertEquals(StatusTitle.Error, card(error = true, hold = held).title)
@@ -251,6 +251,28 @@ class StatusCardContentTest {
             val xml = File("src/main/res/$values/strings.xml").readText()
             for (name in listOf("status_label_path_paused", "status_path_paused_detail", SceneEventMessageKeys.GROUND_UNRECOGNIZED)) {
                 assertTrue("$values: no string named $name", Regex("""<string name="${Regex.escape(name)}"[^>]*>[^<]+</string>""").containsMatchIn(xml))
+            }
+        }
+    }
+
+    /**
+     * [StatusTitle.Clear] shows while an obstacle prompted a few seconds ago is still ahead, its event expired and its
+     * next prompt not yet due (`ground_unrecognized_long`'s people, `person_stays_ahead`). So its words speak of prompts:
+     * none says that no risk was found or that the way is clear, and the detail says that no prompt is not a clear way.
+     */
+    @Test
+    fun `no new guidance is said as such, never as no risk or a clear way`() {
+        val expected = mapOf(
+            "values" to ("No new guidance right now" to "No prompt does not mean the way is clear."),
+            "values-zh" to ("当前没有新提示" to "没有提示不等于前方能走。"),
+        )
+        for ((values, words) in expected) {
+            val xml = File("src/main/res/$values/strings.xml").readText()
+            fun text(name: String) = Regex("""<string name="$name"[^>]*>([^<]+)</string>""").find(xml)?.groupValues?.get(1)
+            assertEquals("$values title", words.first, text("status_clear_title"))
+            assertEquals("$values detail", words.second, text("status_clear_detail"))
+            for (claim in listOf("risk", "clear", "safe", "风险", "安全", "通行")) {
+                assertFalse("$values: the title claims '$claim'", text("status_clear_title")!!.contains(claim, ignoreCase = true))
             }
         }
     }

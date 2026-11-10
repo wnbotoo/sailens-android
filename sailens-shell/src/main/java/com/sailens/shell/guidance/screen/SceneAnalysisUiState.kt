@@ -50,7 +50,7 @@ data class SceneAnalysisUiState(
     val lastEvents: List<SceneEvent> = emptyList(),
     /**
      * 当前仍有效的状态提示。新事件到来时替换；没有新事件时保留到 [SceneEvent.expiresAt]，
-     * 避免冷却造成的空帧让卡片瞬间闪回"无风险"。
+     * 避免冷却造成的空帧让卡片瞬间闪回"当前没有新提示"。
      *
      * 这个字段只描述当前场景，不能用于重播；过期后必须清空。
      */
@@ -68,7 +68,7 @@ data class SceneAnalysisUiState(
      * announced; the monitor it comes from decides when the alerts about Guidance itself are due
      * ([com.sailens.shell.guidance.safety.GuidanceSystemAlerts]). Nothing reads this field to decide what is delivered:
      * the status card reads from it only whether a result has come yet and which judgements are paused
-     * ([statusCardContent]), so that it never says the way looks clear without a judgement.
+     * ([statusCardContent]), so that it never says there is no new guidance without a judgement.
      */
     val safetyState: GuidanceSafetyState = GuidanceSafetyState.Idle,
     /**

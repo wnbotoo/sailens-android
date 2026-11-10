@@ -23,11 +23,11 @@
     <string name="error_analysis_start_failed">无法启动实时分析。此设备可能不满足实时分析的运行要求。</string>
     <string name="status_starting_title">正在启动辅助</string>
     <string name="status_idle_title">辅助未开启</string>
-    <string name="status_clear_title">前方暂未发现明显风险</string>
+    <string name="status_clear_title">当前没有新提示</string>
     <string name="status_starting_detail">正在准备辅助。</string>
     <string name="status_idle_detail">准备好后即可开启。</string>
     <string name="status_guidance_detail">当前提示已生效。</string>
-    <string name="status_clear_detail">当前没有紧急提示。</string>
+    <string name="status_clear_detail">没有提示不等于前方能走。</string>
     <string name="status_hold_confirming_title">正在确认画面</string>
     <string name="status_hold_stopping_detail">提示已暂停，请先停下。</string>
     <string name="status_hold_recovering_detail">画面稳定后恢复提示。</string>

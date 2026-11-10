@@ -12,7 +12,10 @@ import com.sailens.shell.guidance.safety.GuidanceSafetyState
 import com.sailens.shell.guidance.safety.HoldCause
 import com.sailens.shell.guidance.safety.PromptHoldView
 
-/** The status card's headline: a fixed sentence, a held stop's own sentence, a paused judgement's, or the current event's. */
+/**
+ * The status card's headline: a fixed sentence, a held stop's own sentence, a paused judgement's, or the current event's.
+ * [Clear] is "no new guidance right now", never a claim that nothing is ahead.
+ */
 internal sealed interface StatusTitle {
     data object Error : StatusTitle
     data object Interrupted : StatusTitle
@@ -45,9 +48,10 @@ internal data class StatusCardContent(val title: StatusTitle, val detail: Status
 
 /**
  * The status card, by priority: an error, an interruption, speech gone, starting, not running, a hold, no result yet,
- * an ordinary prompt, a paused judgement, any other event, and otherwise a clear way. The card says the way looks clear
- * only when Guidance judges it in full: never before the first result of a start, nor while part of the judgement is
- * paused.
+ * an ordinary prompt, a paused judgement, any other event, and otherwise no new guidance ([StatusTitle.Clear]). The
+ * card says there is no new guidance only when Guidance judges the way in full: never before the first result of a
+ * start, nor while part of the judgement is paused. Even then it speaks of prompts, not of the way: a prompt stays
+ * current for a few seconds while its obstacle may stay ahead for longer, unprompted under the cooldown.
  *
  * While prompts are held the card shows the stop or that the view is being confirmed, never an event: the screen keeps
  * none then. When speech gone takes the title during a hold, the detail is still the hold's, so the card says that
