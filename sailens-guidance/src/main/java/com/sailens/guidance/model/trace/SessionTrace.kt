@@ -270,7 +270,14 @@ object PromptRevokeReasons {
     /** Vibration was its only channel, it waited for the motor, and it never played. */
     const val HAPTIC_DROPPED = "haptic_dropped"
 
-    val all: Set<String> = setOf(WAITING_FOR_DESCRIPTION, OUTPUT_REFUSED, CUT, HAPTIC_DROPPED)
+    /**
+     * Guidance had to stop (a covered lens, darkness, a stall, the background) and has not yet had the fresh results
+     * that show it can judge the way again: an ordinary prompt is not offered, or one whose rhythm waited for the motor
+     * is withdrawn, and it is offered again on a later frame while it still holds.
+     */
+    const val SAFETY_HOLD = "safety_hold"
+
+    val all: Set<String> = setOf(WAITING_FOR_DESCRIPTION, OUTPUT_REFUSED, CUT, HAPTIC_DROPPED, SAFETY_HOLD)
 }
 
 /** The closed set of [PromptOutcomeTrace.deliveredVia] values. */

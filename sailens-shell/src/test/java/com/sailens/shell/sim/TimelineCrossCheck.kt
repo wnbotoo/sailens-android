@@ -1,6 +1,8 @@
 package com.sailens.shell.sim
 
+import com.sailens.guidance.delivery.isOrdinaryPrompt
 import com.sailens.guidance.model.trace.GuidanceAlertChannels
+import com.sailens.guidance.model.trace.PromptRevokeReasons
 import com.sailens.guidance.model.trace.GuidanceAlertSources
 import com.sailens.guidance.model.trace.SafetyTraceNames
 import com.sailens.guidance.safety.BaselineQualification
@@ -21,7 +23,11 @@ import com.sailens.guidance.safety.traceReasons
  * - a stop or an interruption always holds ordinary prompts, and a hold shows only a stop, an interruption or
  *   initializing;
  * - every hold released was released by a fresh result: the frames counted since its stop began were received after it,
- *   there were at least three of them, their receipts span at least 500 ms, and the release names the last of them.
+ *   there were at least three of them, their receipts span at least 500 ms, and the release names the last of them;
+ * - while a hold stands no ordinary prompt reaches the user ([ordinaryDeliveriesDuringHolds]): what a channel took
+ *   before the hold began is not a delivery during it;
+ * - the frame that releases a hold offers its own prompt, which is not held;
+ * - no prompt decided while a hold stands is confirmed to the cooldown while it stands.
  *
  * A stop for the camera that is still held while its cause has gone is checked against the frame that began it.
  *
@@ -37,24 +43,37 @@ internal object TimelineCrossCheck {
         sources(entries, problems)
         holdsCoverStops(entries, problems)
         releases(entries, problems)
+        problems += ordinaryDeliveriesDuringHolds(entries)
+        releasesOffered(entries, problems)
+        confirmsDuringHolds(entries, problems)
         return problems
     }
 
     /**
-     * The ordinary prompts that reached the user while prompts were held: delivered outcomes of events the vision-fault
-     * alerts do not tell, and navigation rhythms that started. One line each.
+     * The ordinary prompts that reached the user while a hold stood: a delivered outcome, own speech accepting one, the
+     * screen reader handed one, or the motor asked for or starting a navigation rhythm. An ordinary prompt is a frame's
+     * event the vision-fault alerts do not tell ([com.sailens.guidance.delivery.isOrdinaryPrompt]). One line each.
      */
-    fun heldDeliveries(entries: List<TimelineEntry>): List<String> {
+    fun ordinaryDeliveriesDuringHolds(entries: List<TimelineEntry>): List<String> {
+        val ordinary = HashMap<String, String>()
         val found = mutableListOf<String>()
         var held = false
         for (entry in entries) {
             when (entry) {
+                is TimelineEntry.Script -> if (entry.action == "start") held = false
+                is TimelineEntry.Frame -> entry.events.filter { it.isOrdinaryPrompt }.forEach { ordinary[it.id.toString()] = it.messageKey }
                 is TimelineEntry.State -> held = entry.trace.hold != null
-                is TimelineEntry.Outcome -> if (held && entry.trace.deliveredAt != null && entry.trace.category !in VISION_CATEGORIES) {
-                    found += "${entry.atMs}: outcome ${entry.trace.messageKey} delivered=${entry.trace.deliveredVia.joinToString(",")}"
+                is TimelineEntry.Outcome -> if (held && entry.trace.deliveredAt != null && entry.trace.eventId in ordinary) {
+                    found += "${entry.atMs}: held, outcome ${entry.trace.messageKey} delivered=${entry.trace.deliveredVia.joinToString(",")}"
                 }
-                is TimelineEntry.Motor -> if (held && entry.kind == "start" && entry.rhythm?.isNavigation == true) {
-                    found += "${entry.atMs}: motor start ${entry.rhythm.name.lowercase()}"
+                is TimelineEntry.Speech -> if (held && entry.kind == "speak" && entry.result == "accepted" && entry.id in ordinary) {
+                    found += "${entry.atMs}: held, speech accepted ${ordinary[entry.id]}"
+                }
+                is TimelineEntry.ScreenReader -> if (held && entry.text.substringBefore('{') in ordinary.values) {
+                    found += "${entry.atMs}: held, screen reader ${entry.text}"
+                }
+                is TimelineEntry.Motor -> if (held && entry.rhythm?.isNavigation == true && entry.kind in NAVIGATION_STARTS) {
+                    found += "${entry.atMs}: held, motor ${entry.kind} ${entry.rhythm.name.lowercase()}"
                 }
                 else -> Unit
             }
@@ -62,7 +81,78 @@ internal object TimelineCrossCheck {
         return found
     }
 
-    private val VISION_CATEGORIES = setOf("sensor_quality", "ground_unrecognized")
+    /** The motor lines that ask for or start a navigation rhythm; `drop` and `drop_queued` withdraw one. */
+    private val NAVIGATION_STARTS = setOf("trigger", "queue", "start")
+
+    /** The frame whose result released a hold offers its primary prompt as ever: its outcome is not a hold's. */
+    private fun releasesOffered(entries: List<TimelineEntry>, problems: MutableList<String>) {
+        var lastFrame: TimelineEntry.Frame? = null
+        var awaited: String? = null
+        for (entry in entries) {
+            when (entry) {
+                is TimelineEntry.Frame -> {
+                    awaited?.let { problems += "${entry.atMs}: the frame that released the hold never offered its prompt" }
+                    awaited = null
+                    lastFrame = entry
+                }
+                is TimelineEntry.State -> if (entry.trace.holdReleased != null) {
+                    val primary = lastFrame?.events?.firstOrNull()
+                    if (primary != null && primary.isOrdinaryPrompt) awaited = primary.id.toString()
+                }
+                is TimelineEntry.Outcome -> if (entry.trace.eventId == awaited) {
+                    if (entry.trace.revokeReason == PromptRevokeReasons.SAFETY_HOLD) {
+                        problems += "${entry.atMs}: the frame that released the hold held its own prompt ${entry.trace.messageKey}"
+                    }
+                    awaited = null
+                }
+                else -> Unit
+            }
+        }
+    }
+
+    /** A prompt decided while a hold stands is not offered, so nothing confirms it to the cooldown while the hold stands. */
+    private fun confirmsDuringHolds(entries: List<TimelineEntry>, problems: MutableList<String>) {
+        val decidedHeld = HashSet<String>()
+        var held = false
+        for (entry in entries) {
+            when (entry) {
+                is TimelineEntry.Script -> if (entry.action == "start") held = false
+                is TimelineEntry.State -> {
+                    held = entry.trace.hold != null
+                    if (!held) decidedHeld.clear()
+                }
+                is TimelineEntry.Frame -> if (held) entry.events.filter { it.isOrdinaryPrompt }.forEach { decidedHeld += it.id.toString() }
+                is TimelineEntry.Receipt -> if (held && entry.kind == "confirm" && entry.eventId in decidedHeld) {
+                    problems += "${entry.atMs}: held, a prompt decided during the hold was confirmed"
+                }
+                else -> Unit
+            }
+        }
+    }
+
+    /**
+     * The status card across holds, from the screen's real state after each result ([cards]): no event while prompts
+     * are held, and after a release no event decided before the frame that released it.
+     */
+    fun cardsAcrossHolds(entries: List<TimelineEntry>, cards: List<CardSample>): List<String> {
+        val decidedBy = HashMap<String, Long>()
+        entries.filterIsInstance<TimelineEntry.Frame>().forEach { frame -> frame.events.forEach { decidedBy[it.id.toString()] = frame.seq } }
+        val problems = mutableListOf<String>()
+        var releasedAt: Long? = null
+        for (card in cards) {
+            if (card.held) {
+                if (card.eventId != null) problems += "frame ${card.seq}: held, the card shows an event"
+                releasedAt = -1
+                continue
+            }
+            if (releasedAt == -1L) releasedAt = card.seq
+            val shown = card.eventId ?: continue
+            val since = releasedAt ?: continue
+            val decided = decidedBy[shown]
+            if (decided == null || decided < since) problems += "frame ${card.seq}: the card shows an event from before the release at frame $since"
+        }
+        return problems
+    }
 
     private val com.sailens.shell.device.GuidanceHaptic.isNavigation: Boolean
         get() = this != com.sailens.shell.device.GuidanceHaptic.VISION_UNRELIABLE &&

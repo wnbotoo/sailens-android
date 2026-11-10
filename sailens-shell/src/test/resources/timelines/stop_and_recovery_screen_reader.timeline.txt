@@ -25,20 +25,30 @@
 12050 frames seq=40..111 n=72 from=4950 q=unqualified(camera_obstructed)
 12150 frame seq=112 q=qualified events=[e3:event_obstacle_left_person:HIGH{count=1}@MEDIUM~15150]
 12150 state stop_required(camera_obstructed) since=4850 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=screen_reader cause=result hold=camera_obstructed(since=4850,recovering,fresh=1,span=0)
-12150 screen_reader "event_obstacle_left_person{count=1}"
-12150 motor queue left -> started
-12150 receipt confirm e3
-12150 outcome e3 src=112 event_obstacle_left_person HIGH delivered=screen_reader,haptics
-12250 frames seq=113..113 n=1 from=12250 q=qualified
+12150 receipt revoke e3 safety_hold
+12150 outcome e3 src=112 event_obstacle_left_person HIGH revoked=safety_hold
+12250 frame seq=113 q=qualified events=[e4:event_obstacle_left_person:HIGH{count=1}@MEDIUM~15250]
 12250 state stop_required(camera_obstructed) since=4850 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=screen_reader cause=result hold=camera_obstructed(since=4850,recovering,fresh=2,span=100)
-12350 frames seq=114..114 n=1 from=12350 q=qualified
+12250 receipt revoke e4 safety_hold
+12250 outcome e4 src=113 event_obstacle_left_person HIGH revoked=safety_hold
+12350 frame seq=114 q=qualified events=[e5:event_obstacle_left_person:HIGH{count=1}@MEDIUM~15350]
 12350 state stop_required(camera_obstructed) since=4850 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=screen_reader cause=result hold=camera_obstructed(since=4850,recovering,fresh=3,span=200)
-12450 frames seq=115..115 n=1 from=12450 q=qualified
+12350 receipt revoke e5 safety_hold
+12350 outcome e5 src=114 event_obstacle_left_person HIGH revoked=safety_hold
+12450 frame seq=115 q=qualified events=[e6:event_obstacle_left_person:HIGH{count=1}@MEDIUM~15450]
 12450 state stop_required(camera_obstructed) since=4850 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=screen_reader cause=result hold=camera_obstructed(since=4850,recovering,fresh=4,span=300)
-12550 frames seq=116..116 n=1 from=12550 q=qualified
+12450 receipt revoke e6 safety_hold
+12450 outcome e6 src=115 event_obstacle_left_person HIGH revoked=safety_hold
+12550 frame seq=116 q=qualified events=[e7:event_obstacle_left_person:HIGH{count=1}@MEDIUM~15550]
 12550 state stop_required(camera_obstructed) since=4850 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=screen_reader cause=result hold=camera_obstructed(since=4850,recovering,fresh=5,span=400)
-12650 frames seq=117..117 n=1 from=12650 q=qualified
+12550 receipt revoke e7 safety_hold
+12550 outcome e7 src=116 event_obstacle_left_person HIGH revoked=safety_hold
+12650 frame seq=117 q=qualified events=[e8:event_obstacle_left_person:HIGH{count=1}@MEDIUM~15650]
 12650 state guiding since=12650 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=screen_reader cause=result hold=none released=(fresh=6,span=500,src=117,fallbacks=0)
+12650 screen_reader "event_obstacle_left_person{count=1}"
+12650 motor queue left -> started
+12650 receipt confirm e8
+12650 outcome e8 src=117 event_obstacle_left_person HIGH delivered=screen_reader,haptics
 14150 frames seq=118..132 n=15 from=12750 q=qualified
 14150 screen_reader "event_camera_restored"
 14150 alert vision fault_recovery event_camera_restored priority=low channel=screen_reader result=published

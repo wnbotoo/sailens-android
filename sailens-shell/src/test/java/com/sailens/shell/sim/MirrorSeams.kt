@@ -31,7 +31,7 @@ internal interface SpeechDevice {
     fun release()
 }
 
-/** `HapticManager`'s seven calls. */
+/** `HapticManager`'s eight calls. */
 internal interface HapticDevice {
     fun trigger(event: SceneEvent): Boolean
     fun triggerOrQueue(event: SceneEvent, onQueuedResult: (played: Boolean) -> Unit): NavigationClaim
@@ -39,6 +39,7 @@ internal interface HapticDevice {
     fun cancelReservation()
     fun play(haptic: GuidanceHaptic): Boolean
     fun cancelNavigation()
+    fun dropQueuedNavigation()
     fun cancel()
 }
 
@@ -79,12 +80,16 @@ internal interface MirrorAlerts {
     fun onLifecycleStart()
     fun onOutput(engineState: SpeechEngineState, speechEnabled: Boolean, screenReaderActive: Boolean, hapticsEnabled: Boolean)
     fun poll()
+
+    /** Read after [onResult]: whether the result's prompts are held. */
+    val holdsOrdinaryPrompts: Boolean
 }
 
-/** `GuidanceOutputWiring` as the view model uses it: its stop, and its protocol's three entries. */
+/** `GuidanceOutputWiring` as the view model uses it: its stop, and its protocol's four entries. */
 internal interface MirrorOutput {
     fun stop(beforeOutputsStop: () -> Unit)
-    fun onFrame(events: List<SceneEvent>, sequenceNumber: Long, visionFaults: VisionFaults)
+    fun onFrame(events: List<SceneEvent>, sequenceNumber: Long, visionFaults: VisionFaults, holdOrdinary: Boolean)
+    fun holdBegan()
     fun settingsChanged()
     fun reset()
 }

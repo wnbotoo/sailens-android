@@ -93,6 +93,7 @@ class MirrorOrderTest {
         override fun cancelReservation() { calls += "haptics.cancelReservation" }
         override fun play(haptic: GuidanceHaptic): Boolean = true.also { calls += "haptics.play" }
         override fun cancelNavigation() { calls += "haptics.cancelNavigation" }
+        override fun dropQueuedNavigation() { calls += "haptics.dropQueuedNavigation" }
         override fun cancel() { calls += "haptics.cancel" }
     }
 
@@ -111,6 +112,8 @@ class MirrorOrderTest {
             calls += "alerts.onOutput $engineState speech=$speechEnabled screenReader=$screenReaderActive haptics=$hapticsEnabled"
         }
         override fun poll() { calls += "alerts.poll" }
+        override val holdsOrdinaryPrompts: Boolean
+            get() = false.also { calls += "alerts.holdsOrdinaryPrompts" }
     }
 
     private val output = object : MirrorOutput {
@@ -120,7 +123,8 @@ class MirrorOrderTest {
             // GuidanceOutputWiring.stop: speech, then the motor, after the block.
             calls += "output.stop: speech and motor"
         }
-        override fun onFrame(events: List<SceneEvent>, sequenceNumber: Long, visionFaults: VisionFaults) { calls += "output.onFrame $sequenceNumber" }
+        override fun onFrame(events: List<SceneEvent>, sequenceNumber: Long, visionFaults: VisionFaults, holdOrdinary: Boolean) { calls += "output.onFrame $sequenceNumber hold=$holdOrdinary" }
+        override fun holdBegan() { calls += "output.holdBegan" }
         override fun settingsChanged() { calls += "output.settingsChanged" }
         override fun reset() { calls += "output.reset" }
     }
@@ -236,20 +240,20 @@ class MirrorOrderTest {
         build()
         assertEquals(
             listOf(
-                "speech.setSpeechRate", // :254
-                "speech.initialize", // :255-257, :296
+                "speech.setSpeechRate", // :259
+                "speech.initialize", // :260-262, :301
             ),
             taken(),
         )
         assertEquals(
             listOf(
-                // :258-262, the settings' first value: applyFeedbackSettings (:356-380)
-                "speech.setSpeechRate", // :365
-                "alerts.onOutput IDLE speech=true screenReader=false haptics=true", // :377, :318-321
-                "output.settingsChanged", // :379
-                // :263-267, the screen reader's first value: applyScreenReaderMode returns at :305
-                // :268-278, the engine's first state
-                "alerts.onOutput READY speech=true screenReader=false haptics=true", // :276
+                // :263-267, the settings' first value: applyFeedbackSettings (:361-385)
+                "speech.setSpeechRate", // :370
+                "alerts.onOutput IDLE speech=true screenReader=false haptics=true", // :382, :323-326
+                "output.settingsChanged", // :384
+                // :268-272, the screen reader's first value: applyScreenReaderMode returns at :310
+                // :273-283, the engine's first state
+                "alerts.onOutput READY speech=true screenReader=false haptics=true", // :281
             ),
             drained(),
         )
@@ -259,13 +263,13 @@ class MirrorOrderTest {
     fun `start`() {
         built()
         mirror.toggleAnalysis()
-        assertEquals(listOf("alerts.onStartRequested loading=false"), taken()) // :336, before isLoading
+        assertEquals(listOf("alerts.onStartRequested loading=false"), taken()) // :341, before isLoading
         assertEquals(
             listOf(
-                "run begins", // runs.start's block (:418)
-                "alerts.onStallWatchStarted", // :430, :484
-                "analysis", // :433
-                "alerts.onFlowStarted running=false", // :440, before isRunning
+                "run begins", // runs.start's block (:423)
+                "alerts.onStallWatchStarted", // :435, :490
+                "analysis", // :438
+                "alerts.onFlowStarted running=false", // :445, before isRunning
             ),
             drained(),
         )
@@ -279,26 +283,27 @@ class MirrorOrderTest {
         upstream.trySend(SceneResult(sequenceNumber = 7, passableMask = null, events = listOf(event)))
         assertEquals(
             listOf(
-                "alerts.onResult qualified", // :447
-                "output.onFrame 7", // :476
+                "alerts.onResult qualified", // :452
+                "alerts.holdsOrdinaryPrompts", // :453, how this result's prompts and card go
+                "output.onFrame 7 hold=false", // :482
             ),
             drained(),
         )
-        assertEquals("the frame's events are in the UI state (:454-461)", listOf(event), ui.lastEvents)
+        assertEquals("the frame's events are in the UI state (:460-467)", listOf(event), ui.lastEvents)
     }
 
     @Test
     fun `a failure of the flow`() {
         started()
         upstream.trySend(IllegalStateException("the pipeline gave up"))
-        assertEquals(listOf("alerts.onFlowFailed the pipeline gave up"), drained()) // :442-443
+        assertEquals(listOf("alerts.onFlowFailed the pipeline gave up"), drained()) // :447-448
     }
 
     @Test
     fun `the stall loop polls every 500 ms until it is cancelled`() {
         started()
         advanceTo(1_000)
-        assertEquals(listOf("alerts.poll", "alerts.poll"), taken()) // :485-490
+        assertEquals(listOf("alerts.poll", "alerts.poll"), taken()) // :491-496
         mirror.toggleAnalysis()
         drained()
         advanceTo(3_000)
@@ -309,7 +314,7 @@ class MirrorOrderTest {
     fun `the engine's state`() {
         built()
         engineState.value = SpeechEngineState.UNAVAILABLE
-        assertEquals(listOf("alerts.onOutput UNAVAILABLE speech=true screenReader=false haptics=true"), drained()) // :269-277
+        assertEquals(listOf("alerts.onOutput UNAVAILABLE speech=true screenReader=false haptics=true"), drained()) // :274-282
         engineState.value = SpeechEngineState.UNAVAILABLE
         assertEquals("the same state again is no change", emptyList<String>(), drained())
     }
@@ -320,16 +325,16 @@ class MirrorOrderTest {
         screenReader.value = true
         assertEquals(
             listOf(
-                "speech.stop", // :309
-                "alerts.onOutput READY speech=true screenReader=true haptics=true", // :314
+                "speech.stop", // :314
+                "alerts.onOutput READY speech=true screenReader=true haptics=true", // :319
             ),
             drained(),
         )
         screenReader.value = false
         assertEquals(
             listOf(
-                "speech.initialize", // :310-311, :296
-                "alerts.onOutput READY speech=true screenReader=false haptics=true", // :314
+                "speech.initialize", // :315-316, :301
+                "alerts.onOutput READY speech=true screenReader=false haptics=true", // :319
             ),
             drained(),
         )
@@ -341,30 +346,30 @@ class MirrorOrderTest {
         settings.update { it.copy(speechEnabled = false) }
         assertEquals(
             listOf(
-                "speech.setSpeechRate", // :365
-                "speech.stop", // :367-368
-                "alerts.onOutput READY speech=false screenReader=false haptics=true", // :377
-                "output.settingsChanged", // :379
+                "speech.setSpeechRate", // :370
+                "speech.stop", // :372-373
+                "alerts.onOutput READY speech=false screenReader=false haptics=true", // :382
+                "output.settingsChanged", // :384
             ),
             drained(),
         )
         settings.update { it.copy(hapticsEnabled = false) }
         assertEquals(
             listOf(
-                "speech.setSpeechRate", // :365
-                "haptics.cancelNavigation", // :373-375
-                "alerts.onOutput READY speech=false screenReader=false haptics=false", // :377
-                "output.settingsChanged", // :379
+                "speech.setSpeechRate", // :370
+                "haptics.cancelNavigation", // :378-380
+                "alerts.onOutput READY speech=false screenReader=false haptics=false", // :382
+                "output.settingsChanged", // :384
             ),
             drained(),
         )
         settings.update { it.copy(speechEnabled = true) }
         assertEquals(
             listOf(
-                "speech.setSpeechRate", // :365
-                "speech.initialize", // :369-370, :296
-                "alerts.onOutput READY speech=true screenReader=false haptics=false", // :377
-                "output.settingsChanged", // :379
+                "speech.setSpeechRate", // :370
+                "speech.initialize", // :374-375, :301
+                "alerts.onOutput READY speech=true screenReader=false haptics=false", // :382
+                "output.settingsChanged", // :384
             ),
             drained(),
         )
@@ -374,9 +379,9 @@ class MirrorOrderTest {
     fun `the lifecycle`() {
         started()
         mirror.onGuidanceInterrupted("interrupted")
-        assertEquals(listOf("alerts.onLifecycleStop interrupted"), taken()) // :508
+        assertEquals(listOf("alerts.onLifecycleStop interrupted"), taken()) // :514
         mirror.acknowledgeInterruption()
-        assertEquals(listOf("alerts.onLifecycleStart"), taken()) // :513
+        assertEquals(listOf("alerts.onLifecycleStart"), taken()) // :519
     }
 
     @Test
@@ -385,12 +390,12 @@ class MirrorOrderTest {
         mirror.toggleAnalysis()
         assertEquals(
             listOf(
-                "alerts.onStallWatchStopped", // :543, :494-495
-                "output.stop", // :545
-                "runs.stop", // :546
+                "alerts.onStallWatchStopped", // :549, :500-501
+                "output.stop", // :551
+                "runs.stop", // :552
                 "output.stop: speech and motor", // GuidanceOutputWiring.stop, after the block
-                "alerts.onStopped running=true scope=active", // :552, before the UI state
-                "alerts.endOfSession", // :554
+                "alerts.onStopped running=true scope=active", // :558, before the UI state
+                "alerts.endOfSession", // :560
             ),
             taken(),
         )
@@ -404,18 +409,18 @@ class MirrorOrderTest {
         mirror.onCleared()
         assertEquals(
             listOf(
-                // viewModelScope is cancelled before onCleared runs (:633)
-                "alerts.onStopped running=true scope=cancelled", // :558
-                "alerts.endOfSession", // :559
-                "alerts.onStallWatchStopped", // :560, :494-495
-                "output.reset", // :561
-                "haptics.cancel", // :564
-                "runs.stop", // :565, :635
-                "engines released", // :568, the last lease
+                // viewModelScope is cancelled before onCleared runs (:639)
+                "alerts.onStopped running=true scope=cancelled", // :564
+                "alerts.endOfSession", // :565
+                "alerts.onStallWatchStopped", // :566, :500-501
+                "output.reset", // :567
+                "haptics.cancel", // :570
+                "runs.stop", // :571, :641
+                "engines released", // :574, the last lease
             ),
             taken(),
         )
-        assertEquals("the reset, then the models' release", listOf("reset", "release models"), drained()) // :635-650
+        assertEquals("the reset, then the models' release", listOf("reset", "release models"), drained()) // :641-656
         engineState.value = SpeechEngineState.UNAVAILABLE
         advanceTo(5_000)
         assertEquals("nothing reaches the seams any more", emptyList<String>(), drained())

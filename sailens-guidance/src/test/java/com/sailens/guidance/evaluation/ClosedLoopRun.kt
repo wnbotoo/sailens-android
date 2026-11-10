@@ -188,6 +188,9 @@ internal class ClosedLoopRun(
                 override fun vibrateAlone(event: SceneEvent, onQueuedResult: (played: Boolean) -> Unit) = MotorOffer.PLAYED
                 override fun vibrateVisionFault(priority: EventPriority, onPlayed: () -> Unit) = onPlayed()
                 override fun cancelVisionFaultVibration() = Unit
+
+                // Nothing waits for the motor here, and the evaluation holds no prompts.
+                override fun dropQueuedNavigation() = Unit
             },
             description = object : GuidanceDescriptionPort {
                 override fun waits(priority: EventPriority): Boolean = false

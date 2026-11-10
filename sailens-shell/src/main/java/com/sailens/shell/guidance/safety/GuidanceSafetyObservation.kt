@@ -26,7 +26,7 @@ import com.sailens.shell.device.GuidanceHaptic
  * @param stallAlarmDue the stall detector's alarm test, for the stall alarm.
  * @param recordState the trace's `safety_state` record.
  * @param recordAlert the trace's `guidance_alert` record.
- * @param publishState the state for the UI, on each change of it.
+ * @param publishState the state for the UI, and what the card shows of a hold, on each change of either.
  * @param elapsedClock the view model's clock, for when an alert was given.
  * @param wrapMonitor what the inputs reach the monitor through: the monitor itself, but for a test that counts them.
  */
@@ -37,7 +37,7 @@ internal class GuidanceSafetyObservation(
     initialOutput: OutputFacts,
     private val recordState: (SafetyStateTrace) -> Unit,
     private val recordAlert: (GuidanceAlertTrace) -> Unit,
-    private val publishState: (GuidanceSafetyState) -> Unit,
+    private val publishState: (GuidanceSafetyState, PromptHoldView?) -> Unit,
     private val logger: LogService,
     private val timed: () -> Boolean,
     private val elapsedClock: () -> Long,
@@ -53,10 +53,10 @@ internal class GuidanceSafetyObservation(
     val monitor: SafetyMonitor =
         wrapMonitor(GuidanceSafetyMonitor(stallCondition, stallAlarmDue, nowMs, initialOutput, onChange = ::changed))
 
-    private var published: GuidanceSafetyState = monitor.state
+    private var published: Pair<GuidanceSafetyState, PromptHoldView?> = monitor.state to monitor.axes.holdView
 
     init {
-        publishState(published)
+        publishState(published.first, published.second)
     }
 
     /** One input to the monitor; returns what the monitor returns for it, the alert it calls for if it is one that can. */
@@ -135,14 +135,16 @@ internal class GuidanceSafetyObservation(
 
     /**
      * The trace and the UI each on their own: a fault in one must not keep the other on an old state, and the monitor
-     * tells of a change only once. A state the UI did not take is offered again at the next change.
+     * tells of a change only once. A state the UI did not take is offered again at the next change. The UI hears of a
+     * hold beginning or its cause going even when the state stays the same stop; not of a result counted.
      */
     private fun changed(snapshot: GuidanceSafetySnapshot) {
         contained { recordState(snapshot.toTrace(at = wallClock())) }
-        if (snapshot.state != published) {
+        val next = snapshot.state to snapshot.axes.holdView
+        if (next != published) {
             contained {
-                publishState(snapshot.state)
-                published = snapshot.state
+                publishState(next.first, next.second)
+                published = next
             }
         }
     }

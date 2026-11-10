@@ -7,6 +7,7 @@ import com.sailens.guidance.model.scene.SceneDebugInfo
 import com.sailens.output.SpeechEngineState
 import com.sailens.shell.guidance.overlay.SceneOverlayMode
 import com.sailens.shell.guidance.safety.GuidanceSafetyState
+import com.sailens.shell.guidance.safety.PromptHoldView
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 
@@ -67,6 +68,11 @@ data class SceneAnalysisUiState(
      * ([com.sailens.shell.guidance.safety.GuidanceSystemAlerts]). Nothing reads this field to decide.
      */
     val safetyState: GuidanceSafetyState = GuidanceSafetyState.Idle,
+    /**
+     * Ordinary prompts are held after a stop: its cause, and whether it still holds or fresh results are awaited. The
+     * status card shows it in place of an event; written with [safetyState], on each change of either.
+     */
+    val promptHold: PromptHoldView? = null,
 )
 
 /**
@@ -124,3 +130,17 @@ internal fun SceneAnalysisUiState.withFrameEvents(
         activeStatusEvent = activeEvent,
     )
 }
+
+/**
+ * A result's decisions on the screen. While ordinary prompts are held after a stop ([holdsPrompts]) the card keeps no
+ * event, a vision fault's included: the hold shows the stop, and an event kept now would come back once the hold is
+ * released. Only the debug list takes them then. Otherwise as [withFrameEvents].
+ */
+internal fun SceneAnalysisUiState.withResultEvents(events: List<SceneEvent>, now: Long, holdsPrompts: Boolean): SceneAnalysisUiState =
+    if (holdsPrompts) copy(lastEvents = events) else withFrameEvents(events, now)
+
+/**
+ * A hold began: the card forgets its event, so the event neither shows during the stop nor comes back after it. The
+ * release starts the card afresh, from the frame that released it.
+ */
+internal fun SceneAnalysisUiState.withHoldBegun(): SceneAnalysisUiState = copy(activeStatusEvent = null)

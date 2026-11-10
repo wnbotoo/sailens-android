@@ -26,28 +26,41 @@
 9680 speech done s1
 9800 script camera_resume
 9850 frame seq=89 lag=1900 q=qualified events=[e2:event_obstacle_left_person:HIGH{count=1}@MEDIUM~12850]
-9850 speech speak e2 "event_obstacle_left_person{count=1}" scale=16 exp=12850 -> accepted
-9850 motor queue left -> started
-9850 receipt confirm e2
-9850 outcome e2 src=89 event_obstacle_left_person HIGH delivered=speech,haptics
-11490 speech done e2
+9850 receipt revoke e2 safety_hold
+9850 outcome e2 src=89 event_obstacle_left_person HIGH revoked=safety_hold
 12500 state interrupted(lifecycle) since=8000 phase=running interrupted=true stall=no_results judgement=qualified faults=[] channel=speech cause=poll hold=lifecycle(since=8000,stopping,fresh=0,span=0)
 13000 script foreground
 13000 state initializing since=13000 phase=awaiting_first_result interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=lifecycle_start hold=lifecycle(since=8000,recovering,fresh=0,span=0)
 13000 ui clear_interrupted
-13350 frames seq=124..124 n=1 from=13350 q=qualified
+13350 frame seq=124 q=qualified events=[e3:event_obstacle_left_person:HIGH{count=1}@MEDIUM~16350]
 13350 state initializing since=13000 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=lifecycle(since=8000,recovering,fresh=1,span=0)
-13450 frames seq=125..125 n=1 from=13450 q=qualified
+13350 receipt revoke e3 safety_hold
+13350 outcome e3 src=124 event_obstacle_left_person HIGH revoked=safety_hold
+13450 frame seq=125 q=qualified events=[e4:event_obstacle_left_person:HIGH{count=1}@MEDIUM~16450]
 13450 state initializing since=13000 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=lifecycle(since=8000,recovering,fresh=2,span=100)
-13550 frames seq=126..126 n=1 from=13550 q=qualified
+13450 receipt revoke e4 safety_hold
+13450 outcome e4 src=125 event_obstacle_left_person HIGH revoked=safety_hold
+13550 frame seq=126 q=qualified events=[e5:event_obstacle_left_person:HIGH{count=1}@MEDIUM~16550]
 13550 state initializing since=13000 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=lifecycle(since=8000,recovering,fresh=3,span=200)
-13650 frames seq=127..127 n=1 from=13650 q=qualified
+13550 receipt revoke e5 safety_hold
+13550 outcome e5 src=126 event_obstacle_left_person HIGH revoked=safety_hold
+13650 frame seq=127 q=qualified events=[e6:event_obstacle_left_person:HIGH{count=1}@MEDIUM~16650]
 13650 state initializing since=13000 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=lifecycle(since=8000,recovering,fresh=4,span=300)
-13750 frames seq=128..128 n=1 from=13750 q=qualified
+13650 receipt revoke e6 safety_hold
+13650 outcome e6 src=127 event_obstacle_left_person HIGH revoked=safety_hold
+13750 frame seq=128 q=qualified events=[e7:event_obstacle_left_person:HIGH{count=1}@MEDIUM~16750]
 13750 state initializing since=13000 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=lifecycle(since=8000,recovering,fresh=5,span=400)
-13850 frames seq=129..129 n=1 from=13850 q=qualified
+13750 receipt revoke e7 safety_hold
+13750 outcome e7 src=128 event_obstacle_left_person HIGH revoked=safety_hold
+13850 frame seq=129 q=qualified events=[e8:event_obstacle_left_person:HIGH{count=1}@MEDIUM~16850]
 13850 state guiding since=13850 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=none released=(fresh=6,span=500,src=129,fallbacks=0)
-15850 frames seq=130..149 n=20 from=13950 q=qualified
+13850 speech speak e8 "event_obstacle_left_person{count=1}" scale=16 exp=16850 -> accepted
+13850 motor queue left -> started
+13850 receipt confirm e8
+13850 outcome e8 src=129 event_obstacle_left_person HIGH delivered=speech,haptics
+15450 frames seq=130..145 n=16 from=13950 q=qualified
+15490 speech done e8
+15850 frames seq=146..149 n=4 from=15550 q=qualified
 16000 script stop
 16000 speech stop
 16000 motor cancel

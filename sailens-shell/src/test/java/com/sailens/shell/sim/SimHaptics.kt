@@ -130,6 +130,13 @@ internal class SimHaptics(
         vibrated
     }
 
+    // HapticManager.dropQueuedNavigation
+    override fun dropQueuedNavigation() = calling {
+        line("drop_queued")
+        arbiter.dropQueuedNavigation()
+        motorWait.reschedule()
+    }
+
     // HapticManager.kt:326-331
     override fun cancelNavigation() = calling {
         line("cancel_navigation")

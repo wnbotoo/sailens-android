@@ -124,6 +124,7 @@ class GuidanceSystemAlertsInputTest {
         stopGuidanceOutput = { calls += "stop guidance output" },
         clearLatestResult = {},
         preemptDescription = {},
+        holdOrdinaryPrompts = {},
         playAlarm = { haptic ->
             alarms += haptic
             calls += "alarm ${haptic.name}"
@@ -148,7 +149,7 @@ class GuidanceSystemAlertsInputTest {
         initialOutput = OutputFacts(engine, speechEnabled, screenReader, hapticsEnabled = true, speechReady = engine == SpeechEngineState.READY),
         recordState = { states += it.stateLabel },
         recordAlert = {},
-        publishState = {},
+        publishState = { _, _ -> },
         timed = { false },
         logger = logger,
         clock = {

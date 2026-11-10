@@ -506,3 +506,10 @@ class VisionFaultAlerts(
 /** Events whose state [VisionFaultAlerts] tells the user about: they are not offered as prompts. */
 internal fun SceneEvent.isToldByVisionFaultAlerts(): Boolean =
     category == EventCategory.SENSOR_QUALITY || category == EventCategory.GROUND_UNRECOGNIZED
+
+/**
+ * An event offered to the user as a prompt about the scene: every one but those [VisionFaultAlerts] tells of. These
+ * are what a hold after a stop keeps back, on every channel and on the status card.
+ */
+val SceneEvent.isOrdinaryPrompt: Boolean
+    get() = !isToldByVisionFaultAlerts()

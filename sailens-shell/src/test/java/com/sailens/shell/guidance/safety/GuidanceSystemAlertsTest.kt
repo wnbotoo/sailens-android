@@ -90,6 +90,7 @@ class GuidanceSystemAlertsTest {
         stopGuidanceOutput = { call("stop guidance output") },
         clearLatestResult = { call("clear latest result") },
         preemptDescription = { call("preempt description: $it") },
+        holdOrdinaryPrompts = { call("hold ordinary prompts") },
         playAlarm = { haptic ->
             call("alarm ${haptic.name}")
             vibrates
@@ -119,7 +120,7 @@ class GuidanceSystemAlertsTest {
         initialOutput = facts(),
         recordState = { call("safety_state ${it.described()}") },
         recordAlert = { call("guidance_alert ${it.described()}") },
-        publishState = { call("publish ${it.label}") },
+        publishState = { state, hold -> call("publish ${state.label}" + (hold?.let { " hold=${it.cause.traceName},${if (it.stopping) "stopping" else "recovering"}" } ?: "")) },
         timed = { true },
         logger = logger,
         clock = { now },
@@ -393,7 +394,8 @@ class GuidanceSystemAlertsTest {
         assertEquals(
             listOf(
                 "safety_state interrupted(lifecycle) phase=running interrupted channel=speech <- lifecycle_stop", // 9f2deb3:543
-                "publish interrupted(lifecycle)",
+                "publish interrupted(lifecycle) hold=lifecycle,stopping",
+                "hold ordinary prompts", // before the alert, so a rhythm waiting for the motor is gone before the alarm
                 // 9f2deb3:544: the state stands behind it, so no warning.
                 "log warning $SCREEN: Guidance interrupted while running", // 1a99f6e:497
                 "mark interrupted", // 1a99f6e:498
@@ -418,7 +420,8 @@ class GuidanceSystemAlertsTest {
         assertEquals(
             listOf(
                 "safety_state interrupted(lifecycle) phase=running interrupted channel=screen_reader <- lifecycle_stop", // 9f2deb3:543
-                "publish interrupted(lifecycle)",
+                "publish interrupted(lifecycle) hold=lifecycle,stopping",
+                "hold ordinary prompts", // before the alert, so a rhythm waiting for the motor is gone before the alarm
                 "log warning $SCREEN: Guidance interrupted while running", // 1a99f6e:497
                 "mark interrupted", // 1a99f6e:498
                 "preempt description: guidance interrupted", // 1a99f6e:501
@@ -441,7 +444,8 @@ class GuidanceSystemAlertsTest {
         assertEquals(
             listOf(
                 "safety_state interrupted(lifecycle) phase=running interrupted channel=haptics_only <- lifecycle_stop", // 9f2deb3:543
-                "publish interrupted(lifecycle)",
+                "publish interrupted(lifecycle) hold=lifecycle,stopping",
+                "hold ordinary prompts", // before the alert, so a rhythm waiting for the motor is gone before the alarm
                 "log warning $SCREEN: Guidance interrupted while running", // 1a99f6e:497
                 "mark interrupted", // 1a99f6e:498
                 "preempt description: guidance interrupted", // 1a99f6e:501
@@ -463,7 +467,8 @@ class GuidanceSystemAlertsTest {
         assertEquals(
             listOf(
                 "safety_state interrupted(lifecycle) phase=running interrupted channel=speech <- lifecycle_stop",
-                "publish interrupted(lifecycle)",
+                "publish interrupted(lifecycle) hold=lifecycle,stopping",
+                "hold ordinary prompts", // before the alert, so a rhythm waiting for the motor is gone before the alarm
                 "log warning $SCREEN: Guidance interrupted while running", // 1a99f6e:497
                 "mark interrupted", // 1a99f6e:498
                 "preempt description: guidance interrupted", // 1a99f6e:501
@@ -489,7 +494,8 @@ class GuidanceSystemAlertsTest {
         assertEquals(
             listOf(
                 "safety_state stop_required(perception_stalled) phase=running stall=no_results channel=speech <- poll", // 9f2deb3:517
-                "publish stop_required(perception_stalled)",
+                "publish stop_required(perception_stalled) hold=perception_stalled,stopping",
+                "hold ordinary prompts",
                 // 9f2deb3:522-523: the second poll finds nothing new, and the state stands behind STALLED.
                 STALLED_WARNING, // 1a99f6e:476, :453
                 "preempt description: guidance stalled", // 1a99f6e:454
@@ -536,7 +542,8 @@ class GuidanceSystemAlertsTest {
         assertEquals(
             listOf(
                 "safety_state stop_required(startup_stalled) phase=awaiting_first_result stall=startup_timeout channel=speech <- poll", // 9f2deb3:517
-                "publish stop_required(startup_stalled)",
+                "publish stop_required(startup_stalled) hold=startup_stalled,stopping",
+                "hold ordinary prompts",
                 STALLED_WARNING, // 1a99f6e:453
                 "preempt description: guidance stalled", // 1a99f6e:454
                 "alarm INTERRUPTED", // 1a99f6e:455
@@ -564,7 +571,7 @@ class GuidanceSystemAlertsTest {
         assertEquals(
             listOf(
                 "safety_state initializing phase=awaiting_first_result channel=speech <- lifecycle_start", // 9f2deb3:573
-                "publish initializing",
+                "publish initializing hold=lifecycle,recovering",
                 "clear interrupted", // 1a99f6e:519
             ),
             recordedAt(30_200L),
@@ -572,7 +579,8 @@ class GuidanceSystemAlertsTest {
         assertEquals(
             listOf(
                 "safety_state stop_required(startup_stalled) phase=awaiting_first_result stall=startup_timeout channel=speech <- poll", // 9f2deb3:517
-                "publish stop_required(startup_stalled)",
+                "publish stop_required(startup_stalled) hold=startup_stalled,stopping",
+                "hold ordinary prompts",
                 STALLED_WARNING, // 1a99f6e:476, :453
                 "preempt description: guidance stalled",
                 "alarm INTERRUPTED",
@@ -595,9 +603,12 @@ class GuidanceSystemAlertsTest {
         // 1a99f6e:411: the result is progress, so the next alarm is 2.5 s after it, then every 10 s.
         assertEquals(listOf(3_500L, 11_000L, 21_000L), stallAlarmTimes())
         // The stall is over, but the stop holds ordinary prompts until fresh results release it: the state stays a
-        // stall's stop, so nothing is published.
+        // stall's stop, and only the card hears that the cause has gone.
         assertEquals(
-            listOf("safety_state stop_required(perception_stalled) phase=running channel=speech <- result"),
+            listOf(
+                "safety_state stop_required(perception_stalled) phase=running channel=speech <- result",
+                "publish stop_required(perception_stalled) hold=perception_stalled,recovering",
+            ),
             recordedAt(8_200L),
         )
     }
@@ -617,7 +628,7 @@ class GuidanceSystemAlertsTest {
         assertEquals(
             listOf(
                 "safety_state initializing phase=awaiting_first_result channel=speech <- lifecycle_start", // 9f2deb3:573
-                "publish initializing",
+                "publish initializing hold=lifecycle,recovering",
                 "clear interrupted", // 1a99f6e:519
             ),
             recorded(),
@@ -677,7 +688,7 @@ class GuidanceSystemAlertsTest {
         assertEquals(
             listOf(
                 "safety_state initializing phase=awaiting_first_result channel=speech <- lifecycle_start", // 9f2deb3:573
-                "publish initializing",
+                "publish initializing hold=lifecycle,recovering",
                 "clear interrupted", // 1a99f6e:519
             ),
             recorded(),

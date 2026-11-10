@@ -37,6 +37,9 @@ import com.sailens.shell.guidance.screen.GuidanceStallDetector
  * @param stopGuidanceOutput stops Guidance's outputs: the delivery protocol reset, then speech, then the motor.
  * @param clearLatestResult forgets the last result the screen holds.
  * @param preemptDescription cuts off a scene description that holds the floor, for the reason given.
+ * @param holdOrdinaryPrompts a stop began: the screen clears the event its card shows and the delivery protocol
+ *   withdraws an ordinary rhythm waiting for the motor. Called before the input's alert, so the motor is free of it
+ *   before an alarm claims it.
  * @param playAlarm claims the motor unconditionally for the rhythm, whatever the vibration setting; true when the
  *   vibrator was asked to play it.
  * @param speakSystemNotice own speech, for a sentence about Guidance itself, at that priority (on
@@ -54,7 +57,7 @@ import com.sailens.shell.guidance.screen.GuidanceStallDetector
  * @param initialOutput the output facts when the screen is built, for the monitor.
  * @param recordState the trace's `safety_state` record.
  * @param recordAlert the trace's `guidance_alert` record.
- * @param publishState the safety state for the UI, on each change of it.
+ * @param publishState the safety state for the UI, and what the card shows of a hold, on each change of either.
  * @param timed whether main-thread time is kept (diagnostics on).
  * @param clock the same monotonic clock Guidance stamps events with.
  * @param detFirst the policy switches Guidance decides with: a stall notice's rank depends on them.
@@ -65,6 +68,7 @@ internal class GuidanceSystemAlerts(
     private val stopGuidanceOutput: () -> Unit,
     private val clearLatestResult: () -> Unit,
     private val preemptDescription: (reason: String) -> Unit,
+    private val holdOrdinaryPrompts: () -> Unit,
     private val playAlarm: (GuidanceHaptic) -> Boolean,
     private val speakSystemNotice: (text: String, priority: Int) -> Unit,
     private val announceToScreenReader: (String) -> Unit,
@@ -79,7 +83,7 @@ internal class GuidanceSystemAlerts(
     initialOutput: OutputFacts,
     recordState: (SafetyStateTrace) -> Unit,
     recordAlert: (GuidanceAlertTrace) -> Unit,
-    publishState: (GuidanceSafetyState) -> Unit,
+    publishState: (GuidanceSafetyState, PromptHoldView?) -> Unit,
     timed: () -> Boolean,
     private val logger: LogService,
     private val clock: () -> Long,
@@ -121,18 +125,25 @@ internal class GuidanceSystemAlerts(
         wrapMonitor = wrapMonitor,
     )
 
+    /**
+     * Whether ordinary prompts are held after a stop, as the latest input left it: read after [onResult], it says how the
+     * result's own prompts are delivered.
+     */
+    val holdsOrdinaryPrompts: Boolean
+        get() = observation.monitor.axes.hold != null
+
     /** Start pressed. Main-thread time is kept from here on, this call's own included. */
     fun onStartRequested() {
         observation.startOfSession()
         checkFacts(SafetyInput.START_REQUESTED)
-        observation.observe { onStartRequested(clock()) }
+        observe { onStartRequested(clock()) }
     }
 
     /** The view model is launching its stall loop: a new watch, with the startup grace from now. */
     fun onStallWatchStarted() {
         checkFacts(SafetyInput.STALL_WATCH_STARTED)
         stallDetector.start(clock())
-        observation.observe { onStallWatchStarted(clock()) }
+        observe { onStallWatchStarted(clock()) }
         stallWatchRunning = true
     }
 
@@ -150,7 +161,7 @@ internal class GuidanceSystemAlerts(
     /** The analysis flow is collected. */
     fun onFlowStarted() {
         checkFacts(SafetyInput.FLOW_STARTED)
-        observation.observe { onFlowStarted(clock()) }
+        observe { onFlowStarted(clock()) }
     }
 
     /**
@@ -161,7 +172,7 @@ internal class GuidanceSystemAlerts(
     fun onResult(baseline: BaselineQualification, sequenceNumber: Long, receivedAtMs: Long?) {
         checkFacts(SafetyInput.RESULT)
         stallDetector.onResult(clock())
-        observation.observe { onResult(clock(), baseline, sequenceNumber, receivedAtMs, speechReady = speechReady()) }
+        observe { onResult(clock(), baseline, sequenceNumber, receivedAtMs, speechReady = speechReady()) }
     }
 
     /**
@@ -170,7 +181,7 @@ internal class GuidanceSystemAlerts(
      */
     fun onFlowFailed(error: Throwable) {
         checkFacts(SafetyInput.FLOW_FAILED)
-        val alert = observation.observe { onFlowFailed(clock(), error) }
+        val alert = observe { onFlowFailed(clock(), error) }
         failureNotShown = true
         try {
             logger.error(TAG, "Error in scene analysis", error)
@@ -193,7 +204,7 @@ internal class GuidanceSystemAlerts(
     /** The user stopped Guidance, or the screen went away. The session ends with [endOfSession]. */
     fun onStopped() {
         checkFacts(SafetyInput.STOPPED)
-        observation.observe { onStopped(clock()) }
+        observe { onStopped(clock()) }
     }
 
     /**
@@ -217,7 +228,7 @@ internal class GuidanceSystemAlerts(
      */
     fun onLifecycleStop(noticeText: String) {
         checkFacts(SafetyInput.LIFECYCLE_STOP)
-        val alert = observation.observe { onLifecycleStop(clock()) }
+        val alert = observe { onLifecycleStop(clock()) }
         if (alert != SystemAlert.INTERRUPTED) return
 
         logger.warning(TAG, "Guidance interrupted while running")
@@ -250,7 +261,7 @@ internal class GuidanceSystemAlerts(
         // never hears of the loop's cancelling.
         if (observation.monitor.axes.phase.isRunning && stallWatchRunning) stallDetector.start(clock())
         // After the detector's restart, so the monitor reads the new grace; before the UI state clears the interruption.
-        observation.observe { onLifecycleStart(clock()) }
+        observe { onLifecycleStart(clock()) }
         clearInterrupted()
     }
 
@@ -261,7 +272,7 @@ internal class GuidanceSystemAlerts(
      */
     fun onOutput(engineState: SpeechEngineState, speechEnabled: Boolean, screenReaderActive: Boolean, hapticsEnabled: Boolean) {
         checkFacts(SafetyInput.OUTPUT)
-        val alert = observation.observe {
+        val alert = observe {
             onOutput(clock(), OutputFacts(engineState, speechEnabled, screenReaderActive, hapticsEnabled, speechReady = speechReady()))
         }
         if (alert == SystemAlert.SPEECH_UNAVAILABLE) speechEngineUnavailable()
@@ -274,8 +285,18 @@ internal class GuidanceSystemAlerts(
     fun poll() {
         checkFacts(SafetyInput.POLL)
         // 进后台时 onLifecycleStop 已经告知过；那时相机停帧是必然的，不重复报：中断期间监视器不问检测器。
-        val alert = observation.observe { poll(clock()) }
+        val alert = observe { poll(clock()) }
         if (alert == SystemAlert.STALLED) alertGuidanceUnavailable(GuidanceNotice.STALLED)
+    }
+
+    /**
+     * One input to the monitor, through the observation. When it began a stop, ordinary prompts are held at once, before
+     * the input's alert is given: any input can, as each reads the stall condition at its own time.
+     */
+    private inline fun <A> observe(crossinline input: SafetyMonitor.() -> A): A {
+        val result = observation.observe { input() }
+        if (observation.monitor.beganStop) holdOrdinaryPrompts()
+        return result
     }
 
     /** The screen's own facts against the monitor's, before the input [next] reaches it; see [failureNotShown]. */

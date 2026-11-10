@@ -59,6 +59,9 @@ class GuidanceOutputProtocol(
     private var pendingRhythm: EventPriority? = null
     private var rhythmRequest = 0L
 
+    /** The prompt whose rhythm waits for the motor, as its only channel or going with another; null once answered. */
+    private var queuedOnMotor: PromptSpeech? = null
+
     /** Everything said and felt about a covered lens, low light and an unrecognised floor; see [VisionFaultAlerts]. */
     private val visionFaultAlerts = VisionFaultAlerts(
         outputs = object : VisionFaultAlerts.Outputs {
@@ -97,12 +100,16 @@ class GuidanceOutputProtocol(
      * The frame's vision faults first, so a rhythm reserved for a state that has just ended is withdrawn
      * before the prompt's own rhythm asks for the motor; what is said and felt about them only after the
      * prompt, so a higher prompt in the same frame does not cut off a floor notice just begun.
+     *
+     * @param holdOrdinary Guidance holds prompts after a stop: an ordinary primary prompt
+     *   ([SceneEvent.isOrdinaryPrompt]) is not offered to any channel or to the description, and is revoked as
+     *   [PromptRevokeReasons.SAFETY_HOLD], with its `prompt_outcome`. The vision faults are told as ever.
      */
-    fun onFrame(events: List<SceneEvent>, sequenceNumber: Long, visionFaults: VisionFaults) {
+    fun onFrame(events: List<SceneEvent>, sequenceNumber: Long, visionFaults: VisionFaults, holdOrdinary: Boolean = false) {
         val frameAt = speech.settleFrame()
         frameAtMs = frameAt
         visionFaultAlerts.observe(frameAt, visionFaults, settings.visionFaults())
-        onSceneEvents(events, sequenceNumber)
+        onSceneEvents(events, sequenceNumber, holdOrdinary)
         visionFaultAlerts.act(frameAt, settings.visionFaults())
         modeNotice?.act(frameAt)
         frameAtMs = null
@@ -113,9 +120,22 @@ class GuidanceOutputProtocol(
         visionFaultAlerts.settingsChanged(settings.visionFaults())
     }
 
-    /** Guidance stopped: no recovery is said for what was still faulty. */
+    /**
+     * A hold began: Guidance had to stop. An ordinary rhythm still waiting for the motor is withdrawn, so that it is not
+     * felt during the stop; what the motor answers settles its prompt: one whose only channel it was is revoked as
+     * [PromptRevokeReasons.SAFETY_HOLD], one going with a channel that took the prompt keeps what that channel gave it.
+     * Nothing that has started is cut, and with nothing waiting the motor is not asked.
+     */
+    fun holdBegan() {
+        val queued = queuedOnMotor ?: return
+        queued.withdrawnForHold = true
+        motor.dropQueuedNavigation()
+    }
+
+    /** Guidance stopped: no recovery is said for what was still faulty. The motor drops what waits without answering. */
     fun reset() {
         run++
+        queuedOnMotor = null
         visionFaultAlerts.reset()
         modeNotice?.reset()
     }
@@ -130,6 +150,7 @@ class GuidanceOutputProtocol(
         state.mode?.let { modeNotice?.restore(it) }
         run = state.run
         pendingRhythm = null
+        queuedOnMotor = null
     }
 
     /**
@@ -184,7 +205,7 @@ class GuidanceOutputProtocol(
         return if (taken) ModeNotice.Offer.ACCEPTED else ModeNotice.Offer.REFUSED
     }
 
-    private fun onSceneEvents(events: List<SceneEvent>, sequenceNumber: Long) {
+    private fun onSceneEvents(events: List<SceneEvent>, sequenceNumber: Long, holdOrdinary: Boolean) {
         if (events.isEmpty()) return
         // Guidance 为这一条（且只为这一条）记了冷却，见 DecideEventsUseCase。
         val primaryEvent = events.first()
@@ -195,6 +216,7 @@ class GuidanceOutputProtocol(
 
         // 自带语音接收了、又要等结果时，这里不确认：结果来了再说。
         val prompt = PromptSpeech(primaryEvent)
+        val held = holdOrdinary && primaryEvent.isOrdinaryPrompt
 
         // 等描述 / 打断描述 / 送达就确认冷却、没送达就撤销冷却，并为这条提示写一条 prompt_outcome（实际
         // 送达的通道或撤回原因）——整条规则在 offerAndTraceGuidancePrompt 里，有单测。
@@ -202,7 +224,8 @@ class GuidanceOutputProtocol(
             event = primaryEvent,
             sourceSequenceNumber = sequenceNumber,
             outputs = outputs,
-            waitsForDescription = description.waits(primaryEvent.priority),
+            heldAfterStop = held,
+            waitsForDescription = !held && description.waits(primaryEvent.priority),
             now = wallClock,
             preemptDescription = { description.preempt(primaryEvent.messageKey) },
             deliver = { deliver(primaryEvent, outputs, prompt) },
@@ -253,6 +276,9 @@ class GuidanceOutputProtocol(
             private set
         var traceWhenMotorAnswers: PromptOutcomeTrace? = null
 
+        /** Its rhythm was withdrawn from the motor because a hold began ([holdBegan]), not dropped by the motor. */
+        var withdrawnForHold = false
+
         fun taken() {
             takenByAnotherChannel = true
             if (!retryInterrupted) return
@@ -280,8 +306,12 @@ class GuidanceOutputProtocol(
             if (takenByVoice) return rhythmGoesWithIt && motor.vibrate(event)
             val thisRun = run
             val accompanies = takenByAnotherChannel
-            val offer = motor.vibrateAlone(event) { played -> if (thisRun == run && !accompanies) motorAnswered(played) }
+            val offer = motor.vibrateAlone(event) { played ->
+                if (queuedOnMotor === this@PromptSpeech) queuedOnMotor = null
+                if (thisRun == run && !accompanies) motorAnswered(played)
+            }
             if (offer == MotorOffer.PLAYED && retryInterrupted) cooldown.accepted(event)
+            if (offer == MotorOffer.QUEUED) queuedOnMotor = this
             waitsForMotor = offer == MotorOffer.QUEUED && !accompanies
             return offer == MotorOffer.PLAYED
         }
@@ -295,8 +325,9 @@ class GuidanceOutputProtocol(
                 onReachedUser(event)
                 trace?.let { recordOutcome(it.copy(deliveredAt = at, revokedAt = null, revokeReason = null, deliveredVia = listOf(PromptDeliveryChannels.HAPTICS))) }
             } else {
-                cooldown.revoke(event, PromptRevokeReasons.HAPTIC_DROPPED)
-                trace?.let { recordOutcome(it.copy(revokedAt = at, revokeReason = PromptRevokeReasons.HAPTIC_DROPPED)) }
+                val reason = if (withdrawnForHold) PromptRevokeReasons.SAFETY_HOLD else PromptRevokeReasons.HAPTIC_DROPPED
+                cooldown.revoke(event, reason)
+                trace?.let { recordOutcome(it.copy(revokedAt = at, revokeReason = reason)) }
             }
         }
     }

@@ -492,7 +492,7 @@ class SessionTimelineTest {
     fun stop_and_recovery_speech_launch() {
         val run = check(SessionScenarios.stopAndRecoverySpeechLaunch)
         val confirmed = assertCoverCutsPrompt(run)
-        val cut = run.speech().single { it.kind == "cut" }
+        val cut = run.speech().first { it.kind == "cut" }
         assertEquals("the cut prompt is reported to the cooldown", listOf("$confirmed cut ${cut.id}"), run.receipts().filter { it.kind == "cut" }.map { "${it.atMs} ${it.kind} ${it.eventId}" })
         assertRecovers(run, confirmed)
     }
@@ -504,14 +504,20 @@ class SessionTimelineTest {
         val queued = run.motor().single { it.kind == "queue" && it.result == "queued" }
         assertTrue("a person's rhythm queued before the stop (${queued.atMs})", queued.atMs < stop)
         val rhythm = queued.rhythm!!
-        assertTrue("and still waiting at the stop", run.motor().none { it.rhythm == rhythm && it.atMs in queued.atMs + 1..stop && (it.kind == "start" || it.kind == "drop") })
+        assertTrue("and still waiting when the stop begins", run.motor().none { it.rhythm == rhythm && it.atMs in queued.atMs + 1 until stop && (it.kind == "start" || it.kind == "drop") })
         val prompt = run.entries.filterIsInstance<TimelineEntry.Frame>().single { it.atMs == queued.atMs }.events.first()
         val expiresAt = queued.atMs + (prompt.expiresAt - prompt.timestamp)
         assertTrue("and not expired ($expiresAt)", expiresAt > stop)
+        assertEquals(
+            "withdrawn as the stop begins, before the cover's rhythm asks for the motor",
+            listOf("motor drop_queued", "motor drop ${rhythm.name.lowercase()}"),
+            run.deviceAndAlertsAt(stop).take(2),
+        )
+        assertEquals("its prompt, the rhythm its only channel, is taken back as held", PromptRevokeReasons.SAFETY_HOLD, run.outcomes().single { it.at == stop && it.revoked != null }.revoked)
         assertTrue("the cover's rhythm reserves the motor at the stop", run.motor().any { it.atMs == stop && it.kind == "reserve" && it.result == "reserved" })
-        val reservedStarts = run.motor().first { it.kind == "start" && it.rhythm == GuidanceHaptic.VISION_UNRELIABLE && it.atMs > stop }.atMs
-        val queuedStarts = run.motor().first { it.kind == "start" && it.rhythm == rhythm }.atMs
-        assertTrue("the reserved rhythm goes first, then the queued one ($reservedStarts, $queuedStarts)", reservedStarts < queuedStarts)
+        val release = assertRelease(run, at = null, fresh = null, span = null)
+        assertTrue("the person's rhythm does not start while the stop holds", run.motor().none { it.rhythm == rhythm && it.kind == "start" && it.atMs in stop..release.atMs })
+        assertEquals("it is felt again from the result that releases it", "${release.atMs} haptics", run.outcomes().first { it.at >= release.atMs && it.key.startsWith("event_obstacle_") }.let { "${it.at} ${it.via.joinToString(",")}" })
     }
 
     @Test
@@ -547,7 +553,7 @@ class SessionTimelineTest {
         assertStaleAfterStall(run)
     }
 
-    /** Four results of pictures taken before the stall, arriving once its notice is said: none counts, and today the first is said. */
+    /** Four results of pictures taken before the stall, arriving once its notice is said: none counts, and none is said. */
     private fun assertStaleAfterStall(run: SessionRun) {
         val stall = run.holdStates().first { it.trace.hold?.cause == "perception_stalled" }
         assertEquals("the stall begins the hold", 8_500L, stall.atMs)
@@ -556,8 +562,11 @@ class SessionTimelineTest {
         assertTrue("received before the stall", stale.all { checkNotNull(it.receivedAtMs) < stall.atMs })
         assertTrue("the stall's notice is over when they come", run.speech().any { it.kind == "done" && it.atMs < SessionScenarios.STALE_ARRIVE_MS })
         assertTrue("none counts", run.holdStates().filter { it.atMs in 10_050..10_350 }.all { it.trace.hold?.freshResults == 0 })
-        val said = run.outcomes().first { it.at > stall.atMs && it.key.startsWith("event_obstacle_") }
-        assertEquals("today the first stale result's prompt is said", "10050 speech", "${said.at} ${said.via.first()}")
+        val prompts = run.outcomes().filter { it.at > stall.atMs && it.key.startsWith("event_obstacle_") }
+        val ofStale = prompts.filter { it.at in 10_050L..10_350L }
+        assertTrue("the stale results' prompts are offered and held", ofStale.size == 4 && ofStale.all { it.revoked == PromptRevokeReasons.SAFETY_HOLD })
+        val said = prompts.first { it.via.isNotEmpty() }
+        assertEquals("the person is said by the result that releases the hold", "10950 speech", "${said.at} ${said.via.first()}")
         assertRelease(run, at = 10_950, fresh = 6, span = 500)
     }
 
@@ -568,7 +577,8 @@ class SessionTimelineTest {
         assertEquals("the first result back is of a picture from before the background", SessionScenarios.BEFORE_BACKGROUND_RECEIVED_MS, late.receivedAtMs)
         assertTrue("the interruption is said before it comes", run.speech().any { it.kind == "done" && it.atMs < late.atMs })
         assertEquals("it does not count", 0, run.holdStates().single { it.atMs == late.atMs }.trace.hold?.freshResults)
-        assertEquals("today its prompt is said", "9750 speech", run.outcomes().first { it.at >= late.atMs }.let { "${it.at} ${it.via.first()}" })
+        assertEquals("its prompt is held", PromptRevokeReasons.SAFETY_HOLD, run.outcomes().first { it.at >= late.atMs }.revoked)
+        assertEquals("and said by the result that releases the hold", "10350 speech", run.outcomes().first { it.at >= late.atMs && it.via.isNotEmpty() }.let { "${it.at} ${it.via.first()}" })
         assertRelease(run, at = 10_350, fresh = 6, span = 500)
     }
 
@@ -581,7 +591,8 @@ class SessionTimelineTest {
         assertEquals(SessionScenarios.BETWEEN_BACKGROUNDS_RECEIVED_MS, late.receivedAtMs)
         assertEquals("received before the second stop: it does not count", 0, run.holdStates().single { it.atMs == late.atMs }.trace.hold?.freshResults)
         assertEquals("both interruptions are said before it comes", 2, run.speech().count { it.kind == "done" && it.id?.startsWith("s") == true && it.atMs < late.atMs })
-        assertEquals("today its prompt is said", "12050 speech", run.outcomes().first { it.at >= late.atMs }.let { "${it.at} ${it.via.first()}" })
+        assertEquals("its prompt is held", PromptRevokeReasons.SAFETY_HOLD, run.outcomes().first { it.at >= late.atMs }.revoked)
+        assertEquals("and said by the result that releases the hold", "12650 speech", run.outcomes().first { it.at >= late.atMs && it.via.isNotEmpty() }.let { "${it.at} ${it.via.first()}" })
         assertRelease(run, at = 12_650, fresh = 6, span = 500)
     }
 
@@ -592,7 +603,9 @@ class SessionTimelineTest {
         assertEquals(SessionScenarios.IN_BACKGROUND_RESULT_MS, late.atMs)
         val heldThen = run.holdStates().last { it.atMs <= late.atMs }
         assertEquals("still in the background, the stop holds", "interrupted(lifecycle) true", "${heldThen.trace.stateLabel} ${heldThen.trace.hold?.stopping}")
-        assertEquals("today its prompt is said in the background", "9850 speech", run.outcomes().first { it.at >= late.atMs }.let { "${it.at} ${it.via.first()}" })
+        assertTrue("the interruption is said before it comes: speech would take it", run.speech().any { it.kind == "done" && it.id?.startsWith("s") == true && it.atMs < late.atMs })
+        assertEquals("its prompt is held in the background", PromptRevokeReasons.SAFETY_HOLD, run.outcomes().first { it.at >= late.atMs }.revoked)
+        assertEquals("and said, back in the foreground, by the result that releases the hold", "13850 speech", run.outcomes().first { it.at >= late.atMs && it.via.isNotEmpty() }.let { "${it.at} ${it.via.first()}" })
         assertRelease(run, at = 13_850, fresh = 6, span = 500)
     }
 
@@ -602,18 +615,25 @@ class SessionTimelineTest {
         val background = SessionScenarios.QUEUED_BACKGROUND_MS
         val queued = run.motor().single { it.kind == "queue" && it.result == "queued" }
         assertTrue("a person's rhythm waits for the motor when the app goes", queued.atMs < background)
-        assertTrue("not started or dropped by then", run.motor().none { it.rhythm == queued.rhythm && it.atMs in queued.atMs..background && (it.kind == "start" || it.kind == "drop") })
-        val started = run.motor().first { it.kind == "start" && it.rhythm == queued.rhythm }
-        val stateThen = run.holdStates().last { it.atMs <= started.atMs }
-        assertEquals("today it plays in the background", "interrupted(lifecycle)", stateThen.trace.stateLabel)
+        assertTrue("not started or dropped before then", run.motor().none { it.rhythm == queued.rhythm && it.atMs in queued.atMs until background && (it.kind == "start" || it.kind == "drop") })
+        val prompt = run.frames().single { it.atMs == queued.atMs }.events.first()
+        val expiresAt = queued.atMs + (prompt.expiresAt - prompt.timestamp)
+        val alarmEnds = background + GuidanceHaptic.INTERRUPTED.timings.sum()
+        assertTrue("left waiting it would still be valid when the interruption's alarm frees the motor ($expiresAt, $alarmEnds)", expiresAt > alarmEnds)
+        assertEquals("withdrawn as the app goes", listOf("motor drop_queued", "motor drop ${queued.rhythm!!.name.lowercase()}"), run.deviceAndAlertsAt(background).take(2))
+        assertEquals("its prompt taken back as held", PromptRevokeReasons.SAFETY_HOLD, run.outcomes().single { it.at == background }.revoked)
+        assertTrue("it never plays in the background", run.motor().none { it.kind == "start" && it.rhythm == queued.rhythm })
     }
 
     @Test
     fun stop_and_recovery_screen_reader() {
         val run = check(SessionScenarios.stopAndRecoveryScreenReader)
         val recovered = SessionScenarios.RECOVERY_LAST_UNCOVER_MS + 500
-        val handed = run.outcomes().first { it.at > SessionScenarios.RECOVERY_COVER_MS + 1_000 && it.key.startsWith("event_obstacle_") }
-        assertEquals("today the person goes to the screen reader on the sixth clear frame", "$recovered screen_reader", "${handed.at} ${handed.via.first()}")
+        val prompts = run.outcomes().filter { it.at > SessionScenarios.RECOVERY_COVER_MS + 1_000 && it.key.startsWith("event_obstacle_") }
+        assertTrue("from the sixth clear frame the person is held", prompts.filter { it.at < recovered + 500 }.let { it.isNotEmpty() && it.first().at == recovered && it.all { o -> o.revoked == PromptRevokeReasons.SAFETY_HOLD } })
+        assertTrue("and the screen reader is handed none of it", run.entries.filterIsInstance<TimelineEntry.ScreenReader>().none { it.atMs in recovered until recovered + 500 && it.text.startsWith("event_obstacle_") })
+        val handed = prompts.first { it.via.isNotEmpty() }
+        assertEquals("the person goes to the screen reader with the result that releases the hold", "${recovered + 500} screen_reader", "${handed.at} ${handed.via.first()}")
         assertRelease(run, at = recovered + 500, fresh = 6, span = 500)
     }
 
@@ -621,9 +641,11 @@ class SessionTimelineTest {
     fun recovery_fast_frames() {
         val run = check(SessionScenarios.recoveryFastFrames)
         val back = run.holdStates().first { it.trace.hold?.stopping == false }
-        val said = run.outcomes().single { it.key.startsWith("event_obstacle_") }
-        assertEquals("today the person ahead is said on the first frame judged again", "${back.atMs} CRITICAL", "${said.at} ${said.priority}")
+        val prompts = run.outcomes().filter { it.key.startsWith("event_obstacle_") }
+        val said = prompts.single { it.via.isNotEmpty() }
+        assertTrue("from the first frame judged again the person ahead is held", prompts.filter { it.at < said.at }.let { it.isNotEmpty() && it.first().at == back.atMs && it.all { o -> o.revoked == PromptRevokeReasons.SAFETY_HOLD } })
         val release = assertRelease(run, at = null, fresh = null, span = null)
+        assertEquals("and said, critical, by the result that releases the hold", "${release.atMs} CRITICAL", "${said.at} ${said.priority}")
         assertTrue("the span settles it: the first result 500 ms of picture on (${release.atMs - back.atMs})", release.atMs - back.atMs in 500L..532L)
     }
 
@@ -646,7 +668,9 @@ class SessionTimelineTest {
         val run = check(SessionScenarios.recoveryOneFps)
         val back = run.holdStates().first { it.trace.hold?.stopping == false }
         assertEquals("the sixth clear frame judges again", 18_050L, back.atMs)
-        assertEquals("today the person is said then", "18050 speech", run.outcomes().first { it.at >= back.atMs && it.key.startsWith("event_obstacle_") }.let { "${it.at} ${it.via.first()}" })
+        val prompts = run.outcomes().filter { it.at >= back.atMs && it.key.startsWith("event_obstacle_") }
+        assertEquals("the person is held on the first two results", listOf(18_050L, 19_050L), prompts.filter { it.revoked == PromptRevokeReasons.SAFETY_HOLD }.map { it.at })
+        assertEquals("and said by the third, which releases the hold", "20050 speech", prompts.first { it.via.isNotEmpty() }.let { "${it.at} ${it.via.first()}" })
         assertRelease(run, at = 20_050, fresh = 3, span = 2_000)
     }
 
@@ -779,8 +803,7 @@ class SessionTimelineTest {
         Timelines.check(script.name, run.lines)
         assertEquals("no disagreement and no observation fault", emptyList<LoggedLine>(), run.observationFaults)
         assertEquals("the cross-check", emptyList<String>(), TimelineCrossCheck.check(run.entries))
-        // Ordinary prompts that reached the user while prompts were held: what holding them would change.
-        TimelineCrossCheck.heldDeliveries(run.entries).forEach { println("held delivery ${script.name} $it") }
+        assertEquals("the card across holds", emptyList<String>(), TimelineCrossCheck.cardsAcrossHolds(run.entries, run.cards))
         return run
     }
 
@@ -837,7 +860,8 @@ class SessionTimelineTest {
     private fun assertCoverCutsPrompt(run: SessionRun): Long {
         val confirmed = run.states().first { it.label == "stop_required(camera_obstructed)" }.at
         assertEquals("the sixth covered frame", SessionScenarios.RECOVERY_COVER_MS + 500, confirmed)
-        val cut = run.speech().single { it.kind == "cut" }
+        // The first cut: the stop at the end can cut the lens-restored sentence, said late behind the released prompt.
+        val cut = run.speech().first { it.kind == "cut" }
         assertEquals("a prompt is cut off as the cover is confirmed", confirmed, cut.atMs)
         val prompt = run.decided().single { it.id.toString() == cut.id }
         assertTrue("one below critical (${prompt.priority})", prompt.priority < EventPriority.CRITICAL)
@@ -860,8 +884,14 @@ class SessionTimelineTest {
             run.states().filter { it.at >= confirmed }.take(2).map { it.describe() },
         )
         assertEquals("fresh results for 500 ms release the stop", "${recovered + 500} guiding result", run.states().first { it.at > confirmed && it.label == "guiding" }.describe())
-        val again = run.outcomes().first { it.at > confirmed && it.key.startsWith("event_obstacle_") }
-        assertEquals("the person is prompted on that frame, and said", "$recovered event_obstacle_left_person true", "${again.at} ${again.key} ${PromptDeliveryChannels.SPEECH in again.via}")
+        val prompted = run.outcomes().filter { it.at > confirmed && it.key == "event_obstacle_left_person" }
+        assertEquals(
+            "the person is decided from that frame on and held until the release",
+            (recovered until recovered + 500 step 100).toList(),
+            prompted.filter { it.revoked == PromptRevokeReasons.SAFETY_HOLD }.map { it.at },
+        )
+        val said = prompted.first { it.via.isNotEmpty() }
+        assertEquals("and said by the result that releases the stop", "${recovered + 500} true", "${said.at} ${PromptDeliveryChannels.SPEECH in said.via}")
     }
 
     /** A prompt is being said when the screen goes; guidance stops, the motor after it, and nothing reaches the safety state after. Returns the prompt's id. */

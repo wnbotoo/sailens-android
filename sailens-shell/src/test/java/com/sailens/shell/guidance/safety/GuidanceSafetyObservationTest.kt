@@ -35,6 +35,7 @@ class GuidanceSafetyObservationTest {
     private val states = mutableListOf<SafetyStateTrace>()
     private val alerts = mutableListOf<GuidanceAlertTrace>()
     private val published = mutableListOf<GuidanceSafetyState>()
+    private val publishedHolds = mutableListOf<PromptHoldView?>()
     private val log = mutableListOf<String>()
     private val logData = mutableListOf<Map<String, Any>?>()
 
@@ -66,9 +67,10 @@ class GuidanceSafetyObservationTest {
             states += it
         },
         recordAlert = { alerts += it },
-        publishState = {
+        publishState = { state, hold ->
             check(!failPublishing) { "no UI" }
-            published += it
+            published += state
+            publishedHolds += hold
         },
         logger = logger,
         timed = { diagnostics },
@@ -102,6 +104,31 @@ class GuidanceSafetyObservationTest {
             listOf(GuidanceSafetyState.Idle, GuidanceSafetyState.Initializing, GuidanceSafetyState.Guiding),
             published,
         )
+    }
+
+    @Test
+    fun `the card hears of a hold beginning and of its cause going, not of a result counted`() {
+        running()
+        val dark = BaselineQualification.Unqualified(UnqualifiedReason.TOO_DARK, emptySet())
+        observation.observe { onResult(2_000, dark, 2, 2_000, speechReady = true) }
+        for ((at, seq) in listOf(2_100L to 3L, 2_200L to 4L, 2_300L to 5L)) {
+            observation.observe { onResult(at, BaselineQualification.Qualified, seq, at, speechReady = true) }
+        }
+        val stop = GuidanceSafetyState.StopRequired(StopReason.TOO_DARK)
+        assertEquals(
+            "the stop is published with its hold, then once more as its cause goes; the counted results add nothing",
+            listOf(
+                GuidanceSafetyState.Idle to null,
+                GuidanceSafetyState.Initializing to null,
+                GuidanceSafetyState.Guiding to null,
+                stop to PromptHoldView(HoldCause.TOO_DARK, stopping = true),
+                stop to PromptHoldView(HoldCause.TOO_DARK, stopping = false),
+            ),
+            published.zip(publishedHolds),
+        )
+        assertEquals("while every count is a record", 7, states.size)
+        observation.observe { onResult(2_600, BaselineQualification.Qualified, 6, 2_600, speechReady = true) }
+        assertEquals("the release is published", GuidanceSafetyState.Guiding to null, published.zip(publishedHolds).last())
     }
 
     @Test

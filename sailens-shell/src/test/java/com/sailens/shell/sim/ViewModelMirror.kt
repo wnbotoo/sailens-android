@@ -29,7 +29,8 @@ import com.sailens.shell.guidance.screen.guidanceToggleAction
 import com.sailens.shell.guidance.screen.startRequested
 import com.sailens.shell.guidance.screen.stopped
 import com.sailens.shell.guidance.screen.toTrace
-import com.sailens.shell.guidance.screen.withFrameEvents
+import com.sailens.shell.guidance.screen.withHoldBegun
+import com.sailens.shell.guidance.screen.withResultEvents
 import com.sailens.shell.guidance.settings.GuidanceFeedbackSettings
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -113,7 +114,7 @@ internal class ViewModelMirror(
     private val runs = GuidanceRunSequencer(viewModelScope) { resetProcessors() }
     private var stallWatchJob: Job? = null
 
-    // SceneAnalysisViewModel.kt:139-181
+    // SceneAnalysisViewModel.kt:139-185
     private val alerts: MirrorAlerts = seams.alerts {
         GuidanceSystemAlerts(
             cancelStallLoop = ::cancelStallLoop,
@@ -123,6 +124,10 @@ internal class ViewModelMirror(
                 record.ui("clear_latest_result")
             },
             preemptDescription = description::preemptForGuidance,
+            holdOrdinaryPrompts = {
+                uiState.update { it.withHoldBegun() }
+                guidanceOutput.holdBegan()
+            },
             playAlarm = { haptic -> haptics.play(haptic) },
             speakSystemNotice = { text, priority -> speech.speakSystemNotice(text, priority = priority) },
             announceToScreenReader = announceToScreenReader,
@@ -162,7 +167,7 @@ internal class ViewModelMirror(
             initialOutput = uiState.value.outputFacts(),
             recordState = record::recordSafetyState,
             recordAlert = record::recordGuidanceAlert,
-            publishState = { state -> uiState.update { it.copy(safetyState = state) } },
+            publishState = { state, hold -> uiState.update { it.copy(safetyState = state, promptHold = hold) } },
             timed = { uiState.value.showDiagnostics },
             logger = logger,
             clock = clock,
@@ -173,7 +178,7 @@ internal class ViewModelMirror(
         )
     }
 
-    // SceneAnalysisViewModel.kt:184-234
+    // SceneAnalysisViewModel.kt:188-239
     private val guidanceOutput: MirrorOutput = seams.output {
         GuidanceOutputWiring(
             speakOwn = { announcement, onSpoken, onOutcome, atMs -> speech.speak(announcement, onSpoken, onOutcome, atMs) },
@@ -186,6 +191,7 @@ internal class ViewModelMirror(
             announceToScreenReader = announceToScreenReader,
             vibrateEvent = haptics::trigger,
             vibrateEventAlone = haptics::triggerOrQueue,
+            dropQueuedNavigation = haptics::dropQueuedNavigation,
             playOrReserveVisionFault = { priority, onPlayed ->
                 haptics.playOrReserve(
                     GuidanceHaptic.VISION_UNRELIABLE,
@@ -228,17 +234,17 @@ internal class ViewModelMirror(
 
     private var releaseJob: Job? = null
 
-    // SceneAnalysisViewModel.kt:241-242
+    // SceneAnalysisViewModel.kt:246-247
     private val engineLease = sharedEngineOwner.acquire()
     val releaseScope = CoroutineScope(SupervisorJob() + context)
     private var frameCount: Long = 0
     private var latestSceneResult: SceneResult? = null
 
-    // SceneAnalysisViewModel.kt:250-251
+    // SceneAnalysisViewModel.kt:255-256
     @Volatile
     private var isReleasingResources = false
 
-    // SceneAnalysisViewModel.kt:253-287 (the overlay's collector left out)
+    // SceneAnalysisViewModel.kt:258-292 (the overlay's collector left out)
     init {
         speech.setSpeechRate(settings.value.speechRate)
         if (settings.value.speechEnabled) {
@@ -267,7 +273,7 @@ internal class ViewModelMirror(
         }
     }
 
-    // SceneAnalysisViewModel.kt:289-300
+    // SceneAnalysisViewModel.kt:294-305
     private fun initializeSpeech() {
         if (uiState.value.isScreenReaderActive) {
             logger.info(TAG, "Screen reader active; deferring to it instead of starting own TTS")
@@ -276,7 +282,7 @@ internal class ViewModelMirror(
         speech.initialize()
     }
 
-    // SceneAnalysisViewModel.kt:302-315
+    // SceneAnalysisViewModel.kt:307-320
     private fun applyScreenReaderMode(active: Boolean) {
         val wasActive = uiState.value.isScreenReaderActive
         uiState.update { it.copy(isScreenReaderActive = active) }
@@ -290,13 +296,13 @@ internal class ViewModelMirror(
         checkSpeechUnavailable()
     }
 
-    // SceneAnalysisViewModel.kt:318-321
+    // SceneAnalysisViewModel.kt:323-326
     private fun checkSpeechUnavailable() {
         val state = uiState.value
         alerts.onOutput(state.speechEngineState, state.isSpeechEnabled, state.isScreenReaderActive, state.isHapticsEnabled)
     }
 
-    // SceneAnalysisViewModel.kt:324-330
+    // SceneAnalysisViewModel.kt:329-335
     private fun SceneAnalysisUiState.outputFacts() = OutputFacts(
         engineState = speechEngineState,
         speechEnabled = isSpeechEnabled,
@@ -305,7 +311,7 @@ internal class ViewModelMirror(
         speechReady = speech.isReady,
     )
 
-    // SceneAnalysisViewModel.kt:332-342 (no start gate is bound here)
+    // SceneAnalysisViewModel.kt:337-347 (no start gate is bound here)
     fun toggleAnalysis() {
         when (val action = guidanceToggleAction(uiState.value.isRunning, startGate = null)) {
             GuidanceToggleAction.Stop -> stopSceneAnalysis()
@@ -317,7 +323,7 @@ internal class ViewModelMirror(
         }
     }
 
-    // SceneAnalysisViewModel.kt:356-380
+    // SceneAnalysisViewModel.kt:361-385
     private fun applyFeedbackSettings(settings: GuidanceFeedbackSettings) {
         val previous = uiState.value
         uiState.update {
@@ -342,13 +348,13 @@ internal class ViewModelMirror(
         guidanceOutput.settingsChanged()
     }
 
-    // SceneAnalysisViewModel.kt:416-479
+    // SceneAnalysisViewModel.kt:421-485
     private fun startSceneAnalysis() {
         frameCount = 0
         val run = observer.runRequested()
         runs.start {
             observer.blockStarted(run, coroutineContext.job)
-            // :419-428
+            // :424-433
             var waitTime = 0L
             val maxWaitMs = 2000L
             while (isReleasingResources && waitTime < maxWaitMs) {
@@ -359,10 +365,10 @@ internal class ViewModelMirror(
                 logger.warning(TAG, "Resource release timeout; proceeding with analysis anyway")
             }
 
-            // :430
+            // :435
             startStallWatch()
 
-            // :433-444 (frames are not lent here, so there is nothing to give back)
+            // :438-449 (frames are not lent here, so there is nothing to give back)
             analysis(
                 frames(run),
                 {},
@@ -374,25 +380,26 @@ internal class ViewModelMirror(
                 alerts.onFlowFailed(e)
             }.collectLatest { result ->
                 observer.resultArrived(run, result)
-                // :445-461
+                // :450-467
                 frameCount++
                 alerts.onResult(result.qualification.baseline, result.sequenceNumber, result.frameReceivedAtMs)
+                val holdOrdinary = alerts.holdsOrdinaryPrompts
                 latestSceneResult = result
                 val events = result.events
                 uiState.update {
-                    it.withFrameEvents(events, clock()).copy(
+                    it.withResultEvents(events, clock(), holdOrdinary).copy(
                         frameDisplayWidth = result.frameDisplayWidth,
                         frameDisplayHeight = result.frameDisplayHeight,
                     )
                 }
-                // :476
-                guidanceOutput.onFrame(events, result.sequenceNumber, result.visionFaults)
+                // :482
+                guidanceOutput.onFrame(events, result.sequenceNumber, result.visionFaults, holdOrdinary)
                 observer.resultHandled(run, result.sequenceNumber)
             }
         }
     }
 
-    // SceneAnalysisViewModel.kt:482-491
+    // SceneAnalysisViewModel.kt:488-497
     private fun startStallWatch() {
         stallWatchJob?.cancel()
         alerts.onStallWatchStarted()
@@ -404,29 +411,29 @@ internal class ViewModelMirror(
         }
     }
 
-    // SceneAnalysisViewModel.kt:493-496
+    // SceneAnalysisViewModel.kt:499-502
     private fun stopStallWatch() {
         cancelStallLoop()
         alerts.onStallWatchStopped()
     }
 
-    // SceneAnalysisViewModel.kt:498-501
+    // SceneAnalysisViewModel.kt:504-507
     fun cancelStallLoop() {
         stallWatchJob?.cancel()
         stallWatchJob = null
     }
 
-    // SceneAnalysisViewModel.kt:507-509
+    // SceneAnalysisViewModel.kt:513-515
     fun onGuidanceInterrupted(noticeText: String) {
         alerts.onLifecycleStop(noticeText)
     }
 
-    // SceneAnalysisViewModel.kt:512-514
+    // SceneAnalysisViewModel.kt:518-520
     fun acknowledgeInterruption() {
         alerts.onLifecycleStart()
     }
 
-    // SceneAnalysisViewModel.kt:542-555 (the overlay's render is not mirrored)
+    // SceneAnalysisViewModel.kt:548-561 (the overlay's render is not mirrored)
     private fun stopSceneAnalysis() {
         stopStallWatch()
         guidanceOutput.stop {
@@ -438,7 +445,7 @@ internal class ViewModelMirror(
     }
 
     /**
-     * SceneAnalysisViewModel.kt:557-570. The real `viewModelScope` is cancelled before `onCleared` runs (Android's
+     * SceneAnalysisViewModel.kt:563-576. The real `viewModelScope` is cancelled before `onCleared` runs (Android's
      * `ViewModel` contract; the view model relies on it at :633), so this cancels it first: the state-flow
      * collectors, the stall loop and the analysis collector run no more after it.
      */
@@ -453,7 +460,7 @@ internal class ViewModelMirror(
         engineLease.close()
     }
 
-    // SceneAnalysisViewModel.kt:630-660 (the release runs in the release scope itself, not in Dispatchers.IO)
+    // SceneAnalysisViewModel.kt:636-666 (the release runs in the release scope itself, not in Dispatchers.IO)
     private fun releaseSceneAnalysisResources() {
         releaseJob?.cancel()
         isReleasingResources = true

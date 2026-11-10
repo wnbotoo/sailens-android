@@ -86,6 +86,41 @@ class DeliveryBoundaryScriptsTest {
         assertTrue("the cut side person is decided again on the very next frame", redecided > flushing)
     }
 
+    /**
+     * The hold enforced as the shell enforces it, against the same frames only observed: a covered lens for a second,
+     * then a vehicle ahead. Its prompts wait for fresh results, and the outputs differ nowhere else.
+     */
+    @Test
+    fun `with the hold enforced a prompt after a covered lens waits for fresh results, and nothing else changes`() {
+        for (detFirst in listOf(DetFirstConfig(), DetFirstConfig.LAUNCH)) {
+            val analysis = AnalysisConfig(detFirst = detFirst)
+            val scenes = { i: Int ->
+                when {
+                    i < 10 -> scene(sidePerson(1))
+                    i < 20 -> scene(frameQuality = FrameQuality.OBSTRUCTED)
+                    else -> scene(centerObstacle(2, ObstacleCategory.VEHICLE))
+                }
+            }
+            fun run(enforceHold: Boolean) = FingerprintPipeline(analysis, OutputCondition.V1, enforceHold = enforceHold).also { pipeline ->
+                frames(analysis, 40, scenes).forEach(pipeline::onFrame)
+                pipeline.finish()
+            }
+            val observed = run(enforceHold = false)
+            val enforced = run(enforceHold = true)
+            val case = "detFirst=$detFirst"
+            assertEquals("$case: the stop begins with the first covered frame", 11L, enforced.heldFrames.min())
+            val held = enforced.lines.filter { !it.startsWith(FingerprintPipeline.QUALIFICATION_PREFIX) && "revokeReason=safety_hold" in it }
+            assertEquals("$case: the vehicle is held on the five clear frames before the release", (21L..25L).toList(), held.map(::seqOf))
+            assertTrue("$case: and offered by the sixth", enforced.lines.any { seqOf(it) == 26L && it.contains(" outcome ") && it.contains("revokeReason=null") })
+            assertTrue("$case: only observed, it is offered at once", observed.lines.any { seqOf(it) == 21L && it.contains(" outcome ") })
+            assertTrue("$case: and never held", observed.lines.none { "revokeReason=safety_hold" in it })
+            val delivery = { pipeline: FingerprintPipeline -> pipeline.lines.filterNot { it.startsWith(FingerprintPipeline.QUALIFICATION_PREFIX) } }
+            val firstDifference = delivery(observed).zip(delivery(enforced)).indexOfFirst { (a, b) -> a != b }
+            assertTrue("$case: the first difference is on a frame the hold stood on", seqOf(delivery(enforced)[firstDifference]) in enforced.heldFrames)
+            assertEquals("$case: before the stop nothing differs", delivery(observed).takeWhile { seqOf(it) <= 10 }, delivery(enforced).takeWhile { seqOf(it) <= 10 })
+        }
+    }
+
     /** What the engine ends by itself is reported at the next settlement, never inside the frame it ended in. */
     @Test
     fun `a sentence heard to the end is reported at the next settlement`() {

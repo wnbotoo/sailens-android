@@ -31,30 +31,46 @@
 10020 speech done s1
 10050 frame seq=91 lag=4090 q=qualified events=[e2:event_obstacle_left_person:HIGH{count=1}@MEDIUM~13050]
 10050 state stop_required(perception_stalled) since=8500 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=perception_stalled(since=8500,recovering,fresh=0,span=0)
-10050 speech speak e2 "event_obstacle_left_person{count=1}" scale=20 exp=13050 -> accepted
-10050 receipt accepted e2 -> true
-10050 motor trigger left -> played
-10050 outcome e2 src=91 event_obstacle_left_person HIGH delivered=speech,haptics
-10150 frame seq=92 lag=4180 q=qualified events=[]
-10250 frame seq=93 lag=4270 q=qualified events=[]
-10350 frame seq=94 lag=4360 q=qualified events=[]
-10450 frames seq=95..95 n=1 from=10450 q=qualified
+10050 receipt revoke e2 safety_hold
+10050 outcome e2 src=91 event_obstacle_left_person HIGH revoked=safety_hold
+10150 frame seq=92 lag=4180 q=qualified events=[e3:event_obstacle_left_person:HIGH{count=1}@MEDIUM~13150]
+10150 receipt revoke e3 safety_hold
+10150 outcome e3 src=92 event_obstacle_left_person HIGH revoked=safety_hold
+10250 frame seq=93 lag=4270 q=qualified events=[e4:event_obstacle_left_person:HIGH{count=1}@MEDIUM~13250]
+10250 receipt revoke e4 safety_hold
+10250 outcome e4 src=93 event_obstacle_left_person HIGH revoked=safety_hold
+10350 frame seq=94 lag=4360 q=qualified events=[e5:event_obstacle_left_person:HIGH{count=1}@MEDIUM~13350]
+10350 receipt revoke e5 safety_hold
+10350 outcome e5 src=94 event_obstacle_left_person HIGH revoked=safety_hold
+10450 frame seq=95 q=qualified events=[e6:event_obstacle_left_person:HIGH{count=1}@MEDIUM~13450]
 10450 state stop_required(perception_stalled) since=8500 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=perception_stalled(since=8500,recovering,fresh=1,span=0)
-10550 frames seq=96..96 n=1 from=10550 q=qualified
+10450 receipt revoke e6 safety_hold
+10450 outcome e6 src=95 event_obstacle_left_person HIGH revoked=safety_hold
+10550 frame seq=96 q=qualified events=[e7:event_obstacle_left_person:HIGH{count=1}@MEDIUM~13550]
 10550 state stop_required(perception_stalled) since=8500 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=perception_stalled(since=8500,recovering,fresh=2,span=100)
-10650 frames seq=97..97 n=1 from=10650 q=qualified
+10550 receipt revoke e7 safety_hold
+10550 outcome e7 src=96 event_obstacle_left_person HIGH revoked=safety_hold
+10650 frame seq=97 q=qualified events=[e8:event_obstacle_left_person:HIGH{count=1}@MEDIUM~13650]
 10650 state stop_required(perception_stalled) since=8500 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=perception_stalled(since=8500,recovering,fresh=3,span=200)
-10750 frames seq=98..98 n=1 from=10750 q=qualified
+10650 receipt revoke e8 safety_hold
+10650 outcome e8 src=97 event_obstacle_left_person HIGH revoked=safety_hold
+10750 frame seq=98 q=qualified events=[e9:event_obstacle_left_person:HIGH{count=1}@MEDIUM~13750]
 10750 state stop_required(perception_stalled) since=8500 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=perception_stalled(since=8500,recovering,fresh=4,span=300)
-10850 frames seq=99..99 n=1 from=10850 q=qualified
+10750 receipt revoke e9 safety_hold
+10750 outcome e9 src=98 event_obstacle_left_person HIGH revoked=safety_hold
+10850 frame seq=99 q=qualified events=[e10:event_obstacle_left_person:HIGH{count=1}@MEDIUM~13850]
 10850 state stop_required(perception_stalled) since=8500 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=perception_stalled(since=8500,recovering,fresh=5,span=400)
-10950 frames seq=100..100 n=1 from=10950 q=qualified
+10850 receipt revoke e10 safety_hold
+10850 outcome e10 src=99 event_obstacle_left_person HIGH revoked=safety_hold
+10950 frame seq=100 q=qualified events=[e11:event_obstacle_left_person:HIGH{count=1}@MEDIUM~13950]
 10950 state guiding since=10950 phase=running interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=result hold=none released=(fresh=6,span=500,src=100,fallbacks=0)
-11650 frames seq=101..107 n=7 from=11050 q=qualified
-11690 speech done e2
-11690 receipt confirm e2
-11850 frames seq=108..109 n=2 from=11750 q=qualified
+10950 speech speak e11 "event_obstacle_left_person{count=1}" scale=20 exp=13950 -> accepted
+10950 receipt accepted e11 -> true
+10950 motor trigger left -> played
+10950 outcome e11 src=100 event_obstacle_left_person HIGH delivered=speech,haptics
+11850 frames seq=101..109 n=9 from=11050 q=qualified
 12000 script stop
 12000 speech stop
+12000 speech cut e11
 12000 motor cancel
 12000 state idle since=12000 phase=not_started interrupted=false stall=none judgement=qualified faults=[] channel=speech cause=stopped hold=none

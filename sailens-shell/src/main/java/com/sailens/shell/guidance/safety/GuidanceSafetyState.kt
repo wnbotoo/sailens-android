@@ -67,7 +67,16 @@ enum class OutputFault {
  * Why ordinary prompts are held: the stop that began it. A stop for the camera or a stall is a [StopReason]; going to the
  * background is [LIFECYCLE].
  */
-internal enum class HoldCause { CAMERA_OBSTRUCTED, TOO_DARK, STARTUP_STALLED, PERCEPTION_STALLED, LIFECYCLE }
+enum class HoldCause { CAMERA_OBSTRUCTED, TOO_DARK, STARTUP_STALLED, PERCEPTION_STALLED, LIFECYCLE }
+
+/**
+ * What the status card shows of a hold: the stop that began it, and whether that stop's cause still holds ([stopping])
+ * or fresh results are awaited. Not the progress: the card does not show it, so a counted result changes nothing here.
+ */
+data class PromptHoldView(val cause: HoldCause, val stopping: Boolean)
+
+internal val GuidanceSafetyAxes.holdView: PromptHoldView?
+    get() = hold?.let { PromptHoldView(it.cause, it.stopping) }
 
 /** The session's stage, from the facts the view model keeps today (`isLoading`, `isRunning`, a result seen). */
 internal enum class GuidanceRunPhase {

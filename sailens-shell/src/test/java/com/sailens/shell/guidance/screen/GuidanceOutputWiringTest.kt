@@ -75,6 +75,7 @@ class GuidanceOutputWiringTest {
             calls += "vibrate:${event.messageKey}"
             NavigationClaim.STARTED
         },
+        dropQueuedNavigation = { calls += "dropQueued" },
         playOrReserveVisionFault = { priority, onPlayed ->
             calls += "faultRhythm:$priority"
             if (motorStarts) onPlayed() else reservation = onPlayed
@@ -222,7 +223,7 @@ class GuidanceOutputWiringTest {
             speakOwn = { _, _, _, _ -> true }, settleFrame = { now }, speechReady = { true }, stopSpeech = {},
             announcementFor = { Announcement(id = it.id.toString(), key = it.messageKey, text = it.messageKey, priority = 0, expiresAtMs = it.expiresAt) },
             eventText = { it.messageKey }, noticeText = { it }, announceToScreenReader = {}, vibrateEvent = { true },
-            vibrateEventAlone = { _, _ -> NavigationClaim.STARTED }, playOrReserveVisionFault = { _, onPlayed -> onPlayed() },
+            vibrateEventAlone = { _, _ -> NavigationClaim.STARTED }, dropQueuedNavigation = {}, playOrReserveVisionFault = { _, onPlayed -> onPlayed() },
             cancelVisionFaultReservation = {}, cancelHaptics = {}, descriptionHoldsTheFloor = { false }, preemptDescription = {},
             confirmDelivered = {}, revokeUndelivered = { _, _ -> }, reportCut = {}, reportHeardAfterCut = {}, promptAccepted = { true },
             outputSettings = { GuidanceOutputSettings(speechEnabled = true, screenReaderActive = false, hapticsEnabled = true) },
