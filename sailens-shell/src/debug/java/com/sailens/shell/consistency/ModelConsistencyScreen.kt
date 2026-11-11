@@ -158,7 +158,7 @@ private fun Results(done: ConsistencyPhase.Done, semanticLabel: (Int) -> String)
                 verdict = result.depthVerdict,
                 accelerators = result.depth.result?.accelerators,
                 details = result.depth.result?.consistency?.let { c ->
-                    listOf(
+                    listOfNotNull(
                         stringResource(
                             R.string.model_consistency_depth_metrics,
                             percent(c.maxMedianRelativeError.coerceAtMost(10f)),
@@ -166,6 +166,9 @@ private fun Results(done: ConsistencyPhase.Done, semanticLabel: (Int) -> String)
                             c.framesWithGeometry,
                             c.minLabelAgreement?.let(::percent) ?: "–",
                         ),
+                        c.nonFiniteOutputFrames.takeIf { it > 0 }?.let {
+                            stringResource(R.string.model_consistency_depth_non_finite, it)
+                        },
                     )
                 }.orEmpty(),
             )

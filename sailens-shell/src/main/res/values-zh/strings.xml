@@ -386,6 +386,7 @@
     <string name="model_consistency_detection_metrics">CPU 检出的物体，加速器也检出：%1$s（共 %2$d 个）。加速器多检出：%3$s（共 %4$d 个）</string>
     <string name="model_consistency_depth">深度</string>
     <string name="model_consistency_depth_metrics">视差差异中位数最大：%1$s。地面拟合一致：%2$d 帧（有朝向数据的帧：%3$d）。标签一致率最低：%4$s</string>
+    <string name="model_consistency_depth_non_finite">有 %1$d 帧的输出含 NaN 或无穷大：每一帧都算一次失败的运行，所以检查不通过。</string>
     <string name="model_consistency_semantic_inconclusive">无法判断：差异处在不确定区间，通常是手机晃动或画面模糊造成的。请拿稳手机、对着清晰的画面重试</string>
     <string name="model_consistency_frames_changed">有 %1$d 帧在比对过程中被改动，已排除。这说明相机快照有 bug</string>
     <string name="model_consistency_overall_pass">总体：一致</string>

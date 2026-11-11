@@ -26,6 +26,29 @@ class DepthConsistencyTest {
     }
 
     @Test
+    fun `identical outputs agree even where the reference is zero, and a value against zero is infinitely off`() {
+        val zeros = map { 0f }
+        assertEquals(0f, compareDisparity(zeros, map { 0f }).medianRelativeError, 0f)
+        assertEquals(0f, compareDisparity(zeros, map { 0f }).p95RelativeError, 0f)
+        assertEquals(Float.POSITIVE_INFINITY, compareDisparity(zeros, map { 0.1f }).medianRelativeError)
+        assertEquals(ConsistencyVerdict.PASS, judgeDepth(List(8) { DepthFrameAgreement(compareDisparity(zeros, map { 0f }), agreeValid) }).verdict)
+    }
+
+    @Test
+    fun `a NaN or infinite value on either side fails the check, however the other values agree`() {
+        val perfect = frame(0f, agreeValid)
+        assertEquals(ConsistencyVerdict.PASS, judgeDepth(List(8) { perfect }).verdict)
+        // Such a frame is not fitted: without this rule seven agreeing fits out of eight would pass.
+        val candidateNaN = DepthFrameAgreement(DisparityAgreement(0f, 0f, 1000), fit = null, candidateNonFinite = 1)
+        val referenceInf = DepthFrameAgreement(DisparityAgreement(0f, 0f, 1000), fit = null, referenceNonFinite = 3)
+        for (bad in listOf(candidateNaN, referenceInf)) {
+            val result = judgeDepth(List(7) { perfect } + bad)
+            assertEquals(ConsistencyVerdict.FAIL, result.verdict)
+            assertEquals(1, result.nonFiniteOutputFrames)
+        }
+    }
+
+    @Test
     fun `padding columns are not compared`() {
         // The padding holds anything; only the content decides.
         val columns = reference.contentColumns

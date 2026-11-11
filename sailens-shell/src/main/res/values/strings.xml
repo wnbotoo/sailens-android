@@ -400,6 +400,7 @@
     <string name="model_consistency_detection_metrics">CPU objects also found: %1$s of %2$d. Extra on the accelerator: %3$s of %4$d</string>
     <string name="model_consistency_depth">Depth</string>
     <string name="model_consistency_depth_metrics">Largest median disparity difference: %1$s. Ground fits agreeing: %2$d (frames with orientation: %3$d). Lowest label agreement: %4$s</string>
+    <string name="model_consistency_depth_non_finite">NaN or infinite values in the output on %1$d frame(s): each is a failed run, so the check fails.</string>
     <string name="model_consistency_semantic_inconclusive">Inconclusive: differences in the uncertain range, usually from a shaking phone or a blurred view. Hold the phone still on a clear scene and run again</string>
     <string name="model_consistency_frames_changed">%1$d frames changed during the comparison and were left out. This points to a camera snapshot bug</string>
     <string name="model_consistency_overall_pass">Overall: consistent</string>
