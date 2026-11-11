@@ -1,5 +1,6 @@
 package com.sailens.guidance.trace
 
+import com.sailens.guidance.model.trace.DepthRunTrace
 import com.sailens.guidance.model.trace.FrameTrace
 import com.sailens.guidance.model.trace.GuidanceAlertTrace
 import com.sailens.guidance.model.trace.PromptOutcomeTrace
@@ -19,6 +20,48 @@ internal object TraceJsonEncoder {
         metadata.openedElapsedMs?.let { put("openedElapsedMs", it) }
         if (metadata.safetyTrace) put("safetyTrace", true)
         if (metadata.holdTrace) put("holdTrace", true)
+        if (metadata.depthTrace) put("depthTrace", true)
+    }
+
+    fun encodeDepthRun(record: DepthRunTrace): JSONObject = JSONObject().apply {
+        put("type", "depth_run")
+        put("sessionId", record.sessionId)
+        put("seq", record.seq)
+        put("generation", record.generation)
+        put("runId", record.runId)
+        put("outcome", record.outcome)
+        put("atElapsedMs", record.atElapsedMs)
+        record.frameSequence?.let { put("frameSequence", it) }
+        record.frameTimeNanos?.let { put("frameTimeNanos", it) }
+        record.timeBasis?.let { put("timeBasis", it) }
+        record.geometryQuality?.let { put("geometryQuality", it) }
+        record.validity?.let { put("validity", it) }
+        record.inlierRatio?.let { put("inlierRatio", it.toDouble()) }
+        record.confidence?.let { put("confidence", it.toDouble()) }
+        record.planeAgreesWithGravity?.let { put("planeAgreesWithGravity", it) }
+        record.groundRatio?.let { put("groundRatio", it.toDouble()) }
+        record.aboveGroundRatio?.let { put("aboveGroundRatio", it.toDouble()) }
+        record.belowGroundRatio?.let { put("belowGroundRatio", it.toDouble()) }
+        record.disparityScale?.let { put("disparityScale", it.toDouble()) }
+        record.disparityShift?.let { put("disparityShift", it.toDouble()) }
+        record.detail?.let { put("detail", it.toDouble()) }
+        record.prepareMs?.let { put("prepareMs", it) }
+        record.admitWaitMs?.let { put("admitWaitMs", it) }
+        record.inferMs?.let { put("inferMs", it) }
+        record.outputReadMs?.let { put("outputReadMs", it) }
+        record.fitMs?.let { put("fitMs", it) }
+        record.accelerator?.let { put("accelerator", it) }
+        record.acceleratorSelection?.let { put("acceleratorSelection", it) }
+        record.preprocessBackend?.let { put("preprocessBackend", it) }
+        record.postprocessBackend?.let { put("postprocessBackend", it) }
+        record.modelShape?.let { put("modelShape", it) }
+        if (record.skipsSinceLast.isNotEmpty()) {
+            put("skipsSinceLast", JSONObject().apply { record.skipsSinceLast.forEach { (k, v) -> put(k, v) } })
+        }
+        record.cancelledRunId?.let { put("cancelledRunId", it) }
+        record.cancelledStage?.let { put("cancelledStage", it) }
+        record.failuresTotal?.let { put("failuresTotal", it) }
+        record.finalState?.let { put("finalState", it) }
     }
 
     fun encodeSafetyState(state: SafetyStateTrace): JSONObject = JSONObject().apply {
@@ -199,6 +242,8 @@ internal object TraceJsonEncoder {
         }
         frameTrace.receiptToDecisionMs?.let { put("receiptToDecisionMs", it) }
         frameTrace.receivedElapsedMs?.let { put("receivedElapsedMs", it) }
+        frameTrace.depthRunId?.let { put("depthRunId", it) }
+        frameTrace.depthAgeMs?.let { put("depthAgeMs", it) }
     }
 
     fun encodeOverlayRender(
@@ -272,6 +317,7 @@ internal object TraceJsonEncoder {
         summary.closedElapsedMs?.let { put("closedElapsedMs", it) }
         summary.guidanceAlertCount?.let { put("guidanceAlertCount", it) }
         summary.safetyStateCount?.let { put("safetyStateCount", it) }
+        summary.depthRunCount?.let { put("depthRunCount", it) }
     }
 
     fun encodeError(sessionId: String, stage: String, throwable: Throwable): JSONObject = JSONObject().apply {

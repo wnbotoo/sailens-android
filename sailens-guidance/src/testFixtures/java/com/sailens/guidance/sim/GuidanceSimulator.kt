@@ -35,10 +35,12 @@ class GuidanceSimulator(
     ),
     /** The phone settings the user would have set; the scenario's pose is the truth they approximate. */
     private val phoneGeometry: () -> PhoneGeometrySettings = { PhoneGeometrySettings.DEFAULT },
+    /** Shared by the pipelines of every run, for a test that runs one scenario many times; null: each renders its own. */
+    private val renders: ScenarioRenders? = null,
 ) {
     /** Every result of [scenario]; throws what ended the pipeline if it did not run to the last frame. */
-    fun run(scenario: Scenario): List<SceneResult> {
-        val run = runToEnd(scenario)
+    fun run(scenario: Scenario, depth: SimulatedDepthModel? = null): List<SceneResult> {
+        val run = runToEnd(scenario, depth)
         (run.end as? SimulationEnd.Failed)?.let { throw it.error }
         return run.results
     }
@@ -50,9 +52,12 @@ class GuidanceSimulator(
      * A frame goes in only once the result of the one before it, if it had one, has been collected:
      * the pipeline runs on another dispatcher, and without the wait a failure could end the run while
      * an earlier result was still on its way to the collector.
+     *
+     * With [depth], the depth lane runs beside the pipeline on its own threads (`SimulatedPipeline.depth`), unsynchronised
+     * with it: whatever it does, the results must be the same as without it.
      */
-    fun runToEnd(scenario: Scenario): SimulationRun = runBlocking {
-        val pipeline = SimulatedPipeline(scenario, analysisConfig, perceptionConfig, phoneGeometry)
+    fun runToEnd(scenario: Scenario, depth: SimulatedDepthModel? = null): SimulationRun = runBlocking {
+        val pipeline = SimulatedPipeline(scenario, analysisConfig, perceptionConfig, phoneGeometry, renders = renders, depth = depth)
         val collected = Channel<Long>(Channel.UNLIMITED)
         val frames = flow {
             scenario.frames.forEachIndexed { index, frame ->
@@ -72,7 +77,7 @@ class GuidanceSimulator(
         }
         val results = mutableListOf<SceneResult>()
         val end = try {
-            pipeline.start(frames, releaseFrame = {}, semanticMaskSnapshot = { false }).collect {
+            pipeline.start(frames, releaseFrame = {}, semanticMaskSnapshot = { false }, depthFrames = pipeline.depthFrames).collect {
                 results += it
                 collected.trySend(it.sequenceNumber)
             }

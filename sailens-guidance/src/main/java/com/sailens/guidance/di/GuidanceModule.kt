@@ -9,6 +9,13 @@ import com.sailens.guidance.config.TraceRuntimeConfig
 import com.sailens.guidance.depth.DefaultDepthRepository
 import com.sailens.guidance.depth.GroundContactDistanceEstimator
 import com.sailens.guidance.depth.ImagePositionDepthEstimator
+import com.sailens.guidance.depth.geometry.DepthGeometryConfig
+import com.sailens.guidance.depth.geometry.DepthGeometryLane
+import com.sailens.guidance.depth.geometry.DepthGeometrySwitch
+import com.sailens.guidance.depth.geometry.DepthModelCheck
+import com.sailens.guidance.depth.geometry.LiteRtDepthModelCheck
+import com.sailens.guidance.depth.geometry.LiteRtDepthModelRunner
+import com.sailens.guidance.depth.geometry.ThermalStatusSource
 import com.sailens.guidance.kernel.NativeConnectivityStatsExtractor
 import com.sailens.guidance.kernel.NavigationScorePostprocessor
 import com.sailens.guidance.model.common.ObstacleProviderType
@@ -37,6 +44,9 @@ import com.sailens.guidance.trace.FileTraceService
 import com.sailens.guidance.trace.NoOpTraceService
 import com.sailens.runtime.InputPreprocessCache
 import com.sailens.runtime.ModelSourceResolver
+import com.sailens.runtime.accelerator.AcceleratorCoordinator
+import com.sailens.vision.depth.DepthModelConfig
+import com.sailens.vision.depth.LiteRtDepthRunner
 import com.sailens.vision.detection.DetectionModelConfig
 import com.sailens.vision.semantic.SemanticModelConfig
 import org.koin.android.ext.koin.androidContext
@@ -131,6 +141,33 @@ val guidanceModule = module {
         getOrNull<TraceServiceDecorator>()?.decorate(base) ?: base
     }
     single<TraceReplayService> { FileTraceReplayService(androidContext()) }
+
+    // The depth lane (docs/geometry.md §6). One for the app: the start use case is a factory, and the barrier
+    // chain has to span the sessions. A host that binds no DepthModelConfig has no depth model, so every
+    // session reports not configured; one that binds no coordinator, thermal source or lane config gets
+    // the defaults (nothing to yield to, never throttled, 3 Hz).
+    single { DepthGeometrySwitch() }
+    single {
+        val context = androidContext()
+        val logService = get<LogService>()
+        val modelConfig = getOrNull<DepthModelConfig>()
+        val resolver = modelConfig?.let { get<ModelSourceResolver>() }
+        DepthGeometryLane(
+            runnerFactory = {
+                LiteRtDepthModelRunner(LiteRtDepthRunner(context, checkNotNull(modelConfig), checkNotNull(resolver), logService))
+            },
+            modelCheck = if (modelConfig != null && resolver != null) {
+                LiteRtDepthModelCheck(context, modelConfig, resolver)
+            } else {
+                DepthModelCheck.None
+            },
+            coordinator = getOrNull() ?: AcceleratorCoordinator(),
+            thermal = getOrNull() ?: ThermalStatusSource.None,
+            traceService = get(),
+            config = getOrNull() ?: DepthGeometryConfig(),
+            logService = logService,
+        )
+    }
 }
 
 // Provider selection lives in these factory functions, not in the module body, so the `when`

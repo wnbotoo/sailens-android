@@ -11,6 +11,7 @@ import com.sailens.guidance.model.trace.PromptOutcomeTrace
 import com.sailens.guidance.model.trace.SafetyStateTrace
 import com.sailens.guidance.safety.BaselineQualification
 import com.sailens.guidance.sim.FrameDelivery
+import com.sailens.guidance.sim.SimulatedDepthModel
 import com.sailens.guidance.sim.SimulatedPipeline
 import com.sailens.guidance.usecase.decision.AcceptedPromptUseCase
 import com.sailens.guidance.usecase.decision.ConfirmDeliveredEventUseCase
@@ -29,6 +30,7 @@ import com.sailens.shell.guidance.settings.GuidanceFeedbackSettings
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.update
 
 /** One warning or error the session's shell side logged. */
@@ -49,6 +51,8 @@ internal class SessionRun(
     val ledger: Map<Int, String>,
     /** The status card after each result was handled. */
     val cards: List<CardSample> = emptyList(),
+    /** Depth runs that reached the simulated model, over every session of the script; 0 without a lane. */
+    val depthInferences: Int = 0,
     /** The status card's content each time the session settled, from its start. */
     val screens: List<ScreenSample> = emptyList(),
 ) {
@@ -69,7 +73,15 @@ internal class SessionRun(
  */
 internal object SessionSimulator {
 
-    fun run(script: SessionScript, reverseCompletion: Boolean = false, handshakeTimeoutMs: Long = 30_000): SessionRun {
+    /**
+     * @param depth runs the depth lane beside the pipeline with this model (`SimulatedPipeline.depth`); null: no lane.
+     */
+    fun run(
+        script: SessionScript,
+        reverseCompletion: Boolean = false,
+        handshakeTimeoutMs: Long = 30_000,
+        depth: SimulatedDepthModel? = null,
+    ): SessionRun {
         val frames = script.scenario.frames
         val director = Director(
             predict = script.predict ?: { index -> !frames[index].semFails && !frames[index].detFails },
@@ -82,6 +94,7 @@ internal object SessionSimulator {
             analysisConfig = AnalysisConfig(detFirst = script.detFirst),
             semanticInit = gates[ScriptAction.SEM]?.gate,
             detectionInit = gates[ScriptAction.DET]?.gate,
+            depth = depth,
         )
         if (script.scenario.alignClockToFrames) pipeline.clock.advanceBy(script.scenario.stepMs - script.firstFrameAtMs)
         val clock = SessionClock(advancePipeline = pipeline.clock::advanceBy, pipelineNow = pipeline.clock)
@@ -176,7 +189,10 @@ internal object SessionSimulator {
         val context = director.dispatcher + CoroutineExceptionHandler { _, error -> director.uncaught(error) }
         val mirror = ViewModelMirror(
             frames = director::frames,
-            analysis = { frameFlow, releaseFrame, semanticMaskSnapshot -> pipeline.start(frameFlow, releaseFrame, semanticMaskSnapshot) },
+            depthFrames = { minIntervalMs -> pipeline.depthFrames?.invoke(minIntervalMs) ?: emptyFlow() },
+            analysis = { frameFlow, releaseFrame, semanticMaskSnapshot, depthFrames ->
+                pipeline.start(frameFlow, releaseFrame, semanticMaskSnapshot, depthFrames)
+            },
             resetProcessors = {
                 director.log += "reset"
                 pipeline.stop()
@@ -233,7 +249,9 @@ internal object SessionSimulator {
         val lines = TimelineWriter(origin).write(header(script), entries)
         return SessionRun(
             script, entries, lines, log.lines, director.log.toList(), delivered, mirror.uiState.value,
-            director.ledger.mapValues { it.value.toString() }, cards.toList(), screens.toList(),
+            director.ledger.mapValues { it.value.toString() }, cards.toList(),
+            depthInferences = synchronized(pipeline.depthRunners) { pipeline.depthRunners.sumOf { it.inferences.get() } },
+            screens = screens.toList(),
         )
     }
 

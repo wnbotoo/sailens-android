@@ -80,7 +80,7 @@ private val PATH_PROMPT_CATEGORIES: Set<EventCategory> = setOf(EventCategory.BLO
  * (`PipelineAvailability`, `CapabilityExpectations`): that one says what a build offers, this one how an
  * input stood in one frame.
  */
-enum class GuidanceCapability { ORIENTATION, CAMERA_GEOMETRY, GROUND_CONTACT_DISTANCE }
+enum class GuidanceCapability { ORIENTATION, CAMERA_GEOMETRY, GROUND_CONTACT_DISTANCE, DEPTH_GEOMETRY }
 
 sealed interface CapabilityStatus {
     /** Not wired or switched off in this session. */
@@ -179,16 +179,20 @@ internal object GuidanceQualifier {
      * How the optional inputs stood for one frame. Never part of the baseline.
      *
      * @param orientationConfigured false when no orientation source is wired (`NoOrientationSource`).
+     * @param depth the depth lane's status for this frame (`DepthGeometryCapability`); nothing here or in the
+     *   baseline reads it.
      */
     fun capabilities(
         geometry: CameraGeometry,
         motion: MotionState,
         orientationConfigured: Boolean,
         groundContact: GroundContactDistanceConfig,
+        depth: CapabilityStatus = CapabilityStatus.NotConfigured,
     ): Map<GuidanceCapability, CapabilityStatus> = mapOf(
         GuidanceCapability.ORIENTATION to orientation(motion, orientationConfigured),
         GuidanceCapability.CAMERA_GEOMETRY to cameraGeometry(geometry),
         GuidanceCapability.GROUND_CONTACT_DISTANCE to groundContactDistance(geometry, groundContact),
+        GuidanceCapability.DEPTH_GEOMETRY to depth,
     )
 
     private fun orientation(motion: MotionState, configured: Boolean): CapabilityStatus {

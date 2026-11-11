@@ -542,6 +542,19 @@ preemptibility，但不能出现以 Guidance 或 Describe 命名的策略。
 哪些任务是 safety-critical，以及 Guidance protection 暂停时要给用户什么反馈，都是上层
 产品决策。如果为了 Describe 暂停 Guidance，这种 protection loss 必须通过非视觉通道告知。
 
+协调器是 `AcceleratorCoordinator`（`sailens-runtime` `…runtime.accelerator`），只做机制：
+
+- 三个档位：`REALTIME`、`INTERACTIVE`、`BACKGROUND`；
+- `yieldFor(档位)` 开一个让路区间（可嵌套、按次计数，关闭幂等）；区间内更低的档位不被准入；
+- `tryAdmit(档位)` 返回一个 `Admission`，运行结束时关闭；在更高档位的让路区间内返回 null。`REALTIME`
+  永远准入，从不等待；
+- 区间开始前已经准入的那次运行会跑完：LiteRT 的一次 GPU 运行不能中途取消，跑多久也没有上界；
+- 准入的边界在模型的 CPU 预处理之后、推理之前。
+
+档位在它之上、由宿主在 DI 里分配。深度车道是 `BACKGROUND`（GPU 队列优先级 `LOW`），每次运行都申请准入；
+sem/det 不经过协调器，所以有没有它，它们的代码路径都一样。接入 VLM 运行时之后，VLM 请求是 `INTERACTIVE`，
+由 Describe 在一次请求期间开让路区间。宿主为它们绑定同一个协调器。
+
 ### 6.10 JNI：RegisterNatives + 每模块 native library
 
 先摆脱静态 Java JNI symbol，再移动 package。

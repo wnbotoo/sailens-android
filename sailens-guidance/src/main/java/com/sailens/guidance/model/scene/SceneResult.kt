@@ -1,5 +1,6 @@
 package com.sailens.guidance.model.scene
 
+import com.sailens.guidance.depth.geometry.DepthGeometrySnapshot
 import com.sailens.guidance.geometry.CameraGeometry
 import com.sailens.guidance.model.analysis.VisionFaults
 import com.sailens.guidance.motion.MotionState
@@ -32,4 +33,6 @@ data class SceneResult(
      * safety state judges by it whether a result is fresh after a stop; the frame trace records the same value.
      */
     val frameReceivedAtMs: Long? = null,
+    /** The depth lane's latest snapshot when this frame was qualified: for the debug views only, read by no decision. */
+    val depthGeometry: DepthGeometrySnapshot? = null,
 )

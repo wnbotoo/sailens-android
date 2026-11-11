@@ -441,6 +441,8 @@ class SceneAnalysisViewModel(
                 // The class-map overlay is the only reader of the mask outside the pipeline; the
                 // copy it needs is made only while it is showing.
                 semanticMaskSnapshot = { rendersSemanticClassMask() },
+                // The depth lane's own sampled subscription; it runs only when the debug switch is on.
+                depthFrames = { minIntervalMs -> frameSource.frames(minIntervalMs) },
             ).onStart {
                 _uiState.flowStarted { alerts.onFlowStarted() }
                 logger.info(TAG, "Scene analysis started")

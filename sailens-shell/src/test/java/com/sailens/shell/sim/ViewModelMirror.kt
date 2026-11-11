@@ -51,8 +51,12 @@ import kotlin.coroutines.CoroutineContext
 private const val TAG = "SceneAnalysisViewModel"
 
 /** `StartSceneAnalysisUseCase.invoke`, as the view model calls it. */
-internal typealias AnalysisPipeline =
-    suspend (frames: Flow<ImageFrame>, releaseFrame: (ImageFrame) -> Unit, semanticMaskSnapshot: () -> Boolean) -> Flow<SceneResult>
+internal typealias AnalysisPipeline = suspend (
+    frames: Flow<ImageFrame>,
+    releaseFrame: (ImageFrame) -> Unit,
+    semanticMaskSnapshot: () -> Boolean,
+    depthFrames: ((minIntervalMs: Long) -> Flow<ImageFrame>)?,
+) -> Flow<SceneResult>
 
 /**
  * `SceneAnalysisViewModel`, mirrored: its forwarding, entry by entry, onto the real system alerts, output wiring,
@@ -76,6 +80,8 @@ internal typealias AnalysisPipeline =
  */
 internal class ViewModelMirror(
     private val frames: (run: Int) -> Flow<ImageFrame>,
+    /** The depth lane's own subscription, as `frameSource.frames(minIntervalMs)`. */
+    private val depthFrames: (minIntervalMs: Long) -> Flow<ImageFrame>,
     private val analysis: AnalysisPipeline,
     private val resetProcessors: () -> Unit,
     private val releaseModels: suspend () -> Unit,
@@ -348,7 +354,7 @@ internal class ViewModelMirror(
         guidanceOutput.settingsChanged()
     }
 
-    // SceneAnalysisViewModel.kt:421-485
+    // SceneAnalysisViewModel.kt:421-487
     private fun startSceneAnalysis() {
         frameCount = 0
         val run = observer.runRequested()
@@ -368,11 +374,12 @@ internal class ViewModelMirror(
             // :435
             startStallWatch()
 
-            // :438-449 (frames are not lent here, so there is nothing to give back)
+            // :438-451 (frames are not lent here, so there is nothing to give back)
             analysis(
                 frames(run),
                 {},
                 { false },
+                { minIntervalMs -> depthFrames(minIntervalMs) },
             ).onStart {
                 uiState.flowStarted { alerts.onFlowStarted() }
                 logger.info(TAG, "Scene analysis started")
@@ -380,7 +387,7 @@ internal class ViewModelMirror(
                 alerts.onFlowFailed(e)
             }.collectLatest { result ->
                 observer.resultArrived(run, result)
-                // :450-467
+                // :452-469
                 frameCount++
                 alerts.onResult(result.qualification.baseline, result.sequenceNumber, result.frameReceivedAtMs)
                 val holdOrdinary = alerts.holdsOrdinaryPrompts
@@ -392,14 +399,14 @@ internal class ViewModelMirror(
                         frameDisplayHeight = result.frameDisplayHeight,
                     )
                 }
-                // :482
+                // :484
                 guidanceOutput.onFrame(events, result.sequenceNumber, result.visionFaults, holdOrdinary)
                 observer.resultHandled(run, result.sequenceNumber)
             }
         }
     }
 
-    // SceneAnalysisViewModel.kt:488-497
+    // SceneAnalysisViewModel.kt:490-499
     private fun startStallWatch() {
         stallWatchJob?.cancel()
         alerts.onStallWatchStarted()
@@ -411,29 +418,29 @@ internal class ViewModelMirror(
         }
     }
 
-    // SceneAnalysisViewModel.kt:499-502
+    // SceneAnalysisViewModel.kt:501-504
     private fun stopStallWatch() {
         cancelStallLoop()
         alerts.onStallWatchStopped()
     }
 
-    // SceneAnalysisViewModel.kt:504-507
+    // SceneAnalysisViewModel.kt:506-509
     fun cancelStallLoop() {
         stallWatchJob?.cancel()
         stallWatchJob = null
     }
 
-    // SceneAnalysisViewModel.kt:513-515
+    // SceneAnalysisViewModel.kt:515-517
     fun onGuidanceInterrupted(noticeText: String) {
         alerts.onLifecycleStop(noticeText)
     }
 
-    // SceneAnalysisViewModel.kt:518-520
+    // SceneAnalysisViewModel.kt:520-522
     fun acknowledgeInterruption() {
         alerts.onLifecycleStart()
     }
 
-    // SceneAnalysisViewModel.kt:548-561 (the overlay's render is not mirrored)
+    // SceneAnalysisViewModel.kt:550-563 (the overlay's render is not mirrored)
     private fun stopSceneAnalysis() {
         stopStallWatch()
         guidanceOutput.stop {
@@ -445,8 +452,8 @@ internal class ViewModelMirror(
     }
 
     /**
-     * SceneAnalysisViewModel.kt:563-576. The real `viewModelScope` is cancelled before `onCleared` runs (Android's
-     * `ViewModel` contract; the view model relies on it at :633), so this cancels it first: the state-flow
+     * SceneAnalysisViewModel.kt:565-578. The real `viewModelScope` is cancelled before `onCleared` runs (Android's
+     * `ViewModel` contract; the view model relies on it at :635), so this cancels it first: the state-flow
      * collectors, the stall loop and the analysis collector run no more after it.
      */
     fun onCleared() {
@@ -460,7 +467,7 @@ internal class ViewModelMirror(
         engineLease.close()
     }
 
-    // SceneAnalysisViewModel.kt:636-666 (the release runs in the release scope itself, not in Dispatchers.IO)
+    // SceneAnalysisViewModel.kt:638-668 (the release runs in the release scope itself, not in Dispatchers.IO)
     private fun releaseSceneAnalysisResources() {
         releaseJob?.cancel()
         isReleasingResources = true

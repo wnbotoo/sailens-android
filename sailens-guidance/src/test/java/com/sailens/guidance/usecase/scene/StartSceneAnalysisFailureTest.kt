@@ -41,9 +41,18 @@ import com.sailens.guidance.repository.PerceptionRepository
 import com.sailens.guidance.semantics.CityscapesNavigationSemantics
 import com.sailens.guidance.trace.NoOpTraceService
 import com.sailens.guidance.depth.GroundContactDistanceConfig
+import com.sailens.guidance.depth.geometry.DepthGeometryConfig
+import com.sailens.guidance.depth.geometry.DepthGeometryLane
+import com.sailens.guidance.depth.geometry.DepthGeometrySwitch
+import com.sailens.guidance.depth.geometry.DepthModelCheck
+import com.sailens.guidance.depth.geometry.ThermalStatusSource
 import com.sailens.guidance.geometry.HeightSource
 import com.sailens.guidance.geometry.PhoneGeometrySettings
+import com.sailens.guidance.model.trace.DepthRunTrace
 import com.sailens.guidance.model.trace.FrameTrace
+import com.sailens.guidance.model.trace.SessionTraceMetadata
+import com.sailens.guidance.model.trace.SessionTraceSummary
+import com.sailens.runtime.accelerator.AcceleratorCoordinator
 import com.sailens.guidance.safety.GuidanceCapability
 import com.sailens.guidance.safety.GuidanceQualification
 import com.sailens.guidance.safety.traceLevel
@@ -56,6 +65,7 @@ import com.sailens.guidance.usecase.perception.ProcessFrameUseCase
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asFlow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -248,6 +258,44 @@ class StartSceneAnalysisFailureTest {
         assertTrue("the inputs did change something", runs.map { q -> q.map { it.capabilities } }.distinct().size > 1)
     }
 
+    @Test
+    fun `the depth session closes before the trace does, so its closing record is in the trace`() {
+        val calls = java.util.Collections.synchronizedList(mutableListOf<String>())
+        val trace = object : TraceService by NoOpTraceService {
+            override fun startSession(metadata: SessionTraceMetadata) {
+                calls += "start"
+            }
+
+            override fun recordDepthRun(record: DepthRunTrace): Boolean {
+                calls += "depth ${record.outcome}"
+                return true
+            }
+
+            override fun finishSession(summary: SessionTraceSummary) {
+                calls += "finish"
+            }
+        }
+        val lane = DepthGeometryLane(
+            runnerFactory = { error("no model, no runner") },
+            modelCheck = DepthModelCheck.None,
+            coordinator = AcceleratorCoordinator(),
+            thermal = ThermalStatusSource.None,
+            traceService = trace,
+            config = DepthGeometryConfig(),
+            logService = SilentLog,
+        )
+        val results = runBlocking {
+            useCase(ScriptedRepository(List(3) { true }), maxFailures = 3, trace = trace, depthLane = lane)(
+                frames(3),
+                releaseFrame = {},
+                semanticMaskSnapshot = { false },
+                depthFrames = { emptyFlow() },
+            ).toList()
+        }
+        assertEquals(3, results.size)
+        assertEquals(listOf("start", "depth ${DepthRunTrace.CLOSED}", "finish"), calls)
+    }
+
     private fun useCase(
         repository: PerceptionRepository,
         maxFailures: Int,
@@ -255,6 +303,7 @@ class StartSceneAnalysisFailureTest {
         trace: TraceService = NoOpTraceService,
         groundContact: GroundContactDistanceConfig = GroundContactDistanceConfig(),
         phone: PhoneGeometrySettings = PhoneGeometrySettings.DEFAULT,
+        depthLane: DepthGeometryLane? = null,
     ): StartSceneAnalysisUseCase {
         val perceptionConfig = PerceptionConfig(profile = PerceptionProfile.BASIC, groundContact = groundContact)
         val analysisConfig = AnalysisConfig()
@@ -305,6 +354,8 @@ class StartSceneAnalysisFailureTest {
             pipelineBudget = PipelinePerformanceBudget(maxConsecutiveFrameFailures = maxFailures),
             orientationSource = orientation,
             phoneGeometry = { phone },
+            depthLane = depthLane,
+            depthSwitch = DepthGeometrySwitch(initial = depthLane != null),
         )
     }
 

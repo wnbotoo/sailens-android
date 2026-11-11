@@ -13,6 +13,7 @@ import com.sailens.runtime.hardware.DeviceHardwareProfileProvider
 import com.sailens.guidance.config.PerceptionConfig
 import com.sailens.guidance.config.PipelinePerformanceBudget
 import com.sailens.guidance.config.TraceRuntimeConfig
+import com.sailens.guidance.depth.geometry.DepthGeometryConfig
 import com.sailens.shell.guidance.overlay.SceneOverlayConfig
 import com.sailens.shell.guidance.settings.PerceptionSettingsStore
 import org.koin.android.ext.koin.androidContext
@@ -44,6 +45,7 @@ val profileBindingsModule = module {
     single<SemanticModelConfig> { get<SailensRuntimeProfile>().semanticModel }
     single<DetectionModelConfig> { get<SailensRuntimeProfile>().realtimeObstacleModel }
     single<DepthModelConfig> { get<SailensRuntimeProfile>().depthModel }
+    single<DepthGeometryConfig> { get<SailensRuntimeProfile>().depthGeometry }
     // The VLM's backend is the profile's call; everything else
     // about it — prompt, decode budget — is the model config's own default.
     single {

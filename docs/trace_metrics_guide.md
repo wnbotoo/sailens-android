@@ -30,6 +30,8 @@ A trace is a JSONL file; each line is one event:
   and what the output did with it. See [Qualification and alerts](#qualification-and-alerts).
 - `safety_state` — where Guidance stood for the user, and the facts it was derived from, written
   whenever either changed. See [Safety state](#safety-state).
+- `depth_run` — one attempt of the depth lane, or a depth session's closing record. See
+  [Depth lane](#depth-lane).
 - `session_summary` — the aggregate summary after a session ends.
 - `error` — an exception in the pipeline or in tracing.
 
@@ -805,8 +807,8 @@ Each is absent in traces written before it existed, which means "not recorded", 
   exactly when it makes a covered-lens or low-light event, so `unqualified` frames are the ones whose
   other prompts were suppressed.
 - `capabilities`: how each optional input stood (`orientation`, `camera_geometry`,
-  `ground_contact_distance`), each with a `status` (`not_configured` / `available` / `degraded` /
-  `unavailable`) and its `issues`. Trace only: they are not part of the qualification.
+  `ground_contact_distance`, `depth_geometry`), each with a `status` (`not_configured` / `available` /
+  `degraded` / `unavailable`) and its `issues`. Trace only: they are not part of the qualification.
 - `receiptToDecisionMs`: from the frame source receiving the frame to the decision, both elapsed
   realtime. It leaves out exposure to receipt, so it is not the frame's whole age. Absent when the
   source did not record the receipt.
@@ -973,6 +975,68 @@ that too, counting starts at the first record kept (`+ before the first record`)
 is unknown and its length too. `records` is `complete`, `incomplete (missing n)`,
 `possibly_incomplete` (no count) or `not_recorded`, as for alerts, with `ended on an error` when the
 trace records the flow ending on one.
+
+## Depth lane
+
+The depth lane (`docs/geometry.md` §6) runs beside Guidance, at about 3 Hz, and nothing decides on it.
+Its statistics come from its own records, never from frames: several runs can fall between two traced
+frames, one observation is attached to every frame until the next, and frames are sampled.
+
+### `depth_run`
+
+One record per attempt, and one closing record per depth session. Not sampled. An attempt is a frame
+the lane began on (it has a `runId`); a frame it skipped before that is only counted, by reason, in the
+next record's `skipsSinceLast` (`stopped`, `thermal`, `thermal_cadence`, `yield`, `no_baseline_yet`,
+`frame_unqualified`, `geometry_unavailable`).
+
+- `generation`: the depth session; `runId` counts its attempts from 1. `seq` numbers the trace
+  session's depth records from 1, and `session_summary.depthRunCount` is how many it queued.
+- `outcome`: `published` (the observation became the session's snapshot), `preprocess_unavailable` (the
+  native preprocessing could not take the frame; there is no fallback), `yield_dropped` (a higher tier
+  opened a yield interval after the preprocessing; the model did not run), `failed` (a step threw),
+  `non_finite_output` (NaN or infinity in the output), or `closed` (the session's closing record, always
+  its last).
+- `frameSequence`, `frameTimeNanos`, `timeBasis`, `geometryQuality`: the frame and the geometry the
+  attempt used.
+- For a published run: `validity` (the ground fit's, lower case: `valid`, `no_ground`, `inverse_output`
+  and so on), `inlierRatio`, `confidence`, `planeAgreesWithGravity`, `groundRatio` /
+  `aboveGroundRatio` / `belowGroundRatio` (fractions of the label grid), `disparityScale` /
+  `disparityShift` (the fit's `A` and `t`), `detail` (the picture detail the lane measures on Y).
+- Timings, ms: `prepareMs` (native preprocessing), `admitWaitMs`, `inferMs`, `outputReadMs`, `fitMs`;
+  the runtime's `accelerator`, `acceleratorSelection` (with the GPU precision and queue priority),
+  `preprocessBackend`, `postprocessBackend`; `modelShape`, input and output (`1x3x392x224>1x392x224`).
+- The closing record: `cancelledRunId` and `cancelledStage` (`prepare`, `admit`, `infer`, `fit`) when an
+  attempt was in flight at the stop -- that is its settlement, and nothing more is written for it --
+  `failuresTotal`, `finalState`, and the last skips.
+
+Every attempt is settled exactly once: by its own record or as the closing record's in-flight attempt.
+A record is accepted only while its own trace session is open, so a trace never holds another
+session's runs. `session_start.depthTrace` says the trace records them; a trace without it has none
+recorded, which says nothing about the lane.
+
+### Frame fields
+
+- `depthRunId`: the run whose observation was attached to the frame; absent before the lane's first
+  published run, and without a lane.
+- `depthAgeMs`: that observation's age by frame time, the frame's minus the observation's. It can be
+  negative: the lane may have finished a newer frame first.
+- `capabilities.depth_geometry`: the lane's state for the frame, with its issues (`initializing`,
+  `stale`, `paused_thermal`, `init_failed`, ...).
+
+### `depthRuns` / `depthMs`
+
+The report's depth lines, from the records alone, each attempt once:
+
+- `attempts` and `outcomes` (closing records left out; `cancelled` for the attempts in flight at a stop);
+  `validity` over published runs, and `inverse`, the share of them whose output was inverted; `skips`,
+  per reason, over the trace;
+- `records`: `complete`, `incomplete (missing n)` (a `seq` gap, fewer than `depthRunCount`, a `runId`
+  gap within a session, or a depth session with no closing record), `possibly_incomplete` (no summary to
+  count against) or `not recorded`;
+- `depthMs`: `prepare`, `admitWait`, `infer`, `fit` as p50/p95/max(count), nearest rank; `age`, the
+  attached observation's age on the traced frames, the only figure taken from frames.
+
+A trace with the lane switched off is `complete` with no attempts.
 
 ## Quick diagnosis paths
 

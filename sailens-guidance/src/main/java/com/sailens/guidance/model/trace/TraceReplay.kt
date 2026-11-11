@@ -26,6 +26,8 @@ data class TraceReplaySession(
     val guidanceAlerts: List<GuidanceAlertTrace> = emptyList(),
     /** The safety-state records, in file order; empty for traces recorded before these were written. */
     val safetyStates: List<SafetyStateTrace> = emptyList(),
+    /** The depth lane's records, in file order; empty without a depth model or for older traces. */
+    val depthRuns: List<DepthRunTrace> = emptyList(),
 )
 
 data class TraceReplayError(
@@ -138,6 +140,8 @@ data class TraceReplayReport(
     val guidanceAlertsMissing: Long = 0,
     /** How long each safety state held within the trace's window, and how much of it is unknown. */
     val safetyTimeline: SafetyStateTimeline = SafetyStateTimeline.NOT_RECORDED,
+    /** The depth lane's runs, from the `depth_run` records. */
+    val depthRuns: DepthRunReport = DepthRunReport.NOT_RECORDED,
 )
 
 /**
@@ -222,6 +226,7 @@ object TraceReplayParser {
         val promptOutcomes = mutableListOf<PromptOutcomeTrace>()
         val guidanceAlerts = mutableListOf<GuidanceAlertTrace>()
         val safetyStates = mutableListOf<SafetyStateTrace>()
+        val depthRuns = mutableListOf<DepthRunTrace>()
         val errors = mutableListOf<TraceReplayError>()
 
         lines.forEachIndexed { index, rawLine ->
@@ -236,6 +241,7 @@ object TraceReplayParser {
                 PROMPT_OUTCOME_TYPE -> promptOutcomes += parsePromptOutcome(entry, index)
                 GUIDANCE_ALERT_TYPE -> guidanceAlerts += parseGuidanceAlert(entry, index)
                 SAFETY_STATE_TYPE -> safetyStates += parseSafetyState(entry, index)
+                DEPTH_RUN_TYPE -> depthRuns += parseDepthRun(entry, index)
                 SESSION_SUMMARY_TYPE -> summary = parseSummary(entry, index)
                 ERROR_TYPE -> errors += parseError(entry, index)
                 else -> throw IllegalArgumentException("Unsupported trace entry type '$type' at line ${index + 1}")
@@ -251,6 +257,51 @@ object TraceReplayParser {
             summary = summary,
             guidanceAlerts = guidanceAlerts,
             safetyStates = safetyStates,
+            depthRuns = depthRuns,
+        )
+    }
+
+    private fun parseDepthRun(entry: JsonObject, lineIndex: Int): DepthRunTrace {
+        fun float(key: String) = entry.optionalDouble(key)?.toFloat()
+        val skips = (entry["skipsSinceLast"] as? JsonObject)?.mapValues { (_, v) -> v.jsonPrimitive.longOrNull?.toInt() ?: 0 }.orEmpty()
+        val outcome = entry.requireString("outcome", lineIndex)
+        require(outcome in DepthRunTrace.ALL) { "Unknown depth_run outcome '$outcome' at line ${lineIndex + 1}" }
+        return DepthRunTrace(
+            sessionId = entry.requireString("sessionId", lineIndex),
+            generation = entry.requireLong("generation", lineIndex),
+            runId = entry.requireLong("runId", lineIndex),
+            outcome = outcome,
+            seq = entry.requireLong("seq", lineIndex),
+            atElapsedMs = entry.requireLong("atElapsedMs", lineIndex),
+            frameSequence = entry.optionalLong("frameSequence"),
+            frameTimeNanos = entry.optionalLong("frameTimeNanos"),
+            timeBasis = entry.optionalString("timeBasis"),
+            geometryQuality = entry.optionalString("geometryQuality"),
+            validity = entry.optionalString("validity"),
+            inlierRatio = float("inlierRatio"),
+            confidence = float("confidence"),
+            planeAgreesWithGravity = entry.optionalBoolean("planeAgreesWithGravity"),
+            groundRatio = float("groundRatio"),
+            aboveGroundRatio = float("aboveGroundRatio"),
+            belowGroundRatio = float("belowGroundRatio"),
+            disparityScale = float("disparityScale"),
+            disparityShift = float("disparityShift"),
+            detail = float("detail"),
+            prepareMs = entry.optionalLong("prepareMs"),
+            admitWaitMs = entry.optionalLong("admitWaitMs"),
+            inferMs = entry.optionalLong("inferMs"),
+            outputReadMs = entry.optionalLong("outputReadMs"),
+            fitMs = entry.optionalLong("fitMs"),
+            accelerator = entry.optionalString("accelerator"),
+            acceleratorSelection = entry.optionalString("acceleratorSelection"),
+            preprocessBackend = entry.optionalString("preprocessBackend"),
+            postprocessBackend = entry.optionalString("postprocessBackend"),
+            modelShape = entry.optionalString("modelShape"),
+            skipsSinceLast = skips,
+            cancelledRunId = entry.optionalLong("cancelledRunId"),
+            cancelledStage = entry.optionalString("cancelledStage"),
+            failuresTotal = entry.optionalLong("failuresTotal")?.toInt(),
+            finalState = entry.optionalString("finalState"),
         )
     }
 
@@ -270,6 +321,7 @@ object TraceReplayParser {
         openedElapsedMs = entry.optionalLong("openedElapsedMs"),
         safetyTrace = entry.optionalBoolean("safetyTrace") ?: false,
         holdTrace = entry.optionalBoolean("holdTrace") ?: false,
+        depthTrace = entry.optionalBoolean("depthTrace") ?: false,
     )
 
     private fun parseFrame(entry: JsonObject, lineIndex: Int) = FrameTrace(
@@ -382,6 +434,8 @@ object TraceReplayParser {
         },
         receiptToDecisionMs = entry.optionalDouble("receiptToDecisionMs"),
         receivedElapsedMs = entry.optionalLong("receivedElapsedMs"),
+        depthRunId = entry.optionalLong("depthRunId"),
+        depthAgeMs = entry.optionalLong("depthAgeMs"),
     )
 
     private fun parseOverlayRender(entry: JsonObject, lineIndex: Int) = OverlayRenderTrace(
@@ -535,6 +589,7 @@ object TraceReplayParser {
         closedElapsedMs = entry.optionalLong("closedElapsedMs"),
         guidanceAlertCount = entry.optionalLong("guidanceAlertCount"),
         safetyStateCount = entry.optionalLong("safetyStateCount"),
+        depthRunCount = entry.optionalLong("depthRunCount"),
     )
 
     private fun parseError(entry: JsonObject, lineIndex: Int) = TraceReplayError(
@@ -612,6 +667,7 @@ object TraceReplayParser {
     private const val PROMPT_OUTCOME_TYPE = "prompt_outcome"
     private const val GUIDANCE_ALERT_TYPE = "guidance_alert"
     private const val SAFETY_STATE_TYPE = "safety_state"
+    private const val DEPTH_RUN_TYPE = "depth_run"
     private const val SESSION_SUMMARY_TYPE = "session_summary"
     private const val ERROR_TYPE = "error"
 }

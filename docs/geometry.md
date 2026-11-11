@@ -209,9 +209,11 @@ reproduces the device exactly, which a test checks) or `ALL_DELIVERED` (no revok
 
 ## 6. Depth input transform and ground fit
 
-**Model contract.** Input RGB, ImageNet normalisation, fixed shape; output relative disparity (larger
-= nearer), one channel; layout resolved from the tensor shape as for sem/det. There is no class order
-to get wrong; the equivalent risk is **inverse output** (depth instead of disparity), which static
+**Model contract** ([models.md](models.md), "The `depth` contract"). Input RGB in [0, 1] with the
+model's own normalisation inside it, fixed shape; output relative disparity (larger = nearer), one
+channel, the input's size; layout resolved from the tensor shape as for sem/det. The resize is part of
+the contract, not of the model: `PAD_KEEP_ASPECT`, the native preprocessing's letterbox. There is no
+class order to get wrong; the equivalent risk is **inverse output** (depth instead of disparity), which static
 preflight cannot see, so the ground fit checks the slope's sign on every frame and refuses an inverted
 model. The rule for whatever consumes depth: a configured but broken depth model is never worse than
 none. A failing, stale or inverse-output model leaves Guidance running as without it, and a failure
@@ -221,9 +223,10 @@ never turns into "no obstacles".
 and the model tensor is part of the model's configured contract, because every disparity sample is
 turned into a ray.
 
-- Each depth model declares a `ResizePolicy`, matching how its export was validated: `STRETCH`
-  (resize without keeping aspect), `CROP_KEEP_ASPECT` (centre crop to the tensor aspect, then resize)
-  or `PAD_KEEP_ASPECT`. It cannot be read from TFLite metadata, so it is configured with the model.
+- The transform knows three `ResizePolicy`s: `STRETCH` (resize without keeping aspect),
+  `CROP_KEEP_ASPECT` (centre crop to the tensor aspect, then resize) and `PAD_KEEP_ASPECT`. The depth
+  contract fixes `PAD_KEEP_ASPECT`, because that is what the native preprocessing writes; the other two
+  serve the fit's tests and offline experiments.
 - `DepthInputTransform.create(analysis size, tensor size, policy)` gives `toTensor*` / `toAnalysis*`
   and `covers`. `scaleX ≠ scaleY` is allowed (stretch); it only has to be known.
 - **All geometry is done in analysis-image pixels.** Ground-fit samples are analysis-image pixels
@@ -231,10 +234,13 @@ turned into a ray.
   tensor at `toTensor(p)`. Nothing works in tensor pixels, so no tensor-space intrinsics are needed.
 - Pixels where `covers(p)` is false (cropped away or padding) are **unknown**: never interpolated or
   extrapolated into ground, above or below. `DisparityMap.sampleAt(u, v)` is bilinear, returns null
-  where the model did not see the point, and is clamped to the pixels whose centres lie in the
-  content, so padding never blends in, even when it is fractional (960×1280 → 518×518 pads 64.75 px)
-  or a half pixel (640×1280 → 518×518 pads 129.5 px; a centre exactly on the open right end is
-  padding).
+  where the model did not see the point, and interpolates only between content pixels. A tensor pixel
+  is content when the native kernel wrote image data into it, `[ceil(pad), ceil(pad + content))`, and
+  its centre lies inside the content, `< pad + content`: the first column is `ceil(pad)`, the last
+  `ceil(pad + content − 0.5) − 1`, rows alike. So padding never blends in, even when it is fractional
+  (540×960 → 224×392 pads 1.75 px) or a half pixel (a centre exactly on the open right end is padding).
+  `DepthContentRuleNativeTest` holds the rule to the native kernel on device, at five paddings and the
+  four rotations.
 
 **Ground fit** (`…guidance.geometry` `GroundFitter`, Kotlin):
 
@@ -272,9 +278,57 @@ turned into a ray.
 **Validity**: `VALID`, `TOO_FEW_SAMPLES`, `DEGENERATE_VIEW` (camera pointing straight down),
 `NO_GROUND`, `NO_SUPPORT`, `SUPPORT_SWITCH` or `INVERSE_OUTPUT`.
 
-There is no depth runner, depth `ModelType` or scheduling yet; the transform and the fit are pure JVM
-code exercised by the simulator's synthetic disparity (`renderDisparity`, `a/Z + b`, through any
-transform).
+The transform and the fit are pure JVM code, exercised by the simulator's synthetic disparity
+(`renderDisparity`, `a/Z + b`, through any transform).
+
+**The depth lane** (`…guidance.depth.geometry` `DepthGeometryLane`) runs the model and the fit beside
+Guidance. **Nothing decides on it**: its observations reach the `DEPTH_GEOMETRY` capability, the trace
+and the debug views, and no input of `ProcessFrameUseCase`, `AnalyzeSceneUseCase` or
+`DecideEventsUseCase` (I1). Depth evidence never shows that the lens is clear, the picture usable or the
+way passable, and never raises a qualification or lowers a risk (I6): whatever uses it later starts from
+that rule. `DepthLaneInvarianceTest` (every scenario under every golden configuration, with a sound, an
+inverted and a failing model) and `DepthLaneSessionTest` (every session script) run each case with and
+without the lane and compare the results, and the user's timeline, line for line.
+
+- **Switch.** `DepthGeometrySwitch`, read once at a session's start; off by default, switched only by
+  the debug settings. It is not a `PerceptionConfig` field: the lane is no input to a decision, and
+  turning it on must not change what a capture says the pipeline ran. Cadence and limits come from the
+  host's runtime profile (`DepthGeometryConfig`: 3 Hz, 1 Hz under `MODERATE` heat, stale after 2 periods,
+  30 failures in a row stop it).
+- **Ownership.** One lane for the app (a Koin `single`), holding only the tail of a barrier chain; there
+  is no "current session". `StartSceneAnalysisUseCase` starts a `DepthSession` after sem (and det)
+  initialised, keeps the handle, reads its snapshot on every frame and stops it in its flow's `finally`,
+  before the trace closes. Guidance never waits for the lane: the start returns at once.
+- **Barrier chain.** A session's `done` completes when its own job has ended and the previous
+  session's `done` has; a session initialises its runner only after that. The runner is released in the
+  job's `finally`, so a new session compiles only after every earlier one let go of its model, even when
+  a session in between was cancelled before it ran. Each session has its own runner and fitter.
+- **One run** (the lane's own `frames(333)` subscription): skip, and give the frame back, when the lane
+  has stopped, the device is hot (`SEVERE` pauses; `MODERATE` keeps 1 Hz by frame time), the
+  coordinator is yielding to a higher tier, the main pipeline has no baseline yet or its latest is
+  unqualified, or the frame's own geometry is unavailable. Otherwise the attempt begins (a run id), the
+  native preprocessing reads the frame and **the frame goes back in its `finally`**, before admission,
+  inference and the fit (I7); a native failure is `preprocess_unavailable`, never an OpenCV fallback.
+  Admission (`AcceleratorCoordinator.tryAdmit(BACKGROUND)`), inference on the GPU at `LOW` queue
+  priority, a non-finite output is a failed run, then `GroundFitter.fit` on a dispatcher of one thread.
+  A frame the source replaced while the lane was busy never reaches it, so there is no "busy" skip.
+- **Accounting.** Every step a record or the snapshot shows is under the session's own lock: `begin`
+  gives the run id, `commit` publishes the snapshot together with the attempt's `depth_run` record, and
+  `seal` (the stop) closes the session and writes its closing record, which carries the attempt in
+  flight. So every attempt is settled exactly once, the closing record is its session's last, and a run
+  that returns after the stop publishes nothing. The records go through the trace's ledger and are
+  refused once their trace session has closed ([trace_metrics_guide.md](trace_metrics_guide.md),
+  `depth_run`).
+- **Failures stay in the lane.** Every `Throwable` but cancellation becomes the session's state
+  (`init_failed`, `run_failed`, `model_unreadable`, ...), never an error of the Guidance flow; a
+  cancellation is rethrown. The lane's jobs are children of its own supervisor, not of the flow.
+- **Capability** (`DepthGeometryCapability`, first match wins): no session or no model → not configured;
+  `model_unreadable`; `preprocess_unavailable`; `init_failed` / `run_failed`; `initializing`;
+  `paused_thermal` / `paused_yield`; no observation yet, or one older than 2 periods by frame time (or on
+  another time basis) → `stale`, with the last skip reason; a fresh observation on degraded geometry →
+  degraded; else available. What the fit found (no ground, inverted output, a support switch) is the
+  observation's content, not a failure of the capability. The age is the main frame's time minus the
+  observation's, so it can be negative; it is judged by its size.
 
 ## 7. Simulator
 
@@ -297,6 +351,10 @@ modules' tests can use it as well; the tests that run it, such as `SyntheticScen
   narrowing corridor; see the connectivity note in [architecture.md](architecture.md)), and semantic
   stats come from the Kotlin extractor. The goldens' blockage, width and flood figures are the
   fallback's.
+- **Depth.** `SimulatedPipeline(depth = SimulatedDepthModel())` adds the depth lane (§6): the real lane
+  and ground fit with a depth model that reports `renderDisparity` of each frame's own pose and world,
+  on the lane's own threads, unsynchronised with the pipeline. `SimulatedDepthModel` can also output
+  depth instead of disparity, fail its initialization, or report the device hot.
 - **Goldens**: `sailens-guidance/src/test/resources/scenarios/<name>.golden.txt`, headed by the
   scenario's description, then one line per frame: decided events (key, priority, parameters),
   tracked obstacles (category / zone / distance), ground recognition, the connectivity figures and
