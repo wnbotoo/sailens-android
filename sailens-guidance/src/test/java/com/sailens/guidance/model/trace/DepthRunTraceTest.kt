@@ -80,8 +80,19 @@ class DepthRunTraceTest {
 
     // ---- the report
 
-    private fun run(seq: Long, runId: Long, outcome: String = DepthRunTrace.PUBLISHED, generation: Long = 1, inferMs: Long? = 30, validity: String? = "valid", skips: Map<String, Int> = emptyMap()) =
-        DepthRunTrace(sessionId = "s", generation = generation, runId = runId, outcome = outcome, seq = seq, atElapsedMs = seq, inferMs = inferMs, validity = validity, skipsSinceLast = skips)
+    private fun run(
+        seq: Long,
+        runId: Long,
+        outcome: String = DepthRunTrace.PUBLISHED,
+        generation: Long = 1,
+        inferMs: Long? = 30,
+        validity: String? = "valid",
+        skips: Map<String, Int> = emptyMap(),
+        outputReadMs: Long? = null,
+    ) = DepthRunTrace(
+        sessionId = "s", generation = generation, runId = runId, outcome = outcome, seq = seq, atElapsedMs = seq, inferMs = inferMs,
+        outputReadMs = outputReadMs, validity = validity, skipsSinceLast = skips,
+    )
 
     private fun closed(seq: Long, lastRunId: Long, generation: Long = 1, cancelled: Long? = null, skips: Map<String, Int> = emptyMap()) =
         DepthRunTrace(sessionId = "s", generation = generation, runId = lastRunId, outcome = DepthRunTrace.CLOSED, seq = seq, atElapsedMs = seq, cancelledRunId = cancelled, cancelledStage = cancelled?.let { "fit" }, skipsSinceLast = skips)
@@ -129,6 +140,25 @@ class DepthRunTraceTest {
         assertEquals(20, full.attempts)
         assertEquals(full.copy(ageMs = null), sampled.copy(ageMs = null))
         assertEquals(TimingStats(count = 20, p50 = 30, p95 = 39, max = 40), full.inferMs)
+    }
+
+    @Test
+    fun `reading the output back is reported, and the accelerator's time is their sum per run`() {
+        fun report(readMs: Long) = DepthRunReportBuilder.build(session((1L..10L).map { run(it, it, inferMs = 30, outputReadMs = readMs) } + closed(11, 10)))
+        val fast = report(1)
+        val slow = report(100)
+        assertEquals(TimingStats(count = 10, p50 = 1, p95 = 1, max = 1), fast.outputReadMs)
+        assertEquals(TimingStats(count = 10, p50 = 31, p95 = 31, max = 31), fast.gpuMs)
+        assertEquals(TimingStats(count = 10, p50 = 130, p95 = 130, max = 130), slow.gpuMs)
+        assertEquals(fast.inferMs, slow.inferMs)
+
+        // The sum is per run: a slow read on one run and a slow inference on another are not added together.
+        val split = DepthRunReportBuilder.build(
+            session(listOf(run(1, 1, inferMs = 100, outputReadMs = 1), run(2, 2, inferMs = 10, outputReadMs = 90), closed(3, 2))),
+        )
+        assertEquals(TimingStats(count = 2, p50 = 100, p95 = 101, max = 101), split.gpuMs)
+        assertEquals(100L, split.inferMs!!.max)
+        assertEquals(90L, split.outputReadMs!!.max)
     }
 
     @Test

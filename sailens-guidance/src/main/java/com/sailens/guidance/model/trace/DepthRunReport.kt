@@ -12,6 +12,9 @@ package com.sailens.guidance.model.trace
  * @param validityCounts per ground-fit validity, published runs only.
  * @param inverseOutputRatio published runs whose fit found the output inverted, over all published runs.
  * @param skipCounts frames skipped before an attempt, per reason, over the whole trace.
+ * @param inferMs the model run; [outputReadMs] reading its output back.
+ * @param gpuMs per run, [inferMs] + [outputReadMs]: the accelerator's share of a run, which the device budget
+ *   judges. Percentiles of the sum, never the sum of the two percentiles.
  * @param ageMs the attached observation's age on the traced frames, by frame time.
  */
 data class DepthRunReport(
@@ -26,6 +29,8 @@ data class DepthRunReport(
     val prepareMs: TimingStats? = null,
     val admitWaitMs: TimingStats? = null,
     val inferMs: TimingStats? = null,
+    val outputReadMs: TimingStats? = null,
+    val gpuMs: TimingStats? = null,
     val fitMs: TimingStats? = null,
     val ageMs: TimingStats? = null,
 ) {

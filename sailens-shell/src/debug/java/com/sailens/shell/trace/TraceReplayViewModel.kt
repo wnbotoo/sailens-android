@@ -266,7 +266,8 @@ internal fun DepthRunReport.recordsText(): String {
 /** "prepare:p50/p95/max(n) ...": the depth runs' timings, and the attached observations' age on the traced frames. */
 internal fun DepthRunReport.timingsText(): String {
     fun TimingStats?.text() = this?.let { "${it.p50}/${it.p95}/${it.max}(${it.count})" } ?: "-"
-    return "prepare:${prepareMs.text()} admitWait:${admitWaitMs.text()} infer:${inferMs.text()} fit:${fitMs.text()} age:${ageMs.text()}"
+    return "prepare:${prepareMs.text()} admitWait:${admitWaitMs.text()} infer:${inferMs.text()} read:${outputReadMs.text()} " +
+        "gpu:${gpuMs.text()} fit:${fitMs.text()} age:${ageMs.text()}"
 }
 
 /** "key:count, ...", or "none". */
