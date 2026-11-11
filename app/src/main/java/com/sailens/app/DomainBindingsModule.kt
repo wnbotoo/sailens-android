@@ -44,6 +44,7 @@ import com.sailens.guidance.usecase.trace.LoadTraceReplayReportUseCase
 import com.sailens.guidance.trace.capture.RegressionClocks
 import com.sailens.guidance.trace.regression.RegressionRecorder
 import com.sailens.guidance.trace.regression.recordingClock
+import com.sailens.runtime.accelerator.AcceleratorCoordinator
 import org.koin.android.ext.koin.androidContext
 import org.koin.core.qualifier.named
 import org.koin.core.scope.Scope
@@ -161,8 +162,14 @@ val domainBindingsModule = module {
             cameraFactsSource = getOrNull() ?: CameraFactsSource { null },
             phoneGeometry = get<PhoneGeometryStore>().let { store -> store::current },
             isStationary = get<DeviceSensorRepository>().let { sensors -> { sensors.isStationary.value } },
+            depthLane = get(),
+            depthSwitch = get(),
+            depthConfig = get(),
         )
     }
+    // One coordinator for every accelerator user this host composes (docs/architecture.md §6.9): the depth
+    // lane runs in the background; sem/det do not go through it.
+    single { AcceleratorCoordinator() }
     factory {
         StopSceneAnalysisUseCase(
             perceptionRepository = get(),

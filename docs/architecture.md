@@ -585,6 +585,22 @@ Which work is safety-critical and what user feedback is required when Guidance p
 higher-level product decisions. If Guidance is paused for Describe, that loss of protection must be
 communicated through a non-visual channel.
 
+The coordinator is `AcceleratorCoordinator` (`sailens-runtime` `…runtime.accelerator`), mechanism only:
+
+- three tiers, `REALTIME`, `INTERACTIVE`, `BACKGROUND`;
+- `yieldFor(tier)` opens a yield interval (intervals nest and are counted; closing is idempotent);
+  inside it, no lower tier is admitted;
+- `tryAdmit(tier)` returns an `Admission`, closed when the run ends, or null inside an interval of a
+  higher tier. `REALTIME` is always admitted and never waits;
+- a run admitted before an interval opened runs to its end: a LiteRT GPU run cannot be cancelled midway,
+  and how long it takes is not bounded;
+- the admission boundary is after a model's CPU preprocessing and before its inference.
+
+Tiers are assigned above it, in the host's DI. The depth lane is `BACKGROUND` (with `LOW` GPU queue
+priority) and asks for admission on every run; sem/det do not go through the coordinator, so their code
+paths are the same with or without it. A VLM request will be `INTERACTIVE`, Describe opening an interval
+for the request, once a VLM runtime is wired. The host binds one coordinator for all of them.
+
 ### 6.10 JNI: RegisterNatives and per-module native libraries
 
 Move away from static Java JNI symbol names before package movement.

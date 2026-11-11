@@ -2,8 +2,11 @@ package com.sailens.shell.trace
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.sailens.guidance.model.trace.DepthRecordCompleteness
+import com.sailens.guidance.model.trace.DepthRunReport
 import com.sailens.guidance.model.trace.SafetyRecordCompleteness
 import com.sailens.guidance.model.trace.SafetyStateTimeline
+import com.sailens.guidance.model.trace.TimingStats
 import com.sailens.guidance.model.trace.TraceReplayReport
 import com.sailens.guidance.model.trace.TraceSessionDescriptor
 import com.sailens.core.log.LogService
@@ -228,6 +231,8 @@ class TraceReplayViewModel(
                 "safetyStatesInWindow=${report.safetyTimeline.durationsText()} unknown=${report.safetyTimeline.unknownText()} " +
                     "records=${report.safetyTimeline.recordsText()}",
             )
+            appendLine("depthRuns=${report.depthRuns.runsText()} records=${report.depthRuns.recordsText()}")
+            appendLine("depthMs=${report.depthRuns.timingsText()}")
             append(warningSection)
         }
     }
@@ -241,6 +246,28 @@ class TraceReplayViewModel(
         fun List<String>.summary() = ifEmpty { listOf("unknown") }.joinToString("|")
         return "accel=${accelerators.summary()},sel=${acceleratorSelections.summary()},pre=${preprocessBackends.summary()},post=${postprocessBackends.summary()}"
     }
+}
+
+/** "attempts:n outcomes:... validity:... inverse:p% skips:...": the depth lane's runs, from its own records. */
+internal fun DepthRunReport.runsText(): String {
+    if (completeness == DepthRecordCompleteness.NOT_RECORDED) return "not recorded"
+    val inverse = String.format(Locale.ROOT, "%.1f", inverseOutputRatio * 100)
+    return "attempts:$attempts outcomes:${outcomeCounts.countsOrNone()} validity:${validityCounts.countsOrNone()} " +
+        "inverse:$inverse% skips:${skipCounts.countsOrNone()}"
+}
+
+/** Whether every depth record is there, with how many are known missing. */
+internal fun DepthRunReport.recordsText(): String {
+    if (completeness == DepthRecordCompleteness.NOT_RECORDED) return "not recorded"
+    val name = completeness.name.lowercase()
+    return if (missingRecords > 0) "$name (missing $missingRecords)" else name
+}
+
+/** "prepare:p50/p95/max(n) ...": the depth runs' timings, and the attached observations' age on the traced frames. */
+internal fun DepthRunReport.timingsText(): String {
+    fun TimingStats?.text() = this?.let { "${it.p50}/${it.p95}/${it.max}(${it.count})" } ?: "-"
+    return "prepare:${prepareMs.text()} admitWait:${admitWaitMs.text()} infer:${inferMs.text()} read:${outputReadMs.text()} " +
+        "gpu:${gpuMs.text()} fit:${fitMs.text()} age:${ageMs.text()}"
 }
 
 /** "key:count, ...", or "none". */

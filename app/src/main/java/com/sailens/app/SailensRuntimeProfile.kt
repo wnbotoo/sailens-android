@@ -13,6 +13,7 @@ import com.sailens.guidance.config.DetFirstConfig
 import com.sailens.guidance.config.PerceptionConfig
 import com.sailens.guidance.config.PipelinePerformanceBudget
 import com.sailens.guidance.config.TraceRuntimeConfig
+import com.sailens.guidance.depth.geometry.DepthGeometryConfig
 import com.sailens.guidance.model.common.ObstacleProviderType
 import com.sailens.guidance.model.common.PerceptionProfile
 import com.sailens.shell.guidance.overlay.SceneOverlayConfig
@@ -47,6 +48,8 @@ data class SailensRuntimeProfile(
     val realtimeObstacleModel: DetectionModelConfig,
     /** The optional depth model's run choices; with no `depth.tflite` nothing loads (docs/models.md). */
     val depthModel: DepthModelConfig,
+    /** The depth lane's cadence and limits; whether it runs is the debug switch's call, off by default. */
+    val depthGeometry: DepthGeometryConfig,
     val vlmModelBackend: ModelAcceleratorBackend,
     val perception: PerceptionConfig,
     val analysis: AnalysisConfig,
@@ -84,6 +87,7 @@ data class SailensRuntimeProfile(
                     gpuPrecision = GpuPrecision.FP16,
                     gpuPriority = GpuQueuePriority.LOW,
                 ),
+                depthGeometry = DepthGeometryConfig(targetFps = 3f, throttledFps = 1f),
                 vlmModelBackend = ModelAcceleratorBackend.GPU,
                 perception = PerceptionConfig.forProfile(
                     profile = perceptionProfile,

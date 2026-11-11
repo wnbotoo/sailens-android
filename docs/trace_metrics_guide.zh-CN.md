@@ -23,6 +23,7 @@ Trace 是 JSONL 文件，每一行是一个事件：
 - `guidance_alert`：就某个故障给用户（或试图给用户）的一次告知：一句话或一段节奏，以及输出对它做了什么。
   见[资格与告警](#资格与告警)。
 - `safety_state`：Guidance 对用户处在什么状态，以及它从哪些事实算出；两者任一变化时写一条。见[安全状态](#安全状态)。
+- `depth_run`：深度车道的一次尝试，或一个深度会话的收尾记录。见[深度车道](#深度车道)。
 - `session_summary`：会话结束后的聚合摘要。
 - `error`：pipeline 或 trace 中出现异常。
 
@@ -648,7 +649,7 @@ bbox 接地带（det∩sem 交叉验证）从 sem 可行走区抠除后的占比
 
 - `frameQuality`：去抖后的帧质量（`ok` / `obstructed` / `too_dark`），不管镜头遮挡/过暗事件开没开。`frameQualityClassified`：当帧未去抖的判定；镜头被挡时它比 `frameQuality` 早几帧变化。
 - `qualification`：`qualified`（合格）、`degraded`（一部分提示暂停，其余照常）或 `unqualified`（画面不可信，所有提示都被压掉）。`qualificationReasons` 是小写的原因列表，不合格的原因排在最前：`camera_obstructed`、`too_dark`、`ground_unrecognized`。级别和事件生成器用的是同一个判据：一帧不合格当且仅当它生成了镜头遮挡或光线过暗事件，所以 `unqualified` 的帧正是其余提示被压掉的那些帧。
-- `capabilities`：各可选输入（`orientation`、`camera_geometry`、`ground_contact_distance`）的状况，各有 `status`（`not_configured` / `available` / `degraded` / `unavailable`）和 `issues`。只进 trace，不属于资格。
+- `capabilities`：各可选输入（`orientation`、`camera_geometry`、`ground_contact_distance`、`depth_geometry`）的状况，各有 `status`（`not_configured` / `available` / `degraded` / `unavailable`）和 `issues`。只进 trace，不属于资格。
 - `receiptToDecisionMs`：从帧源收到这一帧到做出决策，两者都是 elapsed realtime。不含曝光到接收的那一段，不是完整帧龄。帧源没记录接收时间时没有这个字段。
 - `receivedElapsedMs`：帧源收到这一帧的时刻，elapsed realtime 毫秒：停止之后，安全状态按它判断一个结果是否新鲜（见下面的 `hold`），和安全状态读到的是同一个值。帧源没记录接收时间时没有这个字段。
 
@@ -723,6 +724,58 @@ Guidance 此刻对用户处在什么状态，合成为一个值，由 shell 从�
 缺口在原始记录上找，再合并相邻的同状态记录；未知和已知重叠时按未知算。真实状态 0–10 s `guiding`、10–20 s `stop_required`、20–30 s `guiding`，只丢了 `stop_required` 那条，报告给出 `guiding` 10 s（20–30）和未知 20 s（0–20），绝不会是 `guiding` 30 s。
 
 没有 `session_start` 时，窗口从这段会话第一条状态记录写下的时刻开始；那条也没有时，从读到的第一条记录算起（`+ before the first record`）。没有 `session_summary` 时，算到读到的最后一条记录为止（`+ after the last record`）：之后的时间未知，长度也未知。`records` 是 `complete`、`incomplete (missing n)`、`possibly_incomplete`（没有计数）或 `not_recorded`，和告警一样；trace 记录了流以错误结束时再加 `ended on an error`。
+
+## 深度车道
+
+深度车道（`docs/geometry.md` §6）在 Guidance 旁边跑，约 3 Hz，没有任何判定用它。它的统计只从它自己的记录算，
+从不从帧算：两条被记下的帧之间可能跑了几次，一个观测会挂到下一个观测之前的每一帧上，帧又是抽样的。
+
+### `depth_run`
+
+每次尝试一条，每个深度会话再加一条收尾记录。不抽样。尝试指车道开始处理的一帧（有了 `runId`）；在那之前就
+跳过的帧只按原因计数，记进下一条记录的 `skipsSinceLast`（`stopped`、`thermal`、`thermal_cadence`、`yield`、
+`no_baseline_yet`、`frame_unqualified`、`geometry_unavailable`）。
+
+- `generation`：深度会话；`runId` 在会话内从 1 起数尝试。`seq` 在 trace 会话内从 1 起给深度记录编号，
+  `session_summary.depthRunCount` 是会话排进队列的条数。
+- `outcome`：`published`（观测成了会话的快照）、`preprocess_unavailable`（原生预处理接不了这一帧；没有兜底）、
+  `yield_dropped`（预处理之后更高档位开了让路区间，模型没跑）、`failed`（某一步抛了异常）、`non_finite_output`
+  （输出里有 NaN 或无穷）、`closed`（会话的收尾记录，一定是它的最后一条）。
+- `frameSequence`、`frameTimeNanos`、`timeBasis`、`geometryQuality`：这次尝试用的帧和几何。
+- 发布了的运行还有：`validity`（地面拟合的有效性，小写：`valid`、`no_ground`、`inverse_output` 等）、
+  `inlierRatio`、`confidence`、`planeAgreesWithGravity`、`groundRatio` / `aboveGroundRatio` / `belowGroundRatio`
+  （占标签网格的比例）、`disparityScale` / `disparityShift`（拟合出的 `A` 和 `t`）、`detail`（车道在 Y 平面上量的
+  画面细节）。
+- 耗时（ms）：`prepareMs`（原生预处理）、`admitWaitMs`、`inferMs`、`outputReadMs`、`fitMs`；运行时的
+  `accelerator`、`acceleratorSelection`（含 GPU 精度和队列优先级）、`preprocessBackend`、`postprocessBackend`；
+  `modelShape`，输入与输出（`1x3x392x224>1x392x224`）。
+- 收尾记录：停止时有尝试在途，就带 `cancelledRunId` 和 `cancelledStage`（`prepare`、`admit`、`infer`、`fit`）——
+  这就是那次尝试的结算，之后不再为它写任何记录——以及 `failuresTotal`、`finalState` 和最后一段的跳过。
+
+每次尝试恰好结算一次：要么是它自己的记录，要么是收尾记录里的在途项。记录只在它自己的 trace 会话开着时才被
+接收，所以一个 trace 里不会混进别的会话的运行。`session_start.depthTrace` 表示这个 trace 记录深度运行；没有
+这个标志的 trace 里没有记录，这说明不了车道的任何情况。
+
+### 帧字段
+
+- `depthRunId`：挂到这一帧上的观测来自哪次运行；车道第一次发布之前、以及没有车道时没有这个字段。
+- `depthAgeMs`：这个观测按帧时间的年龄，这一帧的时间减观测的时间。可以为负：车道可能先处理完了一帧更新的。
+- `capabilities.depth_geometry`：这一帧时车道的状态和问题（`initializing`、`stale`、`paused_thermal`、
+  `init_failed` 等）。
+
+### `depthRuns` / `depthMs`
+
+报告里的两行深度内容，只从记录算，每次尝试算一次：
+
+- `attempts` 和 `outcomes`（不算收尾记录；停止时在途的尝试记为 `cancelled`）；已发布运行的 `validity` 分布，
+  `inverse` 是其中输出反向的比例；`skips` 按原因、全 trace 合计；
+- `records`：`complete`、`incomplete (missing n)`（`seq` 有缺口、少于 `depthRunCount`、会话内 `runId` 有缺口，或某个
+  深度会话没有收尾记录）、`possibly_incomplete`（没有汇总可以对照）或 `not recorded`；
+- `depthMs`：`prepare`、`admitWait`、`infer`、`read`（读回输出）、`gpu`（每次运行的 `infer` + `read`，即真机预算判断的
+  加速器部分：按每次运行的和取分位数）和 `fit`，格式 p50/p95/最大值(条数)，最近秩；`age` 是被记下的帧上挂着的观测的年龄，
+  唯一从帧算的量。
+
+车道关着的 trace 是 `complete`，尝试数为 0。
 
 ## 快速诊断路径
 

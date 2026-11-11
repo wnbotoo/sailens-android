@@ -1,5 +1,6 @@
 package com.sailens.shell.capture
 
+import com.sailens.guidance.model.trace.DepthRunTrace
 import com.sailens.guidance.model.trace.FrameTrace
 import com.sailens.guidance.model.trace.GuidanceAlertTrace
 import com.sailens.guidance.model.trace.PromptOutcomeTrace
@@ -38,6 +39,7 @@ internal class CapturingTraceService(
     override fun recordFrame(frameTrace: FrameTrace) = base.recordFrame(frameTrace)
     override fun recordGuidanceAlert(alert: GuidanceAlertTrace) = base.recordGuidanceAlert(alert)
     override fun recordSafetyState(state: SafetyStateTrace) = base.recordSafetyState(state)
+    override fun recordDepthRun(record: DepthRunTrace): Boolean = base.recordDepthRun(record)
     override fun recordPromptOutcome(outcome: PromptOutcomeTrace) {
         base.recordPromptOutcome(outcome)
         // A delivered prompt opens an event window in a model_regression capture.

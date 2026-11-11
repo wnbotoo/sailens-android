@@ -1,5 +1,6 @@
 package com.sailens.guidance.service
 
+import com.sailens.guidance.model.trace.DepthRunTrace
 import com.sailens.guidance.model.trace.FrameTrace
 import com.sailens.guidance.model.trace.GuidanceAlertTrace
 import com.sailens.guidance.model.trace.PromptOutcomeTrace
@@ -40,4 +41,12 @@ interface TraceService {
      * first thing when a session opens. Called on the main thread, so it must never wait for the trace's disk writes.
      */
     fun recordSafetyState(state: SafetyStateTrace) {}
+
+    /**
+     * One depth-lane record ([DepthRunTrace]). Accepted only while the trace session it names is the attached
+     * one, numbered with that session's next `seq`; anything else is refused.
+     *
+     * @return whether it was accepted.
+     */
+    fun recordDepthRun(record: DepthRunTrace): Boolean = false
 }

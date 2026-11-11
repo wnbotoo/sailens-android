@@ -165,8 +165,9 @@ NEAR）。真正有保证的只有融合：使用的等级绝不比今天的远�
 
 ## 6. 深度输入变换与地面拟合
 
-**模型契约。** 输入 RGB、ImageNet 归一化、固定形状；输出相对视差（越大越近），单通道；布局和
-sem/det 一样由张量形状判定。没有类别顺序可弄错；对应的风险是**反向输出**（输出深度而不是视差），静
+**模型契约**（[models.zh-CN.md](models.zh-CN.md) 的 "`depth` 契约"）。输入 RGB，取值 [0, 1]，模型需要的归一化
+在模型里，固定形状；输出相对视差（越大越近），单通道，与输入同尺寸；布局和 sem/det 一样由张量形状判定。
+缩放方式属于契约而不属于模型：`PAD_KEEP_ASPECT`，即原生预处理的 letterbox。没有类别顺序可弄错；对应的风险是**反向输出**（输出深度而不是视差），静
 态预检看不出来，所以地面拟合每帧检查斜率的符号，拒绝反向的模型。对使用深度的一方的规则：配置了但坏掉
 的深度模型绝不比没有更糟。失败、过期或反向输出的模型让 Guidance 照没有它时那样运行，失败绝不会变成
 "没有障碍物"。
@@ -174,17 +175,19 @@ sem/det 一样由张量形状判定。没有类别顺序可弄错；对应的风
 **深度输入变换**（`sailens-vision` `…vision.depth`）。分析图像和模型张量之间的映射是模型配置契约的一
 部分，因为每个视差样本都要变成一条射线。
 
-- 每个深度模型声明一个 `ResizePolicy`，与它导出时的验证方式一致：`STRETCH`（不保持宽高比直接缩放）、
-  `CROP_KEEP_ASPECT`（居中裁到张量宽高比再缩放）或 `PAD_KEEP_ASPECT`。TFLite 元数据里读不到它，所以和模
-  型一起配置。
+- 变换认识三种 `ResizePolicy`：`STRETCH`（不保持宽高比直接缩放）、`CROP_KEEP_ASPECT`（居中裁到张量宽高比
+  再缩放）和 `PAD_KEEP_ASPECT`。深度契约固定用 `PAD_KEEP_ASPECT`，因为原生预处理写出的就是它；另外两种
+  用于拟合的测试和离线实验。
 - `DepthInputTransform.create(分析尺寸, 张量尺寸, policy)` 提供 `toTensor*` / `toAnalysis*` 和 `covers`。
   允许 `scaleX ≠ scaleY`（拉伸），只要已知即可。
 - **所有几何都在分析图像像素里做。** 地面拟合的样本是分析图像像素 `p`；`q = g · K⁻¹ p` 用分析图像内参
   `K`；`p` 的视差在张量的 `toTensor(p)` 处读取。不在张量像素里做任何计算，因此不需要张量空间的内参。
 - `covers(p)` 为假的像素（被裁掉或在填充里）是**未知**：绝不插值或外推成地面、地面以上或以下。
-  `DisparityMap.sampleAt(u, v)` 双线性插值，模型没看到的点返回 null，并钳在中心落在内容区内的像素范围
-  里，所以填充永远混不进来，即使填充是小数（960×1280 → 518×518 填 64.75 px）或半像素（640×1280 →
-  518×518 填 129.5 px；中心恰好落在开区间右端的像素算填充）。
+  `DisparityMap.sampleAt(u, v)` 双线性插值，模型没看到的点返回 null，只在内容像素之间插值。张量里的一个
+  像素算内容，要原生内核往里写了图像（`[ceil(pad), ceil(pad + 内容宽))`），**且**它的中心在内容区内
+  （`< pad + 内容宽`）：首列 `ceil(pad)`，末列 `ceil(pad + 内容宽 − 0.5) − 1`，行同理。所以填充永远混不进
+  来，即使填充是小数（540×960 → 224×392 填 1.75 px）或半像素（中心恰好落在开区间右端的像素算填充）。
+  `DepthContentRuleNativeTest` 在真机上用五种填充、四种旋转把这条规则和原生内核对上。
 
 **地面拟合**（`…guidance.geometry` `GroundFitter`，Kotlin）：
 
@@ -214,8 +217,43 @@ sem/det 一样由张量形状判定。没有类别顺序可弄错；对应的风
 **有效性**：`VALID`、`TOO_FEW_SAMPLES`、`DEGENERATE_VIEW`（相机垂直朝下）、`NO_GROUND`、`NO_SUPPORT`、
 `SUPPORT_SWITCH` 或 `INVERSE_OUTPUT`。
 
-目前还没有深度 runner、深度 `ModelType` 和调度；变换和拟合都是纯 JVM 代码，由仿真器的合成视差
-（`renderDisparity`，`a/Z + b`，可经任意变换）来检验。
+变换和拟合都是纯 JVM 代码，由仿真器的合成视差（`renderDisparity`，`a/Z + b`，可经任意变换）来检验。
+
+**深度车道**（`…guidance.depth.geometry` `DepthGeometryLane`）在 Guidance 旁边跑模型和拟合。**没有任何判定
+用它**：它的观测只进 `DEPTH_GEOMETRY` 能力、trace 和调试视图，不进 `ProcessFrameUseCase`、
+`AnalyzeSceneUseCase`、`DecideEventsUseCase` 的任何输入（I1）。深度证据永远不能证明镜头没被挡、画面可用或
+前方可走，不能升级任何资格，也不能降低任何风险（I6）：以后用它的一方从这条规则出发。
+`DepthLaneInvarianceTest`（每个场景、每种基准配置，配正常、反向和初始化失败的模型）和
+`DepthLaneSessionTest`（每个会话脚本）把每种情况开、关车道各跑一遍，逐行比较结果和用户的时间线。
+
+- **开关。** `DepthGeometrySwitch`，会话开始时读一次；默认关，只有调试设置能打开。它不是 `PerceptionConfig`
+  的字段：车道不是任何判定的输入，打开它不能改变采集记下的管线配置。频率和上限来自宿主的运行时配置
+  （`DepthGeometryConfig`：3 Hz，`MODERATE` 发热时 1 Hz，超过 2 个周期算过期，连续失败 30 次停跑）。
+- **归属。** 全应用一个车道（Koin `single`），只持有屏障链的末端；没有"当前会话"。
+  `StartSceneAnalysisUseCase` 在 sem（和 det）初始化之后启动一个 `DepthSession`，拿着句柄，每帧读它的快照，
+  在流的 `finally` 里、trace 关闭之前停止它。Guidance 从不等车道：启动立即返回。
+- **屏障链。** 一个会话的 `done` 在它自己的 Job 结束、且上一个会话的 `done` 完成之后才完成；会话只在这之后
+  初始化 runner。runner 在 Job 的 `finally` 里释放，所以新会话只在所有更早的会话都放开模型之后才编译，
+  中间有会话还没开始执行就被取消也一样。每个会话有自己的 runner 和 fitter。
+- **一次运行**（车道自己的 `frames(333)` 订阅）：车道已停跑、设备过热（`SEVERE` 暂停；`MODERATE` 按帧时间
+  保持 1 Hz）、协调器正在为更高档位让路、主管线还没有基础资格或最新一帧不合格、这一帧自己的几何不可用时，
+  跳过并还帧。否则尝试开始（有了运行编号），原生预处理读这一帧，**帧在它的 `finally` 里归还**，早于准入、
+  推理和拟合（I7）；原生失败是 `preprocess_unavailable`，绝不走 OpenCV。然后准入
+  （`AcceleratorCoordinator.tryAdmit(BACKGROUND)`）、GPU 推理（队列优先级 `LOW`）、输出有非有限值算失败，再在
+  只有一个线程的 dispatcher 上 `GroundFitter.fit`。车道忙时被帧源替换掉的帧根本到不了车道，所以没有"忙"这种
+  跳过。
+- **记账。** 记录或快照能看到的每一步都在会话自己的锁里：`begin` 分配运行编号，`commit` 把快照和这次尝试的
+  `depth_run` 记录一起提交，`seal`（停止）关闭会话、写收尾记录，收尾记录带着在途的尝试。所以每次尝试恰好
+  结算一次，收尾记录是它所在会话的最后一条，停止之后才返回的运行什么也不发布。记录经 trace 的账本写入，
+  trace 会话关闭后一律拒收（[trace_metrics_guide.zh-CN.md](trace_metrics_guide.zh-CN.md) 的 `depth_run`）。
+- **失败留在车道里。** 除取消以外的每个 `Throwable` 都变成会话的状态（`init_failed`、`run_failed`、
+  `model_unreadable` 等），绝不成为 Guidance 流的错误；取消照常重抛。车道的 Job 是它自己的 supervisor 的子
+  任务，不是流的。
+- **能力**（`DepthGeometryCapability`，第一条匹配的为准）：没有会话或没有模型 → 未配置；`model_unreadable`；
+  `preprocess_unavailable`；`init_failed` / `run_failed`；`initializing`；`paused_thermal` / `paused_yield`；还没有
+  观测，或观测按帧时间超过 2 个周期（或时间基准不同）→ `stale`，带最后一次跳过的原因；新鲜的观测、几何降级
+  → 降级；否则可用。拟合看到了什么（没有地面、反向输出、支撑面切换）是观测的内容，不是能力的失败。年龄是
+  主管线这一帧的时间减去观测的时间，可以为负，按绝对值判断。
 
 ## 7. 仿真器
 
@@ -232,6 +270,9 @@ sem/det 一样由张量形状判定。没有类别顺序可弄错；对应的风
   `DomainBindingsModule` 给应用的一样，只有两个模型、时钟和静止标志是假的。JVM 迫使有两处替代，因为 native 库只有 arm64：连通
   性走 Kotlin 回退而不是 native 内核（两者在收窄的走廊上不同，见 [architecture.zh-CN.md](architecture.zh-CN.md)
   里关于连通性的说明），语义统计来自 Kotlin 提取器。golden 里的阻塞、宽度和洪泛数值都是回退路径的。
+- **深度。** `SimulatedPipeline(depth = SimulatedDepthModel())` 加上深度车道（§6）：真实的车道和地面拟合，配一个
+  报告每帧自己姿态和世界的 `renderDisparity` 的深度模型，跑在车道自己的线程上，与管线不同步。
+  `SimulatedDepthModel` 还可以输出深度而不是视差、初始化失败，或报告设备过热。
 - **golden**：`sailens-guidance/src/test/resources/scenarios/<name>.golden.txt`，开头是场景描述，之后每帧一
   行：决定的事件（key、优先级、参数）、被跟踪的障碍物（类别 / 区域 / 距离）、地面识别、连通性数值和
   `geometry=<质量>/<俯角>`，保留 4 位小数。`ScenarioGoldenTest` 在第一处不同的行失败。`<name>.m3a.golden.txt`

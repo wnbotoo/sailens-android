@@ -13,6 +13,13 @@ import com.sailens.guidance.config.TraceRuntimeConfig
 import com.sailens.guidance.depth.DefaultDepthRepository
 import com.sailens.guidance.depth.GroundContactDistanceEstimator
 import com.sailens.guidance.depth.ImagePositionDepthEstimator
+import com.sailens.guidance.depth.geometry.DepthGeometryConfig
+import com.sailens.guidance.depth.geometry.DepthGeometryLane
+import com.sailens.guidance.depth.geometry.DepthGeometrySwitch
+import com.sailens.guidance.depth.geometry.DepthModelCheckResult
+import com.sailens.guidance.depth.geometry.DepthModelRunner
+import com.sailens.guidance.depth.geometry.DepthPreparedInput
+import com.sailens.guidance.depth.geometry.ThermalLevel
 import com.sailens.guidance.geometry.CameraFactsSource
 import com.sailens.guidance.geometry.PhoneGeometrySettings
 import com.sailens.guidance.geometry.SensorSample
@@ -53,8 +60,17 @@ import com.sailens.guidance.usecase.perception.AnalyzeSceneUseCase
 import com.sailens.guidance.usecase.perception.ProcessFrameUseCase
 import com.sailens.guidance.usecase.scene.StartSceneAnalysisUseCase
 import com.sailens.guidance.usecase.scene.StopSceneAnalysisUseCase
+import com.sailens.core.runtime.MlRuntimeInfo
+import com.sailens.runtime.accelerator.AcceleratorCoordinator
+import com.sailens.vision.depth.DepthInputTransform
+import com.sailens.vision.depth.DepthRun
+import com.sailens.vision.depth.DisparityMap
+import com.sailens.vision.depth.ResizePolicy
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
@@ -86,6 +102,11 @@ import kotlin.random.Random
  * @param semanticInit holds the segmentation model's initialisation; null: initialised from the start,
  *   so the pipeline never initialises it.
  * @param detectionInit the same for the detector.
+ * @param renders keeps the rendering of the last scenario across pipelines, for a test that runs one scenario many
+ *   times in a row; null: this pipeline renders its own.
+ * @param depth a depth model for the depth lane (docs/geometry.md §6), run through the real lane and ground fit; null:
+ *   no lane, as in a host that has none. The lane sees every frame the segmentation model is given, as a second
+ *   subscription to the camera would, on its own threads and at its own pace: nothing waits for it.
  */
 class SimulatedPipeline(
     val scenario: Scenario,
@@ -99,6 +120,8 @@ class SimulatedPipeline(
     phoneGeometry: () -> PhoneGeometrySettings = { PhoneGeometrySettings.DEFAULT },
     semanticInit: ModelInitGate? = null,
     detectionInit: ModelInitGate? = null,
+    renders: ScenarioRenders? = null,
+    val depth: SimulatedDepthModel? = null,
 ) {
     private val semantics = CityscapesNavigationSemantics
 
@@ -119,19 +142,13 @@ class SimulatedPipeline(
             content[index] = if (delivery is FrameDelivery.Frozen) content[delivery.fromIndex] else index
         }
     }
-    private val classMaps = arrayOfNulls<IntArray>(scenario.frames.size)
-    private val detections = arrayOfNulls<List<ObstacleDetection>>(scenario.frames.size)
+    private val classMaps: Array<IntArray?>
+    private val detections: Array<List<ObstacleDetection>?>
 
     init {
-        // Rendering is the slow part, and a standing user repeats the same view frame after frame.
-        val views = HashMap<Pair<Pose, World>, RenderedFrame>()
-        fun view(pose: Pose, world: World) = views.getOrPut(pose to world) { render(scenario.camera, pose, world) }
-        scenario.frames.forEachIndexed { index, frame ->
-            if (frame.delivery == FrameDelivery.Lost) return@forEachIndexed
-            val content = scenario.frames[contentIndex[index]]
-            classMaps[index] = view(content.pose, content.semWorld ?: content.world).classMap
-            detections[index] = view(content.pose, content.detWorld ?: content.world).detections
-        }
+        val rendered = (renders ?: ScenarioRenders()).of(scenario, contentIndex)
+        classMaps = rendered.first
+        detections = rendered.second
     }
 
     private val failedFrames = ConcurrentHashMap.newKeySet<Long>()
@@ -162,6 +179,7 @@ class SimulatedPipeline(
             releases.incrementAndGet()
         }
         override suspend fun segment(frame: ImageFrame): Result<SegmentationOutput> {
+            if (depth != null) depthChannel.trySend(frame)
             val index = indexOf(frame)
             if (scenario.frames[index].semFails) {
                 failedFrames += frame.sequenceNumber
@@ -262,6 +280,75 @@ class SimulatedPipeline(
     )
     val frameQualityAnalyzer = FrameQualityAnalyzer()
 
+    private val depthChannel = Channel<ImageFrame>(Channel.CONFLATED)
+
+    /** The depth lane's frames, for `StartSceneAnalysisUseCase`'s `depthFrames`; null without [depth]. */
+    val depthFrames: ((Long) -> Flow<ImageFrame>)? = depth?.let { { _ -> depthChannel.receiveAsFlow() } }
+
+    /** Every depth runner the lane built, in order: one per session that got past its model check. */
+    val depthRunners: MutableList<SimulatedDepthRunner> = java.util.Collections.synchronizedList(mutableListOf())
+
+    /** The depth lane, wired as `GuidanceModule` wires it; null without [depth]. */
+    val depthLane: DepthGeometryLane? = depth?.let { model ->
+        DepthGeometryLane(
+            runnerFactory = { SimulatedDepthRunner(model).also { depthRunners += it } },
+            modelCheck = {
+                if (model.checkThrows) throw IllegalStateException("simulated depth model check failure")
+                DepthModelCheckResult.Compatible
+            },
+            coordinator = AcceleratorCoordinator(),
+            thermal = { model.thermal },
+            traceService = NoOpTraceService,
+            config = DepthGeometryConfig(),
+            logService = SilentLog,
+            elapsedMs = clock,
+        )
+    }
+
+    /**
+     * The depth model for [depth]: the disparity [renderDisparity] gives each frame's own pose and world, `a/Z + b`,
+     * at the model's size and with the letterbox the contract fixes.
+     */
+    inner class SimulatedDepthRunner internal constructor(private val model: SimulatedDepthModel) : DepthModelRunner {
+        /** Runs that reached the model. */
+        val inferences = AtomicInteger()
+
+        override suspend fun initialize() {
+            if (model.initFails) throw UnsatisfiedLinkError("simulated depth model initialization failure")
+        }
+
+        override suspend fun prepare(frame: ImageFrame): DepthPreparedInput {
+            val rotated = frame.rotationDegrees == 90 || frame.rotationDegrees == 270
+            val transform = DepthInputTransform.create(
+                if (rotated) frame.height else frame.width,
+                if (rotated) frame.width else frame.height,
+                model.width,
+                model.height,
+                ResizePolicy.PAD_KEEP_ASPECT,
+            )
+            return DepthPreparedInput(transform, detail = null, preprocessMs = 0, payload = contentIndex[indexOf(frame)])
+        }
+
+        override suspend fun infer(input: DepthPreparedInput): DepthRun {
+            inferences.incrementAndGet()
+            val content = scenario.frames[input.payload as Int]
+            val t = input.transform
+            var values = renderDisparity(
+                scenario.camera, content.pose, content.world, model.width, model.height, t.analysisWidth, t.analysisHeight,
+                { x, y -> t.toAnalysisX(x) to t.toAnalysisY(y) },
+            )
+            // A model that outputs depth: Z = a / (d - b), the sky capped far away.
+            if (model.inverted) values = FloatArray(values.size) { i -> if (values[i] > 0.2001f) (10f / (values[i] - 0.2f)).coerceAtMost(200f) else 200f }
+            return DepthRun(
+                DisparityMap(model.width, model.height, values, t), nonFiniteCount = 0, detail = null, preprocessMs = 0,
+                inferenceMs = 0, outputReadMs = 0, runtimeInfo = MlRuntimeInfo("simulated", "simulated", "simulated", "kotlin_ground_fit"),
+                shapeLabel = "1x3x${model.height}x${model.width}>1x${model.height}x${model.width}",
+            )
+        }
+
+        override suspend fun release() = Unit
+    }
+
     /** Starts a session: the pipeline the app's Guidance screen collects. */
     val start = StartSceneAnalysisUseCase(
         profileManager = profiles,
@@ -279,6 +366,8 @@ class SimulatedPipeline(
         cameraFactsSource = CameraFactsSource { cameraFacts },
         phoneGeometry = phoneGeometry,
         isStationary = { stationary.value },
+        depthLane = depthLane,
+        depthSwitch = DepthGeometrySwitch(initial = depth != null),
     )
 
     /** Stops a session (resets every processor and the cooldown) and releases the models. */
@@ -333,6 +422,47 @@ class SimulatedPipeline(
         override fun error(tag: String, message: String, throwable: Throwable?) = Unit
     }
 }
+
+/**
+ * Each frame's class map and detections, rendered once per distinct view, and the last scenario's kept (by identity)
+ * for the next pipeline given the same instance. Rendering is the slow part of a simulated run. Nothing writes to
+ * them: the segmentation hands out a copy of the class map, and the detections are a read-only list.
+ */
+class ScenarioRenders {
+    private var last: Triple<Scenario, Array<IntArray?>, Array<List<ObstacleDetection>?>>? = null
+
+    @Synchronized
+    fun of(scenario: Scenario, contentIndex: IntArray): Pair<Array<IntArray?>, Array<List<ObstacleDetection>?>> {
+        last?.takeIf { it.first === scenario }?.let { return it.second to it.third }
+        val classMaps = arrayOfNulls<IntArray>(scenario.frames.size)
+        val detections = arrayOfNulls<List<ObstacleDetection>>(scenario.frames.size)
+        // A standing user repeats the same view frame after frame.
+        val views = HashMap<Pair<Pose, World>, RenderedFrame>()
+        fun view(pose: Pose, world: World) = views.getOrPut(pose to world) { render(scenario.camera, pose, world) }
+        scenario.frames.forEachIndexed { index, frame ->
+            if (frame.delivery == FrameDelivery.Lost) return@forEachIndexed
+            val content = scenario.frames[contentIndex[index]]
+            classMaps[index] = view(content.pose, content.semWorld ?: content.world).classMap
+            detections[index] = view(content.pose, content.detWorld ?: content.world).detections
+        }
+        last = Triple(scenario, classMaps, detections)
+        return classMaps to detections
+    }
+}
+
+/**
+ * The simulator's depth model: its input size (portrait, 9:16 here, so the letterbox is small), whether it outputs
+ * depth instead of disparity, whether its static check or its initialization throws, and the device's thermal status
+ * the lane sees.
+ */
+data class SimulatedDepthModel(
+    val width: Int = 126,
+    val height: Int = 224,
+    val inverted: Boolean = false,
+    val checkThrows: Boolean = false,
+    val initFails: Boolean = false,
+    val thermal: ThermalLevel = ThermalLevel.NONE,
+)
 
 /** A model failing on one frame, as a scenario scripted it. */
 class SimulatedModelFailure(model: String, sequenceNumber: Long) : RuntimeException("simulated $model failure on frame $sequenceNumber")

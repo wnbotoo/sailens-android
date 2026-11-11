@@ -1,5 +1,6 @@
 package com.sailens.guidance.trace
 
+import com.sailens.guidance.model.trace.DepthRunTrace
 import com.sailens.guidance.model.trace.FrameTrace
 import com.sailens.guidance.model.trace.GuidanceAlertTrace
 import com.sailens.guidance.model.trace.PromptOutcomeTrace
@@ -62,6 +63,12 @@ internal sealed interface TraceQueueEntry {
         val state: SafetyStateTrace,
     ) : TraceQueueEntry {
         override fun encode(): JSONObject = TraceJsonEncoder.encodeSafetyState(state)
+    }
+
+    data class DepthRun(
+        val record: DepthRunTrace,
+    ) : TraceQueueEntry {
+        override fun encode(): JSONObject = TraceJsonEncoder.encodeDepthRun(record)
     }
 
     data class Error(

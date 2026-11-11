@@ -24,6 +24,11 @@ data class SessionTraceMetadata(
      * were: no hold there means none was recorded, not that none held, and a frame without a receipt says nothing.
      */
     val holdTrace: Boolean = false,
+    /**
+     * The trace can carry `depth_run` records ([DepthRunTrace]) and the frame fields that point at them. Set by the
+     * trace service. False in a trace written before these were.
+     */
+    val depthTrace: Boolean = false,
 )
 
 data class FrameTrace(
@@ -154,6 +159,9 @@ data class FrameTrace(
      * result's freshness by. Null when the source did not record it, and in traces written before it existed.
      */
     val receivedElapsedMs: Long? = null,
+    /** The depth run this frame's snapshot came from, and its age by frame time; null without a depth observation. */
+    val depthRunId: Long? = null,
+    val depthAgeMs: Long? = null,
 )
 
 /** One optional input's status ("not_configured" / "available" / "degraded" / "unavailable") and issues, lower case. */
@@ -621,6 +629,11 @@ data class SessionTraceSummary(
      * `seq` a complete trace holds. Set by the trace service; null in older traces.
      */
     val safetyStateCount: Long? = null,
+    /**
+     * How many [DepthRunTrace] records this session accepted: the highest `seq` a complete trace holds. Set by the
+     * trace service; null in older traces.
+     */
+    val depthRunCount: Long? = null,
 )
 
 class SessionTraceAccumulator(

@@ -3,6 +3,7 @@ package com.sailens.guidance.trace
 import android.content.Context
 import android.os.SystemClock
 import com.sailens.guidance.config.TraceRuntimeConfig
+import com.sailens.guidance.model.trace.DepthRunTrace
 import com.sailens.guidance.model.trace.FrameTrace
 import com.sailens.guidance.model.trace.GuidanceAlertTrace
 import com.sailens.guidance.model.trace.PromptOutcomeTrace
@@ -72,7 +73,7 @@ class FileTraceService internal constructor(
             flushToDisk()
             activeSessionId = metadata.sessionId
             traceFile = createTraceFile(metadata.sessionId)
-            ledger.attach(metadata.copy(safetyTrace = true, holdTrace = true))
+            ledger.attach(metadata.copy(safetyTrace = true, holdTrace = true, depthTrace = true))
             trim()
         }
     }
@@ -124,6 +125,13 @@ class FileTraceService internal constructor(
     /** Never takes this object's lock, which a flush holds while it writes to disk. */
     override fun recordSafetyState(state: SafetyStateTrace) {
         if (ledger.recordState(state)) trim()
+    }
+
+    /** Through the ledger, which orders it against the session's opening and closing; never takes this object's lock. */
+    override fun recordDepthRun(record: DepthRunTrace): Boolean {
+        val accepted = ledger.recordDepthRun(record)
+        if (accepted) trim()
+        return accepted
     }
 
     override fun finishSession(summary: SessionTraceSummary) {

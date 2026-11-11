@@ -212,6 +212,7 @@ class BuildTraceReplayReportUseCase {
             guidanceAlertCompleteness = alertCompleteness,
             guidanceAlertsMissing = alertsMissing,
             safetyTimeline = SafetyTimelineBuilder.build(session),
+            depthRuns = DepthRunReportBuilder.build(session),
         )
     }
 

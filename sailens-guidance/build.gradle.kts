@@ -95,6 +95,7 @@ dependencies {
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.serialization.json)
     testFixturesImplementation(libs.kotlinx.coroutines.core)
+    testFixturesImplementation(project(":sailens-runtime"))
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

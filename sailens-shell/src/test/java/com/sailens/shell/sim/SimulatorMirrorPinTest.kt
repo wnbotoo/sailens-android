@@ -57,7 +57,7 @@ class SimulatorMirrorPinTest {
 
         val PINS = mapOf(
             Pin("SceneAnalysisViewModel.kt") { file("$SOURCES/guidance/screen/SceneAnalysisViewModel.kt") } to
-                "949ef32f8679cedbff11484966159ff3900e823049533f97cc4be91d1f504732",
+                "fd48481c2fb7e45ea3690a50494b06abc31886680ecf8277a30465aaaff0db91",
             Pin("HapticManager.kt") { file("$SOURCES/device/HapticManager.kt") } to
                 "2b624773124fdbfddecbe240a774b5392e355a03d4a4606e6f97bf69bf923b72",
             Pin("GuidanceAnnouncements.kt") { file("$SOURCES/device/GuidanceAnnouncements.kt") } to

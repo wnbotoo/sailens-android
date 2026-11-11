@@ -1,5 +1,6 @@
 package com.sailens.guidance.trace
 
+import com.sailens.guidance.model.trace.DepthRunTrace
 import com.sailens.guidance.model.trace.FrameTrace
 import com.sailens.guidance.model.trace.GuidanceAlertTrace
 import com.sailens.guidance.model.trace.PromptOutcomeTrace
@@ -32,4 +33,6 @@ object NoOpTraceService : TraceService {
     override fun recordGuidanceAlert(alert: GuidanceAlertTrace) = Unit
 
     override fun recordSafetyState(state: SafetyStateTrace) = Unit
+
+    override fun recordDepthRun(record: DepthRunTrace): Boolean = false
 }

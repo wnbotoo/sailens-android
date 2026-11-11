@@ -5,6 +5,12 @@ import com.sailens.guidance.config.PipelinePerformanceBudget
 import com.sailens.guidance.model.common.ObstacleRunKind
 import com.sailens.guidance.processor.perception.PerceptionProfileManager
 import com.sailens.guidance.config.TraceRuntimeConfig
+import com.sailens.guidance.depth.geometry.DepthGeometryCapability
+import com.sailens.guidance.depth.geometry.DepthGeometryConfig
+import com.sailens.guidance.depth.geometry.DepthGeometryLane
+import com.sailens.guidance.depth.geometry.DepthGeometrySwitch
+import com.sailens.guidance.depth.geometry.DepthSession
+import com.sailens.guidance.depth.geometry.DepthStartContext
 import com.sailens.guidance.geometry.CameraFactsSource
 import com.sailens.guidance.geometry.CameraGeometryResolver
 import com.sailens.guidance.geometry.FrameFacts
@@ -21,6 +27,7 @@ import com.sailens.guidance.model.scene.SceneDebugInfo
 import com.sailens.guidance.model.perception.SegmentationMask
 import com.sailens.guidance.model.scene.SceneResult
 import com.sailens.guidance.processor.analysis.FrameQualityAnalyzer
+import com.sailens.guidance.safety.BaselineQualification
 import com.sailens.guidance.safety.GuidanceQualification
 import com.sailens.guidance.safety.GuidanceQualifier
 import com.sailens.guidance.safety.receiptToDecisionMs
@@ -46,6 +53,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.transform
 import kotlinx.coroutines.flow.onEach
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.abs
 
 private data class PipelineFrameResult(
@@ -77,6 +85,10 @@ class StartSceneAnalysisUseCase(
     private val phoneGeometry: () -> PhoneGeometrySettings = { PhoneGeometrySettings.DEFAULT },
     private val isStationary: () -> Boolean = { false },
     private val cameraGeometryResolver: CameraGeometryResolver = CameraGeometryResolver(),
+    // The depth lane (docs/geometry.md §6): beside Guidance, read by no decision. Null: a host without one.
+    private val depthLane: DepthGeometryLane? = null,
+    private val depthSwitch: DepthGeometrySwitch = DepthGeometrySwitch(),
+    private val depthConfig: DepthGeometryConfig = DepthGeometryConfig(),
 ) {
     /**
      * @param releaseFrame hands each frame back to its source once this pipeline is done reading
@@ -89,11 +101,15 @@ class StartSceneAnalysisUseCase(
      *   run replaces it, so what goes out is a copy the caller owns -- made only when asked, and
      *   shared by the frames that reuse one semantic run. Deliberately without a default: a caller
      *   that used to get the mask must not silently start getting null.
+     * @param depthFrames opens the depth lane's own subscription to the camera, sampled at the interval
+     *   it is given; null leaves the lane off for this session whatever the switch says. Its frames go
+     *   back through [releaseFrame].
      */
     suspend operator fun invoke(
         frameFlow: Flow<ImageFrame>,
         releaseFrame: (ImageFrame) -> Unit,
         semanticMaskSnapshot: () -> Boolean,
+        depthFrames: ((minIntervalMs: Long) -> Flow<ImageFrame>)? = null,
     ): Flow<SceneResult> = flow {
         // 会话开始时把设置页选中的挡位落成运行配置；必须在 obstacle provider 初始化之前，
         // 且先于首帧处理（ProcessFrameUseCase 逐帧读取 activeConfig）
@@ -123,6 +139,11 @@ class StartSceneAnalysisUseCase(
         var consecutiveFrameFailures = 0
         val maskSnapshots = SegmentationMaskSnapshots()
         processFrameUseCase.reset()
+        // Decided once per session, like the profile. The session is declared out here so that the finally
+        // below can stop it: `start` does not suspend, so no cancellation falls between it and the assignment.
+        val depthEnabled = depthLane != null && depthFrames != null && depthSwitch.selected
+        var depthSession: DepthSession? = null
+        val latestBaseline = AtomicReference<BaselineQualification?>(null)
 
         try {
         // The session owns the orientation sensors: started here, stopped in the finally below.
@@ -167,6 +188,27 @@ class StartSceneAnalysisUseCase(
             initializeObstacleProvider(
                 provider = realtimeObstacleProvider,
                 label = "Realtime obstacle provider",
+            )
+        }
+
+        // 3. The depth lane, after the models Guidance needs: it initializes on its own, and Guidance does not
+        //    wait for it (docs/geometry.md §6).
+        if (depthEnabled) {
+            depthSession = checkNotNull(depthLane).start(
+                DepthStartContext(
+                    frames = checkNotNull(depthFrames)(depthConfig.frameIntervalMs),
+                    releaseFrame = releaseFrame,
+                    baseline = latestBaseline::get,
+                    geometry = { frame ->
+                        cameraGeometryResolver.resolve(
+                            cameraFactsSource.current(),
+                            FrameFacts.of(frame),
+                            orientationSource::gravityNear,
+                            phoneGeometry(),
+                        )
+                    },
+                    traceSessionId = sessionId.takeIf { traceSessionStarted },
+                ),
             )
         }
 
@@ -238,6 +280,10 @@ class StartSceneAnalysisUseCase(
                     geometry.frameTimeNanos ?: frame.receivedElapsedRealtimeNanos,
                     isStationary(),
                 )
+                // The depth lane reads this; nothing flows back into the baseline or the decisions.
+                latestBaseline.set(baseline)
+                val depthSnapshot = depthSession?.latest()
+                val depthStatus = DepthGeometryCapability.status(depthSnapshot, geometry, depthConfig.maxAgePeriods)
                 val qualification = GuidanceQualification(
                     baseline = baseline,
                     capabilities = GuidanceQualifier.capabilities(
@@ -245,6 +291,7 @@ class StartSceneAnalysisUseCase(
                         motion = motion,
                         orientationConfigured = orientationSource !== NoOrientationSource,
                         groundContact = perceptionConfig.groundContact,
+                        depth = depthStatus,
                     ),
                 )
 
@@ -379,6 +426,10 @@ class StartSceneAnalysisUseCase(
                     obstacleAcceleratorSelection = perceptionResult.obstacleRuntimeInfo.acceleratorSelection,
                     obstaclePreprocessBackend = perceptionResult.obstacleRuntimeInfo.preprocessBackend,
                     obstaclePostprocessBackend = perceptionResult.obstacleRuntimeInfo.postprocessBackend,
+                    depthRunId = depthSnapshot?.runId,
+                    depthAgeMs = depthSnapshot?.takeIf { it.observation != null }
+                        ?.let { DepthGeometryCapability.ageNanos(it, geometry) }
+                        ?.let { it / 1_000_000L },
                 ).withGeometry(geometry, motion)
                     .withObstacleDistances(perceptionResult.obstacles, perceptionConfig.groundContact.enabled)
                     .withQualification(quality, qualification, receiptToDecisionMs(frame, decideEventsUseCase.lastDecisionAtMs), receivedElapsedMs(frame))
@@ -459,6 +510,7 @@ class StartSceneAnalysisUseCase(
                         visionFaults = baseline.visionFaults(),
                         qualification = qualification,
                         frameReceivedAtMs = receivedElapsedMs(frame),
+                        depthGeometry = depthSnapshot,
                     ),
                     frameTrace = frameTrace,
                 )
@@ -495,6 +547,8 @@ class StartSceneAnalysisUseCase(
             logService.error("Navigation", "Error in navigation flow", error)
             throw error
         } finally {
+            // Before the trace closes, so the depth session's closing record lands in it (docs/geometry.md §6).
+            depthSession?.let { checkNotNull(depthLane).stop(it) }
             orientationSource.stop()
             if (traceSessionStarted && accumulator != null) {
                 traceService.finishSession(

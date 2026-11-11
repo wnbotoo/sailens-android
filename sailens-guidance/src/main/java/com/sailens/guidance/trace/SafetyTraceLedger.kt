@@ -1,5 +1,6 @@
 package com.sailens.guidance.trace
 
+import com.sailens.guidance.model.trace.DepthRunTrace
 import com.sailens.guidance.model.trace.GuidanceAlertTrace
 import com.sailens.guidance.model.trace.SafetyStateTrace
 import com.sailens.guidance.model.trace.SafetyTraceNames
@@ -46,7 +47,23 @@ internal class SafetyTraceLedger(
     private var sessionId: String? = null
     private var alerts = 0L
     private var states = 0L
+    private var depthRuns = 0L
     private var latestState: SafetyStateTrace? = null
+
+    /**
+     * Queues a depth-lane record with its session's next `seq`, but only when the trace session it names is the
+     * attached one: a record from a closed session, or one that arrives after its session closed and another opened,
+     * is refused rather than written into the other session's file. (The depth lane closes its own sessions under its
+     * own lock before this; this guards the trace session's boundary.)
+     *
+     * @return false, and nothing queued, when its session is not the attached one.
+     */
+    fun recordDepthRun(record: DepthRunTrace): Boolean = synchronized(lock) {
+        if (sessionId == null || record.sessionId != sessionId) return false
+        depthRuns++
+        queue.offerCounted(TraceQueueEntry.DepthRun(record.copy(seq = depthRuns)))
+        true
+    }
 
     /**
      * Queues [alert] with the attached session and its next `seq`.
@@ -86,6 +103,7 @@ internal class SafetyTraceLedger(
         sessionId = metadata.sessionId
         alerts = 0
         states = 0
+        depthRuns = 0
         latestState?.let { kept ->
             states++
             queue.offerCounted(
@@ -111,7 +129,12 @@ internal class SafetyTraceLedger(
         sessionId = null
         queue.offerCounted(
             TraceQueueEntry.SessionSummary(
-                summary.copy(closedElapsedMs = elapsedClock(), guidanceAlertCount = alerts, safetyStateCount = states),
+                summary.copy(
+                    closedElapsedMs = elapsedClock(),
+                    guidanceAlertCount = alerts,
+                    safetyStateCount = states,
+                    depthRunCount = depthRuns,
+                ),
             ),
         )
     }

@@ -3,8 +3,10 @@ package com.sailens.shell.di
 import com.sailens.shell.guidance.settings.PhoneGeometryStore
 import com.sailens.core.log.LogService
 import com.sailens.guidance.config.AnalysisConfig
+import com.sailens.guidance.depth.geometry.ThermalStatusSource
 import com.sailens.guidance.geometry.CameraFactsSource
 import com.sailens.shell.FileLogService
+import com.sailens.shell.device.AndroidThermalStatusSource
 import com.sailens.shell.guidance.geometry.CameraFactsAdapter
 import com.sailens.shell.diagnostics.GuidanceDiagnosticsStore
 import com.sailens.output.AccessibilityStatusProvider
@@ -60,6 +62,8 @@ val shellModule = module {
     }
     single { AccessibilityStatusProvider(androidContext()) }
     single<CameraFactsSource> { CameraFactsAdapter(get()) }
+    // Read by the depth lane only (docs/geometry.md §6).
+    single<ThermalStatusSource> { AndroidThermalStatusSource(androidContext()) }
     single { GuidanceSettingsStore(androidContext()) }
     single { PerceptionSettingsStore(androidContext()) }
     single { PhoneGeometryStore(androidContext()) }
