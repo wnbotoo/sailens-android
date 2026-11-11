@@ -383,11 +383,32 @@ private suspend fun liteRtDepthPair(
         run = { (frame, geometry) ->
             val cand = candidate.infer(checkNotNull(candidate.prepare(frame)) { "native preprocessing unavailable" })
             val ref = reference.infer(checkNotNull(reference.prepare(frame)) { "native preprocessing unavailable" })
-            val fit = geometry?.let { compareGroundFits(it, ref.map, cand.map, referenceFitter, candidateFitter) }
-            DepthFrameAgreement(compareDisparity(reference = ref.map, candidate = cand.map), fit) to
+            compareDepthFrame(geometry, ref.map, cand.map, referenceFitter, candidateFitter) to
                 AcceleratorPair(candidate = cand.runtimeInfo.accelerator, reference = ref.runtimeInfo.accelerator)
         },
     )
+}
+
+/**
+ * One frame of the depth pair. A NaN or infinite value in either output is a failed run (docs/models.md), counted
+ * from the values themselves: such a frame fails the check whatever the other values' statistics say, and neither
+ * fitter sees it, so the two fitters keep the same history.
+ */
+internal fun compareDepthFrame(
+    geometry: CameraGeometry?,
+    reference: DisparityMap,
+    candidate: DisparityMap,
+    referenceFitter: GroundFitter,
+    candidateFitter: GroundFitter,
+): DepthFrameAgreement {
+    val disparity = compareDisparity(reference = reference, candidate = candidate)
+    val referenceNonFinite = reference.values.count { !it.isFinite() }
+    val candidateNonFinite = candidate.values.count { !it.isFinite() }
+    if (referenceNonFinite > 0 || candidateNonFinite > 0) {
+        return DepthFrameAgreement(disparity, fit = null, candidateNonFinite = candidateNonFinite, referenceNonFinite = referenceNonFinite)
+    }
+    val fit = geometry?.let { compareGroundFits(it, reference, candidate, referenceFitter, candidateFitter) }
+    return DepthFrameAgreement(disparity, fit)
 }
 
 /** The two fits of one frame; null when the frame's geometry cannot carry a fit. */

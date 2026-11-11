@@ -54,6 +54,37 @@ class DepthTensorContractTest {
     }
 
     @Test
+    fun `a shape that reads two ways takes the reading whose input and output sizes match`() {
+        // [1,3,4,3] is NCHW 3x4 or NHWC 4x3; the output says which.
+        val nchw = compatible(listOf(1, 3, 4, 3), listOf(1, 4, 3))
+        assertEquals(ImageTensorLayout.NCHW, nchw.inputLayout)
+        assertEquals(3, nchw.inputWidth)
+        assertEquals(4, nchw.inputHeight)
+        val nhwc = compatible(listOf(1, 3, 4, 3), listOf(1, 3, 4))
+        assertEquals(ImageTensorLayout.NHWC, nhwc.inputLayout)
+        assertEquals(4, nhwc.inputWidth)
+        assertEquals(3, nhwc.inputHeight)
+        // [1,1,4,1] is a 4x1 or a 1x4 map; the input says which.
+        val wide = compatible(listOf(1, 1, 4, 3), listOf(1, 1, 4, 1))
+        assertEquals(ImageTensorLayout.NHWC, wide.inputLayout)
+        assertEquals(4, wide.outputWidth)
+        assertEquals(1, wide.outputHeight)
+        val tall = compatible(listOf(1, 3, 4, 1), listOf(1, 1, 4, 1))
+        assertEquals(ImageTensorLayout.NCHW, tall.inputLayout)
+        assertEquals(1, tall.outputWidth)
+        assertEquals(4, tall.outputHeight)
+    }
+
+    @Test
+    fun `an input whose two layouts both fit is refused, and one that fits neither is a size mismatch`() {
+        // [1,3,3,3]: channels first or last give the same 3x3, so the layout cannot be told.
+        val ambiguous = DepthTensorContract.resolve(model(listOf(tensor(listOf(1, 3, 3, 3))), listOf(tensor(listOf(1, 3, 3), index = 1))))
+        assertTrue(ambiguous.toString(), ambiguous is DepthTensorContract.Resolution.InputUnreadable)
+        val neither = DepthTensorContract.resolve(model(listOf(tensor(listOf(1, 3, 4, 3))), listOf(tensor(listOf(1, 5, 5), index = 1))))
+        assertTrue(neither.toString(), neither is DepthTensorContract.Resolution.OutputSizeMismatch)
+    }
+
+    @Test
     fun `an output of another size is refused, not remapped`() {
         val resolved = DepthTensorContract.resolve(model(listOf(tensor(listOf(1, 3, 224, 392))), listOf(tensor(listOf(1, 112, 112), index = 1))))
         assertTrue(resolved.toString(), resolved is DepthTensorContract.Resolution.OutputSizeMismatch)
