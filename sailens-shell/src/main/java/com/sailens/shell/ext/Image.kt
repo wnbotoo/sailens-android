@@ -3,6 +3,7 @@ package com.sailens.shell.ext
 import android.graphics.Bitmap
 import android.graphics.Color
 import com.sailens.core.mask.BinaryMask
+import com.sailens.guidance.geometry.GroundObservation
 import com.sailens.guidance.model.perception.SegmentationMask
 import androidx.core.graphics.createBitmap
 import kotlin.math.roundToInt
@@ -39,6 +40,21 @@ class OverlayBitmapRenderer(
             maxLongSide = maxLongSide,
             pixelBufferProvider = ::obtainPixels,
         )
+    }
+
+    /**
+     * The ground fit's labels (debug overlay); see [groundGeometryColor]. The whole grid in the frame's shape, never
+     * cropped ([groundGeometryOverlay]).
+     */
+    @Synchronized
+    fun renderGroundGeometry(
+        observation: GroundObservation,
+        sourceAspectRatio: Float?,
+    ): Bitmap {
+        val (size, pixels) = groundGeometryOverlay(observation, sourceAspectRatio, maxLongSide, ::obtainPixels)
+        val bitmap = createBitmap(size.width, size.height)
+        bitmap.setPixels(pixels, 0, size.width, 0, 0, size.width, size.height)
+        return bitmap
     }
 
     private fun obtainPixels(size: Int): IntArray {

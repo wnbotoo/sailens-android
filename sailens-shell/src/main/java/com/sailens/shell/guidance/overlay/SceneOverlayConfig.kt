@@ -4,6 +4,7 @@ data class SceneOverlayConfig(
     val enablePassableAreaMaskOverlay: Boolean = true,
     val enableSemanticClassMaskOverlay: Boolean = true,
     val enableDetectionOverlay: Boolean = true,
+    val enableGroundGeometryOverlay: Boolean = true,
     val enableDebugPanel: Boolean = true,
     val initialMode: SceneOverlayMode = SceneOverlayMode.PASSABLE_AREA_MASK,
     val bitmapRenderIntervalMs: Long = 100L,
@@ -19,6 +20,7 @@ data class SceneOverlayConfig(
             if (enablePassableAreaMaskOverlay) add(SceneOverlayMode.PASSABLE_AREA_MASK)
             if (enableSemanticClassMaskOverlay) add(SceneOverlayMode.SEMANTIC_CLASS_MASK)
             if (enableDetectionOverlay) add(SceneOverlayMode.DETECTION_BOXES)
+            if (enableGroundGeometryOverlay) add(SceneOverlayMode.GROUND_GEOMETRY)
         }
 
     val effectiveInitialMode: SceneOverlayMode
@@ -41,6 +43,7 @@ data class SceneOverlayConfig(
             SceneOverlayMode.PASSABLE_AREA_MASK,
             SceneOverlayMode.SEMANTIC_CLASS_MASK,
             SceneOverlayMode.DETECTION_BOXES,
+            SceneOverlayMode.GROUND_GEOMETRY,
         )
 
         fun forDiagnostics(enabled: Boolean): SceneOverlayConfig {
@@ -51,6 +54,7 @@ data class SceneOverlayConfig(
                     enablePassableAreaMaskOverlay = false,
                     enableSemanticClassMaskOverlay = false,
                     enableDetectionOverlay = false,
+                    enableGroundGeometryOverlay = false,
                     enableDebugPanel = false,
                     initialMode = SceneOverlayMode.OFF,
                     bitmapRenderIntervalMs = 500L,

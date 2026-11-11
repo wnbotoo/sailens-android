@@ -1,6 +1,8 @@
 package com.sailens.guidance.model.scene
 
 import com.sailens.core.runtime.MlRuntimeInfo
+import com.sailens.guidance.depth.geometry.DepthGeometrySnapshot
+import com.sailens.guidance.safety.CapabilityStatus
 
 data class SceneDebugInfo(
     val semanticProvider: String,
@@ -53,4 +55,9 @@ data class SceneDebugInfo(
     val roadVehicleBottomY: Float = 0f,
     val roadVehicleCenterBandOverlap: Float = 0f,
     val roadVehicleAreaRatio: Float = 0f,
+    /** The depth lane for this frame, for the panel only: its latest snapshot, its capability, the snapshot's age. */
+    val depthGeometry: DepthGeometrySnapshot? = null,
+    /** Null when the session runs no depth lane. */
+    val depthStatus: CapabilityStatus? = null,
+    val depthAgeMs: Long? = null,
 )

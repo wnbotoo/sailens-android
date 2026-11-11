@@ -329,6 +329,13 @@ without the lane and compare the results, and the user's timeline, line for line
   degraded; else available. What the fit found (no ground, inverted output, a support switch) is the
   observation's content, not a failure of the capability. The age is the main frame's time minus the
   observation's, so it can be negative; it is judged by its size.
+- **Debug views** (debug builds). The switch is on the ground-contact distance screen. The debug panel
+  has a depth line: the capability, then the latest run's number, age, the fit's validity and label
+  shares, its timings and the model's shape. The `GROUND_GEOMETRY` overlay draws the latest valid fit
+  while the capability is fresh (available or degraded): ground green, above ground red, below ground
+  blue, unknown not drawn. The label grid covers the whole analysis frame, so the overlay is the whole grid
+  stretched to the frame's shape, never cropped to the grid's. The replay report has the `depthRuns` and `depthMs` lines
+  ([trace_metrics_guide.md](trace_metrics_guide.md)).
 
 ## 7. Simulator
 

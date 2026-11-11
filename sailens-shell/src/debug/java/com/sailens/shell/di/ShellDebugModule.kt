@@ -127,7 +127,7 @@ val shellDebugModule: Module = module {
     single<HardwareKeyHandler> { VolumeDownMarkerKeyHandler(get(), get()) }
     single<GuidanceStartGate> { FieldCaptureStartGate(androidContext(), get()) }
     viewModel { FieldCaptureViewModel(get(), get()) }
-    viewModel { GroundContactViewModel(store = get(), profiles = get()) }
+    viewModel { GroundContactViewModel(store = get(), profiles = get(), depthSwitch = get()) }
     viewModel {
         TtsDurationViewModel(
             probe = TtsDurationProbe(androidContext()),

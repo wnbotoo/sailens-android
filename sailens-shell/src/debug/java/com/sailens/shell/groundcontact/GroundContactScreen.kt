@@ -56,6 +56,7 @@ internal fun GroundContactScreen(
     viewModel: GroundContactViewModel = koinViewModel(),
 ) {
     val choice by viewModel.choice.collectAsStateWithLifecycle()
+    val depthLaneEnabled by viewModel.depthLaneEnabled.collectAsStateWithLifecycle()
     val settings = choice.settings
 
     SailensScaffold(
@@ -89,6 +90,15 @@ internal fun GroundContactScreen(
                             R.string.ground_contact_enable_next_session
                         },
                     ),
+                )
+            }
+
+            SettingsSection(title = stringResource(R.string.depth_lane_section)) {
+                ToggleRow(
+                    label = stringResource(R.string.depth_lane_enable),
+                    checked = depthLaneEnabled,
+                    onCheckedChange = viewModel::setDepthLaneEnabled,
+                    supportingText = stringResource(R.string.depth_lane_enable_supporting),
                 )
             }
 
