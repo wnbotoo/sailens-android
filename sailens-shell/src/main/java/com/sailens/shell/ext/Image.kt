@@ -42,19 +42,18 @@ class OverlayBitmapRenderer(
         )
     }
 
-    /** The ground fit's labels (debug overlay); see [groundGeometryColor]. */
+    /**
+     * The ground fit's labels (debug overlay); see [groundGeometryColor]. The whole grid in the frame's shape, never
+     * cropped ([groundGeometryOverlay]).
+     */
     @Synchronized
     fun renderGroundGeometry(
         observation: GroundObservation,
         sourceAspectRatio: Float?,
     ): Bitmap {
-        val grid = observation.groundMask
-        val crop = AspectCrop.from(grid.width, grid.height, sourceAspectRatio)
-        val outputSize = crop.outputSize(maxLongSide)
-        val pixels = obtainPixels(outputSize.width * outputSize.height)
-        groundGeometryPixels(observation, crop.left, crop.top, crop.width, crop.height, outputSize.width, outputSize.height, pixels)
-        val bitmap = createBitmap(outputSize.width, outputSize.height)
-        bitmap.setPixels(pixels, 0, outputSize.width, 0, 0, outputSize.width, outputSize.height)
+        val (size, pixels) = groundGeometryOverlay(observation, sourceAspectRatio, maxLongSide, ::obtainPixels)
+        val bitmap = createBitmap(size.width, size.height)
+        bitmap.setPixels(pixels, 0, size.width, 0, 0, size.width, size.height)
         return bitmap
     }
 
