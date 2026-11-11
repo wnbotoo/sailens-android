@@ -15,7 +15,11 @@ import kotlin.math.max
  * is Guidance's) and hands the per-frame agreement in as a [GroundFitAgreement].
  */
 data class DisparityAgreement(
-    /** Median over the content pixels of |candidate − reference| / max(|reference|, 5% of max|reference|). */
+    /**
+     * Median over the content pixels of |candidate − reference| / max(|reference|, 5% of max|reference|). Where that
+     * denominator is 0 (a zero reference value with a zero maximum) equal values are no error and different ones an
+     * infinite one.
+     */
     val medianRelativeError: Float,
     val p95RelativeError: Float,
     val pixelCount: Int,
@@ -36,8 +40,10 @@ fun compareDisparity(reference: DisparityMap, candidate: DisparityMap): Disparit
         val i = y * reference.width + x
         val r = reference.values[i]
         val c = candidate.values[i]
-        val e = abs(c - r) / max(abs(r), floor)
-        // A non-finite candidate value is as wrong as a value can be.
+        val denominator = max(abs(r), floor)
+        // A zero denominator is not an error in itself: two equal values agree, whatever they are.
+        val e = if (denominator > 0f) abs(c - r) / denominator else if (c == r) 0f else Float.POSITIVE_INFINITY
+        // A non-finite value is as wrong as a value can be.
         errors[n++] = if (e.isFinite()) e else Float.POSITIVE_INFINITY
     }
     errors.sort(0, n)
@@ -56,10 +62,19 @@ data class GroundFitAgreement(
     val labelAgreement: Float?,
 )
 
+/**
+ * One frame's comparison. [candidateNonFinite] and [referenceNonFinite] count NaN or infinite values in the
+ * accelerator's and the CPU's output: any one is a failed run (docs/models.md, the `depth` contract), whatever the
+ * statistics of the other values say, so such a frame is not fitted and fails the check.
+ */
 data class DepthFrameAgreement(
     val disparity: DisparityAgreement,
     val fit: GroundFitAgreement?,
-)
+    val candidateNonFinite: Int = 0,
+    val referenceNonFinite: Int = 0,
+) {
+    val hasNonFiniteOutput: Boolean get() = candidateNonFinite > 0 || referenceNonFinite > 0
+}
 
 /**
  * The bands, from the measured exports above. The fit counts are out of [framesRequired], never out of
@@ -83,10 +98,13 @@ data class DepthConsistency(
     /** Lowest label agreement on frames where both fits were valid; null when there were none. */
     val minLabelAgreement: Float?,
     val verdict: ConsistencyVerdict,
+    /** Frames where either output had a NaN or infinite value. */
+    val nonFiniteOutputFrames: Int = 0,
 )
 
 /**
- * FAIL when any frame's disparity is off by more than the fail band, or when at least
+ * FAIL when any frame's output, on either side, has a NaN or infinite value; when any frame's disparity is off by
+ * more than the fail band; or when at least
  * [DepthConsistencyThresholds.minPassFitAgreeingFrames] frames had geometry and the fits agreed on
  * validity in no more than [DepthConsistencyThresholds.failAtOrBelowFitAgreeingFrames]. PASS when every
  * frame's disparity is within the pass band, the fits agreed on at least
@@ -104,8 +122,10 @@ fun judgeDepth(
     val labels = frames.mapNotNull { it.fit?.labelAgreement }
     val minLabel = labels.minOrNull()
     val fitJudgeable = withGeometry >= thresholds.minPassFitAgreeingFrames
+    val nonFinite = frames.count { it.hasNonFiniteOutput }
     val verdict = when {
         frames.isEmpty() -> ConsistencyVerdict.INCONCLUSIVE
+        nonFinite > 0 -> ConsistencyVerdict.FAIL
         maxMedian > thresholds.failAboveMedianRelativeError -> ConsistencyVerdict.FAIL
         fitJudgeable && agreeing <= thresholds.failAtOrBelowFitAgreeingFrames -> ConsistencyVerdict.FAIL
         maxMedian <= thresholds.maxPassMedianRelativeError &&
@@ -114,5 +134,5 @@ fun judgeDepth(
             (minLabel == null || minLabel >= thresholds.minLabelAgreement) -> ConsistencyVerdict.PASS
         else -> ConsistencyVerdict.INCONCLUSIVE
     }
-    return DepthConsistency(frames, maxMedian, withGeometry, agreeing, minLabel, verdict)
+    return DepthConsistency(frames, maxMedian, withGeometry, agreeing, minLabel, verdict, nonFinite)
 }

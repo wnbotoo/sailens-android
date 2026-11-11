@@ -77,13 +77,28 @@ internal data class ReportModel(
     val extraFraction: Float? = null,
     val referenceDetections: Int? = null,
     val candidateDetections: Int? = null,
-    // Depth
-    val frameMedianRelativeError: List<Float>? = null,
+    // Depth. JSON has no Infinity or NaN: a number that is not finite is written as null, and [nonFiniteMetrics] says
+    // which one it was and what it was, so the report of a failed check is still written whole.
+    val frameMedianRelativeError: List<Float?>? = null,
     val maxMedianRelativeError: Float? = null,
     val framesWithGeometry: Int? = null,
     val fitAgreeingFrames: Int? = null,
     val minLabelAgreement: Float? = null,
+    /** Per frame, NaN or infinite values in the accelerator's output; any is a failed run. */
+    val frameCandidateNonFinite: List<Int>? = null,
+    /** Per frame, NaN or infinite values in the CPU's output. */
+    val frameReferenceNonFinite: List<Int>? = null,
+    val nonFiniteOutputFrames: Int? = null,
+    /** "field=value" for every number above written as null because it was not finite, e.g. "frameMedianRelativeError[3]=Infinity". */
+    val nonFiniteMetrics: List<String>? = null,
 )
+
+/** [value] when finite; otherwise null, with "[name]=[value]" added to [notFinite]. */
+private fun finiteOrNull(name: String, value: Float?, notFinite: MutableList<String>): Float? {
+    if (value == null || value.isFinite()) return value
+    notFinite += "$name=$value"
+    return null
+}
 
 internal fun ConsistencyRunResult.toReport(
     wallTimeMs: Long,
@@ -152,6 +167,7 @@ internal fun ConsistencyRunResult.toReport(
     } ?: ReportModel(status = detection.status.name, failure = detection.failure, modelSource = detection.modelSource),
     depth = depth.result?.let { r ->
         val c = r.consistency
+        val notFinite = mutableListOf<String>()
         ReportModel(
             status = depth.status.name,
             failure = depth.failure,
@@ -160,11 +176,17 @@ internal fun ConsistencyRunResult.toReport(
             referenceAccelerator = r.accelerators.reference,
             verdict = depthVerdict?.name,
             comparedVerdict = c.verdict.name,
-            frameMedianRelativeError = c.frames.map { it.disparity.medianRelativeError },
-            maxMedianRelativeError = c.maxMedianRelativeError,
+            frameMedianRelativeError = c.frames.mapIndexed { i, f ->
+                finiteOrNull("frameMedianRelativeError[$i]", f.disparity.medianRelativeError, notFinite)
+            },
+            maxMedianRelativeError = finiteOrNull("maxMedianRelativeError", c.maxMedianRelativeError, notFinite),
             framesWithGeometry = c.framesWithGeometry,
             fitAgreeingFrames = c.fitAgreeingFrames,
-            minLabelAgreement = c.minLabelAgreement,
+            minLabelAgreement = finiteOrNull("minLabelAgreement", c.minLabelAgreement, notFinite),
+            frameCandidateNonFinite = c.frames.map { it.candidateNonFinite },
+            frameReferenceNonFinite = c.frames.map { it.referenceNonFinite },
+            nonFiniteOutputFrames = c.nonFiniteOutputFrames,
+            nonFiniteMetrics = notFinite.takeIf { it.isNotEmpty() },
         )
     } ?: ReportModel(status = depth.status.name, failure = depth.failure, modelSource = depth.modelSource),
 )

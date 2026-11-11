@@ -142,6 +142,9 @@ output   one float32 tensor  [1,H,W], [1,1,H,W] or [1,H,W,1]   the same H and W 
   then not `a/Z + b`; such a model passes the preflight and is judged `INVERSE_OUTPUT` on every frame.
   Metric depth would need its own contract.
 - **Finite values.** A run whose output holds a NaN or an infinity counts as a failed run.
+- **A shape that reads two ways** (`[1,3,4,3]` is NCHW 3×4 or NHWC 4×3; `[1,1,4,1]` is a 4×1 or a 1×4
+  map) is read the way under which input and output have the same size. An input whose two layouts both
+  fit (`[1,3,3,3]`) is refused: its layout cannot be told.
 - **Resize is fixed: `PAD_KEEP_ASPECT`**, the native letterbox, the only resize the native
   preprocessing does. A tensor with the frame's aspect (portrait 9:16) pads almost nothing; padding is
   unknown to the ground fit. A tensor pixel is image content only when the kernel wrote image data
@@ -271,7 +274,7 @@ compared:
 |---|---|---|---|
 | sem | pixel agreement ≥ 95% on average and ≥ 90% on every frame | average < 80% | inconclusive: usually a shaking phone or a blurred view (a correct model measured 86–96% while shaken); retry held still |
 | det | of the CPU's detections, ≥ 90% also found on the accelerator (same class, IoU ≥ 0.5), and ≤ 10% extra | either bound missed | inconclusive when nothing was detected: point at objects |
-| depth (when configured) | every frame's median relative disparity difference ≤ 2%, the two ground fits agree on validity on ≥ 7 of the 8 frames, and their labels agree ≥ 95% where both are valid | any frame > 10%, or the fits agree on ≤ 4 of 8 with geometry on ≥ 7 | inconclusive in between, and when fewer than 7 frames had orientation: the count stays out of 8 |
+| depth (when configured) | every frame's median relative disparity difference ≤ 2%, the two ground fits agree on validity on ≥ 7 of the 8 frames, and their labels agree ≥ 95% where both are valid | a NaN or infinite value in either output on any frame (that frame is not fitted), any frame > 10%, or the fits agree on ≤ 4 of 8 with geometry on ≥ 7 | inconclusive in between, and when fewer than 7 frames had orientation: the count stays out of 8 |
 
 For depth the check holds the gravity sensor itself (Guidance is stopped) and resolves each frame's
 orientation as the frame is taken, before any model runs; each side fits its own `GroundFitter`. The
