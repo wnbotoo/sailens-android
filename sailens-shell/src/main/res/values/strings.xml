@@ -108,6 +108,7 @@
     <string name="btn_overlay_passable_area_mask">Passable area mask</string>
     <string name="btn_overlay_semantic_class_mask">Semantic class mask</string>
     <string name="btn_overlay_detection_boxes">Detection boxes</string>
+    <string name="btn_overlay_ground_geometry">Ground geometry</string>
     <string name="settings_path_complex_off_note">Complex-path alerts are off: only obstacles and blocked paths are announced, in speech and vibration. They have no direction to act on, and they compete with obstacle alerts for the speaker. Some of the "ahead" vibrations used to come from them, and no longer do.</string>
     <string name="settings_section_perception">Perception</string>
     <string name="label_perception_profile_basic">Basic</string>
@@ -144,6 +145,7 @@
     <string name="debug_total_pipeline_ms">Current pipeline: %1$dms</string>
     <string name="debug_pipeline_breakdown_ms">Breakdown process/analyze/decision: %1$d/%2$d/%3$dms</string>
     <string name="debug_inference_ms">Current inference: %1$dms</string>
+    <string name="debug_depth_geometry">Depth: %1$s</string>
     <string name="debug_mask_source_age_ms">Mask age: %1$dms</string>
     <string name="debug_recent_avg_pipeline_ms">Recent avg pipeline: %1$.1fms</string>
     <string name="debug_recent_p95_pipeline_ms">Recent P95 pipeline: %1$dms</string>
@@ -256,6 +258,8 @@
     <string name="trace_report_qualification_frames">Frames by qualification: %1$s</string>
     <string name="trace_report_guidance_alerts">Alerts the session recorded: %1$s; records %2$s</string>
     <string name="trace_report_safety_states">Safety states in the trace window: %1$s; unknown %2$s; records %3$s</string>
+    <string name="trace_report_depth_runs">Depth runs: %1$s; records %2$s</string>
+    <string name="trace_report_depth_timings">Depth timings, ms as p50/p95/max(count): %1$s</string>
     <string name="trace_session_button_label">Session %1$s</string>
     <string name="trace_session_selected_label">Selected session %1$s</string>
     <string name="trace_session_file_name">File: %1$s</string>
@@ -438,6 +442,9 @@
     <string name="ground_contact_enable">Use ground-contact distance</string>
     <string name="ground_contact_enable_needs_placement">Choose how you carry the phone first. Until then this changes nothing.</string>
     <string name="ground_contact_enable_next_session">Applies the next time Guidance starts.</string>
+    <string name="depth_lane_section">Depth ground geometry</string>
+    <string name="depth_lane_enable">Run the depth lane</string>
+    <string name="depth_lane_enable_supporting">Applies the next time Guidance starts, until the app restarts. Needs depth.tflite: without it the lane reports not configured. It feeds the debug panel, the ground-geometry overlay and the trace only; no prompt changes.</string>
     <string name="ground_contact_section_placement">How you carry the phone</string>
     <string name="ground_contact_placement_none">Not set</string>
     <string name="ground_contact_placement_none_supporting">The default height of %1$s m is used for the record only</string>

@@ -675,7 +675,8 @@ class SceneAnalysisViewModel(
                 SceneOverlayMode.DETECTION_BOXES -> obstacleDetections
                 SceneOverlayMode.OFF,
                 SceneOverlayMode.PASSABLE_AREA_MASK,
-                SceneOverlayMode.SEMANTIC_CLASS_MASK -> emptyList()
+                SceneOverlayMode.SEMANTIC_CLASS_MASK,
+                SceneOverlayMode.GROUND_GEOMETRY -> emptyList()
             }
         }
 
@@ -690,9 +691,25 @@ class SceneAnalysisViewModel(
                 passableMask?.let { overlayBitmapRenderer.renderPassableMask(it, sourceAspectRatio) }
             SceneOverlayMode.SEMANTIC_CLASS_MASK ->
                 segmentationMask?.let { overlayBitmapRenderer.renderSemanticClasses(it, sourceAspectRatio) }
+            SceneOverlayMode.GROUND_GEOMETRY ->
+                freshGroundObservation()?.let { overlayBitmapRenderer.renderGroundGeometry(it, sourceAspectRatio) }
             SceneOverlayMode.OFF,
             SceneOverlayMode.DETECTION_BOXES -> null
         }
+    }
+
+    /**
+     * The depth lane's latest valid fit, while its capability says it is fresh; otherwise nothing is drawn. (Names in
+     * full: an import would move every line `ViewModelMirror` names.)
+     */
+    private fun SceneResult.freshGroundObservation(): com.sailens.guidance.geometry.GroundObservation? {
+        val status = qualification.capabilities[com.sailens.guidance.safety.GuidanceCapability.DEPTH_GEOMETRY]
+        if (status !is com.sailens.guidance.safety.CapabilityStatus.Available &&
+            status !is com.sailens.guidance.safety.CapabilityStatus.Degraded
+        ) {
+            return null
+        }
+        return depthGeometry?.observation?.takeIf { it.isValid }
     }
 
     /** Read from the pipeline thread, once per frame. */
@@ -703,7 +720,8 @@ class SceneAnalysisViewModel(
     private fun SceneOverlayMode.rendersBitmap(): Boolean {
         return when (this) {
             SceneOverlayMode.PASSABLE_AREA_MASK,
-            SceneOverlayMode.SEMANTIC_CLASS_MASK -> true
+            SceneOverlayMode.SEMANTIC_CLASS_MASK,
+            SceneOverlayMode.GROUND_GEOMETRY -> true
             SceneOverlayMode.OFF,
             SceneOverlayMode.DETECTION_BOXES -> false
         }

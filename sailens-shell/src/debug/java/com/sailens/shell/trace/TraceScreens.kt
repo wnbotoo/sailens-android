@@ -462,6 +462,10 @@ private fun TraceReplayReportDetail(
                     report.safetyTimeline.recordsText(),
                 )
             )
+            TraceMetricLine(
+                stringResource(R.string.trace_report_depth_runs, report.depthRuns.runsText(), report.depthRuns.recordsText()),
+            )
+            TraceMetricLine(stringResource(R.string.trace_report_depth_timings, report.depthRuns.timingsText()))
 
             Spacer(modifier = Modifier.height(4.dp))
 

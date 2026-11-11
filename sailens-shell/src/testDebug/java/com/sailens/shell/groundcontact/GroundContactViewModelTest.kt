@@ -1,6 +1,7 @@
 package com.sailens.shell.groundcontact
 
 import com.sailens.guidance.config.PerceptionConfig
+import com.sailens.guidance.depth.geometry.DepthGeometrySwitch
 import com.sailens.guidance.processor.perception.PerceptionProfileManager
 import com.sailens.shell.guidance.settings.PhoneGeometryChoice
 import com.sailens.shell.guidance.settings.PhoneGeometryStore
@@ -22,7 +23,22 @@ class GroundContactViewModelTest {
     private val memory = Memory()
     private val store = PhoneGeometryStore(memory)
     private val profiles = PerceptionProfileManager(PerceptionConfig())
-    private val viewModel = GroundContactViewModel(store, profiles)
+    private val depthSwitch = DepthGeometrySwitch()
+    private val viewModel = GroundContactViewModel(store, profiles, depthSwitch)
+
+    @Test
+    fun `the depth lane starts off, and the switch reaches the lane's switch, not the remembered choice`() {
+        assertFalse(viewModel.depthLaneEnabled.value)
+        viewModel.setDepthLaneEnabled(true)
+        assertTrue(depthSwitch.selected)
+        assertTrue(viewModel.depthLaneEnabled.value)
+        assertEquals("nothing about depth is remembered", PhoneGeometryChoice(), memory.stored)
+        viewModel.setDepthLaneEnabled(false)
+        assertFalse(depthSwitch.selected)
+        // A new screen shows what the lane's switch holds.
+        depthSwitch.select(true)
+        assertTrue(GroundContactViewModel(store, profiles, depthSwitch).depthLaneEnabled.value)
+    }
 
     @Test
     fun `the switch is remembered and reaches Guidance at its next session, not the running one`() {

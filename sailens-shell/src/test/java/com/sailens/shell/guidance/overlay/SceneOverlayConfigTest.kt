@@ -12,6 +12,7 @@ class SceneOverlayConfigTest {
             enablePassableAreaMaskOverlay = false,
             enableSemanticClassMaskOverlay = true,
             enableDetectionOverlay = false,
+            enableGroundGeometryOverlay = false,
             enableDebugPanel = false,
             initialMode = SceneOverlayMode.DETECTION_BOXES,
         )
@@ -27,6 +28,7 @@ class SceneOverlayConfigTest {
             enablePassableAreaMaskOverlay = false,
             enableSemanticClassMaskOverlay = false,
             enableDetectionOverlay = false,
+            enableGroundGeometryOverlay = false,
             enableDebugPanel = false,
         )
 

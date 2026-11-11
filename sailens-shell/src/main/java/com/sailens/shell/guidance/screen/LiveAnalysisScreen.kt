@@ -816,6 +816,7 @@ private fun SceneOverlayMode.labelResId(): Int {
         SceneOverlayMode.PASSABLE_AREA_MASK -> R.string.btn_overlay_passable_area_mask
         SceneOverlayMode.SEMANTIC_CLASS_MASK -> R.string.btn_overlay_semantic_class_mask
         SceneOverlayMode.DETECTION_BOXES -> R.string.btn_overlay_detection_boxes
+        SceneOverlayMode.GROUND_GEOMETRY -> R.string.btn_overlay_ground_geometry
     }
 }
 

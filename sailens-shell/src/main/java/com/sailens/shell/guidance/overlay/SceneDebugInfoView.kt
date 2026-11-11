@@ -76,6 +76,10 @@ internal fun SceneDebugInfoView(
             style = MaterialTheme.typography.titleSmall,
         )
         SafetyStateLine(safetyState, promptHold)
+        // Only while the session runs a depth lane.
+        debugInfo.depthStatus?.let { status ->
+            Text(stringResource(R.string.debug_depth_geometry, depthDebugText(debugInfo.depthGeometry, status, debugInfo.depthAgeMs)))
+        }
         Text(stringResource(R.string.debug_semantic_provider, debugInfo.semanticProvider))
         Text(stringResource(R.string.debug_obstacle_provider, debugInfo.obstacleProvider))
         Text(stringResource(R.string.debug_perception_profile, debugInfo.perceptionProfile))
