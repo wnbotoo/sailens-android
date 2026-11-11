@@ -155,8 +155,9 @@ class DepthGeometryLaneTest {
 
     /** A depth evidence recorder that logs what the lane hands it, and can be made to throw. */
     private inner class Evidence(
-        val copyError: Exception? = null,
-        val submitError: Exception? = null,
+        val copyError: Throwable? = null,
+        val submitError: Throwable? = null,
+        val discardError: Throwable? = null,
     ) : DepthEvidenceRecorder {
         val settled: MutableList<String> = Collections.synchronizedList(mutableListOf())
 
@@ -171,6 +172,7 @@ class DepthGeometryLaneTest {
 
                 override fun discard() {
                     settled += "discard $runId"
+                    discardError?.let { throw it }
                 }
             }
         }
@@ -590,7 +592,10 @@ class DepthGeometryLaneTest {
         feed.send(4)
         until("run 4") { records.all.size == 4 }
         lane.stop(session)
-        return records.all.filter { it.outcome != DepthRunTrace.CLOSED }.map { "${it.runId} ${it.outcome}" }
+        // The closing record carries the session's failure count and its state at the stop.
+        return records.all.map { r ->
+            if (r.outcome == DepthRunTrace.CLOSED) "closed failures=${r.failuresTotal} state=${r.finalState}" else "${r.runId} ${r.outcome}"
+        }
     }
 
     @Test
@@ -598,7 +603,7 @@ class DepthGeometryLaneTest {
         val evidence = Evidence()
         val outcomes = fourRuns(evidence)
         assertEquals(
-            listOf("1 published", "2 preprocess_unavailable", "3 non_finite_output", "4 published"),
+            listOf("1 published", "2 preprocess_unavailable", "3 non_finite_output", "4 published", "closed failures=2 state=running"),
             outcomes,
         )
         for (sequence in 1..4) assertTrue("copy of frame $sequence before it went back", index("evidence copy $sequence") < index("a release frame $sequence"))
@@ -612,10 +617,15 @@ class DepthGeometryLaneTest {
     @Test
     fun `a recorder that throws changes nothing the lane does or records`() = runBlocking {
         val without = fourRuns(DepthEvidenceRecorder.None)
-        val failingCopy = fourRuns(Evidence(copyError = IllegalStateException("copy")))
-        val failingSubmit = fourRuns(Evidence(submitError = IllegalStateException("submit")))
-        assertEquals(without, failingCopy)
-        assertEquals(without, failingSubmit)
+        // At each of the three calls, an exception and an Error: the lane's records, its failure count and its final
+        // state are what they are without a recorder.
+        val throwers = listOf<() -> Throwable>({ IllegalStateException("probe") }, { OutOfMemoryError("probe") }, { StackOverflowError("probe") })
+        for (thrown in throwers) {
+            val name = thrown().javaClass.simpleName
+            assertEquals("copy throws $name", without, fourRuns(Evidence(copyError = thrown())))
+            assertEquals("submit throws $name", without, fourRuns(Evidence(submitError = thrown())))
+            assertEquals("discard throws $name", without, fourRuns(Evidence(discardError = thrown())))
+        }
         assertTrue("the lane's last guard was not needed", logs.errors.isEmpty())
     }
 

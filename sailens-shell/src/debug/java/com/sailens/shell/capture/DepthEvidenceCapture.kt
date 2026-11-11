@@ -93,8 +93,9 @@ internal class DepthEvidenceCapture(
     /** Stops recording, writes what is queued and returns the counters. */
     suspend fun finish(sessionId: String): DepthEvidenceStats? {
         val s = sessionFor(sessionId) ?: return null
-        s.recording = false
-        s.queue.close()
+        // Settles every copy still lent out before the counts are read: a run that submits later writes nothing and
+        // is already counted.
+        s.close()
         val writer = s.writerJob
         if (writer == null) s.discardQueued() else writer.join()
         // Whatever the writer left behind (it failed) is dropped, and counted.
@@ -114,9 +115,8 @@ internal class DepthEvidenceCapture(
     }
 
     private fun abandon(s: Session, reason: String) {
-        s.recording = false
+        s.close()
         s.writerJob?.cancel()
-        s.queue.close()
         s.discardQueued()
         log.warning(TAG, "Depth evidence stopped: $reason")
     }
@@ -183,6 +183,28 @@ internal class DepthEvidenceCapture(
 
         private val free = ArrayDeque<Planes>()
         private var allocated = 0
+
+        /**
+         * The copies handed to the lane and not yet settled. [close], a submit and a discard each hold [lending] for
+         * their whole step, so a copy is settled exactly once: by the lane, or by [close] as dropped at the end.
+         */
+        private val lending = Any()
+
+        /** In the order lent, so the first one counted at the end is the earliest run. */
+        private val lent = LinkedHashSet<Slot>()
+
+        /**
+         * Stops taking runs: no new copy, the queue closed, and every copy still lent out counted as dropped at the end.
+         * After it the counters change only by what the writer does with what was already queued.
+         */
+        fun close() {
+            synchronized(lending) {
+                recording = false
+                queue.close()
+                lent.forEach { drop(it.generation, it.runId, Drop.AT_END) }
+                lent.clear()
+            }
+        }
 
         val recordsWritten = AtomicLong()
         val droppedNoBuffer = AtomicLong()
@@ -265,36 +287,41 @@ internal class DepthEvidenceCapture(
                 vRowStride = yuv.v.rowStride,
                 vPixelStride = yuv.v.pixelStride,
             )
-            return Slot(generation, runId, facts, planes)
+            val slot = Slot(generation, runId, facts, planes)
+            synchronized(lending) {
+                if (!recording) {
+                    // Closed while this copy was being made: counted like any copy lent out at the end.
+                    giveBack(planes)
+                    drop(generation, runId, Drop.AT_END)
+                    return null
+                }
+                lent += slot
+            }
+            return slot
         }
 
         private inner class Slot(
-            private val generation: Long,
-            private val runId: Long,
+            val generation: Long,
+            val runId: Long,
             private val facts: FrameFacts,
             private val planes: Planes,
         ) : DepthEvidenceSlot {
-            private var settled = false
-
             override fun submit(run: DepthEvidenceRun) {
-                if (settled) return
-                settled = true
-                if (!recording) {
-                    giveBack(planes)
-                    drop(generation, runId, Drop.AT_END)
-                    return
-                }
-                val sent = queue.trySend(Pending(generation, runId, facts, planes, run))
-                if (sent.isFailure) {
-                    giveBack(planes)
-                    drop(generation, runId, if (sent.isClosed) Drop.AT_END else Drop.QUEUE_FULL)
+                synchronized(lending) {
+                    // Already settled: by an earlier call, or by close() as dropped at the end.
+                    if (!lent.remove(this)) return
+                    val sent = queue.trySend(Pending(generation, runId, facts, planes, run))
+                    if (sent.isFailure) {
+                        giveBack(planes)
+                        drop(generation, runId, if (sent.isClosed) Drop.AT_END else Drop.QUEUE_FULL)
+                    }
                 }
             }
 
             override fun discard() {
-                if (settled) return
-                settled = true
-                giveBack(planes)
+                synchronized(lending) {
+                    if (lent.remove(this)) giveBack(planes)
+                }
             }
         }
 

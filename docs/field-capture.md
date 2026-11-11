@@ -307,8 +307,9 @@ never carries it. The switch is read once, when the session starts, like the mod
   the frame, before giving it back, and the record waits in a queue of 4 for its own writer thread. A run
   that finds no free buffer or no room in the queue is dropped, never waited for, and counted in the
   manifest's `depthEvidence.stats`: `dropped` and its reasons (no buffer, queue full, write failed, the
-  capture ended first) and the first dropped run. A run that ends without an output gives its buffer back
-  and writes nothing. A record is about 2.2 MB at 1280×720 with a 392×224 output, about 6.6 MB/s at 3 Hz:
+  capture ended first, which includes every copy still lent out when the stream finishes: those are counted
+  then, before the manifest is written, and a run that comes back after it writes nothing) and the first
+  dropped run. A run that ends without an output gives its buffer back and writes nothing. A record is about 2.2 MB at 1280×720 with a 392×224 output, about 6.6 MB/s at 3 Hz:
   a 10 GB cap holds about 25 minutes, less the capture's other data. The stream counts toward the cap.
 - **Fit ordinals.** The ground fit keeps history with no expiry (the support-switch hold and the last
   below-ground region end only when two levels are seen again), so its fits can be redone only in its own
@@ -337,8 +338,9 @@ a line-by-line transcription of the kernel in `test_depth_evidence.py`; the kern
 multiply-add, so values can differ in the last bit), runs the model in float32 on the CPU and writes
 `<pc dir>/<sessionId>/g<session>_r<run>.f32`. The replay (`DepthEvidenceReplay`) fits the phone's outputs
 with one fitter per depth session over the acceptable runs and must reproduce every recorded fit
-(validity, gravity agreement, each mask by CRC); a second fitter fits the PC's outputs. A session passes
-when, over its acceptable runs:
+(validity, gravity agreement, each mask by CRC); a second fitter fits the PC's outputs. Every acceptable
+run needs its PC output: one missing ends the comparison there and the session cannot be judged, however
+many runs came before it. A session passes when, over its acceptable runs:
 
 | | Band |
 |---|---|

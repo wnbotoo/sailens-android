@@ -35,7 +35,7 @@ enum class DepthEvidenceVerdict {
     /** A replayed fit differs from the phone's, or the PC is outside a band. */
     FAIL,
 
-    /** Too few acceptable runs, or no PC output for them: neither pass nor fail. */
+    /** Too few acceptable runs, or a PC output missing for any of them: neither pass nor fail. */
     CANNOT_JUDGE,
 }
 
@@ -270,6 +270,9 @@ class DepthEvidenceReplay(
         }
         if (!pcGiven) return DepthEvidenceVerdict.CANNOT_JUDGE to "the fit replays exactly; no PC output to compare with"
         val agreement = checkNotNull(pc)
+        // Every acceptable run needs its PC output: comparing the first ones and leaving the rest out is not a pass,
+        // however many came before the gap.
+        agreement.stoppedAt?.let { return DepthEvidenceVerdict.CANNOT_JUDGE to "PC outputs incomplete: $it" }
         if (agreement.runs < thresholds.minAcceptableRuns) {
             return DepthEvidenceVerdict.CANNOT_JUDGE to "PC output for ${agreement.runs} acceptable run(s), fewer than ${thresholds.minAcceptableRuns}"
         }

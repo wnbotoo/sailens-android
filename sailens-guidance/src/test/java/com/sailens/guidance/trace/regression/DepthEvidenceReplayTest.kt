@@ -206,6 +206,20 @@ class DepthEvidenceReplayTest {
     }
 
     @Test
+    fun `a PC output missing for the last acceptable run cannot be judged, though the ones before it reach the minimum`() {
+        // 21 acceptable runs, a floor of 20: the PC has the first 20, all agreeing, and not the 21st.
+        val session = record(21)
+        val pc = { r: DepthEvidenceRecord -> if (r.fitOrdinal == 20L) null else session.output(r) }
+        val report = DepthEvidenceReplay(few).replay(session.records, session::output, candidate = pc).single()
+        assertEquals(20, report.pc!!.runs)
+        assertEquals(1f, report.pc!!.validityAgreement, 0f)
+        assertEquals(DepthEvidenceVerdict.CANNOT_JUDGE, report.verdict)
+        assertTrue(report.verdictReason, "PC outputs incomplete" in report.verdictReason)
+        // With every output there, the same session passes.
+        assertEquals(DepthEvidenceVerdict.PASS, DepthEvidenceReplay(few).replay(session.records, session::output, candidate = session::output).single().verdict)
+    }
+
+    @Test
     fun `fewer acceptable runs than the minimum cannot be judged, however well they agree`() {
         val session = record(50)
         val report = DepthEvidenceReplay().replay(session.records, session::output, candidate = session::output).single()

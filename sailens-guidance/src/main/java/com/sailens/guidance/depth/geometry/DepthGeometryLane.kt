@@ -345,12 +345,15 @@ class DepthGeometryLane(
         null
     }
 
-    /** A call to the evidence recorder: whatever it throws stays here, and the run goes on as without it. */
+    /**
+     * A call to the evidence recorder: whatever it throws stays here, an `Error` such as running out of memory included,
+     * and the run goes on as without it. Only cancellation passes, as everywhere in the lane.
+     */
     private inline fun <T> observeEvidence(block: () -> T): T? = try {
         block()
     } catch (error: CancellationException) {
         throw error
-    } catch (error: Exception) {
+    } catch (error: Throwable) {
         if (!evidenceFailureLogged) {
             evidenceFailureLogged = true
             logService.warning(TAG, "Depth evidence recorder failed", throwable = error)

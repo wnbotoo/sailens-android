@@ -203,6 +203,34 @@ class DepthEvidenceCaptureTest {
         assertTrue(read("s1").depthEvidence.isEmpty())
         assertTrue(read("s2").depthEvidence.isEmpty())
         assertNull("a copy for an ended capture", evidence.copy("s1", 1, 2, yuvFrame(2)))
+        // The capture that lent the copy counted it as dropped in the manifest it wrote, before the run came back.
+        val stats = read("s1").manifest.depthEvidence!!.stats
+        assertEquals(1L, stats.dropped)
+        assertEquals(1L, stats.droppedAtEnd)
+        assertEquals(1L, stats.firstDroppedRunId)
+        assertEquals(0L, read("s2").manifest.depthEvidence!!.stats.dropped)
+    }
+
+    @Test
+    fun `a copy still lent out when the stream finishes is counted then, and settles nothing after`() = runBlocking {
+        val evidence = stream()
+        evidence.startSession("s1")
+        evidence.attach("s1", tmp.newFolder("s1"))
+        val fitter = GroundFitter()
+        val submitted = evidence.copy("s1", 1, 1, yuvFrame(1))!!
+        submitted.submit(run(yuvFrame(1), output(0), fitter, 0))
+        val late = evidence.copy("s1", 1, 2, yuvFrame(2))!!
+        val discarded = evidence.copy("s1", 1, 3, yuvFrame(3))!!
+        val stats = evidence.finish("s1")!!
+        assertEquals(1L, stats.recordsWritten)
+        // Both copies still out are dropped at the end, whatever the lane does with them next.
+        assertEquals(2L, stats.droppedAtEnd)
+        assertEquals(2L, stats.dropped)
+        assertEquals(2L, stats.firstDroppedRunId)
+        late.submit(run(yuvFrame(2), output(1), fitter, 1))
+        discarded.discard()
+        submitted.discard()
+        assertEquals(1, File(tmp.root, "s1/${DepthEvidenceFiles.RECORDS_FILE}").readLines().count { it.isNotBlank() })
     }
 
     @Test
