@@ -33,6 +33,10 @@ import com.sailens.shell.capture.captureDeviceInfo
 import com.sailens.shell.consistency.ModelConsistencyChecker
 import com.sailens.shell.consistency.ModelConsistencyReportWriter
 import com.sailens.shell.consistency.ModelConsistencyViewModel
+import com.sailens.shell.consistency.SensorConsistencyGeometry
+import com.sailens.shell.guidance.settings.PhoneGeometryStore
+import com.sailens.guidance.geometry.CameraFactsSource
+import com.sailens.vision.depth.DepthModelConfig
 import com.sailens.shell.trace.TraceReplayViewModel
 import com.sailens.shell.ttsduration.TtsDurationProbe
 import com.sailens.shell.ttsduration.TtsDurationViewModel
@@ -145,6 +149,13 @@ val shellDebugModule: Module = module {
                 modelSourceResolver = get(),
                 snapshots = get(),
                 log = get(),
+                // A host that configures no depth model binds no config: the depth check is not applicable.
+                depthConfig = getOrNull<DepthModelConfig>(),
+                geometry = SensorConsistencyGeometry(
+                    orientation = get(),
+                    cameraFacts = getOrNull() ?: CameraFactsSource { null },
+                    phone = get<PhoneGeometryStore>().let { store -> store::current },
+                ),
             ),
             sessions = get(),
             writer = ModelConsistencyReportWriter(File(androidContext().filesDir, CONSISTENCY_DIR)),

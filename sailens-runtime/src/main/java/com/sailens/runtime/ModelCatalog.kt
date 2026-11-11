@@ -35,6 +35,11 @@ object ModelCatalog {
                 ModelAcceleratorBackend.GPU -> ModelSource.Asset(OBSTACLE_DETECTION_ASSET)
                 ModelAcceleratorBackend.NPU -> unsupported(type, accelerator)
             }
+            ModelType.DEPTH_ESTIMATION -> when (accelerator) {
+                ModelAcceleratorBackend.CPU,
+                ModelAcceleratorBackend.GPU -> ModelSource.Asset(DEPTH_ESTIMATION_ASSET)
+                ModelAcceleratorBackend.NPU -> unsupported(type, accelerator)
+            }
         }
 
     private fun unsupported(type: ModelType, accelerator: ModelAcceleratorBackend): Nothing {
@@ -43,4 +48,5 @@ object ModelCatalog {
 
     private const val SEMANTIC_SEGMENTATION_ASSET = "sem.tflite"
     private const val OBSTACLE_DETECTION_ASSET = "det.tflite"
+    private const val DEPTH_ESTIMATION_ASSET = "depth.tflite"
 }

@@ -9,16 +9,29 @@ import com.sailens.runtime.ModelAcceleratorSelectionMode
 import com.sailens.runtime.ModelSourceResolver
 import com.sailens.runtime.ModelType
 import com.sailens.runtime.PinnedModelSourceResolver
+import com.sailens.guidance.geometry.CameraGeometry
+import com.sailens.guidance.geometry.GeometryQuality
+import com.sailens.guidance.geometry.GroundFitter
 import com.sailens.vision.consistency.ClassMapAgreement
 import com.sailens.vision.consistency.ConsistencyVerdict
 import com.sailens.vision.consistency.DEFAULT_CONFIDENCE_MARGIN
+import com.sailens.vision.consistency.DepthConsistency
+import com.sailens.vision.consistency.DepthConsistencyThresholds
+import com.sailens.vision.consistency.DepthFrameAgreement
 import com.sailens.vision.consistency.DetectionAgreement
 import com.sailens.vision.consistency.DetectionConsistency
+import com.sailens.vision.consistency.GroundFitAgreement
 import com.sailens.vision.consistency.SemanticConsistency
 import com.sailens.vision.consistency.compareClassMaps
 import com.sailens.vision.consistency.compareDetections
+import com.sailens.vision.consistency.compareDisparity
+import com.sailens.vision.consistency.judgeDepth
 import com.sailens.vision.consistency.judgeDetection
 import com.sailens.vision.consistency.judgeSemantic
+import com.sailens.vision.depth.DepthModelConfig
+import com.sailens.vision.depth.DepthModelPreflight
+import com.sailens.vision.depth.DisparityMap
+import com.sailens.vision.depth.LiteRtDepthRunner
 import com.sailens.vision.detection.DetectionModelConfig
 import com.sailens.vision.detection.LiteRtDetectionRunner
 import com.sailens.vision.semantic.ClassMapPostprocessor
@@ -55,6 +68,9 @@ internal class ModelConsistencyChecker(
     private val log: LogService,
     private val frameCount: Int = DEFAULT_FRAME_COUNT,
     private val frameIntervalMs: Long = DEFAULT_FRAME_INTERVAL_MS,
+    /** The optional depth model; not applicable when the host configures none. */
+    private val depthPairs: ComparisonPairFactory<DepthFrameAgreement> = ComparisonPairFactory { ComparisonPair.notApplicable() },
+    private val geometry: ConsistencyGeometry = ConsistencyGeometry.None,
 ) {
 
     suspend fun run(onFrame: (done: Int, total: Int) -> Unit = { _, _ -> }): ConsistencyRunResult {
@@ -64,7 +80,21 @@ internal class ModelConsistencyChecker(
         try {
             val detection = detectionPairs.create()
             try {
-                return compare(semantic, detection, onFrame)
+                val depth = depthPairs.create()
+                try {
+                    // The gravity source is started only for the depth fit, and stopped however
+                    // the run ends.
+                    if (!depth.ready) return compare(semantic, detection, depth, onFrame)
+                    geometry.start()
+                    try {
+                        geometry.awaitGravity(GRAVITY_WAIT_MS)
+                        return compare(semantic, detection, depth, onFrame)
+                    } finally {
+                        geometry.stop()
+                    }
+                } finally {
+                    depth.release()
+                }
             } finally {
                 detection.release()
             }
@@ -76,27 +106,33 @@ internal class ModelConsistencyChecker(
     private suspend fun compare(
         semantic: ComparisonPair<ClassMapAgreement>,
         detection: ComparisonPair<DetectionAgreement>,
+        depth: ComparisonPair<DepthFrameAgreement>,
         onFrame: (done: Int, total: Int) -> Unit,
     ): ConsistencyRunResult {
         val semFrames = mutableListOf<ClassMapAgreement>()
         val detFrames = mutableListOf<DetectionAgreement>()
+        val depthFrames = mutableListOf<DepthFrameAgreement>()
         var semAccelerators = AcceleratorPair()
         var detAccelerators = AcceleratorPair()
+        var depthAccelerators = AcceleratorPair()
         var framesUsed = 0
         var framesChanged = 0
 
-        if (semantic.ready || detection.ready) {
+        if (semantic.ready || detection.ready || depth.ready) {
             val lease = snapshots.openSnapshotLease()
             try {
                 for (i in 0 until frameCount) {
                     if (i > 0) delay(frameIntervalMs)
                     val frame = snapshots.awaitCurrentFrame(maxAgeMs = FRAME_MAX_AGE_MS) ?: break
+                    // Frozen now, before any model runs: see ConsistencyGeometry.
+                    val consistencyFrame = ConsistencyFrame(frame, if (depth.ready) geometry.resolve(frame) else null)
                     // Both runs must see the same pixels. A snapshot is detached from the frame
                     // pool, so nothing should write into it; if something does, the comparison
                     // is void and the camera layer has a bug worth reporting.
                     val before = frameChecksum(frame)
-                    val sem = if (semantic.ready) semantic.compare(frame) else null
-                    val det = if (detection.ready) detection.compare(frame) else null
+                    val sem = if (semantic.ready) semantic.compare(consistencyFrame) else null
+                    val det = if (detection.ready) detection.compare(consistencyFrame) else null
+                    val dep = if (depth.ready) depth.compare(consistencyFrame) else null
                     if (frameChecksum(frame) != before) {
                         framesChanged++
                         log.warning(TAG, "Snapshot ${frame.sequenceNumber} changed during the comparison")
@@ -110,6 +146,10 @@ internal class ModelConsistencyChecker(
                     det?.let { (agreement, accelerators) ->
                         detFrames += agreement
                         detAccelerators = accelerators
+                    }
+                    dep?.let { (agreement, accelerators) ->
+                        depthFrames += agreement
+                        depthAccelerators = accelerators
                     }
                     framesUsed++
                     onFrame(framesUsed + framesChanged, frameCount)
@@ -129,6 +169,9 @@ internal class ModelConsistencyChecker(
             detection = detection.outcome(framesUsed, frameCount) {
                 DetectionModelResult(detAccelerators, judgeDetection(detFrames))
             },
+            depth = depth.outcome(framesUsed, frameCount) {
+                DepthModelResult(depthAccelerators, judgeDepth(depthFrames, DepthConsistencyThresholds(framesRequired = frameCount)))
+            },
         )
     }
 
@@ -136,9 +179,13 @@ internal class ModelConsistencyChecker(
         const val DEFAULT_FRAME_COUNT: Int = 8
         const val DEFAULT_FRAME_INTERVAL_MS: Long = 500
         private const val FRAME_MAX_AGE_MS: Long = 200
+        private const val GRAVITY_WAIT_MS: Long = 1_000
         private const val TAG = "ModelConsistency"
 
-        /** The checker over LiteRT runners for the profile's sem and det models. */
+        /**
+         * The checker over LiteRT runners for the profile's sem and det models, and the depth model when
+         * the host configures one ([depthConfig] non-null and a file where the resolver points).
+         */
         fun liteRt(
             context: Context,
             semanticConfig: SemanticModelConfig,
@@ -148,6 +195,8 @@ internal class ModelConsistencyChecker(
             modelSourceResolver: ModelSourceResolver,
             snapshots: FrameSnapshotProvider,
             log: LogService,
+            depthConfig: DepthModelConfig? = null,
+            geometry: ConsistencyGeometry = ConsistencyGeometry.None,
         ): ModelConsistencyChecker = ModelConsistencyChecker(
             semanticPairs = { liteRtSemanticPair(context, semanticConfig, modelSourceResolver, log) },
             detectionPairs = {
@@ -155,6 +204,10 @@ internal class ModelConsistencyChecker(
             },
             snapshots = snapshots,
             log = log,
+            depthPairs = {
+                depthConfig?.let { liteRtDepthPair(context, it, modelSourceResolver, log) } ?: ComparisonPair.notApplicable()
+            },
+            geometry = geometry,
         )
     }
 }
@@ -174,12 +227,12 @@ internal class ComparisonPair<A>(
     val failure: String? = null,
     /** The one physical model both runners load; null when not checked. */
     val modelSource: String? = null,
-    private val runFrame: (suspend (ImageFrame) -> Pair<A, AcceleratorPair>)? = null,
+    private val runFrame: (suspend (ConsistencyFrame) -> Pair<A, AcceleratorPair>)? = null,
     private val releaseRunners: suspend () -> Unit = {},
 ) {
     val ready: Boolean get() = status == ModelCheckStatus.CHECKED
 
-    suspend fun compare(frame: ImageFrame): Pair<A, AcceleratorPair> = requireNotNull(runFrame)(frame)
+    suspend fun compare(frame: ConsistencyFrame): Pair<A, AcceleratorPair> = requireNotNull(runFrame)(frame)
 
     fun <R> outcome(framesUsed: Int, framesRequested: Int, result: () -> R): ModelOutcome<R> = when {
         status != ModelCheckStatus.CHECKED -> ModelOutcome(status, failure, modelSource, null)
@@ -210,7 +263,7 @@ internal class ComparisonPair<A>(
             log: LogService,
             initialize: suspend () -> Unit,
             release: suspend () -> Unit,
-            run: suspend (ImageFrame) -> Pair<A, AcceleratorPair>,
+            run: suspend (ConsistencyFrame) -> Pair<A, AcceleratorPair>,
         ): ComparisonPair<A> = try {
             initialize()
             ComparisonPair(ModelCheckStatus.CHECKED, null, modelSource, run, release)
@@ -249,7 +302,7 @@ private suspend fun liteRtSemanticPair(
         log = log,
         initialize = { candidate.initialize(); reference.initialize() },
         release = { candidate.release(); reference.release() },
-        run = { frame ->
+        run = { (frame) ->
             val cand = candidate.segment(frame).getOrThrow()
             val ref = reference.segment(frame).getOrThrow()
             compareClassMaps(reference = ref.value, candidate = cand.value) to
@@ -289,7 +342,7 @@ private suspend fun liteRtDetectionPair(
         log = log,
         initialize = { candidate.initialize(); reference.initialize() },
         release = { candidate.release(); reference.release() },
-        run = { frame ->
+        run = { (frame) ->
             val cand = candidate.detect(frame)
             val ref = reference.detect(frame)
             compareDetections(reference = ref.detections, candidate = cand.detections, threshold = threshold) to
@@ -297,6 +350,102 @@ private suspend fun liteRtDetectionPair(
         },
     )
 }
+
+/**
+ * The depth model on its configured accelerator and on the CPU. Not applicable when the profile runs
+ * it on the CPU, or when there is no depth file where the resolver points: a host without a depth
+ * model has nothing to check, and that is not a failure.
+ */
+private suspend fun liteRtDepthPair(
+    context: Context,
+    config: DepthModelConfig,
+    resolver: ModelSourceResolver,
+    log: LogService,
+): ComparisonPair<DepthFrameAgreement> {
+    if (config.acceleratorBackend == ModelAcceleratorBackend.CPU) return ComparisonPair.notApplicable()
+    val pinned = PinnedModelSourceResolver.pin(resolver, ModelType.DEPTH_ESTIMATION, config.acceleratorBackend)
+    when (val preflight = DepthModelPreflight.check(context, pinned.pinned)) {
+        is DepthModelPreflight.Result.Compatible -> Unit
+        DepthModelPreflight.Result.ModelSourceMissing -> return ComparisonPair.notApplicable()
+        else -> return ComparisonPair(ModelCheckStatus.UNAVAILABLE, preflight.toString(), pinned.pinned.label)
+    }
+    val candidate = LiteRtDepthRunner(context, config, pinned, log)
+    val reference = LiteRtDepthRunner(context, config.onCpu(), pinned, log)
+    // One fitter per side, fitted in the same frame order, sharing no history.
+    val candidateFitter = GroundFitter()
+    val referenceFitter = GroundFitter()
+    return ComparisonPair.initialize(
+        name = "depth",
+        modelSource = pinned.pinned.label,
+        log = log,
+        initialize = { candidate.initialize(); reference.initialize() },
+        release = { candidate.release(); reference.release() },
+        run = { (frame, geometry) ->
+            val cand = candidate.infer(checkNotNull(candidate.prepare(frame)) { "native preprocessing unavailable" })
+            val ref = reference.infer(checkNotNull(reference.prepare(frame)) { "native preprocessing unavailable" })
+            compareDepthFrame(geometry, ref.map, cand.map, referenceFitter, candidateFitter) to
+                AcceleratorPair(candidate = cand.runtimeInfo.accelerator, reference = ref.runtimeInfo.accelerator)
+        },
+    )
+}
+
+/**
+ * One frame of the depth pair. A NaN or infinite value in either output is a failed run (docs/models.md), counted
+ * from the values themselves: such a frame fails the check whatever the other values' statistics say, and neither
+ * fitter sees it, so the two fitters keep the same history.
+ */
+internal fun compareDepthFrame(
+    geometry: CameraGeometry?,
+    reference: DisparityMap,
+    candidate: DisparityMap,
+    referenceFitter: GroundFitter,
+    candidateFitter: GroundFitter,
+): DepthFrameAgreement {
+    val disparity = compareDisparity(reference = reference, candidate = candidate)
+    val referenceNonFinite = reference.values.count { !it.isFinite() }
+    val candidateNonFinite = candidate.values.count { !it.isFinite() }
+    if (referenceNonFinite > 0 || candidateNonFinite > 0) {
+        return DepthFrameAgreement(disparity, fit = null, candidateNonFinite = candidateNonFinite, referenceNonFinite = referenceNonFinite)
+    }
+    val fit = geometry?.let { compareGroundFits(it, reference, candidate, referenceFitter, candidateFitter) }
+    return DepthFrameAgreement(disparity, fit)
+}
+
+/** The two fits of one frame; null when the frame's geometry cannot carry a fit. */
+internal fun compareGroundFits(
+    geometry: CameraGeometry,
+    reference: DisparityMap,
+    candidate: DisparityMap,
+    referenceFitter: GroundFitter,
+    candidateFitter: GroundFitter,
+): GroundFitAgreement? {
+    val intrinsics = geometry.intrinsics ?: return null
+    val down = geometry.gravityInCamera ?: return null
+    if (geometry.quality is GeometryQuality.Unavailable) return null
+    if (intrinsics.width != reference.transform.analysisWidth || intrinsics.height != reference.transform.analysisHeight) return null
+    val r = referenceFitter.fit(reference, intrinsics, down, FIT_GRID_WIDTH, FIT_GRID_HEIGHT)
+    val c = candidateFitter.fit(candidate, intrinsics, down, FIT_GRID_WIDTH, FIT_GRID_HEIGHT)
+    val labels = if (r.isValid && c.isValid) {
+        var same = 0
+        for (y in 0 until FIT_GRID_HEIGHT) for (x in 0 until FIT_GRID_WIDTH) {
+            if (r.groundMask.get(x, y) == c.groundMask.get(x, y) &&
+                r.aboveGroundMask.get(x, y) == c.aboveGroundMask.get(x, y) &&
+                r.belowGroundMask.get(x, y) == c.belowGroundMask.get(x, y)
+            ) same++
+        }
+        same.toFloat() / (FIT_GRID_WIDTH * FIT_GRID_HEIGHT)
+    } else {
+        null
+    }
+    return GroundFitAgreement(validityAgrees = r.validity == c.validity, referenceValid = r.isValid, labelAgreement = labels)
+}
+
+/** The ground fit's label grid: the size the experiments measured agreement on (portrait 9:16). */
+internal const val FIT_GRID_WIDTH: Int = 90
+internal const val FIT_GRID_HEIGHT: Int = 160
+
+private fun DepthModelConfig.onCpu() =
+    copy(acceleratorBackend = ModelAcceleratorBackend.CPU, acceleratorSelectionMode = ModelAcceleratorSelectionMode.EXPLICIT)
 
 private fun SemanticModelConfig.onCpu() =
     copy(acceleratorBackend = ModelAcceleratorBackend.CPU, acceleratorSelectionMode = ModelAcceleratorSelectionMode.EXPLICIT)
@@ -325,6 +474,9 @@ internal fun frameChecksum(frame: ImageFrame): Long {
 
 /** The accelerator each run reported actually using (`MlRuntimeInfo.accelerator`). */
 internal data class AcceleratorPair(val candidate: String = "", val reference: String = "")
+
+/** A snapshot and the geometry resolved for it when it was taken (null without the depth check). */
+internal data class ConsistencyFrame(val frame: ImageFrame, val geometry: CameraGeometry? = null)
 
 internal enum class ModelCheckStatus {
     CHECKED,
@@ -371,6 +523,11 @@ internal data class DetectionModelResult(
     val consistency: DetectionConsistency,
 )
 
+internal data class DepthModelResult(
+    val accelerators: AcceleratorPair,
+    val consistency: DepthConsistency,
+)
+
 internal data class ConsistencyRunResult(
     val framesRequested: Int,
     val framesUsed: Int,
@@ -378,6 +535,7 @@ internal data class ConsistencyRunResult(
     val framesChanged: Int,
     val semantic: ModelOutcome<SemanticModelResult>,
     val detection: ModelOutcome<DetectionModelResult>,
+    val depth: ModelOutcome<DepthModelResult> = ModelOutcome(ModelCheckStatus.NOT_APPLICABLE, null, null, null),
 ) {
     val semanticVerdict: ConsistencyVerdict?
         get() = effectiveVerdict(semantic.status, semantic.result?.consistency?.verdict)
@@ -385,8 +543,11 @@ internal data class ConsistencyRunResult(
     val detectionVerdict: ConsistencyVerdict?
         get() = effectiveVerdict(detection.status, detection.result?.consistency?.verdict)
 
+    val depthVerdict: ConsistencyVerdict?
+        get() = effectiveVerdict(depth.status, depth.result?.consistency?.verdict)
+
     private val models: List<Pair<ModelCheckStatus, ConsistencyVerdict?>>
-        get() = listOf(semantic.status to semanticVerdict, detection.status to detectionVerdict)
+        get() = listOf(semantic.status to semanticVerdict, detection.status to detectionVerdict, depth.status to depthVerdict)
 
     /** Models the profile runs on an accelerator, so there is something to compare. */
     val modelsApplicable: Int get() = models.count { it.first != ModelCheckStatus.NOT_APPLICABLE }

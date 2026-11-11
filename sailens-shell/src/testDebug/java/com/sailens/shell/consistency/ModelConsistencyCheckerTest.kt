@@ -4,11 +4,35 @@ import com.sailens.camera.FrameLease
 import com.sailens.camera.FrameSnapshotProvider
 import com.sailens.core.frame.ImageFrame
 import com.sailens.guidance.config.PerceptionConfig
+import com.sailens.guidance.geometry.CameraGeometry
+import com.sailens.guidance.geometry.CameraIntrinsics
+import com.sailens.guidance.geometry.GeometryQuality
+import com.sailens.guidance.geometry.GroundFitter
+import com.sailens.guidance.geometry.IntrinsicsSource
+import com.sailens.guidance.geometry.PhoneGeometrySettings
+import com.sailens.guidance.geometry.TimeBasis
+import com.sailens.guidance.geometry.Vec3
 import com.sailens.shell.capture.RecordingLog
 import com.sailens.shell.capture.yuvFrame
 import com.sailens.vision.consistency.ClassMapAgreement
 import com.sailens.vision.consistency.ConsistencyVerdict
+import com.sailens.vision.consistency.DepthFrameAgreement
 import com.sailens.vision.consistency.DetectionAgreement
+import com.sailens.vision.consistency.DisparityAgreement
+import com.sailens.vision.consistency.GroundFitAgreement
+import com.sailens.vision.consistency.judgeDepth
+import com.sailens.vision.depth.DepthInputTransform
+import com.sailens.vision.depth.DisparityMap
+import com.sailens.vision.depth.ResizePolicy
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Rule
+import org.junit.rules.TemporaryFolder
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
@@ -23,6 +47,9 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
 class ModelConsistencyCheckerTest {
+
+    @get:Rule
+    val tmp = TemporaryFolder()
 
     /** Hands out fresh frames; after [available] of them the camera times out (null). */
     private class Snapshots(private val available: Int = Int.MAX_VALUE) : FrameSnapshotProvider {
@@ -41,7 +68,7 @@ class ModelConsistencyCheckerTest {
     private fun <A> pair(answer: A, released: AtomicBoolean, onFrame: (ImageFrame) -> Unit = {}) = ComparisonPair(
         status = ModelCheckStatus.CHECKED,
         modelSource = "model.tflite",
-        runFrame = { frame ->
+        runFrame = { (frame) ->
             onFrame(frame)
             answer to AcceleratorPair("GPU", "CPU")
         },
@@ -55,7 +82,150 @@ class ModelConsistencyCheckerTest {
         semantic: ComparisonPairFactory<ClassMapAgreement>,
         detection: ComparisonPairFactory<DetectionAgreement>,
         snapshots: FrameSnapshotProvider = Snapshots(),
-    ) = ModelConsistencyChecker(semantic, detection, snapshots, RecordingLog(), frameCount = 3, frameIntervalMs = 0)
+        depth: ComparisonPairFactory<DepthFrameAgreement> = ComparisonPairFactory { ComparisonPair.notApplicable() },
+        geometry: ConsistencyGeometry = ConsistencyGeometry.None,
+    ) = ModelConsistencyChecker(
+        semantic, detection, snapshots, RecordingLog(), frameCount = 3, frameIntervalMs = 0,
+        depthPairs = depth, geometry = geometry,
+    )
+
+    /** Records what the check asks of the gravity source, in order, into [events]. */
+    private class RecordingGeometry(private val events: MutableList<String>) : ConsistencyGeometry {
+        var started = 0
+        var stopped = 0
+        override fun start() { started++; events += "start" }
+        override fun stop() { stopped++; events += "stop" }
+        override suspend fun awaitGravity(timeoutMs: Long) { events += "await" }
+        override fun resolve(frame: ImageFrame): CameraGeometry? { events += "resolve"; return null }
+    }
+
+    private val depthAgreement = DepthFrameAgreement(DisparityAgreement(0.004f, 0.01f, 1000), fit = null)
+
+    @Test
+    fun `without a depth model the gravity source is never started`() = runBlocking {
+        val geometry = RecordingGeometry(mutableListOf())
+        val result = checker(
+            semantic = { pair(agreeing, AtomicBoolean()) },
+            detection = { ComparisonPair.notApplicable() },
+            geometry = geometry,
+        ).run()
+        assertEquals(0, geometry.started)
+        assertEquals(ModelCheckStatus.NOT_APPLICABLE, result.depth.status)
+        assertEquals(ConsistencyVerdict.PASS, result.overall)
+    }
+
+    @Test
+    fun `each frame's geometry is resolved before any model runs on it`() = runBlocking {
+        val events = mutableListOf<String>()
+        val geometry = RecordingGeometry(events)
+        checker(
+            semantic = { pair(agreeing, AtomicBoolean()) { events += "semantic" } },
+            detection = { ComparisonPair.notApplicable() },
+            depth = { pair(depthAgreement, AtomicBoolean()) { events += "depth" } },
+            geometry = geometry,
+        ).run()
+        assertEquals(
+            listOf("start", "await") + List(3) { listOf("resolve", "semantic", "depth") }.flatten() + "stop",
+            events,
+        )
+    }
+
+    @Test
+    fun `the gravity source is released when the run is cancelled`() = runBlocking {
+        val geometry = RecordingGeometry(mutableListOf())
+        val inDepth = CompletableDeferred<Unit>()
+        val run = launch {
+            checker(
+                semantic = { ComparisonPair.notApplicable() },
+                detection = { ComparisonPair.notApplicable() },
+                depth = {
+                    ComparisonPair(
+                        status = ModelCheckStatus.CHECKED,
+                        runFrame = { inDepth.complete(Unit); awaitCancellation() },
+                    )
+                },
+                geometry = geometry,
+            ).run()
+        }
+        inDepth.await()
+        run.cancelAndJoin()
+        assertEquals(1, geometry.started)
+        assertEquals(1, geometry.stopped)
+    }
+
+    private val depthTransform = DepthInputTransform.create(9, 16, 9, 16, ResizePolicy.PAD_KEEP_ASPECT)
+    private fun depthMap(values: FloatArray) = DisparityMap(9, 16, values, depthTransform)
+
+    /** Disparity growing toward the bottom of the frame, as ground does. */
+    private val groundValues = FloatArray(9 * 16) { i -> 1f + (i / 9) * 0.25f }
+    private val fitGeometry = CameraGeometry(
+        frameTimeNanos = 0,
+        timeBasis = TimeBasis.CAMERA_REALTIME,
+        intrinsics = CameraIntrinsics(10f, 10f, 4.5f, 8f, 9, 16, IntrinsicsSource.CALIBRATION),
+        gravityInCamera = Vec3(0f, 0.9f, 0.43f),
+        gravityAgeNanos = 0,
+        phone = PhoneGeometrySettings.DEFAULT,
+        quality = GeometryQuality.Ok,
+    )
+
+    @Test
+    fun `a NaN in either output is a failed frame, not fitted, whatever the other values say`() {
+        val finite = compareDepthFrame(fitGeometry, depthMap(groundValues), depthMap(groundValues.copyOf()), GroundFitter(), GroundFitter())
+        assertNotNull("a finite frame with geometry is fitted", finite.fit)
+        assertFalse(finite.hasNonFiniteOutput)
+
+        val withNaN = groundValues.copyOf().also { it[100] = Float.NaN }
+        val candidate = compareDepthFrame(fitGeometry, depthMap(groundValues), depthMap(withNaN), GroundFitter(), GroundFitter())
+        assertEquals(1, candidate.candidateNonFinite)
+        assertNull("not fitted", candidate.fit)
+        // One bad value moves no median: the statistics alone would have passed it.
+        assertEquals(0f, candidate.disparity.medianRelativeError, 0f)
+        val reference = compareDepthFrame(fitGeometry, depthMap(withNaN), depthMap(groundValues), GroundFitter(), GroundFitter())
+        assertEquals(1, reference.referenceNonFinite)
+        assertNull(reference.fit)
+
+        val agreeing = DepthFrameAgreement(DisparityAgreement(0f, 0f, 144), GroundFitAgreement(true, true, 1f))
+        assertEquals(ConsistencyVerdict.FAIL, judgeDepth(List(7) { agreeing } + candidate).verdict)
+    }
+
+    @Test
+    fun `a failed depth check with infinite errors still writes its report, as valid JSON that says why`() {
+        val zeros = depthMap(FloatArray(9 * 16))
+        val broken = compareDepthFrame(null, zeros, depthMap(FloatArray(9 * 16) { 0.5f }), GroundFitter(), GroundFitter())
+        val nan = compareDepthFrame(null, zeros, depthMap(FloatArray(9 * 16) { Float.NaN }), GroundFitter(), GroundFitter())
+        val consistency = judgeDepth(List(6) { DepthFrameAgreement(DisparityAgreement(0f, 0f, 144), null) } + broken + nan)
+        assertEquals(Float.POSITIVE_INFINITY, consistency.maxMedianRelativeError)
+        val run = ConsistencyRunResult(
+            framesRequested = 8,
+            framesUsed = 8,
+            framesChanged = 0,
+            semantic = ModelOutcome(ModelCheckStatus.NOT_APPLICABLE, null, null, null),
+            detection = ModelOutcome(ModelCheckStatus.NOT_APPLICABLE, null, null, null),
+            depth = ModelOutcome(ModelCheckStatus.CHECKED, null, "depth.tflite", DepthModelResult(AcceleratorPair("GPU", "CPU"), consistency)),
+        )
+        val file = ModelConsistencyReportWriter(tmp.newFolder("reports")).write(run.toReport(wallTimeMs = 1, build = null, semanticLabel = { "c$it" }))
+        val depth = Json.parseToJsonElement(file.readText()).jsonObject.getValue("depth").jsonObject
+        assertEquals("FAIL", depth.getValue("verdict").jsonPrimitive.content)
+        assertEquals(JsonNull, depth.getValue("maxMedianRelativeError"))
+        assertEquals(JsonNull, depth.getValue("frameMedianRelativeError").jsonArray[6])
+        assertEquals(1, depth.getValue("nonFiniteOutputFrames").jsonPrimitive.content.toInt())
+        val named = depth.getValue("nonFiniteMetrics").jsonArray.map { it.jsonPrimitive.content }
+        assertTrue(named.toString(), "maxMedianRelativeError=Infinity" in named && "frameMedianRelativeError[6]=Infinity" in named)
+    }
+
+    @Test
+    fun `a checked depth model counts towards the overall verdict`() = runBlocking {
+        val result = checker(
+            semantic = { pair(agreeing, AtomicBoolean()) },
+            detection = { ComparisonPair.notApplicable() },
+            // Three frames with no geometry: the fit cannot be judged, so the depth model is inconclusive.
+            depth = { pair(depthAgreement, AtomicBoolean()) },
+            geometry = RecordingGeometry(mutableListOf()),
+        ).run()
+        assertEquals(ModelCheckStatus.CHECKED, result.depth.status)
+        assertEquals(ConsistencyVerdict.INCONCLUSIVE, result.depthVerdict)
+        assertEquals(ConsistencyVerdict.INCONCLUSIVE, result.overall)
+    }
 
     @Test
     fun `cancelling while the second pair initialises releases the first`() = runBlocking {
@@ -100,6 +270,9 @@ class ModelConsistencyCheckerTest {
         assertEquals(3, result.framesUsed)
         assertEquals(ConsistencyVerdict.PASS, result.overall)
         assertEquals(2, result.modelsChecked)
+        // No depth model configured: nothing to check, and the verdict is what it was without one.
+        assertEquals(ModelCheckStatus.NOT_APPLICABLE, result.depth.status)
+        assertEquals(2, result.modelsApplicable)
     }
 
     @Test

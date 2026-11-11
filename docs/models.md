@@ -119,6 +119,69 @@ DetectionModelConfig(
 When swapping a det model, **confirm the output shape and the box units first** so box/class
 dimensions are not misinterpreted.
 
+## The `depth` contract
+
+An optional third model, `app/src/main/assets/depth.tflite` (git-ignored like the others), for the
+ground geometry (`docs/geometry.md` §6). No file means depth is not configured; nothing else changes.
+Swapping one conforming depth model for another is a file swap: the code names no model family and
+has no branch per model. Shapes and layout come from the metadata; the normalization is inside the
+model; the output's scale and shift are fitted per frame by `GroundFitter`, whose thresholds are depth
+ratios. The runtime choices (accelerator, GPU precision and queue priority) are the host's
+`DepthModelConfig` in its runtime profile.
+
+```text
+input    one float32 tensor  [1,3,H,W] or [1,H,W,3]   RGB in [0,1], any normalization inside the model
+output   one float32 tensor  [1,H,W], [1,1,H,W] or [1,H,W,1]   the same H and W as the input
+         relative disparity: larger is nearer, a/Z + b with a and b unknown per frame
+```
+
+- **Output size equals input size.** Output pixel (x, y) is input pixel (x, y), so the input's
+  transform maps it. A model whose output is a half or a quarter of its input is refused by the
+  preflight (`OutputSizeMismatch`), not remapped: that needs its own coverage rule first.
+- **Disparity only.** A relative-depth output usually carries an unknown shift too, and its inverse is
+  then not `a/Z + b`; such a model passes the preflight and is judged `INVERSE_OUTPUT` on every frame.
+  Metric depth would need its own contract.
+- **Finite values.** A run whose output holds a NaN or an infinity counts as a failed run.
+- **A shape that reads two ways** (`[1,3,4,3]` is NCHW 3×4 or NHWC 4×3; `[1,1,4,1]` is a 4×1 or a 1×4
+  map) is read the way under which input and output have the same size. An input whose two layouts both
+  fit (`[1,3,3,3]`) is refused: its layout cannot be told.
+- **Resize is fixed: `PAD_KEEP_ASPECT`**, the native letterbox, the only resize the native
+  preprocessing does. A tensor with the frame's aspect (portrait 9:16) pads almost nothing; padding is
+  unknown to the ground fit. A tensor pixel is image content only when the kernel wrote image data
+  there (columns `[ceil(pad), ceil(pad + content))`) **and** its centre lies inside the content.
+- **Native preprocessing only, no shared cache.** The OpenCV fallback truncates sizes and offsets to
+  integers, which would not match the transform; a frame the native path cannot take is reported.
+- **Normalization inside the model**: the input is `[0,1]` like the other models'. When a model expects
+  ImageNet normalization, fold it in at export (the reference export below does). A black letterbox
+  pixel, 0 before the fold, still meets the model as normalized black.
+- **The class order problem does not exist here**; an inverted output is found per frame by the fit.
+- **Must pass the accelerator consistency check** (below). Two exports have compiled or run on the
+  LiteRT 2.1.5 GPU and answered wrongly without an error: one with the position-embedding
+  interpolation left in the graph (`GATHER_ND`, `BROADCAST_TO`: the GPU does not compile it), and one
+  whose token activations broadcast between rank 2 `[N,C]` and rank 3 `[1,N,C]` around
+  `FULLY_CONNECTED` (the GPU treats N as a batch; logcat prints one `Shape mismatch ... conv_wave_memory`
+  per block). [`scripts/depth/patch_rank3.py`](../scripts/depth/patch_rank3.py) keeps them rank 3.
+
+**Reference model**: Depth Anything V2 Small (Apache-2.0 code and weights), portrait 392×224, GPU FP16
+with LOW queue priority. On SM8850 at 3 Hz beside sem+det: depth p95 31.4 ms (50.4 ms with LOW
+priority, 76.5 ms max), sem/det p95 +5% (0%/+3% with LOW). Export it with
+[`scripts/depth/dav2/export.py`](../scripts/depth/dav2/export.py), which folds the normalization and the
+position embedding in, applies the rank-3 patch and checks on the CPU that none of it changed the
+output. Distill-Any-Depth Small has the same architecture and fits the contract the same way.
+
+**Swapping a depth model** changes no code but needs the same acceptance as the first one:
+1. the preflight reports `Compatible`;
+2. the debug Model consistency check passes for depth on the target device;
+3. its ground quality is measured offline on the device's preprocessing, **including covered-lens
+   frames** (a model can match the reference outdoors and still be far worse indoors and on a covered
+   lens);
+4. the device budget is met on the target device.
+
+What a swap must **not** change: `GroundFitter`'s thresholds, the run-failure count, freshness, the
+capability table, the consistency thresholds. If a model needs any of those changed it does not fit the
+contract, or the contract has to change first. Which file a model is stays the host's choice
+(`ModelSourceResolver`, above): a host that ships different depth models per device does it there.
+
 ## Normalization
 
 ⚠️ **`/255` is already baked into float preprocessing** (`OpenCVImageProcessor`'s
@@ -126,7 +189,14 @@ dimensions are not misinterpreted.
 
 `config.mean/std` are applied **on top of `[0,1]`** and are currently fixed at mean=(0,0,0),
 std=(1,1,1). When wiring up any per-model normalization, **do not touch `/255` again — you will
-double-scale.**
+double-scale.** The OpenCV fallback ignores `mean/std` altogether and only divides by 255, so that
+fixed value is also the only one the fallback supports; a model that needs normalization carries it
+inside (as the `depth` contract requires).
+
+GPU precision: the sem and det sessions are built without GPU options, so they run LiteRT's default
+precision, which is FP16 on the GPUs measured so far (SM8850, LiteRT 2.1.5). Their consistency results
+above are at that precision. The depth model asks for its precision and queue priority explicitly
+(`DepthModelConfig`).
 
 ## int8 / uint8 / float32
 
@@ -203,6 +273,13 @@ compared:
 |---|---|---|---|
 | sem | pixel agreement ≥ 95% on average and ≥ 90% on every frame | average < 80% | inconclusive: usually a shaking phone or a blurred view (a correct model measured 86–96% while shaken); retry held still |
 | det | of the CPU's detections, ≥ 90% also found on the accelerator (same class, IoU ≥ 0.5), and ≤ 10% extra | either bound missed | inconclusive when nothing was detected: point at objects |
+| depth (when configured) | every frame's median relative disparity difference ≤ 2%, the two ground fits agree on validity on ≥ 7 of the 8 frames, and their labels agree ≥ 95% where both are valid | a NaN or infinite value in either output on any frame (that frame is not fitted), any frame > 10%, or the fits agree on ≤ 4 of 8 with geometry on ≥ 7 | inconclusive in between, and when fewer than 7 frames had orientation: the count stays out of 8 |
+
+For depth the check holds the gravity sensor itself (Guidance is stopped) and resolves each frame's
+orientation as the frame is taken, before any model runs; each side fits its own `GroundFitter`. The
+relative difference is `|accelerator − CPU| / max(|CPU|, 5% of max|CPU|)` over the content pixels:
+correct exports measured 0.3–0.5% median on the GPU in FP32 and FP16, the broken ones in the contract
+above 60–97%. A host without `depth.tflite` gets no depth card and an unchanged overall verdict.
 
 Detections are judged by the production decision at the threshold. A detection that crosses it on
 one side only counts as jitter when the two confidences are within 0.10 of each other (0.41 against

@@ -6,6 +6,7 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlin.math.ceil
 
 class DepthInputTransformTest {
 
@@ -68,40 +69,78 @@ class DepthInputTransformTest {
     }
 
     /**
-     * Fractional padding: 960x1280 padded into 518x518 leaves 64.75 tensor
-     * pixels each side, so the first content pixel is not where the padding ends.
+     * A tensor marked the way the native letterbox writes it (sailens_runtime_jni.cpp): image data in
+     * columns [ceil(pad), ceil(pad + content)) and rows likewise, 1; padding 1000. Building the marker
+     * with the sampler's own rule would hide any disagreement between the two.
      */
+    private fun nativeMarked(transform: DepthInputTransform): FloatArray {
+        val w = transform.modelWidth
+        val h = transform.modelHeight
+        val x0 = ceil(transform.padLeft).toInt()
+        val x1 = ceil(transform.padLeft + transform.sourceWidth * transform.scaleX).toInt().coerceAtMost(w)
+        val y0 = ceil(transform.padTop).toInt()
+        val y1 = ceil(transform.padTop + transform.sourceHeight * transform.scaleY).toInt().coerceAtMost(h)
+        return FloatArray(w * h) { i -> if (i % w in x0 until x1 && i / w in y0 until y1) 1f else 1000f }
+    }
+
+    private fun assertNoPaddingSampled(transform: DepthInputTransform) {
+        val map = DisparityMap(transform.modelWidth, transform.modelHeight, nativeMarked(transform), transform)
+        val aw = transform.analysisWidth.toFloat()
+        val ah = transform.analysisHeight.toFloat()
+        for (u in listOf(0f, 0.3f, 0.5f, 1f, 2f, aw / 2, aw - 2, aw - 1, aw - 0.5f, aw - 0.01f)) {
+            for (v in listOf(0f, 0.5f, ah / 2, ah - 1, ah - 0.01f)) {
+                assertEquals("u=$u v=$v", 1f, map.sampleAt(u, v)!!, 0f)
+            }
+        }
+    }
+
+    /** Fractional padding: 960x1280 padded into 518x518 leaves 64.75 tensor pixels each side. */
     @Test
     fun `fractional padding never blends in at the image edges`() {
         val transform = DepthInputTransform.create(960, 1280, 518, 518, ResizePolicy.PAD_KEEP_ASPECT)
         assertEquals(64.75f, transform.padLeft, 1e-3f)
-        // Content pixels (centre in [pad, size − pad)) hold 1, padding 1000.
-        val values = FloatArray(518 * 518) { i ->
-            val centre = i % 518 + 0.5f
-            if (centre < transform.padLeft || centre >= 518 - transform.padLeft) 1000f else 1f
-        }
-        val map = DisparityMap(518, 518, values, transform)
-        for (u in listOf(0f, 0.5f, 1f, 2f, 480f, 958f, 959f, 959.9f)) {
-            for (v in listOf(0f, 640f, 1279.9f)) assertEquals("u=$u v=$v", 1f, map.sampleAt(u, v)!!, 0f)
-        }
+        assertNoPaddingSampled(transform)
     }
 
     /**
-     * Half-pixel padding: 640x1280 into 518x518 pads 129.5 each side, so
-     * pixel 388's centre sits exactly on the open right end of the content and is padding.
+     * Half-pixel padding: 640x1280 into 518x518 pads 129.5 each side. The native kernel writes column
+     * 129 as padding (its left edge is in the padding although its centre is not), so it is not content.
      */
     @Test
-    fun `half-pixel padding leaves the pixel on the right edge out`() {
+    fun `half-pixel padding takes the content from where the native kernel wrote it`() {
         val transform = DepthInputTransform.create(640, 1280, 518, 518, ResizePolicy.PAD_KEEP_ASPECT)
         assertEquals(129.5f, transform.padLeft, 1e-3f)
-        val values = FloatArray(518 * 518) { i ->
-            val centre = i % 518 + 0.5f
-            if (centre < transform.padLeft || centre >= 518 - transform.padLeft) 1000f else 1f
+        val map = DisparityMap(518, 518, nativeMarked(transform), transform)
+        assertEquals(130, map.contentColumns.first)
+        assertEquals(387, map.contentColumns.last)
+        assertNoPaddingSampled(transform)
+    }
+
+    /**
+     * The five paddings the native cross-check uses, from a real frame size: the 540x960 analysis
+     * image into a 224-wide tensor of five heights pads each side by 4, 6.25, 8.5, 10.75 and 1.75 --
+     * fractional parts 0, 0.25, 0.5, 0.75 and the reference model's.
+     */
+    @Test
+    fun `content bounds follow the native kernel for every fractional padding`() {
+        val cases = listOf(384 to 4f, 376 to 6.25f, 368 to 8.5f, 360 to 10.75f, 392 to 1.75f)
+        for ((height, pad) in cases) {
+            val transform = DepthInputTransform.create(540, 960, 224, height, ResizePolicy.PAD_KEEP_ASPECT)
+            assertEquals("height $height", pad, transform.padLeft, 1e-4f)
+            val map = DisparityMap(224, height, FloatArray(224 * height), transform)
+            val end = transform.padLeft + transform.sourceWidth * transform.scaleX
+            assertEquals("height $height first", ceil(pad).toInt(), map.contentColumns.first)
+            assertEquals("height $height last", ceil(end - 0.5f).toInt() - 1, map.contentColumns.last)
+            assertNoPaddingSampled(transform)
         }
-        val map = DisparityMap(518, 518, values, transform)
-        for (u in listOf(0f, 0.3f, 320f, 639.5f, 639.9f)) {
-            for (v in listOf(0f, 640f, 1279.9f)) assertEquals("u=$u v=$v", 1f, map.sampleAt(u, v)!!, 0f)
-        }
+    }
+
+    @Test
+    fun `without padding every pixel is content`() {
+        val transform = DepthInputTransform.create(720, 1280, 518, 518, ResizePolicy.CROP_KEEP_ASPECT)
+        val map = DisparityMap(518, 518, FloatArray(518 * 518), transform)
+        assertEquals(0..517, map.contentColumns)
+        assertEquals(0..517, map.contentRows)
     }
 
     @Test

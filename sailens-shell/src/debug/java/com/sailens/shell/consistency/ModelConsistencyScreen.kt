@@ -148,6 +148,31 @@ private fun Results(done: ConsistencyPhase.Done, semanticLabel: (Int) -> String)
                 )
             }.orEmpty(),
         )
+        // The depth model is optional: a host without one shows no card for it.
+        if (result.depth.status != ModelCheckStatus.NOT_APPLICABLE) {
+            ModelCard(
+                title = stringResource(R.string.model_consistency_depth),
+                inconclusiveText = stringResource(R.string.model_consistency_verdict_inconclusive),
+                status = result.depth.status,
+                failure = result.depth.failure,
+                verdict = result.depthVerdict,
+                accelerators = result.depth.result?.accelerators,
+                details = result.depth.result?.consistency?.let { c ->
+                    listOfNotNull(
+                        stringResource(
+                            R.string.model_consistency_depth_metrics,
+                            percent(c.maxMedianRelativeError.coerceAtMost(10f)),
+                            c.fitAgreeingFrames,
+                            c.framesWithGeometry,
+                            c.minLabelAgreement?.let(::percent) ?: "–",
+                        ),
+                        c.nonFiniteOutputFrames.takeIf { it > 0 }?.let {
+                            stringResource(R.string.model_consistency_depth_non_finite, it)
+                        },
+                    )
+                }.orEmpty(),
+            )
+        }
         done.reportPath?.let {
             Text(stringResource(R.string.model_consistency_report_saved, it), style = MaterialTheme.typography.bodySmall)
         }

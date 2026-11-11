@@ -20,6 +20,7 @@ import kotlin.coroutines.cancellation.CancellationException
  */
 object LiteRtSessionFactory {
 
+    /** @param gpuSettings used on a GPU attempt only; null builds exactly the options it did without it. */
     fun create(
         context: Context,
         sourceResolver: (Accelerator) -> ModelSource,
@@ -27,10 +28,11 @@ object LiteRtSessionFactory {
         logTag: String,
         modelLabel: String,
         logService: LogService? = null,
+        gpuSettings: GpuSettings? = null,
     ): LiteRtSession {
         val resolved = AcceleratorSelector.select(selection, logTag, modelLabel, logService) { accelerator ->
             val source = sourceResolver(accelerator)
-            buildModel(context, source, accelerator, logService)
+            buildModel(context, source, accelerator, logService, gpuSettings)
         }
         val built = resolved.value
         return LiteRtSession(
@@ -48,6 +50,7 @@ object LiteRtSessionFactory {
         source: ModelSource,
         accelerator: Accelerator,
         logService: LogService?,
+        gpuSettings: GpuSettings?,
     ): BuiltModel {
         source.ensureAvailable(context)
         val handle = LiteRtCompiledModelFactory.create(
@@ -55,6 +58,7 @@ object LiteRtSessionFactory {
             source = source,
             accelerator = accelerator,
             logService = logService,
+            gpuSettings = gpuSettings,
         )
         return try {
             BuiltModel(

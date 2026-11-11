@@ -22,6 +22,9 @@ class SailensRuntimeProfileTest {
         assertEquals(profile.targetHardwareProfile, profile.perception.targetHardwareProfile)
         assertEquals(ModelAcceleratorBackend.GPU, profile.semanticModel.acceleratorBackend)
         assertEquals(ModelAcceleratorBackend.GPU, profile.realtimeObstacleModel.acceleratorBackend)
+        assertEquals(ModelAcceleratorBackend.GPU, profile.depthModel.acceleratorBackend)
+        assertEquals(com.sailens.runtime.session.GpuPrecision.FP16, profile.depthModel.gpuPrecision)
+        assertEquals(com.sailens.runtime.session.GpuQueuePriority.LOW, profile.depthModel.gpuPriority)
         assertEquals(ModelAcceleratorBackend.GPU, profile.vlmModelBackend)
         assertEquals(ObstacleProviderType.DETECTION_MODEL, profile.perception.realtimeObstacleProviderType)
         // 出厂默认标准挡（sem+det）
