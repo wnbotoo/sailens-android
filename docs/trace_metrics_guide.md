@@ -1033,8 +1033,10 @@ The report's depth lines, from the records alone, each attempt once:
 - `records`: `complete`, `incomplete (missing n)` (a `seq` gap, fewer than `depthRunCount`, a `runId`
   gap within a session, or a depth session with no closing record), `possibly_incomplete` (no summary to
   count against) or `not recorded`;
-- `depthMs`: `prepare`, `admitWait`, `infer`, `fit` as p50/p95/max(count), nearest rank; `age`, the
-  attached observation's age on the traced frames, the only figure taken from frames.
+- `depthMs`: `prepare`, `admitWait`, `infer`, `read` (the output read back), `gpu` (each run's `infer` +
+  `read`, the accelerator's share the device budget judges: percentiles of the per-run sum) and `fit`, as
+  p50/p95/max(count), nearest rank; `age`, the attached observation's age on the traced frames, the only
+  figure taken from frames.
 
 A trace with the lane switched off is `complete` with no attempts.
 

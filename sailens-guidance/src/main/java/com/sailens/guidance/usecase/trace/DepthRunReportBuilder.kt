@@ -45,6 +45,8 @@ internal object DepthRunReportBuilder {
             prepareMs = stats(own.mapNotNull { it.prepareMs }),
             admitWaitMs = stats(own.mapNotNull { it.admitWaitMs }),
             inferMs = stats(own.mapNotNull { it.inferMs }),
+            outputReadMs = stats(own.mapNotNull { it.outputReadMs }),
+            gpuMs = stats(own.mapNotNull { run -> run.inferMs?.let { infer -> run.outputReadMs?.let { read -> infer + read } } }),
             fitMs = stats(own.mapNotNull { it.fitMs }),
             ageMs = stats(session.frames.mapNotNull { it.depthAgeMs?.let(Math::abs) }),
         )
