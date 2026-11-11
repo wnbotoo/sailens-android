@@ -6,6 +6,8 @@ import com.sailens.vision.detection.DetectionModelConfig
 import com.sailens.vision.semantic.SemanticModelConfig
 import com.sailens.vlm.VlmModelConfig
 import com.sailens.guidance.config.AnalysisConfig
+import com.sailens.runtime.CatalogModelSourceResolver
+import com.sailens.runtime.ModelSourceResolver
 import com.sailens.runtime.hardware.DeviceHardwareProfileProvider
 import com.sailens.guidance.config.PerceptionConfig
 import com.sailens.guidance.config.PipelinePerformanceBudget
@@ -35,6 +37,9 @@ val profileBindingsModule = module {
         )
     }
     single<CameraRuntimeConfig> { get<SailensRuntimeProfile>().camera }
+    // Which file each model is: this host's models are the git-ignored assets ModelCatalog names.
+    // The runners and the static preflight (App.kt -> sailensEditionSpec) share this one instance.
+    single<ModelSourceResolver> { CatalogModelSourceResolver }
     single<SemanticModelConfig> { get<SailensRuntimeProfile>().semanticModel }
     single<DetectionModelConfig> { get<SailensRuntimeProfile>().realtimeObstacleModel }
     // The VLM's backend is the profile's call; everything else

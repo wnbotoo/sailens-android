@@ -76,7 +76,9 @@ platform, including BYO-model workflows. Zero available pipelines is legal for t
 
 Examples:
 
-- bundled model weights and their provenance;
+- bundled model weights and their provenance, and which file each model is: the distribution binds
+  the `ModelSourceResolver` its runners use and hands the same instance to its static preflight
+  (the platform defines the interface and binds none; `docs/models.md`, "Where to put a model");
 - which capabilities are required for a release;
 - official defaults and supported runtime/profile choices;
 - product name, application ID, icons and store metadata;

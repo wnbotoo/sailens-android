@@ -9,7 +9,6 @@ import com.sailens.guidance.model.perception.ObstacleModelOutput
 import com.sailens.guidance.repository.ObstacleProvider
 import com.sailens.guidance.semantics.CocoNavigationSemantics
 import com.sailens.guidance.semantics.NavigationSemantics
-import com.sailens.runtime.CatalogModelSourceResolver
 import com.sailens.runtime.InputPreprocessCache
 import com.sailens.runtime.ModelSourceResolver
 import com.sailens.vision.detection.DetectionModelConfig
@@ -27,7 +26,7 @@ class DetectorObstacleProvider(
     context: Context,
     perceptionConfig: PerceptionConfig,
     modelConfig: DetectionModelConfig = DetectionModelConfig(),
-    modelSourceResolver: ModelSourceResolver = CatalogModelSourceResolver,
+    modelSourceResolver: ModelSourceResolver,
     preprocessCache: InputPreprocessCache? = null,
     logService: LogService,
     private val navigationSemantics: NavigationSemantics = CocoNavigationSemantics,

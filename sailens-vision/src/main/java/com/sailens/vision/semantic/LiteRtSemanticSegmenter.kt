@@ -4,7 +4,6 @@ import android.content.Context
 import com.google.ai.edge.litert.Accelerator
 import com.sailens.core.frame.ImageFrame
 import com.sailens.core.log.LogService
-import com.sailens.runtime.CatalogModelSourceResolver
 import com.sailens.runtime.InputPreprocessCache
 import com.sailens.runtime.ModelSourceResolver
 import com.sailens.runtime.ModelTensorConfig
@@ -38,7 +37,7 @@ class LiteRtSemanticSegmenter<R>(
     private val context: Context,
     private val postprocessor: SemanticPostprocessor<R>,
     private val modelConfig: SemanticModelConfig = SemanticModelConfig(),
-    private val modelSourceResolver: ModelSourceResolver = CatalogModelSourceResolver,
+    private val modelSourceResolver: ModelSourceResolver,
     private val preprocessCache: InputPreprocessCache? = null,
     private val logService: LogService,
 ) {

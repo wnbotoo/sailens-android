@@ -35,7 +35,6 @@ import com.sailens.guidance.trace.regression.RegressionRecorder
 import com.sailens.guidance.trace.FileTraceReplayService
 import com.sailens.guidance.trace.FileTraceService
 import com.sailens.guidance.trace.NoOpTraceService
-import com.sailens.runtime.CatalogModelSourceResolver
 import com.sailens.runtime.InputPreprocessCache
 import com.sailens.runtime.ModelSourceResolver
 import com.sailens.vision.detection.DetectionModelConfig
@@ -50,7 +49,8 @@ import org.koin.dsl.module
  *
  * The host app composes this module; it does not reach inside it. Configs are supplied by the host
  * (profile bindings), and the Describe/VLM side is wired separately — Guidance and Describe never
- * see each other (architecture.md §4.2 rule 2).
+ * see each other (architecture.md §4.2 rule 2). So is the [ModelSourceResolver]: which file each
+ * model is belongs to the host, which hands the same instance to its static preflight.
  */
 val guidanceModule = module {
     single<NavigationSemanticsProvider> {
@@ -60,8 +60,6 @@ val guidanceModule = module {
     single<NavigationSemantics> {
         get<NavigationSemanticsProvider>().semanticSegmentationSemantics()
     }
-
-    single<ModelSourceResolver> { CatalogModelSourceResolver }
 
     single {
         NavigationScorePostprocessor(
