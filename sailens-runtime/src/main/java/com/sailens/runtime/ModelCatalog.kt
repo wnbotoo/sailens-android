@@ -18,8 +18,9 @@ package com.sailens.runtime
  * here (throws). Prefer NHWC graphs: NCHW exports with a float32 I/O wrapper
  * cost a per-frame host transpose and fragment on the GPU/NPU delegates.
  *
- * [ModelSourceResolver] wraps this catalog today. When model download lands, another resolver can
- * still use this as the bundled [Asset] fallback and upgrade to a downloaded [ModelSource.File].
+ * [CatalogModelSourceResolver] wraps this catalog, and a host whose models are packaged assets binds
+ * it as its [ModelSourceResolver]. When model download lands, another resolver can still use this
+ * as the bundled [Asset] fallback and upgrade to a downloaded [ModelSource.File].
  */
 object ModelCatalog {
     fun source(type: ModelType, accelerator: ModelAcceleratorBackend): ModelSource =

@@ -32,7 +32,12 @@ app/src/main/assets/sem.tflite     # 语义分割
 app/src/main/assets/det.tflite     # 障碍物检测
 ```
 
-文件名由 `ModelCatalog` 固定。输入/输出 tensor 名、输入类型、NHWC/NCHW layout 和量化 scale/zero-point
+文件名由 `ModelCatalog` 固定；某个模型用哪个文件由宿主决定：宿主绑定一个 `ModelSourceResolver`（本仓库的参考宿主在
+`app/ProfileBindingsModule.kt` 里绑定 `CatalogModelSourceResolver`），并把同一个实例交给自己的静态预检，按每个模型配置的加速器取来源，
+所以预检读的就是 runner 要加载的文件。平台模块从不绑定、也不默认任何解析器。发行版的打包方式不同（换文件名、下载、按设备选择）时，
+提供自己的解析器即可，平台不用改。
+
+输入/输出 tensor 名、输入类型、NHWC/NCHW layout 和量化 scale/zero-point
 **都会从 TFLite metadata 自动读取**——tensor 名不是配置项，代码按契约的 shape/role 解析输入输出，
 用 LiteRT 的 list-based buffer API 执行，不把导出器生成的内部名字写进配置。
 

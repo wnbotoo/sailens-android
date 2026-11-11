@@ -7,7 +7,6 @@ import com.sailens.guidance.kernel.NavigationScorePostprocessor
 import com.sailens.guidance.kernel.NavigationSemanticResult
 import com.sailens.guidance.model.perception.SegmentationOutput
 import com.sailens.guidance.repository.PerceptionRepository
-import com.sailens.runtime.CatalogModelSourceResolver
 import com.sailens.runtime.InputPreprocessCache
 import com.sailens.runtime.ModelSourceResolver
 import com.sailens.vision.semantic.LiteRtSemanticSegmenter
@@ -24,7 +23,7 @@ class SemanticPerceptionRepository(
     context: Context,
     private val scorePostprocessor: NavigationScorePostprocessor,
     modelConfig: SemanticModelConfig = SemanticModelConfig(),
-    modelSourceResolver: ModelSourceResolver = CatalogModelSourceResolver,
+    modelSourceResolver: ModelSourceResolver,
     preprocessCache: InputPreprocessCache? = null,
     logService: LogService,
 ) : PerceptionRepository {

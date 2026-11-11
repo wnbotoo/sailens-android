@@ -71,7 +71,8 @@ BYO-model 工作流。这个 host 合法地允许零 available pipeline。
 
 包括：
 
-- 随发行物打包的模型及其 provenance；
+- 随发行物打包的模型及其 provenance，以及每个模型用哪个文件：发行版绑定它的 runner 用的 `ModelSourceResolver`，
+  并把同一个实例交给自己的静态预检（平台只定义接口、不绑定任何实现；`docs/models.zh-CN.md`"放置模型"一节）；
 - 一个 release 承诺哪些 capability 必须可用；
 - 官方默认值和受支持的 runtime/profile 选择；
 - 产品名、applicationId、图标、商店 metadata；

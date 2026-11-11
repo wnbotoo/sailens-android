@@ -1,16 +1,18 @@
 package com.sailens.app
 
 import android.content.Context
-import com.google.ai.edge.litert.Accelerator
 import com.sailens.guidance.semantics.CityscapesNavigationSemantics
 import com.sailens.guidance.semantics.SemanticModelPreflight
-import com.sailens.runtime.CatalogModelSourceResolver
+import com.sailens.runtime.ModelSource
+import com.sailens.runtime.ModelSourceResolver
 import com.sailens.runtime.ModelType
+import com.sailens.runtime.source
 import com.sailens.shell.app.CapabilityExpectations
 import com.sailens.shell.app.DescribeSpec
 import com.sailens.shell.app.GuidanceSpec
 import com.sailens.shell.app.SailensAppSpec
 import com.sailens.shell.app.StaticUnavailableReason
+import com.sailens.vision.semantic.SemanticModelConfig
 import com.sailens.vision.taxonomy.CityscapesTaxonomy
 import com.sailens.vlm.SceneDescriber
 
@@ -29,13 +31,20 @@ import com.sailens.vlm.SceneDescriber
  * catching a mismatched model here and catching it after the user has pressed start and begun
  * walking. What it cannot check is channel *order* -- the models carry no labels, so which channel
  * is `person` remains a manual release gate (§6.2, docs/models.md).
+ *
+ * The check reads the file the semantic runner will load: [modelSourceResolver] is the instance this
+ * host binds for the runners, asked for the accelerator [semanticModel] is configured to run on.
  */
 fun sailensEditionSpec(
     context: Context,
     sceneDescriber: SceneDescriber,
+    modelSourceResolver: ModelSourceResolver,
+    semanticModel: SemanticModelConfig,
 ): SailensAppSpec = SailensAppSpec(
     guidance = GuidanceSpec(
-        verifySemanticModel = { verifySemanticModel(context) },
+        verifySemanticModel = {
+            verifySemanticModel(context, semanticPreflightSource(modelSourceResolver, semanticModel))
+        },
     ),
     describe = DescribeSpec(
         verifyEngine = {
@@ -50,16 +59,22 @@ fun sailensEditionSpec(
     ),
 )
 
+/** The source the semantic runner loads, so the static check looks at that file and no other. */
+internal fun semanticPreflightSource(
+    modelSourceResolver: ModelSourceResolver,
+    semanticModel: SemanticModelConfig,
+): ModelSource = modelSourceResolver.source(ModelType.SEMANTIC_SEGMENTATION, semanticModel.acceleratorBackend)
+
 /**
  * Translates the Guidance pipeline's own verdict into the shell's vocabulary.
  *
  * The shell owns the reasons it can present and speak; what makes a semantic model usable is a
  * Guidance question, answered by Guidance (§6.11).
  */
-private fun verifySemanticModel(context: Context): StaticUnavailableReason? {
+private fun verifySemanticModel(context: Context, source: ModelSource): StaticUnavailableReason? {
     val result = SemanticModelPreflight.check(
         context = context,
-        source = CatalogModelSourceResolver.source(ModelType.SEMANTIC_SEGMENTATION, Accelerator.GPU),
+        source = source,
         taxonomy = CityscapesTaxonomy,
         semantics = CityscapesNavigationSemantics,
     )

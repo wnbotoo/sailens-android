@@ -39,7 +39,14 @@ app/src/main/assets/sem.tflite     # semantic segmentation
 app/src/main/assets/det.tflite     # obstacle detection
 ```
 
-File names are fixed by `ModelCatalog`. Input/output tensor names, input type, NHWC/NCHW layout, and
+File names are fixed by `ModelCatalog`, and which file a model is belongs to the host: it binds a
+`ModelSourceResolver` (this repository's reference host binds `CatalogModelSourceResolver` in
+`app/ProfileBindingsModule.kt`) and passes that same instance to its static preflight, asked for the
+accelerator each model config runs on, so preflight reads the file the runner will load. The platform
+modules never bind or default a resolver. A distribution that packages files differently — another
+name, a download, a per-device choice — supplies its own resolver; nothing in the platform changes.
+
+Input/output tensor names, input type, NHWC/NCHW layout, and
 quantization scale/zero-point are **all read from the TFLite metadata automatically** — tensor names
 are not a config field. The code resolves I/O by the contract's shape and role and executes via
 LiteRT's list-based buffer API, so exporter-generated internal names never end up in configuration.

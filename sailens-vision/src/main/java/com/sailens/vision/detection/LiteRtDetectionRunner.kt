@@ -7,7 +7,6 @@ import com.google.ai.edge.litert.TensorBuffer
 import com.sailens.core.frame.ImageFrame
 import com.sailens.core.log.LogService
 import com.sailens.core.runtime.MlRuntimeInfo
-import com.sailens.runtime.CatalogModelSourceResolver
 import com.sailens.runtime.InputPreprocessBackend
 import com.sailens.runtime.InputPreprocessCache
 import com.sailens.runtime.ModelInputDataType
@@ -50,7 +49,7 @@ class LiteRtDetectionRunner(
     private val confidenceThreshold: Float,
     private val maxDetections: Int,
     private val modelConfig: DetectionModelConfig = DetectionModelConfig(),
-    private val modelSourceResolver: ModelSourceResolver = CatalogModelSourceResolver,
+    private val modelSourceResolver: ModelSourceResolver,
     private val preprocessCache: InputPreprocessCache? = null,
     private val logService: LogService,
     /** Supplies human-readable labels for class ids. A dataset fact, not a product decision. */
