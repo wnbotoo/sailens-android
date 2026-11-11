@@ -3,6 +3,9 @@ package com.sailens.runtime
 import android.content.Context
 import android.os.Build
 import com.sailens.core.log.LogService
+import com.sailens.runtime.session.GpuPrecision
+import com.sailens.runtime.session.GpuQueuePriority
+import com.sailens.runtime.session.GpuSettings
 import com.google.ai.edge.litert.Accelerator
 import com.google.ai.edge.litert.BuiltinNpuAcceleratorProvider
 import com.google.ai.edge.litert.CompiledModel
@@ -45,16 +48,21 @@ internal data class LiteRtCompiledModelHandle(
  */
 internal object LiteRtCompiledModelFactory {
 
+    /**
+     * @param gpuSettings applied only when [accelerator] is the GPU; null leaves the options exactly as
+     *   they are without it.
+     */
     fun create(
         context: Context,
         source: ModelSource,
         accelerator: Accelerator,
         logService: LogService? = null,
+        gpuSettings: GpuSettings? = null,
     ): LiteRtCompiledModelHandle {
         val appContext = context.applicationContext
         val environment = createEnvironment(appContext, accelerator, logService)
         return try {
-            val options = buildOptions(appContext, accelerator, logService)
+            val options = buildOptions(appContext, accelerator, logService, gpuSettings)
             // Same compile path for either source; LiteRT mmaps both (nativeCreateFromAsset /
             // nativeCreateFromFile), so an asset-pack/downloaded File loads exactly like a bundled asset.
             val model = when (source) {
@@ -83,8 +91,15 @@ internal object LiteRtCompiledModelFactory {
         context: Context,
         accelerator: Accelerator,
         logService: LogService?,
+        gpuSettings: GpuSettings?,
     ): CompiledModel.Options {
         val options = CompiledModel.Options(accelerator)
+        if (accelerator == Accelerator.GPU && gpuSettings != null) {
+            options.gpuOptions = CompiledModel.GpuOptions(
+                precision = gpuSettings.precision.toLiteRt(),
+                priority = gpuSettings.priority.toLiteRt(),
+            )
+        }
         if (accelerator == Accelerator.NPU) {
             val diagnostics = QualcommNpuDiagnostics.from(context)
             // Without explicit Qualcomm options the HTP runs at a conservative default clock and
@@ -280,6 +295,19 @@ internal object LiteRtCompiledModelFactory {
     private fun Environment.safeAvailableAccelerators(): String {
         return runCatching { getAvailableAccelerators().joinToString() }
             .getOrElse { "unavailable:${it::class.simpleName}:${it.message}" }
+    }
+
+    private fun GpuPrecision.toLiteRt(): CompiledModel.GpuOptions.Precision = when (this) {
+        GpuPrecision.DEFAULT -> CompiledModel.GpuOptions.Precision.DEFAULT
+        GpuPrecision.FP16 -> CompiledModel.GpuOptions.Precision.FP16
+        GpuPrecision.FP32 -> CompiledModel.GpuOptions.Precision.FP32
+    }
+
+    private fun GpuQueuePriority.toLiteRt(): CompiledModel.GpuOptions.Priority = when (this) {
+        GpuQueuePriority.DEFAULT -> CompiledModel.GpuOptions.Priority.DEFAULT
+        GpuQueuePriority.LOW -> CompiledModel.GpuOptions.Priority.LOW
+        GpuQueuePriority.NORMAL -> CompiledModel.GpuOptions.Priority.NORMAL
+        GpuQueuePriority.HIGH -> CompiledModel.GpuOptions.Priority.HIGH
     }
 
     private fun supportsQualcommHmx(): Boolean {

@@ -4,6 +4,7 @@ import android.os.Build
 import com.sailens.runtime.hardware.DeviceHardwareProfileProvider
 import com.sailens.shell.app.BuildIdentity
 import com.sailens.vision.consistency.ConsistencyThresholds
+import com.sailens.vision.consistency.DepthConsistencyThresholds
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.io.File
@@ -15,7 +16,8 @@ import java.io.File
 @Serializable
 internal data class ModelConsistencyReport(
     val type: String = "model_consistency",
-    val schemaVersion: Int = 1,
+    /** 2: the `depth` model and its thresholds. */
+    val schemaVersion: Int = 2,
     val wallTimeMs: Long,
     val device: String,
     val hardwareProfile: String,
@@ -35,6 +37,7 @@ internal data class ModelConsistencyReport(
     val modelsChecked: Int,
     val semantic: ReportModel,
     val detection: ReportModel,
+    val depth: ReportModel = ReportModel(status = ModelCheckStatus.NOT_APPLICABLE.name),
 )
 
 @Serializable
@@ -44,6 +47,11 @@ internal data class ReportThresholds(
     val failBelowMeanClassAgreement: Float,
     val minDetectionRecall: Float,
     val maxExtraDetectionFraction: Float,
+    val depthMaxPassMedianRelativeError: Float? = null,
+    val depthFailAboveMedianRelativeError: Float? = null,
+    val depthMinPassFitAgreeingFrames: Int? = null,
+    val depthFailAtOrBelowFitAgreeingFrames: Int? = null,
+    val depthMinLabelAgreement: Float? = null,
 )
 
 @Serializable
@@ -69,6 +77,12 @@ internal data class ReportModel(
     val extraFraction: Float? = null,
     val referenceDetections: Int? = null,
     val candidateDetections: Int? = null,
+    // Depth
+    val frameMedianRelativeError: List<Float>? = null,
+    val maxMedianRelativeError: Float? = null,
+    val framesWithGeometry: Int? = null,
+    val fitAgreeingFrames: Int? = null,
+    val minLabelAgreement: Float? = null,
 )
 
 internal fun ConsistencyRunResult.toReport(
@@ -76,6 +90,7 @@ internal fun ConsistencyRunResult.toReport(
     build: BuildIdentity?,
     semanticLabel: (Int) -> String,
     thresholds: ConsistencyThresholds = ConsistencyThresholds(),
+    depthThresholds: DepthConsistencyThresholds = DepthConsistencyThresholds(framesRequired = framesRequested),
 ): ModelConsistencyReport = ModelConsistencyReport(
     wallTimeMs = wallTimeMs,
     device = "${Build.MANUFACTURER} ${Build.MODEL}",
@@ -92,6 +107,11 @@ internal fun ConsistencyRunResult.toReport(
         failBelowMeanClassAgreement = thresholds.failBelowMeanClassAgreement,
         minDetectionRecall = thresholds.minDetectionRecall,
         maxExtraDetectionFraction = thresholds.maxExtraDetectionFraction,
+        depthMaxPassMedianRelativeError = depthThresholds.maxPassMedianRelativeError,
+        depthFailAboveMedianRelativeError = depthThresholds.failAboveMedianRelativeError,
+        depthMinPassFitAgreeingFrames = depthThresholds.minPassFitAgreeingFrames,
+        depthFailAtOrBelowFitAgreeingFrames = depthThresholds.failAtOrBelowFitAgreeingFrames,
+        depthMinLabelAgreement = depthThresholds.minLabelAgreement,
     ),
     overall = overall?.name,
     modelsApplicable = modelsApplicable,
@@ -130,6 +150,23 @@ internal fun ConsistencyRunResult.toReport(
             candidateDetections = c.frames.sumOf { it.candidateCount },
         )
     } ?: ReportModel(status = detection.status.name, failure = detection.failure, modelSource = detection.modelSource),
+    depth = depth.result?.let { r ->
+        val c = r.consistency
+        ReportModel(
+            status = depth.status.name,
+            failure = depth.failure,
+            modelSource = depth.modelSource,
+            candidateAccelerator = r.accelerators.candidate,
+            referenceAccelerator = r.accelerators.reference,
+            verdict = depthVerdict?.name,
+            comparedVerdict = c.verdict.name,
+            frameMedianRelativeError = c.frames.map { it.disparity.medianRelativeError },
+            maxMedianRelativeError = c.maxMedianRelativeError,
+            framesWithGeometry = c.framesWithGeometry,
+            fitAgreeingFrames = c.fitAgreeingFrames,
+            minLabelAgreement = c.minLabelAgreement,
+        )
+    } ?: ReportModel(status = depth.status.name, failure = depth.failure, modelSource = depth.modelSource),
 )
 
 /** The per-frame confusions averaged over all frames, largest first. */

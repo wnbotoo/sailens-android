@@ -4,11 +4,14 @@ import com.sailens.camera.FrameLease
 import com.sailens.camera.FrameSnapshotProvider
 import com.sailens.core.frame.ImageFrame
 import com.sailens.guidance.config.PerceptionConfig
+import com.sailens.guidance.geometry.CameraGeometry
 import com.sailens.shell.capture.RecordingLog
 import com.sailens.shell.capture.yuvFrame
 import com.sailens.vision.consistency.ClassMapAgreement
 import com.sailens.vision.consistency.ConsistencyVerdict
+import com.sailens.vision.consistency.DepthFrameAgreement
 import com.sailens.vision.consistency.DetectionAgreement
+import com.sailens.vision.consistency.DisparityAgreement
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
@@ -41,7 +44,7 @@ class ModelConsistencyCheckerTest {
     private fun <A> pair(answer: A, released: AtomicBoolean, onFrame: (ImageFrame) -> Unit = {}) = ComparisonPair(
         status = ModelCheckStatus.CHECKED,
         modelSource = "model.tflite",
-        runFrame = { frame ->
+        runFrame = { (frame) ->
             onFrame(frame)
             answer to AcceleratorPair("GPU", "CPU")
         },
@@ -55,7 +58,90 @@ class ModelConsistencyCheckerTest {
         semantic: ComparisonPairFactory<ClassMapAgreement>,
         detection: ComparisonPairFactory<DetectionAgreement>,
         snapshots: FrameSnapshotProvider = Snapshots(),
-    ) = ModelConsistencyChecker(semantic, detection, snapshots, RecordingLog(), frameCount = 3, frameIntervalMs = 0)
+        depth: ComparisonPairFactory<DepthFrameAgreement> = ComparisonPairFactory { ComparisonPair.notApplicable() },
+        geometry: ConsistencyGeometry = ConsistencyGeometry.None,
+    ) = ModelConsistencyChecker(
+        semantic, detection, snapshots, RecordingLog(), frameCount = 3, frameIntervalMs = 0,
+        depthPairs = depth, geometry = geometry,
+    )
+
+    /** Records what the check asks of the gravity source, in order, into [events]. */
+    private class RecordingGeometry(private val events: MutableList<String>) : ConsistencyGeometry {
+        var started = 0
+        var stopped = 0
+        override fun start() { started++; events += "start" }
+        override fun stop() { stopped++; events += "stop" }
+        override suspend fun awaitGravity(timeoutMs: Long) { events += "await" }
+        override fun resolve(frame: ImageFrame): CameraGeometry? { events += "resolve"; return null }
+    }
+
+    private val depthAgreement = DepthFrameAgreement(DisparityAgreement(0.004f, 0.01f, 1000), fit = null)
+
+    @Test
+    fun `without a depth model the gravity source is never started`() = runBlocking {
+        val geometry = RecordingGeometry(mutableListOf())
+        val result = checker(
+            semantic = { pair(agreeing, AtomicBoolean()) },
+            detection = { ComparisonPair.notApplicable() },
+            geometry = geometry,
+        ).run()
+        assertEquals(0, geometry.started)
+        assertEquals(ModelCheckStatus.NOT_APPLICABLE, result.depth.status)
+        assertEquals(ConsistencyVerdict.PASS, result.overall)
+    }
+
+    @Test
+    fun `each frame's geometry is resolved before any model runs on it`() = runBlocking {
+        val events = mutableListOf<String>()
+        val geometry = RecordingGeometry(events)
+        checker(
+            semantic = { pair(agreeing, AtomicBoolean()) { events += "semantic" } },
+            detection = { ComparisonPair.notApplicable() },
+            depth = { pair(depthAgreement, AtomicBoolean()) { events += "depth" } },
+            geometry = geometry,
+        ).run()
+        assertEquals(
+            listOf("start", "await") + List(3) { listOf("resolve", "semantic", "depth") }.flatten() + "stop",
+            events,
+        )
+    }
+
+    @Test
+    fun `the gravity source is released when the run is cancelled`() = runBlocking {
+        val geometry = RecordingGeometry(mutableListOf())
+        val inDepth = CompletableDeferred<Unit>()
+        val run = launch {
+            checker(
+                semantic = { ComparisonPair.notApplicable() },
+                detection = { ComparisonPair.notApplicable() },
+                depth = {
+                    ComparisonPair(
+                        status = ModelCheckStatus.CHECKED,
+                        runFrame = { inDepth.complete(Unit); awaitCancellation() },
+                    )
+                },
+                geometry = geometry,
+            ).run()
+        }
+        inDepth.await()
+        run.cancelAndJoin()
+        assertEquals(1, geometry.started)
+        assertEquals(1, geometry.stopped)
+    }
+
+    @Test
+    fun `a checked depth model counts towards the overall verdict`() = runBlocking {
+        val result = checker(
+            semantic = { pair(agreeing, AtomicBoolean()) },
+            detection = { ComparisonPair.notApplicable() },
+            // Three frames with no geometry: the fit cannot be judged, so the depth model is inconclusive.
+            depth = { pair(depthAgreement, AtomicBoolean()) },
+            geometry = RecordingGeometry(mutableListOf()),
+        ).run()
+        assertEquals(ModelCheckStatus.CHECKED, result.depth.status)
+        assertEquals(ConsistencyVerdict.INCONCLUSIVE, result.depthVerdict)
+        assertEquals(ConsistencyVerdict.INCONCLUSIVE, result.overall)
+    }
 
     @Test
     fun `cancelling while the second pair initialises releases the first`() = runBlocking {
@@ -100,6 +186,9 @@ class ModelConsistencyCheckerTest {
         assertEquals(3, result.framesUsed)
         assertEquals(ConsistencyVerdict.PASS, result.overall)
         assertEquals(2, result.modelsChecked)
+        // No depth model configured: nothing to check, and the verdict is what it was without one.
+        assertEquals(ModelCheckStatus.NOT_APPLICABLE, result.depth.status)
+        assertEquals(2, result.modelsApplicable)
     }
 
     @Test

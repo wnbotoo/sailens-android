@@ -9,4 +9,7 @@ package com.sailens.runtime
 enum class ModelType {
     OBSTACLE_DETECTION,
     SEMANTIC_SEGMENTATION,
+
+    /** Relative disparity for the ground geometry (docs/models.md, "The `depth` contract"). Optional. */
+    DEPTH_ESTIMATION,
 }

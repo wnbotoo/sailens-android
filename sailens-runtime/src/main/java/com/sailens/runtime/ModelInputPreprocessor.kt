@@ -40,6 +40,19 @@ class ModelInputPreprocessor(
         }
     }
 
+    /**
+     * The native YUV path only: no shared cache, no OpenCV fallback. For a model whose geometry must
+     * match the native letterbox exactly (the fallback truncates sizes and offsets to integers).
+     *
+     * @return false when the native path could not run (library missing, frame without YUV planes,
+     *   wrong output size); [outputArray] is then not meaningful.
+     */
+    fun preprocessFloatNativeOnly(
+        frame: ImageFrame,
+        rotationDegrees: Int,
+        outputArray: FloatArray,
+    ): Boolean = nativeProcessor.preprocessFloat(frame, rotationDegrees, outputArray)
+
     fun preprocessInt8(
         frame: ImageFrame,
         rotationDegrees: Int,

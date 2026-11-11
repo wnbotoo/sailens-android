@@ -2,6 +2,7 @@ package com.sailens.app
 
 import com.sailens.BuildConfig
 import com.sailens.camera.CameraRuntimeConfig
+import com.sailens.vision.depth.DepthModelConfig
 import com.sailens.vision.detection.DetectionModelConfig
 import com.sailens.vision.semantic.SemanticModelConfig
 import com.sailens.vlm.VlmModelConfig
@@ -42,6 +43,7 @@ val profileBindingsModule = module {
     single<ModelSourceResolver> { CatalogModelSourceResolver }
     single<SemanticModelConfig> { get<SailensRuntimeProfile>().semanticModel }
     single<DetectionModelConfig> { get<SailensRuntimeProfile>().realtimeObstacleModel }
+    single<DepthModelConfig> { get<SailensRuntimeProfile>().depthModel }
     // The VLM's backend is the profile's call; everything else
     // about it — prompt, decode budget — is the model config's own default.
     single {

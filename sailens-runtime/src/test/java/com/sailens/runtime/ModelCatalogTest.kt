@@ -35,12 +35,27 @@ class ModelCatalogTest {
     }
 
     @Test
+    fun `depth model resolves to the same asset on every supported accelerator`() {
+        assertEquals(
+            ModelSource.Asset("depth.tflite"),
+            ModelCatalog.source(ModelType.DEPTH_ESTIMATION, ModelAcceleratorBackend.GPU),
+        )
+        assertEquals(
+            ModelSource.Asset("depth.tflite"),
+            ModelCatalog.source(ModelType.DEPTH_ESTIMATION, ModelAcceleratorBackend.CPU),
+        )
+    }
+
+    @Test
     fun `NPU sources are intentionally unsupported (no vision model ships an NPU file)`() {
         assertThrows(IllegalArgumentException::class.java) {
             ModelCatalog.source(ModelType.SEMANTIC_SEGMENTATION, ModelAcceleratorBackend.NPU)
         }
         assertThrows(IllegalArgumentException::class.java) {
             ModelCatalog.source(ModelType.OBSTACLE_DETECTION, ModelAcceleratorBackend.NPU)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            ModelCatalog.source(ModelType.DEPTH_ESTIMATION, ModelAcceleratorBackend.NPU)
         }
     }
 

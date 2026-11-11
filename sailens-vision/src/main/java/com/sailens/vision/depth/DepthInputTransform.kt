@@ -3,9 +3,10 @@ package com.sailens.vision.depth
 import kotlin.math.ceil
 
 /**
- * How a depth model's input was made from the upright analysis image. Part of the model's
- * configured contract (docs/geometry.md §6): it cannot be read from the TFLite
- * metadata, and it must match how the export was validated.
+ * How a depth model's input was made from the upright analysis image (docs/geometry.md §6). It
+ * cannot be read from the TFLite metadata. The runtime always uses [PAD_KEEP_ASPECT], the only
+ * resize the native preprocessing does (docs/models.md, "The `depth` contract"); the other two
+ * describe inputs made elsewhere, such as offline experiments.
  */
 enum class ResizePolicy {
     /** Resize the whole image to the tensor, aspect not kept (scaleX != scaleY). */
@@ -100,13 +101,25 @@ class DisparityMap(val width: Int, val height: Int, val values: FloatArray, val 
         require(width == transform.modelWidth && height == transform.modelHeight) { "map and transform disagree on the tensor size" }
     }
 
-    // The content spans [pad, size − pad) in tensor pixels; pixel i is content when its centre
-    // i + 0.5 lies inside that span -- strictly below the open right end, so a centre exactly on it
-    // (half-pixel padding: 640x1280 into 518x518 pads 129.5) is padding.
-    private val firstContentX = ceil(transform.padLeft - 0.5f).toInt().coerceIn(0, width - 1)
-    private val lastContentX = (ceil(width - transform.padLeft - 0.5f).toInt() - 1).coerceIn(firstContentX, width - 1)
-    private val firstContentY = ceil(transform.padTop - 0.5f).toInt().coerceIn(0, height - 1)
-    private val lastContentY = (ceil(height - transform.padTop - 0.5f).toInt() - 1).coerceIn(firstContentY, height - 1)
+    // The content spans [pad, end) in tensor pixels. A pixel is content only when both hold:
+    //  - the native letterbox wrote image data there: it writes columns [ceil(pad), ceil(end)), so a
+    //    pixel whose left edge is in the padding is padding even when its centre is not
+    //    (half-pixel padding: 640x1280 into 518x518 pads 129.5, and column 129 is written as padding);
+    //  - its centre lies strictly inside the span: the last column the kernel writes can have its
+    //    centre at or past `end`, and holds the image edge clamped, which the model never saw.
+    // Rows likewise. With no padding (crop, stretch) this is every pixel.
+    private val firstContentX = ceil(transform.padLeft).toInt().coerceIn(0, width - 1)
+    private val lastContentX = (ceil(contentEnd(transform.padLeft, transform.sourceWidth, transform.scaleX) - 0.5f).toInt() - 1)
+        .coerceIn(firstContentX, width - 1)
+    private val firstContentY = ceil(transform.padTop).toInt().coerceIn(0, height - 1)
+    private val lastContentY = (ceil(contentEnd(transform.padTop, transform.sourceHeight, transform.scaleY) - 0.5f).toInt() - 1)
+        .coerceIn(firstContentY, height - 1)
+
+    private fun contentEnd(pad: Float, sourceExtent: Float, scale: Float): Float = pad + sourceExtent * scale
+
+    /** The tensor columns and rows holding what the model saw (the rule above). */
+    val contentColumns: IntRange get() = firstContentX..lastContentX
+    val contentRows: IntRange get() = firstContentY..lastContentY
 
     /**
      * The disparity seen at analysis point (u, v), bilinear between tensor pixel centres; null when
