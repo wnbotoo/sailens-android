@@ -24,6 +24,8 @@ import kotlinx.serialization.json.Json
  *   classmaps.bin      model_regression only: the semantic class maps (ClassMapStore)
  *   windows.jsonl      model_regression only: WindowFrameRecord per full-resolution event frame
  *   windows/           the event-window images
+ *   depth.jsonl        with the depth evidence switch: DepthEvidenceRecord per depth run with an output
+ *   depth.bin          with the depth evidence switch: those runs' planes and outputs
  * ```
  *
  * Every JSONL line is an object with a `type`.
@@ -49,8 +51,10 @@ object CaptureSchema {
      * `RegressionCutKeptRecord`, `RegressionHeardAfterCutRecord`.
      * 7: `RegressionFrameRecord.qualification`, `RegressionManifest.qualificationRecorded`.
      * 8: `safety_hold`, a new value of the open string `RegressionRevokeRecord.reason`; no new field or record.
+     * 9: the depth evidence stream -- `depth.jsonl` (`DepthEvidenceRecord`), `depth.bin`,
+     * `CaptureManifest.depthEvidence`.
      */
-    const val MINOR: Int = 8
+    const val MINOR: Int = 9
 
     const val MANIFEST_FILE: String = "manifest.json"
     const val FRAMES_FILE: String = "frames.jsonl"
@@ -155,6 +159,8 @@ data class CaptureManifest(
     val sceneLabel: String? = null,
     /** Present when [captureMode] is [CaptureModes.MODEL_REGRESSION]. Since schema 1.3. */
     val regression: RegressionManifest? = null,
+    /** Present when the session recorded the depth evidence stream (`DepthEvidenceFiles`). Since schema 1.9. */
+    val depthEvidence: DepthEvidenceManifest? = null,
 )
 
 /**

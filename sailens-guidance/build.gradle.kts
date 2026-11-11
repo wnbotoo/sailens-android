@@ -72,6 +72,11 @@ android {
             project.findProperty("replaySingleSwitches")?.let { test.systemProperty("sailens.replay.singleSwitches", it.toString()) }
             project.findProperty("replayLabels")?.let { test.systemProperty("sailens.replay.labels", it.toString()) }
             if (project.hasProperty("replayCapture")) test.outputs.upToDateWhen { false }
+            // The depth evidence stream of captures (DepthEvidenceCaptureReplayTest): -PreplayDepth=<dir>, and with
+            // -PdepthPcOutputs=<dir> the PC's outputs of the same runs (scripts/capture/depth_evidence.py).
+            test.systemProperty("sailens.replay.depth", project.findProperty("replayDepth")?.toString().orEmpty())
+            test.systemProperty("sailens.replay.depthPc", project.findProperty("depthPcOutputs")?.toString().orEmpty())
+            if (project.hasProperty("replayDepth")) test.outputs.upToDateWhen { false }
             // The paired M5 rehearsal holds up to a million branches of a capture in memory.
             if (project.hasProperty("replayCapture")) test.maxHeapSize = project.findProperty("replayHeap")?.toString() ?: "6g"
             // Simulator scenario goldens: -PupdateGoldens rewrites them in the source tree.

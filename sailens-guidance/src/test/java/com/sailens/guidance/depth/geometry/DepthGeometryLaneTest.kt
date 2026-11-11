@@ -138,6 +138,7 @@ class DepthGeometryLaneTest {
         thermal: ThermalStatusSource = ThermalStatusSource.None,
         fitDispatcher: CoroutineDispatcher = Dispatchers.Default,
         maxFailures: Int = 30,
+        evidence: DepthEvidenceRecorder = DepthEvidenceRecorder.None,
     ) = DepthGeometryLane(
         runnerFactory = { FakeRunner(NAMES[runners.size]).also { configure(it); runners += it } },
         modelCheck = check,
@@ -149,7 +150,31 @@ class DepthGeometryLaneTest {
         elapsedMs = { 0L },
         laneDispatcher = laneDispatcher,
         fitDispatcher = fitDispatcher,
+        evidence = evidence,
     )
+
+    /** A depth evidence recorder that logs what the lane hands it, and can be made to throw. */
+    private inner class Evidence(
+        val copyError: Exception? = null,
+        val submitError: Exception? = null,
+    ) : DepthEvidenceRecorder {
+        val settled: MutableList<String> = Collections.synchronizedList(mutableListOf())
+
+        override fun copy(traceSessionId: String, generation: Long, runId: Long, frame: ImageFrame): DepthEvidenceSlot {
+            copyError?.let { throw it }
+            log += "evidence copy ${frame.sequenceNumber}"
+            return object : DepthEvidenceSlot {
+                override fun submit(run: DepthEvidenceRun) {
+                    settled += "submit $runId ${run.outcome} ${run.fitOrdinal}"
+                    submitError?.let { throw it }
+                }
+
+                override fun discard() {
+                    settled += "discard $runId"
+                }
+            }
+        }
+    }
 
     /** One session's frame stream, the frames it gave back, and its baseline and geometry. */
     private inner class Feed(val tag: String) {
@@ -538,6 +563,75 @@ class DepthGeometryLaneTest {
         assertTrue("nothing settled as failed", records.all.none { it.outcome == DepthRunTrace.FAILED })
         assertTrue("released", "a release" in log)
         lane.stop(session)
+    }
+
+    // ---- the debug capture's depth evidence
+
+    /**
+     * Four frames: published, no input, a non-finite output, published. Returns the session's outcomes and run ids,
+     * with [evidence] attached.
+     */
+    private suspend fun fourRuns(evidence: DepthEvidenceRecorder): List<String> {
+        records.all.clear()
+        runners.clear()
+        val feed = Feed("a")
+        val lane = lane(evidence = evidence)
+        val session = lane.start(feed.context())
+        feed.send(1)
+        until("run 1") { records.all.size == 1 }
+        runners.first().prepareNull = true
+        feed.send(2)
+        until("run 2") { records.all.size == 2 }
+        runners.first().prepareNull = false
+        runners.first().nonFinite = 3
+        feed.send(3)
+        until("run 3") { records.all.size == 3 }
+        runners.first().nonFinite = 0
+        feed.send(4)
+        until("run 4") { records.all.size == 4 }
+        lane.stop(session)
+        return records.all.filter { it.outcome != DepthRunTrace.CLOSED }.map { "${it.runId} ${it.outcome}" }
+    }
+
+    @Test
+    fun `evidence copies the planes before the frame goes back, and every run is settled once`() = runBlocking {
+        val evidence = Evidence()
+        val outcomes = fourRuns(evidence)
+        assertEquals(
+            listOf("1 published", "2 preprocess_unavailable", "3 non_finite_output", "4 published"),
+            outcomes,
+        )
+        for (sequence in 1..4) assertTrue("copy of frame $sequence before it went back", index("evidence copy $sequence") < index("a release frame $sequence"))
+        // The fit ordinals count the fitter's own calls: the runs without a fit leave no gap.
+        assertEquals(
+            listOf("submit 1 published 0", "discard 2", "submit 3 non_finite_output null", "submit 4 published 1"),
+            evidence.settled.toList(),
+        )
+    }
+
+    @Test
+    fun `a recorder that throws changes nothing the lane does or records`() = runBlocking {
+        val without = fourRuns(DepthEvidenceRecorder.None)
+        val failingCopy = fourRuns(Evidence(copyError = IllegalStateException("copy")))
+        val failingSubmit = fourRuns(Evidence(submitError = IllegalStateException("submit")))
+        assertEquals(without, failingCopy)
+        assertEquals(without, failingSubmit)
+        assertTrue("the lane's last guard was not needed", logs.errors.isEmpty())
+    }
+
+    @Test
+    fun `without a trace session nothing is copied`() = runBlocking {
+        val evidence = Evidence()
+        val feed = Feed("a")
+        val lane = lane(evidence = evidence)
+        val session = lane.start(
+            feed.context().let { DepthStartContext(it.frames, it.releaseFrame, it.baseline, it.geometry, traceSessionId = null) },
+        )
+        feed.send(1)
+        until("published") { session.latest().runId == 1L }
+        lane.stop(session)
+        assertFalse("evidence copy 1" in log)
+        assertTrue(evidence.settled.isEmpty())
     }
 
     private suspend fun List<FakeRunner>.awaitFirst(): FakeRunner {

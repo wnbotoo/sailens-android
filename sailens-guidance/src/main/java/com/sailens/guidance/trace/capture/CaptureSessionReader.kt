@@ -32,6 +32,8 @@ data class CaptureSession(
      * said and when the record keeps no lifecycle -- [RegressionManifest.utteranceLifecycle] tells which.
      */
     val utterances: List<RegressionUtteranceRecord> = emptyList(),
+    /** The depth evidence stream (schema 1.9): one per depth run with an output, in the order written. */
+    val depthEvidence: List<DepthEvidenceRecord> = emptyList(),
 )
 
 sealed interface CaptureReadResult {
@@ -94,6 +96,10 @@ object CaptureSessionReader {
         manifest.regression?.stats?.firstLostSeq?.let { seq ->
             warnings += "the regression record lost frames from seq $seq on; replay is exact only before it"
         }
+        manifest.depthEvidence?.stats?.takeIf { it.dropped > 0 }?.let { stats ->
+            warnings += "the depth evidence stream dropped ${stats.dropped} run(s), the first run ${stats.firstDroppedRunId} " +
+                "of depth session ${stats.firstDroppedGeneration}; its fit replays only up to the first gap"
+        }
 
         val records = listOf(
             CaptureSchema.FRAMES_FILE,
@@ -102,6 +108,7 @@ object CaptureSessionReader {
             CaptureSchema.MARKERS_FILE,
             CaptureSchema.REGRESSION_FILE,
             CaptureSchema.WINDOWS_FILE,
+            DepthEvidenceFiles.RECORDS_FILE,
         ).flatMap { readRecords(File(directory, it), warnings) }
 
         return CaptureReadResult.Read(
@@ -119,6 +126,7 @@ object CaptureSessionReader {
                 heardAfterCut = records.filterIsInstance<RegressionHeardAfterCutRecord>(),
                 windowFrames = records.filterIsInstance<WindowFrameRecord>(),
                 utterances = records.filterIsInstance<RegressionUtteranceRecord>(),
+                depthEvidence = records.filterIsInstance<DepthEvidenceRecord>(),
             ),
         )
     }
@@ -139,6 +147,18 @@ object CaptureSessionReader {
         val ref = frame.semantic?.classMap ?: return null
         return ClassMapStore.read(File(session.directory, CaptureSchema.CLASS_MAPS_FILE), ref, frame.seq)
     }
+
+    /**
+     * The bytes of [ref] in the session's `depth.bin`, checked against its CRC32.
+     *
+     * @throws java.io.IOException when they are missing or do not match.
+     */
+    fun depthBytes(session: CaptureSession, ref: DepthBlobRef): ByteArray =
+        DepthEvidenceData.read(File(session.directory, DepthEvidenceFiles.DATA_FILE), ref)
+
+    /** A depth evidence record's model output, row-major, checked against its CRC32. */
+    fun depthOutput(session: CaptureSession, record: DepthEvidenceRecord): FloatArray =
+        DepthEvidenceData.floats(depthBytes(session, record.output.data), record.output.width * record.output.height)
 
     private fun readRecords(file: File, warnings: MutableList<String>): List<CaptureRecord> {
         if (!file.isFile) return emptyList()
@@ -177,7 +197,7 @@ object CaptureSessionReader {
 
     private val KNOWN_TYPES = setOf(
         "frame", "sensor", "clock_anchor", "marker", "regression_frame", "regression_revoke", "window_frame",
-        "regression_utterance", "regression_cut_kept", "regression_heard_after_cut",
+        "regression_utterance", "regression_cut_kept", "regression_heard_after_cut", "depth_evidence",
     )
     private const val SCHEMA_MAJOR = "schemaMajor"
     private const val SCHEMA_MINOR = "schemaMinor"

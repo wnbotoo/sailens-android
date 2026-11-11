@@ -21,6 +21,8 @@ internal data class FieldCaptureUiState(
     val timingSyncArmed: Boolean = false,
     /** Record the model-regression record with field evidence. */
     val modelRegression: Boolean = false,
+    /** Record the depth evidence stream with the capture. */
+    val depthEvidence: Boolean = false,
     val group: String? = null,
     val sceneLabel: String = "",
     val capGigabytes: Int = FieldCaptureSettingsStore.DEFAULT_CAP_GB,
@@ -55,6 +57,7 @@ internal class FieldCaptureViewModel(
         viewModelScope.launch { settings.enabled.collect { on -> _state.update { it.copy(enabled = on) } } }
         viewModelScope.launch { settings.timingSyncArmed.collect { on -> _state.update { it.copy(timingSyncArmed = on) } } }
         viewModelScope.launch { settings.modelRegression.collect { on -> _state.update { it.copy(modelRegression = on) } } }
+        viewModelScope.launch { settings.depthEvidence.collect { on -> _state.update { it.copy(depthEvidence = on) } } }
         viewModelScope.launch { settings.group.collect { g -> _state.update { it.copy(group = g) } } }
         viewModelScope.launch { settings.sceneLabel.collect { l -> _state.update { it.copy(sceneLabel = l) } } }
         viewModelScope.launch { settings.capGigabytes.collect { gb -> _state.update { it.copy(capGigabytes = gb) } } }
@@ -83,6 +86,10 @@ internal class FieldCaptureViewModel(
     // Read when a session starts, so locked while one is recording, like the switch.
     fun setModelRegression(on: Boolean) {
         if (!_state.value.capturing) settings.setModelRegression(on)
+    }
+
+    fun setDepthEvidence(on: Boolean) {
+        if (!_state.value.capturing) settings.setDepthEvidence(on)
     }
 
     fun setGroup(group: String?) {

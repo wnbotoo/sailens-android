@@ -7,6 +7,8 @@ import com.sailens.guidance.processor.perception.PerceptionProfileManager
 import com.sailens.guidance.trace.capture.CaptureSchema
 import com.sailens.guidance.trace.capture.RegressionManifest
 import com.sailens.guidance.trace.regression.RegressionRecorder
+import com.sailens.guidance.depth.geometry.DepthEvidenceRecorder
+import com.sailens.guidance.depth.geometry.DepthGeometrySwitch
 import com.sailens.guidance.semantics.NavigationSemantics
 import com.sailens.guidance.service.TraceServiceDecorator
 import com.sailens.shell.capture.AndroidCaptureClock
@@ -17,6 +19,7 @@ import com.sailens.shell.app.HardwareKeyHandler
 import com.sailens.shell.capture.CaptureExporter
 import com.sailens.shell.capture.CaptureRetention
 import com.sailens.shell.capture.CapturingTraceService
+import com.sailens.shell.capture.DepthEvidenceCapture
 import com.sailens.shell.capture.FieldCaptureController
 import com.sailens.shell.capture.FieldCaptureStartGate
 import com.sailens.shell.capture.FieldCaptureSettingsStore
@@ -94,9 +97,19 @@ val shellDebugModule: Module = module {
         ).also { capture -> speech.setLifecycleObserver(UtteranceLifecycleRecording(capture)) }
     }
     single<RegressionRecorder> { get<RegressionCapture>() }
+    // The depth evidence stream. Guidance's DI finds it as the depth lane's DepthEvidenceRecorder.
+    single {
+        DepthEvidenceCapture(
+            log = get(),
+            writerDispatcher = Executors.newSingleThreadExecutor { runnable -> Thread(runnable, "depth-evidence") }
+                .asCoroutineDispatcher(),
+        )
+    }
+    single<DepthEvidenceRecorder> { get<DepthEvidenceCapture>() }
     // Created at app start so retention runs then, even when capture is switched off.
     single(createdAtStart = true) {
         val settings = get<FieldCaptureSettingsStore>()
+        val depthSwitch = get<DepthGeometrySwitch>()
         val root = File(androidContext().filesDir, CAPTURES_DIR)
         FieldCaptureController(
             root = root,
@@ -115,6 +128,9 @@ val shellDebugModule: Module = module {
             retention = CaptureRetention(root, maxTotalBytesSetting = settings::capBytes),
             regression = get(),
             sessionLabels = settings::sessionLabels,
+            depthEvidence = get(),
+            // Only when the lane runs too: without it the stream would have nothing to record.
+            depthEvidenceSelected = { settings.depthEvidence.value && depthSwitch.selected },
         )
     }
     single<TraceServiceDecorator> {

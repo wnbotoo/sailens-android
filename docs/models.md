@@ -169,7 +169,8 @@ output. Distill-Any-Depth Small has the same architecture and fits the contract 
 **Swapping a depth model** changes no code but needs the same acceptance as the first one:
 1. the preflight reports `Compatible`;
 2. the debug Model consistency check passes for depth on the target device;
-3. its ground quality is measured offline on the device's preprocessing, **including covered-lens
+3. its ground quality is measured offline on the device's preprocessing (reproduced by
+   `scripts/capture/depth_evidence.py`, [field-capture.md](field-capture.md) §11), **including covered-lens
    frames** (a model can match the reference outdoors and still be far worse indoors and on a covered
    lens);
 4. the device budget is met on the target device.

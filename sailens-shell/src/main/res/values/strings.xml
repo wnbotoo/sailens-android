@@ -416,6 +416,8 @@
     <!-- Field capture: model-regression record -->
     <string name="field_capture_model_regression">Also record the model-regression record</string>
     <string name="field_capture_model_regression_supporting">Every frame\'s model outputs and decisions, for exact replay, plus full-resolution frames around delivered prompts and markers. About 3.5 GB an hour outdoors. Record on SM8850 only.</string>
+    <string name="field_capture_depth_evidence">Also record depth evidence</string>
+    <string name="field_capture_depth_evidence_supporting">While the depth lane is on: each depth run\'s camera planes, geometry, model output and ground fit, to compare the phone with a PC. About 6.6 MB a second. Record each scene from the start of a Guidance session.</string>
     <string name="field_capture_group_label">Group</string>
     <string name="field_capture_group_outdoor">Outdoor</string>
     <string name="field_capture_group_indoor">Indoor</string>

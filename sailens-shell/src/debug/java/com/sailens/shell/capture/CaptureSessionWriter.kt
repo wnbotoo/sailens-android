@@ -4,6 +4,8 @@ import com.sailens.guidance.trace.capture.CaptureManifest
 import com.sailens.guidance.trace.capture.CaptureRecord
 import com.sailens.guidance.trace.capture.CaptureSchema
 import com.sailens.guidance.trace.capture.ClockAnchorRecord
+import com.sailens.guidance.trace.capture.DepthEvidenceFiles
+import com.sailens.guidance.trace.capture.DepthEvidenceRecord
 import com.sailens.guidance.trace.capture.FrameRecord
 import com.sailens.guidance.trace.capture.MarkerRecord
 import com.sailens.guidance.trace.capture.RegressionFrameRecord
@@ -118,6 +120,8 @@ internal class CaptureSessionWriter(
         is MarkerRecord -> CaptureSchema.MARKERS_FILE
         is RegressionFrameRecord, is RegressionRevokeRecord, is RegressionCutKeptRecord, is RegressionHeardAfterCutRecord, is RegressionUtteranceRecord -> CaptureSchema.REGRESSION_FILE
         is WindowFrameRecord -> CaptureSchema.WINDOWS_FILE
+        // Written by DepthEvidenceCapture beside its blobs, never through this writer.
+        is DepthEvidenceRecord -> DepthEvidenceFiles.RECORDS_FILE
     }
 
     private companion object {

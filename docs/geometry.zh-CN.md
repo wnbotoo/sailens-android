@@ -220,7 +220,7 @@ NEAR）。真正有保证的只有融合：使用的等级绝不比今天的远�
 变换和拟合都是纯 JVM 代码，由仿真器的合成视差（`renderDisparity`，`a/Z + b`，可经任意变换）来检验。
 
 **深度车道**（`…guidance.depth.geometry` `DepthGeometryLane`）在 Guidance 旁边跑模型和拟合。**没有任何判定
-用它**：它的观测只进 `DEPTH_GEOMETRY` 能力、trace 和调试视图，不进 `ProcessFrameUseCase`、
+用它**：它的观测只进 `DEPTH_GEOMETRY` 能力、trace、调试视图和调试采集的深度证据，不进 `ProcessFrameUseCase`、
 `AnalyzeSceneUseCase`、`DecideEventsUseCase` 的任何输入（I1）。深度证据永远不能证明镜头没被挡、画面可用或
 前方可走，不能升级任何资格，也不能降低任何风险（I6）：以后用它的一方从这条规则出发。
 `DepthLaneInvarianceTest`（每个场景、每种基准配置，配正常、反向和初始化失败的模型）和
@@ -258,6 +258,9 @@ NEAR）。真正有保证的只有融合：使用的等级绝不比今天的远�
   拟合的有效性和各标签占比、耗时、模型形状。叠加层 `GROUND_GEOMETRY` 在能力新鲜（可用或降级）时画最近一次有效的
   拟合：地面绿、高于地面红、低于地面蓝，未知不画。回放报告有 `depthRuns` 和 `depthMs` 两行
   （[trace_metrics_guide.zh-CN.md](trace_metrics_guide.zh-CN.md)）。
+- **深度证据**（调试版）。现场采集还可以记下每次运行的平面、它用的几何、输出和拟合（`DepthEvidenceRecorder`，由车道
+  像对待任何观测一样加了防护地喂给它：记录器出错不改变车道做的和记下的任何东西），好让 PC 重做预处理和模型、
+  JVM 重做拟合（[field-capture.zh-CN.md](field-capture.zh-CN.md) §11）。
 
 ## 7. 仿真器
 

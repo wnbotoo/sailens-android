@@ -13,6 +13,7 @@ import com.sailens.guidance.model.trace.DepthRunTrace
 import com.sailens.guidance.safety.BaselineQualification
 import com.sailens.guidance.service.TraceService
 import com.sailens.runtime.accelerator.AcceleratorCoordinator
+import com.sailens.vision.depth.DepthRun
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineExceptionHandler
@@ -95,6 +96,10 @@ class DepthStartContext(
  * Failures stay here: every `Throwable` but cancellation is caught and becomes the session's state;
  * cancellation is rethrown. The session jobs are children of this lane's supervisor, not of the Guidance
  * flow.
+ *
+ * The debug capture's depth evidence ([DepthEvidenceRecorder]) is fed from [handle]: a copy of the planes
+ * before the frame goes back, and the record once the run has an output. Its calls are guarded; with or
+ * without a recorder the lane does and records the same.
  */
 class DepthGeometryLane(
     private val runnerFactory: () -> DepthModelRunner,
@@ -110,6 +115,8 @@ class DepthGeometryLane(
     private val laneDispatcher: CoroutineDispatcher = Dispatchers.Default.limitedParallelism(1),
     @OptIn(ExperimentalCoroutinesApi::class)
     private val fitDispatcher: CoroutineDispatcher = Dispatchers.Default.limitedParallelism(1),
+    /** The debug capture's depth evidence stream; observation only. */
+    private val evidence: DepthEvidenceRecorder = DepthEvidenceRecorder.None,
 ) {
     // A session catches its own failures; the handler is only the last guard against a crash.
     private val scope = CoroutineScope(
@@ -236,45 +243,78 @@ class DepthGeometryLane(
 
         val attempt = begin(frame.sequenceNumber, geometry.frameTimeNanos, geometry.timeBasis, geometry.quality) ?: return release()
         lastAttemptFrameNanos = frame.timestamp
-        val prepareStart = elapsedMs()
-        val prepared = try {
-            runner.prepare(frame)
-        } finally {
-            release()
-        }
-        val prepareMs = elapsedMs() - prepareStart
-        if (prepared == null) {
-            noteFailure(DepthLaneState.PREPROCESS_UNAVAILABLE)
-            commit(attempt, DepthRunTrace.PREPROCESS_UNAVAILABLE, snapshot = null, prepareMs = prepareMs)
-            return
-        }
+        // Taken while the frame is still held; handed back by the finally below unless a record takes it.
+        var evidenceSlot = context.traceSessionId?.let { id -> observeEvidence { evidence.copy(id, this.generation, attempt.runId, frame) } }
+        try {
+            val prepareStart = elapsedMs()
+            val prepared = try {
+                runner.prepare(frame)
+            } finally {
+                release()
+            }
+            val prepareMs = elapsedMs() - prepareStart
+            if (prepared == null) {
+                noteFailure(DepthLaneState.PREPROCESS_UNAVAILABLE)
+                commit(attempt, DepthRunTrace.PREPROCESS_UNAVAILABLE, snapshot = null, prepareMs = prepareMs)
+                return
+            }
 
-        stage(attempt, STAGE_ADMIT)
-        val admitStart = elapsedMs()
-        val admission = coordinator.tryAdmit(AcceleratorCoordinator.Priority.BACKGROUND)
-        if (admission == null) {
-            commit(attempt, DepthRunTrace.YIELD_DROPPED, snapshot = null, prepareMs = prepareMs)
-            return
-        }
-        val admitWaitMs = elapsedMs() - admitStart
-        stage(attempt, STAGE_INFER)
-        val run = try {
-            runner.infer(prepared)
-        } finally {
-            admission.close()
-        }
-        if (run.nonFiniteCount > 0) {
-            noteFailure(DepthLaneState.RUNNING)
-            commit(attempt, DepthRunTrace.NON_FINITE_OUTPUT, snapshot = null, prepareMs = prepareMs, run = run)
-            return
-        }
+            stage(attempt, STAGE_ADMIT)
+            val admitStart = elapsedMs()
+            val admission = coordinator.tryAdmit(AcceleratorCoordinator.Priority.BACKGROUND)
+            if (admission == null) {
+                commit(attempt, DepthRunTrace.YIELD_DROPPED, snapshot = null, prepareMs = prepareMs)
+                return
+            }
+            val admitWaitMs = elapsedMs() - admitStart
+            stage(attempt, STAGE_INFER)
+            val run = try {
+                runner.infer(prepared)
+            } finally {
+                admission.close()
+            }
+            if (run.nonFiniteCount > 0) {
+                noteFailure(DepthLaneState.RUNNING)
+                commit(attempt, DepthRunTrace.NON_FINITE_OUTPUT, snapshot = null, prepareMs = prepareMs, run = run)
+                evidenceSlot?.let { slot ->
+                    evidenceSlot = null
+                    observeEvidence {
+                        slot.submit(DepthEvidenceRun(DepthRunTrace.NON_FINITE_OUTPUT, null, geometry, config.gridWidth, config.gridHeight, run, null))
+                    }
+                }
+                return
+            }
 
-        stage(attempt, STAGE_FIT)
-        val fitStart = elapsedMs()
-        val observation = withContext(fitDispatcher) {
-            fitter.fit(run.map, intrinsics, down, config.gridWidth, config.gridHeight, geometry.frameTimeNanos)
+            stage(attempt, STAGE_FIT)
+            // Counted before the call: a fit that throws still leaves its gap in the ordinals.
+            val fitOrdinal = fitCalls++
+            val fitStart = elapsedMs()
+            val observation = withContext(fitDispatcher) {
+                fitter.fit(run.map, intrinsics, down, config.gridWidth, config.gridHeight, geometry.frameTimeNanos)
+            }
+            val fitMs = elapsedMs() - fitStart
+            publish(attempt, frame, geometry, prepareMs, admitWaitMs, run, observation, fitMs)
+            evidenceSlot?.let { slot ->
+                evidenceSlot = null
+                observeEvidence {
+                    slot.submit(DepthEvidenceRun(DepthRunTrace.PUBLISHED, fitOrdinal, geometry, config.gridWidth, config.gridHeight, run, observation))
+                }
+            }
+        } finally {
+            evidenceSlot?.let { slot -> observeEvidence { slot.discard() } }
         }
-        val fitMs = elapsedMs() - fitStart
+    }
+
+    private fun DepthSession.publish(
+        attempt: DepthAttempt,
+        frame: ImageFrame,
+        geometry: CameraGeometry,
+        prepareMs: Long,
+        admitWaitMs: Long,
+        run: DepthRun,
+        observation: GroundObservation,
+        fitMs: Long,
+    ) {
         val snapshot = DepthGeometrySnapshot(
             generation = this.generation,
             state = DepthLaneState.RUNNING,
@@ -304,6 +344,22 @@ class DepthGeometryLane(
         logService.warning(TAG, "Depth lane step failed", throwable = error)
         null
     }
+
+    /** A call to the evidence recorder: whatever it throws stays here, and the run goes on as without it. */
+    private inline fun <T> observeEvidence(block: () -> T): T? = try {
+        block()
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: Exception) {
+        if (!evidenceFailureLogged) {
+            evidenceFailureLogged = true
+            logService.warning(TAG, "Depth evidence recorder failed", throwable = error)
+        }
+        null
+    }
+
+    @Volatile
+    private var evidenceFailureLogged = false
 
     companion object {
         private const val TAG = "DepthGeometryLane"

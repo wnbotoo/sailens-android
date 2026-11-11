@@ -282,8 +282,8 @@ The transform and the fit are pure JVM code, exercised by the simulator's synthe
 (`renderDisparity`, `a/Z + b`, through any transform).
 
 **The depth lane** (`…guidance.depth.geometry` `DepthGeometryLane`) runs the model and the fit beside
-Guidance. **Nothing decides on it**: its observations reach the `DEPTH_GEOMETRY` capability, the trace
-and the debug views, and no input of `ProcessFrameUseCase`, `AnalyzeSceneUseCase` or
+Guidance. **Nothing decides on it**: its observations reach the `DEPTH_GEOMETRY` capability, the trace,
+the debug views and the debug capture's depth evidence, and no input of `ProcessFrameUseCase`, `AnalyzeSceneUseCase` or
 `DecideEventsUseCase` (I1). Depth evidence never shows that the lens is clear, the picture usable or the
 way passable, and never raises a qualification or lowers a risk (I6): whatever uses it later starts from
 that rule. `DepthLaneInvarianceTest` (every scenario under every golden configuration, with a sound, an
@@ -335,6 +335,10 @@ without the lane and compare the results, and the user's timeline, line for line
   while the capability is fresh (available or degraded): ground green, above ground red, below ground
   blue, unknown not drawn. The replay report has the `depthRuns` and `depthMs` lines
   ([trace_metrics_guide.md](trace_metrics_guide.md)).
+- **Depth evidence** (debug builds). A field capture can also record each run's planes, the geometry it
+  used, its output and its fit (`DepthEvidenceRecorder`, fed by the lane under the same guard as any
+  observation: a recorder that fails changes nothing the lane does or records), so that a PC can redo the
+  preprocessing and the model and the JVM the fit ([field-capture.md](field-capture.md) §11).
 
 ## 7. Simulator
 
