@@ -771,8 +771,9 @@ Guidance 此刻对用户处在什么状态，合成为一个值，由 shell 从�
   `inverse` 是其中输出反向的比例；`skips` 按原因、全 trace 合计；
 - `records`：`complete`、`incomplete (missing n)`（`seq` 有缺口、少于 `depthRunCount`、会话内 `runId` 有缺口，或某个
   深度会话没有收尾记录）、`possibly_incomplete`（没有汇总可以对照）或 `not recorded`；
-- `depthMs`：`prepare`、`admitWait`、`infer`、`fit`，格式 p50/p95/最大值(条数)，最近秩；`age` 是被记下的帧上挂着的
-  观测的年龄，唯一从帧算的量。
+- `depthMs`：`prepare`、`admitWait`、`infer`、`read`（读回输出）、`gpu`（每次运行的 `infer` + `read`，即真机预算判断的
+  加速器部分：按每次运行的和取分位数）和 `fit`，格式 p50/p95/最大值(条数)，最近秩；`age` 是被记下的帧上挂着的观测的年龄，
+  唯一从帧算的量。
 
 车道关着的 trace 是 `complete`，尝试数为 0。
 
