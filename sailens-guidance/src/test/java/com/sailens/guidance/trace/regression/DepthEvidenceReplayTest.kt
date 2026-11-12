@@ -196,6 +196,46 @@ class DepthEvidenceReplayTest {
     }
 
     @Test
+    fun `validity is judged run by run, and a hold the two fitters take apart in session order is only reported`() {
+        val session = record(50)
+        val switchAt = session.records.first { it.observation?.validity == GroundFitValidity.SUPPORT_SWITCH.name.lowercase() }.fitOrdinal!!
+        val lastValid = session.records.last {
+            it.fitOrdinal!! < switchAt && it.observation?.validity == GroundFitValidity.VALID.name.lowercase()
+        }.fitOrdinal!!
+        // On the last valid fit before the switch the PC sees plain ground where the phone still sees the drop: in
+        // the session's order the PC's fitter takes the hold there and the phone's does not, while each run fitted
+        // on its own is valid on both sides.
+        val plain = Scenarios.straightClearPath.frames[0].world
+        val pc = { r: DepthEvidenceRecord ->
+            if (r.fitOrdinal == lastValid) {
+                val pose = Pose(1.3f, 25f, walkedM = r.fitOrdinal!! * 0.08f)
+                renderDisparity(camera, pose, plain, mw, mh, aw, ah, { x, y -> transform.toAnalysisX(x) to transform.toAnalysisY(y) })
+            } else {
+                session.output(r)
+            }
+        }
+        // A band the session order misses and the runs on their own meet.
+        val strict = few.copy(minValidityAgreement = 0.99f)
+        val report = DepthEvidenceReplay(strict).replay(session.records, session::output, candidate = pc).single()
+        val agreement = report.pc!!
+        assertEquals(49f / 50f, agreement.sessionValidityAgreement, 1e-6f)
+        assertEquals(1f, agreement.validityAgreement, 0f)
+        assertEquals(report.verdictReason, DepthEvidenceVerdict.PASS, report.verdict)
+    }
+
+    @Test
+    fun `runs whose fits disagree on their own fail the validity band, though the tensors pass`() {
+        val session = record(30)
+        // Five runs read as depth instead of disparity; the median over the runs stays on the 25 identical ones.
+        val pc = { r: DepthEvidenceRecord -> session.output(r).let { v -> if (r.fitOrdinal!! < 5) FloatArray(v.size) { -v[it] } else v } }
+        val report = DepthEvidenceReplay(few).replay(session.records, session::output, candidate = pc).single()
+        assertEquals(DepthEvidenceVerdict.FAIL, report.verdict)
+        assertEquals(25f / 30f, report.pc!!.validityAgreement, 1e-6f)
+        assertTrue(report.verdictReason, "validity agreement" in report.verdictReason)
+        assertTrue(report.verdictReason, "median relative error" !in report.verdictReason)
+    }
+
+    @Test
     fun `the comparison stops at the first run without a PC output`() {
         val session = record(30)
         val pc = { r: DepthEvidenceRecord -> if (r.fitOrdinal == 15L) null else session.output(r) }

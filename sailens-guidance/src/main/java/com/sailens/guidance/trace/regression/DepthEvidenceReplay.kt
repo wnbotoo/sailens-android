@@ -17,9 +17,10 @@ import kotlin.math.max
  * @param minAcceptableRuns fewer acceptable runs than this cannot be judged, however well they agree.
  * @param maxMedianRelativeError the median, over the acceptable runs, of each run's median relative error
  *   (`compareDisparity`, the PC's output the reference): FP16 against FP32.
- * @param minValidityAgreement the share of acceptable runs whose fits agree on validity.
- * @param minLabelAgreement the mean, over the runs where both fits are valid, of the share of grid cells with
- *   the same label.
+ * @param minValidityAgreement the share of acceptable runs whose fits agree on validity, each run fitted on
+ *   its own (a new fitter on each side).
+ * @param minLabelAgreement the mean, over the runs where both of those fits are valid, of the share of grid
+ *   cells with the same label.
  */
 data class DepthEvidenceThresholds(
     val minAcceptableRuns: Int = 300,
@@ -49,10 +50,18 @@ data class DepthPcAgreement(
     val medianRelativeError: Float,
     val p95RelativeError: Float,
     val maxRelativeError: Float,
+    /** Share of the runs whose fits agree on validity, each run fitted on its own on both sides: judged. */
     val validityAgreement: Float,
-    /** Mean label agreement over [labelRuns]; null when no run had both fits valid. */
+    /** Mean label agreement over [labelRuns], the runs where both of those fits are valid; null when none were. */
     val labelAgreement: Float?,
     val labelRuns: Int,
+    /**
+     * The same validity agreement with each side's fitter fitting the session in order, history and all:
+     * reported, not judged. The support-switch hold is released only by two levels seen together again, so
+     * one borderline call that goes differently on the two sides gives a stretch of differing fits however
+     * close the outputs are; this measures that sensitivity of the fitter, not the depth path.
+     */
+    val sessionValidityAgreement: Float,
     /** Where the comparison stopped early, when it did. */
     val stoppedAt: String?,
 )
@@ -84,8 +93,10 @@ data class DepthEvidenceReport(
  * on an unbroken run of fits from the session's start: it ends at the first missing ordinal, or at the first run
  * the stream counted as dropped, and nothing after a gap counts, however many runs follow.
  *
- * With a [candidate] -- the same runs' outputs computed on a PC from the recorded planes -- a second fitter
- * fits those, and the PC's outputs and fits are compared with the phone's ([DepthEvidenceThresholds]).
+ * With a [candidate] -- the same runs' outputs computed on a PC from the recorded planes -- the PC's outputs are
+ * compared with the phone's, and each run is fitted on its own from both outputs and the two fits compared
+ * ([DepthEvidenceThresholds]). A second fitter also fits the PC's outputs in the session's order, and its
+ * agreement with the replay is reported ([DepthPcAgreement.sessionValidityAgreement]).
  */
 class DepthEvidenceReplay(
     private val thresholds: DepthEvidenceThresholds = DepthEvidenceThresholds(),
@@ -223,9 +234,10 @@ class DepthEvidenceReplay(
         output: (DepthEvidenceRecord) -> FloatArray,
         candidate: (DepthEvidenceRecord) -> FloatArray?,
     ): DepthPcAgreement {
-        val fitter = fitterFactory()
+        val sessionFitter = fitterFactory()
         val errors = ArrayList<Float>(acceptable.size)
         var validityAgrees = 0
+        var sessionValidityAgrees = 0
         var labelSum = 0.0
         var labelRuns = 0
         var stoppedAt: String? = null
@@ -239,15 +251,18 @@ class DepthEvidenceReplay(
             val transform = record.transform.toTransform()
             val pcMap = DisparityMap(record.output.width, record.output.height, values, transform)
             // Read again rather than held from the exact replay: a session's maps do not stay in memory.
-            val phoneMap = DisparityMap(record.output.width, record.output.height, output(record), transform)
+            val phoneValues = output(record)
+            val phoneMap = DisparityMap(record.output.width, record.output.height, phoneValues, transform)
             errors += compareDisparity(reference = pcMap, candidate = phoneMap).medianRelativeError
-            val phone = replayed[index]
-            val pc = fit(fitter, record, values)
+            // Judged run by run: what the two outputs give, without either side's history.
+            val phone = fit(fitterFactory(), record, phoneValues)
+            val pc = fit(fitterFactory(), record, values)
             if (phone.validity == pc.validity) validityAgrees++
             if (phone.isValid && pc.isValid) {
                 labelSum += labelAgreement(phone, pc)
                 labelRuns++
             }
+            if (replayed[index].validity == fit(sessionFitter, record, values).validity) sessionValidityAgrees++
         }
         val sorted = errors.sorted()
         val n = sorted.size
@@ -259,6 +274,7 @@ class DepthEvidenceReplay(
             validityAgreement = if (n > 0) validityAgrees.toFloat() / n else 0f,
             labelAgreement = if (labelRuns > 0) (labelSum / labelRuns).toFloat() else null,
             labelRuns = labelRuns,
+            sessionValidityAgreement = if (n > 0) sessionValidityAgrees.toFloat() / n else 0f,
             stoppedAt = stoppedAt,
         )
     }
