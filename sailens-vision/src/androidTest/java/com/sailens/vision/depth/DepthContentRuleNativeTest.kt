@@ -86,7 +86,8 @@ class DepthContentRuleNativeTest {
             width = width,
             height = height,
             pixelBytes = ByteArray(0),
-            pixelFormat = ImagePixelFormat.entries.first(),
+            // The native path takes YUV_420_888 frames only.
+            pixelFormat = ImagePixelFormat.YUV_420_888,
             timestamp = 0L,
             rotationDegrees = rotation,
             sequenceNumber = 1L,

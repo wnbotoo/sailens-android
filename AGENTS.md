@@ -23,8 +23,9 @@ pipeline that turns the scene ahead into speech and haptics. This file is the re
   `applicationId = "com.sailens.reference"`; both keep namespace `com.sailens`.
 - Do not add store branding, official bundled weights or release-product identity to the platform
   repository. Reusable capability belongs here; distribution choices belong in the shipping app.
-- The shipping app keeps its host (`app/src/main`) byte-identical to this one except `SailensEdition.kt` (its
-  spec and the binding that builds it from whatever it checks) and its product strings; its CI checks this.
+- The shipping app keeps its host (`app/src/main` and `app/proguard-rules.pro`) byte-identical to this one except
+  `SailensEdition.kt` (its spec and the binding that builds it from whatever it checks), its product strings and
+  `app/src/main/assets` (its packaged models; this host has none); its CI checks this.
   So a host change here is mirrored there, and anything an edition varies goes through `SailensEdition.kt`,
   never through `App.kt` or a shared DI module.
 - The `sailens-*` Gradle modules are architecture/API boundaries, not a commitment to publish nine

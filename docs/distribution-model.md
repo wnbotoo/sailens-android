@@ -89,8 +89,9 @@ Examples:
 The official app should stay thin. If code in the distribution becomes a generally reusable Sailens
 capability, it belongs in Sailens Android after the appropriate licence review.
 
-Its host code is the reference host's: every file under `app/src/main` is byte-identical to the pinned
-copy, which its CI checks, except `SailensEdition.kt` and the product strings. `SailensEdition.kt` holds
+Its host code is the reference host's: every file under `app/src/main`, and `app/proguard-rules.pro`, is
+byte-identical to the pinned copy, which its CI checks, except `SailensEdition.kt`, the product strings and
+`app/src/main/assets` (the packaged models, which the reference host does not have). `SailensEdition.kt` holds
 everything an edition varies about what it offers and promises: its `SailensAppSpec` and the Koin binding
 (`editionModule`) that builds it from whatever the edition checks, such as a second model's config for
 its own static preflight. `App.kt` only injects the spec, so it never has to differ.

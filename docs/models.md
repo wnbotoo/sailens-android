@@ -163,8 +163,11 @@ output   one float32 tensor  [1,H,W], [1,1,H,W] or [1,H,W,1]   the same H and W 
   per block). [`scripts/depth/patch_rank3.py`](../scripts/depth/patch_rank3.py) keeps them rank 3.
 
 **Reference model**: Depth Anything V2 Small (Apache-2.0 code and weights), portrait 392×224, GPU FP16
-with LOW queue priority. On SM8850 at 3 Hz beside sem+det: depth p95 31.4 ms (50.4 ms with LOW
-priority, 76.5 ms max), sem/det p95 +5% (0%/+3% with LOW). Export it with
+with LOW queue priority. In the app on SM8850 (3 Hz beside sem+det): inference and output read p95
+43 ms (max 70 ms), the ground fit p50 146 ms on the CPU, and sem/det no slower than with the lane off.
+On its own the model takes p95 23–28 ms at DEFAULT priority; at LOW priority with nothing else on the
+GPU it runs five to six times slower, so LOW relies on sem+det keeping the GPU busy
+([experiments/depth-lane-device-2026-11.md](experiments/depth-lane-device-2026-11.md)). Export it with
 [`scripts/depth/dav2/export.py`](../scripts/depth/dav2/export.py), which folds the normalization and the
 position embedding in, applies the rank-3 patch and checks on the CPU that none of it changed the
 output. Distill-Any-Depth Small has the same architecture and fits the contract the same way.

@@ -130,8 +130,10 @@ profile 里的 `DepthModelConfig`。
   把 N 当成 batch，logcat 每个 block 打一条 `Shape mismatch ... conv_wave_memory`）。[`scripts/depth/patch_rank3.py`](../scripts/depth/patch_rank3.py)
   把它们保持为三维。
 
-**参考模型**：Depth Anything V2 Small（代码和权重都是 Apache-2.0），竖版 392×224，GPU FP16，队列优先级 LOW。SM8850 上与 sem+det 一起以
-3 Hz 运行：深度 p95 31.4 ms（LOW 时 50.4 ms，最大 76.5 ms），sem/det p95 +5%（LOW 时 0%/+3%）。用
+**参考模型**：Depth Anything V2 Small（代码和权重都是 Apache-2.0），竖版 392×224，GPU FP16，队列优先级 LOW。在 SM8850 的 app 里与
+sem+det 一起以 3 Hz 运行：推理加读输出 p95 43 ms（最大 70 ms），CPU 上的地面拟合 p50 146 ms，sem/det 不比车道关时慢。模型单独跑时
+DEFAULT 优先级下 p95 23–28 ms；LOW 优先级、GPU 上没有别的工作时会慢五到六倍，所以 LOW 靠 sem+det 把 GPU 撑着
+（[experiments/depth-lane-device-2026-11.zh-CN.md](experiments/depth-lane-device-2026-11.zh-CN.md)）。用
 [`scripts/depth/dav2/export.py`](../scripts/depth/dav2/export.py) 导出：它把归一化和位置编码折进去、做三维修补，并在 CPU 上核对这些都没有改变输出。
 Distill-Any-Depth Small 是同一架构，用同样的方式符合契约。
 
