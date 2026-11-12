@@ -14,6 +14,7 @@ val appModule = module {
     includes(guidanceModule)
     includes(profileBindingsModule)
     includes(domainBindingsModule)
+    includes(editionModule)
     includes(cameraModule)
     includes(shellModule)
     includes(shellDebugModule)
