@@ -12,10 +12,8 @@ What the export does to fit the contract and the LiteRT GPU, all with the model'
    compile.
 3. Token activations kept rank 3 around FULLY_CONNECTED (../patch_rank3.py): otherwise the GPU runs the
    graph without an error and computes it wrongly.
-4. With --fp16 only: the weights of FULLY_CONNECTED, CONV_2D, DEPTHWISE_CONV_2D and TRANSPOSE_CONV
-   stored as float16, each behind an explicit DEQUANTIZE (ai-edge-quantizer's float casting), which
-   halves the file. Activations and every other constant stay float32; the GPU, which computes in FP16
-   at its default precision, reads float16 weights either way.
+4. With --fp16 only: the weights stored as float16 (../tflite_tools.py), which halves the file. The GPU,
+   which computes in FP16 at its default precision, reads float16 weights either way.
 Then it checks, on the CPU, that the fold changed nothing (torch, folded against stock with external
 normalization), that the float32 .tflite matches torch and, with --fp16, that storing the weights as
 float16 moved the output by no more than their rounding.
@@ -37,6 +35,7 @@ from transformers import AutoModelForDepthEstimation
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 import patch_rank3  # noqa: E402
+import tflite_tools as tt  # noqa: E402
 
 REPO = "depth-anything/Depth-Anything-V2-Small-hf"
 REVISION = "5426e4f0f36572d16453bbda7a8389317b1bef99"
@@ -83,57 +82,6 @@ def fold_embeddings(model, h, w):
     emb.forward = types.MethodType(forward, emb)
 
 
-def cast_weights_fp16(buf):
-    """The model with its FC / convolution weights stored as float16 behind explicit DEQUANTIZE ops."""
-    from ai_edge_quantizer import qtyping, quantizer
-
-    q = quantizer.Quantizer(buf)
-    q.update_quantization_recipe(
-        regex=".*",
-        operation_name=qtyping.TFLOperationName.ALL_SUPPORTED,
-        op_config=qtyping.OpQuantizationConfig(
-            weight_tensor_config=qtyping.TensorQuantizationConfig(num_bits=16, dtype=qtyping.TensorDataType.FLOAT),
-            compute_precision=qtyping.ComputePrecision.FLOAT,
-            explicit_dequantize=True,
-        ),
-        algorithm_key="float_casting",
-    )
-    return bytes(q.quantize().quantized_model)
-
-
-def run_cpu(buf, x):
-    """The model's output for one input, on the CPU."""
-    interpreter = Interpreter(model_content=buf)
-    interpreter.allocate_tensors()
-    interpreter.set_tensor(interpreter.get_input_details()[0]["index"], x.numpy())
-    interpreter.invoke()
-    return interpreter.get_tensor(interpreter.get_output_details()[0]["index"])
-
-
-def tensor_types(buf):
-    """How many tensors of each type the model holds, and the operator counts, for the printout."""
-    from ai_edge_litert import schema_py_generated as S
-
-    m = S.ModelT.InitFromPackedBuf(buf, 0)
-    g = m.subgraphs[0]
-    names = {v: k for k, v in vars(S.TensorType).items() if not k.startswith("_")}
-    ops = {v: k for k, v in vars(S.BuiltinOperator).items() if not k.startswith("_")}
-    types_, codes = {}, {}
-    for t in g.tensors:
-        types_[names[t.type]] = types_.get(names[t.type], 0) + 1
-    for op in g.operators:
-        oc = m.operatorCodes[op.opcodeIndex]
-        name = ops[max(oc.builtinCode, oc.deprecatedBuiltinCode)]
-        codes[name] = codes.get(name, 0) + 1
-    return types_, codes
-
-
-def relative_error(a, b):
-    a, b = np.asarray(a, np.float64).ravel(), np.asarray(b, np.float64).ravel()
-    den = np.maximum(np.abs(b), 0.05 * np.abs(b).max())
-    return np.abs(a - b) / den
-
-
 if __name__ == "__main__":
     args = [a for a in sys.argv[1:] if a != "--fp16"]
     fp16 = len(args) != len(sys.argv) - 1
@@ -148,7 +96,7 @@ if __name__ == "__main__":
     fold_embeddings(model, h, w)
     with torch.no_grad():
         folded = Wrapper(model)(x01).numpy()
-    fold_err = relative_error(folded, stock)
+    fold_err = tt.relative_error(folded, stock)
     print(f"torch folded vs stock: median relative error {np.median(fold_err):.2e}, max {fold_err.max():.2e}")
     assert np.median(fold_err) <= 1e-5, "the fold changed the output"
 
@@ -157,20 +105,18 @@ if __name__ == "__main__":
         litert_torch.convert(Wrapper(model), (x01,)).export(raw)
         patched, reshapes, fcs = patch_rank3.patch(open(raw, "rb").read())
     print(f"lifted {reshapes} RESHAPE, {fcs} FULLY_CONNECTED")
-    lite32 = run_cpu(patched, x01)
-    lite_err = relative_error(lite32, stock)
-    print(f"tflite float32 (CPU) vs torch stock: median relative error {np.median(lite_err):.2e}, p99 {np.percentile(lite_err, 99):.2e}")
+    lite32 = tt.run_cpu(patched, x01.numpy())
+    lite_err = tt.relative_error(lite32, stock)
+    print(f"tflite float32 (CPU) vs torch stock: {tt.summary(lite_err)}")
     assert np.median(lite_err) <= 1e-4, "the .tflite does not compute what torch does"
     if fp16:
-        patched = cast_weights_fp16(patched)
-        types_, codes = tensor_types(patched)
-        print(f"float16 weights: tensors {types_}, {codes.get('DEQUANTIZE', 0)} DEQUANTIZE")
-        lite16 = run_cpu(patched, x01)
-        cast_err = relative_error(lite16, lite32)
-        print(f"tflite float16 weights (CPU) vs float32: median relative error {np.median(cast_err):.2e}, "
-              f"p99 {np.percentile(cast_err, 99):.2e}")
-        # Rounding to float16 moves a weight by at most 2^-11 (4.9e-4) of itself; at 392x224 the output
-        # moved about a quarter of that. A cast that broke a tensor moves it by far more.
+        patched = tt.cast_weights_fp16(patched)
+        types_, ops = tt.contents(patched)
+        print(f"float16 weights: tensors {types_}, {ops.get('DEQUANTIZE', 0)} DEQUANTIZE")
+        cast_err = tt.relative_error(tt.run_cpu(patched, x01.numpy()), lite32)
+        print(f"tflite float16 weights (CPU) vs float32: {tt.summary(cast_err)}")
+        # At 392x224 the output moved about a quarter of the rounding bound; a cast that broke a tensor
+        # moves it by far more.
         assert np.median(cast_err) <= 1e-3, "storing the weights as float16 changed more than their rounding"
     open(out, "wb").write(patched)
     shapes = Interpreter(model_path=out)

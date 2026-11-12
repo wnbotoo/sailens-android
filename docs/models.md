@@ -170,7 +170,17 @@ GPU it runs five to six times slower, so LOW relies on sem+det keeping the GPU b
 ([experiments/depth-lane-device-2026-11.md](experiments/depth-lane-device-2026-11.md)). Export it with
 [`scripts/depth/dav2/export.py`](../scripts/depth/dav2/export.py), which folds the normalization and the
 position embedding in, applies the rank-3 patch and checks on the CPU that none of it changed the
-output. Distill-Any-Depth Small has the same architecture and fits the contract the same way.
+output. With `--fp16` it stores the weights as float16 (49.9 MB instead of 98.0 MB at 392×224; the CPU
+output moves by a median 1.3e-4); the GPU computes in FP16 either way. Distill-Any-Depth Small has the same
+architecture and fits the contract the same way.
+
+**ZipDepth** (its repository, which holds the checkpoints, is MIT and states no separate terms for the
+weights; distilled from Depth Anything V2 Large, whose weights are CC BY-NC 4.0) is a CNN that fits the contract as it is: its forward pass normalizes the input and outputs
+affine-invariant inverse depth. Portrait 512×288 costs 2.9 GMACs against the reference's 13.7. Export it from
+a checkout of its repository with [`scripts/depth/zipdepth/export.py`](../scripts/depth/zipdepth/export.py)
+(24.7 MB, 12.5 MB with `--fp16`). Swapped in on SM8850 without a code change, it ran at inference and output
+read p50 7 ms, p95 31 ms beside sem+det
+([experiments/depth-lane-device-2026-11.md](experiments/depth-lane-device-2026-11.md) §5).
 
 **Swapping a depth model** changes no code but needs the same acceptance as the first one:
 1. the preflight reports `Compatible`;
