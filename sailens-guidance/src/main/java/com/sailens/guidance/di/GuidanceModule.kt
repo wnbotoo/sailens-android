@@ -9,6 +9,7 @@ import com.sailens.guidance.config.TraceRuntimeConfig
 import com.sailens.guidance.depth.DefaultDepthRepository
 import com.sailens.guidance.depth.GroundContactDistanceEstimator
 import com.sailens.guidance.depth.ImagePositionDepthEstimator
+import com.sailens.guidance.depth.geometry.DepthEvidenceRecorder
 import com.sailens.guidance.depth.geometry.DepthGeometryConfig
 import com.sailens.guidance.depth.geometry.DepthGeometryLane
 import com.sailens.guidance.depth.geometry.DepthGeometrySwitch
@@ -166,6 +167,8 @@ val guidanceModule = module {
             traceService = get(),
             config = getOrNull() ?: DepthGeometryConfig(),
             logService = logService,
+            // Debug builds bind the capture's depth evidence stream; release binds none.
+            evidence = getOrNull() ?: DepthEvidenceRecorder.None,
         )
     }
 }

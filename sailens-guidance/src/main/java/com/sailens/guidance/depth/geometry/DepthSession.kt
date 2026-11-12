@@ -54,6 +54,9 @@ class DepthSession internal constructor(
     @Volatile
     internal var lastAttemptFrameNanos: Long? = null
 
+    /** Calls of this session's fitter so far; the lane's own coroutine only. */
+    internal var fitCalls: Long = 0
+
     internal var job: Job? = null
     internal var done: Job? = null
 

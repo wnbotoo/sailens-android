@@ -47,7 +47,7 @@ Captures never enter this repository or CI.
   type; that is a major version. Closed enums inside records are not extended in a minor version.
   Minor versions have added build provenance (1.2), the model-regression record (1.3), recorded
   geometry (1.4), the speech lifecycle (1.5), speech ranks and cut receipts (1.6), the frame's
-  qualification (1.7) and the revoke reason `safety_hold` (1.8). A revoke record's `reason` is an open
+  qualification (1.7), the revoke reason `safety_hold` (1.8) and the depth evidence stream (1.9, §11). A revoke record's `reason` is an open
   string, a value of the trace's revoke reasons when written: a reader keeps a value it does not know as
   it is, and replay does not read it.
 - Sensor cadence is computed from event timestamps; `SENSOR_DELAY_GAME` is only the requested rate.
@@ -289,3 +289,66 @@ Misses go in a second sheet, one row per miss: segment, rough time (seconds into
 missed, estimated distance, note. Every "missed alert" marker gets a row (`accidental` if pressed by
 mistake). A miss is an obstacle within about 2 m on the route, a path that really is blocked, or a
 step or kerb, with no prompt before it was reached.
+
+## 11. The depth evidence stream
+
+Schema 1.9. With "Also record depth evidence" on (field capture page) and the depth lane on (the
+ground-contact page, [geometry.md](geometry.md) §6), a field-evidence or model-regression capture also
+records every depth run that produced an output, so that the whole depth path can be redone off the
+phone: the native preprocessing and the model on a PC, the ground fit on the JVM. The timing-sync burst
+never carries it. The switch is read once, when the session starts, like the mode.
+
+| File | Content |
+|---|---|
+| `depth.jsonl` | `DepthEvidenceRecord` per run with an output: its depth session and run id (as in its `depth_run` trace record), fit ordinal, outcome, frame sequence and camera timestamp; the frame's size and rotation, and each plane's size in samples, strides and bytes; the geometry the fit used (`GeometryRecord`, as in the model-regression record); every field of the input transform; the label grid; the output's size and bytes; the fit's validity, inlier ratio, confidence, scale, shift and gravity agreement, and each mask's CRC32 and cell count |
+| `depth.bin` | The bytes, back to back: each plane exactly as the native preprocessing was given it (the whole array, strides kept: the kernel reads sample (x, y) at `y × rowStride + x × pixelStride`, and a sample past the end of the array as its plane's default, 16 for Y and 128 for U and V), then the output as float32, row-major, little-endian. Every reference carries the CRC32 of its bytes, so a torn or damaged blob is never read as data |
+
+- **Copying and writing.** The lane copies the planes into one of 4 pooled buffers while it still holds
+  the frame, before giving it back, and the record waits in a queue of 4 for its own writer thread. A run
+  that finds no free buffer or no room in the queue is dropped, never waited for, and counted in the
+  manifest's `depthEvidence.stats`: `dropped` and its reasons (no buffer, queue full, write failed, the
+  capture ended first, which includes every copy still lent out when the stream finishes: those are counted
+  then, before the manifest is written, and a run that comes back after it writes nothing) and the first
+  dropped run. A run that ends without an output gives its buffer back and writes nothing. A record is about 2.2 MB at 1280×720 with a 392×224 output, about 6.6 MB/s at 3 Hz:
+  a 10 GB cap holds about 25 minutes, less the capture's other data. The stream counts toward the cap.
+- **Fit ordinals.** The ground fit keeps history with no expiry (the support-switch hold and the last
+  below-ground region end only when two levels are seen again), so its fits can be redone only in its own
+  call order from the session's first, without a gap: one missed run can change every fit after it.
+  `fitOrdinal` counts the calls of the session's fitter from 0; a run with a non-finite output calls no fit
+  and leaves no gap.
+- **Acceptance.** A session is acceptable from fit 0 up to the first missing ordinal or the first run the
+  stream dropped (the manifest's `firstDroppedRunId`, whether or not that run made a fit). Nothing after a gap
+  counts and nothing resynchronises: a capture whose first fit is not recorded has no acceptable run. A
+  scene needs at least 300 acceptable runs (about 100 s at 3 Hz, from the start of a session); fewer, or
+  none, cannot be judged, which is never a pass. Resuming after a gap would first need a checkpoint of the
+  fitter's state in the record.
+
+Rerun on the PC, then replay and compare on the JVM:
+
+```
+python scripts/capture/depth_evidence.py <capture or folder> --model depth.tflite --out <pc dir>
+gradlew :sailens-guidance:testDebugUnitTest --tests "*DepthEvidenceCaptureReplayTest*" -PreplayDepth=<capture or folder> -PdepthPcOutputs=<pc dir>
+```
+
+The script follows the depth contract ([models.md](models.md)), not a model: input size and layout and
+the output shape come from the model file, so the same script compares any conforming model. It rebuilds
+the input as the native kernel does (BT.601 limited range, rotation, the letterbox's content columns,
+bilinear point sampling with edge clamp, chroma at half the luma coordinate, black padding; checked against
+a line-by-line transcription of the kernel in `test_depth_evidence.py`; the kernel may contract a
+multiply-add, so values can differ in the last bit), runs the model in float32 on the CPU and writes
+`<pc dir>/<sessionId>/g<session>_r<run>.f32`. The replay (`DepthEvidenceReplay`) fits the phone's outputs
+with one fitter per depth session over the acceptable runs and must reproduce every recorded fit
+(validity, gravity agreement, each mask by CRC); a second fitter fits the PC's outputs. Every acceptable
+run needs its PC output: one missing ends the comparison there and the session cannot be judged, however
+many runs came before it. A session passes when, over its acceptable runs:
+
+| | Band |
+|---|---|
+| Output | the median of each run's median relative error (`compareDisparity`, the content pixels, the PC's output the reference) ≤ 1 % |
+| Fit validity | the same validity in ≥ 95 % of the runs |
+| Labels | over the runs where both fits are valid, the mean share of grid cells with the same label ≥ 95 % |
+
+Without PC outputs the test checks the exact replay only. Reports go to
+`sailens-guidance/build/replay/<sessionId>.depth.txt`. This shows that the phone's whole depth path and
+its reproduction agree; it says nothing about how good the ground fit is. Sealed captures are refused
+unless `--unseal` / `-PunsealCapture`.

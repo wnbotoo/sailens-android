@@ -54,6 +54,19 @@ internal class FieldCaptureSettingsStore(context: Context) {
         _modelRegression.value = on
     }
 
+    private val _depthEvidence = MutableStateFlow(preferences.getBoolean(KEY_DEPTH_EVIDENCE, false))
+
+    /**
+     * With the switch on, record the depth evidence stream as well (docs/field-capture.md §11). It has runs to
+     * record only while the depth lane runs.
+     */
+    val depthEvidence: StateFlow<Boolean> = _depthEvidence.asStateFlow()
+
+    fun setDepthEvidence(on: Boolean) {
+        preferences.edit().putBoolean(KEY_DEPTH_EVIDENCE, on).apply()
+        _depthEvidence.value = on
+    }
+
     private val _group = MutableStateFlow(preferences.getString(KEY_GROUP, null))
 
     /** The recording group for the next sessions (`CaptureGroups`), or null when not set. */
@@ -107,6 +120,7 @@ internal class FieldCaptureSettingsStore(context: Context) {
         private const val PREFERENCES_NAME = "field_capture_settings"
         private const val KEY_ENABLED = "enabled"
         private const val KEY_MODEL_REGRESSION = "model_regression"
+        private const val KEY_DEPTH_EVIDENCE = "depth_evidence"
         private const val KEY_GROUP = "group"
         private const val KEY_SCENE_LABEL = "scene_label"
         private const val KEY_CAP_GB = "cap_gb"

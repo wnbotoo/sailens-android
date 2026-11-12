@@ -116,6 +116,7 @@ internal fun FieldCaptureScreen(
             RegressionSection(
                 state = state,
                 onModelRegressionChange = viewModel::setModelRegression,
+                onDepthEvidenceChange = viewModel::setDepthEvidence,
                 onGroupChange = viewModel::setGroup,
                 onSceneLabelChange = viewModel::setSceneLabel,
                 onCapChange = viewModel::setCapGigabytes,
@@ -279,6 +280,7 @@ private fun TimingSyncSection(armed: Boolean, enabled: Boolean, onArmedChange: (
 private fun RegressionSection(
     state: FieldCaptureUiState,
     onModelRegressionChange: (Boolean) -> Unit,
+    onDepthEvidenceChange: (Boolean) -> Unit,
     onGroupChange: (String?) -> Unit,
     onSceneLabelChange: (String) -> Unit,
     onCapChange: (Int) -> Unit,
@@ -290,6 +292,13 @@ private fun RegressionSection(
             checked = state.modelRegression,
             onCheckedChange = onModelRegressionChange,
             supportingText = stringResource(R.string.field_capture_model_regression_supporting),
+            enabled = editable,
+        )
+        ToggleRow(
+            label = stringResource(R.string.field_capture_depth_evidence),
+            checked = state.depthEvidence,
+            onCheckedChange = onDepthEvidenceChange,
+            supportingText = stringResource(R.string.field_capture_depth_evidence_supporting),
             enabled = editable,
         )
         Text(stringResource(R.string.field_capture_group_label), style = MaterialTheme.typography.labelLarge)

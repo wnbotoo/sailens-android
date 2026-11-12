@@ -403,6 +403,8 @@
     <!-- 现场采集：模型回归记录 -->
     <string name="field_capture_model_regression">同时录制模型回归记录</string>
     <string name="field_capture_model_regression_supporting">记录每一帧的模型输出和决策，用于精确回放；另外保存已送达提示和标记前后的全分辨率帧。户外约每小时 3.5 GB。只在 SM8850 上录。</string>
+    <string name="field_capture_depth_evidence">同时录制深度证据</string>
+    <string name="field_capture_depth_evidence_supporting">深度车道开着时：每次深度运行的相机平面、几何、模型输出和地面拟合，用来把手机和 PC 对照。约每秒 6.6 MB。每个场景都从一次导航会话的开头录起。</string>
     <string name="field_capture_group_label">分组</string>
     <string name="field_capture_group_outdoor">户外</string>
     <string name="field_capture_group_indoor">室内</string>

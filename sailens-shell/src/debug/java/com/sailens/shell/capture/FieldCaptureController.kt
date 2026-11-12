@@ -161,6 +161,10 @@ internal class FieldCaptureController(
     private val regression: RegressionCapture? = null,
     private val sessionLabels: () -> SessionLabels = { SessionLabels() },
     private val freeBytes: () -> Long = { root.usableSpace },
+    /** The depth evidence stream; null records none. */
+    private val depthEvidence: DepthEvidenceCapture? = null,
+    /** Whether a session starting now records the depth evidence stream; read once, at its start. */
+    private val depthEvidenceSelected: () -> Boolean = { false },
 ) {
     private val scope = CoroutineScope(
         SupervisorJob() + writerDispatcher + CoroutineExceptionHandler { _, throwable ->
@@ -344,7 +348,12 @@ internal class FieldCaptureController(
                 regression.startSession(sessionId)
             }
         }
-        return scope.launch { begin(sessionId, mode, targetHardwareProfile) }
+        // Not with the burst: it measures alignment and must not carry the stream's load.
+        val depth = depthEvidence != null && mode != CaptureModes.TIMING_SYNC &&
+            runCatching(depthEvidenceSelected).getOrDefault(false)
+        // Synchronously too: the stream must hold the session's first fit, or its fits cannot be replayed.
+        if (depth) depthEvidence?.startSession(sessionId)
+        return scope.launch { begin(sessionId, mode, targetHardwareProfile, depth) }
     }
 
     /** Called when the trace session finishes. Never throws, never blocks. */
@@ -406,10 +415,10 @@ internal class FieldCaptureController(
 
     // ---- writer thread -------------------------------------------------------------------------
 
-    private suspend fun begin(sessionId: String, mode: String, targetHardwareProfile: String?): Unit =
-        lifecycle.withLock { beginLocked(sessionId, mode, targetHardwareProfile) }
+    private suspend fun begin(sessionId: String, mode: String, targetHardwareProfile: String?, depth: Boolean): Unit =
+        lifecycle.withLock { beginLocked(sessionId, mode, targetHardwareProfile, depth) }
 
-    private suspend fun beginLocked(sessionId: String, mode: String, targetHardwareProfile: String?) {
+    private suspend fun beginLocked(sessionId: String, mode: String, targetHardwareProfile: String?, depth: Boolean) {
         // A session that never finished (the app kept running but the hook was missed) is closed
         // as incomplete rather than silently mixed with the new one.
         active?.let { fail(it, "superseded by session $sessionId") }
@@ -434,15 +443,17 @@ internal class FieldCaptureController(
             group = labels.group,
             sceneLabel = labels.sceneLabel,
             regression = if (mode == CaptureModes.MODEL_REGRESSION) regression?.manifestBlock() else null,
+            depthEvidence = if (depth) depthEvidence?.manifestBlock() else null,
         )
         val writer = try {
             CaptureSessionWriter(File(root, sessionId), manifest)
         } catch (e: Exception) {
             log.warning(TAG, "Field capture could not start", throwable = e)
             regression?.abort(sessionId, "the capture could not start")
+            depthEvidence?.abort(sessionId, "the capture could not start")
             return
         }
-        val capture = ActiveCapture(writer, mode)
+        val capture = ActiveCapture(writer, mode, depth)
         active = capture
         if (busySessions.isNotEmpty()) {
             // The start gate should have held Guidance off; this is the backstop. An empty, failed
@@ -456,6 +467,7 @@ internal class FieldCaptureController(
             return
         }
         if (capture.regressionMode) regression?.attach(sessionId, writer.directory)
+        if (capture.depthMode) depthEvidence?.attach(sessionId, writer.directory)
 
         capture.guarded("start") {
             writer.append(anchor(AnchorReason.START))
@@ -528,7 +540,9 @@ internal class FieldCaptureController(
 
     /** What the capture holds on disk: field evidence plus, in `model_regression`, the record. */
     private fun bytesOf(capture: ActiveCapture): Long =
-        capture.writer.bytesWritten + if (capture.regressionMode) regression?.bytesWritten ?: 0 else 0
+        capture.writer.bytesWritten +
+            (if (capture.regressionMode) regression?.bytesWritten ?: 0 else 0) +
+            (if (capture.depthMode) depthEvidence?.bytesWritten ?: 0 else 0)
 
     private fun overLimit(capture: ActiveCapture) =
         otherSessionsBytes + bytesOf(capture) > retention.maxTotalBytes
@@ -551,6 +565,7 @@ internal class FieldCaptureController(
         stopProducers(capture)
         // The record is drained first, so the manifest's counters are final.
         val regressionStats = if (capture.regressionMode) regression?.finish(capture.sessionId) else null
+        val depthStats = if (capture.depthMode) depthEvidence?.finish(capture.sessionId) else null
         if (!capture.failed) {
             capture.guarded("finish") {
                 capture.writer.append(anchor(AnchorReason.END))
@@ -560,6 +575,7 @@ internal class FieldCaptureController(
                         endedWallMs = clock.wallMs(),
                         stats = capture.stats(),
                         regression = it.regression?.let { block -> block.copy(stats = regressionStats ?: block.stats) },
+                        depthEvidence = it.depthEvidence?.let { block -> block.copy(stats = depthStats ?: block.stats) },
                     )
                 }
             }
@@ -590,6 +606,7 @@ internal class FieldCaptureController(
         capture.sensorQueue.close()
         listOfNotNull(capture.sensorWriterJob, capture.frameWriterJob, capture.anchorJob).forEach { it.cancel() }
         val regressionStats = if (capture.regressionMode) regression?.abort(capture.sessionId, reason) else null
+        val depthStats = if (capture.depthMode) depthEvidence?.abort(capture.sessionId, reason) else null
         runCatching {
             capture.writer.finish {
                 it.copy(
@@ -598,6 +615,7 @@ internal class FieldCaptureController(
                     endedWallMs = clock.wallMs(),
                     stats = capture.stats(),
                     regression = it.regression?.let { block -> block.copy(stats = regressionStats ?: block.stats) },
+                    depthEvidence = it.depthEvidence?.let { block -> block.copy(stats = depthStats ?: block.stats) },
                 )
             }
         }.onFailure { runCatching { capture.writer.close() } }
@@ -733,7 +751,7 @@ internal class FieldCaptureController(
         val image: PendingImage,
     )
 
-    private inner class ActiveCapture(val writer: CaptureSessionWriter, val mode: String) {
+    private inner class ActiveCapture(val writer: CaptureSessionWriter, val mode: String, val depthMode: Boolean) {
         val sessionId: String = writer.directory.name
         val timingSync: Boolean = mode == CaptureModes.TIMING_SYNC
         val regressionMode: Boolean = mode == CaptureModes.MODEL_REGRESSION
