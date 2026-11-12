@@ -156,6 +156,10 @@ fun SettingsScreen(
                 )
             }
 
+            SettingsSection(title = stringResource(R.string.settings_section_safety)) {
+                SafetyNotice()
+            }
+
             SettingsSection(title = stringResource(R.string.settings_section_about)) {
                 AboutSummary()
                 SettingsGroupDivider()
@@ -275,6 +279,36 @@ private fun GuidanceHaptic.rhythmResId(): Int = when (this) {
     GuidanceHaptic.VISION_UNRELIABLE -> R.string.haptic_rhythm_sensor_failure
     GuidanceHaptic.SPEECH_UNAVAILABLE -> R.string.haptic_rhythm_speech_unavailable
     GuidanceHaptic.INTERRUPTED -> R.string.haptic_rhythm_interrupted
+}
+
+/**
+ * What Guidance cannot do, in the words of the operating envelope.
+ *
+ * Plain body text in the normal colour rather than an inline note: this is the part of the screen
+ * a user should not skim past. One `Text` per paragraph, so TalkBack reads each as its own stop.
+ */
+@Composable
+private fun SafetyNotice(
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = SailensDimens.spaceMd),
+        verticalArrangement = Arrangement.spacedBy(SailensDimens.spaceMd),
+    ) {
+        listOf(
+            R.string.safety_notice_assistive_only,
+            R.string.safety_notice_no_prompt,
+            R.string.safety_notice_background,
+            R.string.safety_notice_privacy,
+        ).forEach { resId ->
+            Text(
+                text = stringResource(resId),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+    }
 }
 
 @Composable
