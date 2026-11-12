@@ -12,11 +12,17 @@ What the export does to fit the contract and the LiteRT GPU, all with the model'
    compile.
 3. Token activations kept rank 3 around FULLY_CONNECTED (../patch_rank3.py): otherwise the GPU runs the
    graph without an error and computes it wrongly.
+4. With --fp16 only: the weights of FULLY_CONNECTED, CONV_2D, DEPTHWISE_CONV_2D and TRANSPOSE_CONV
+   stored as float16, each behind an explicit DEQUANTIZE (ai-edge-quantizer's float casting), which
+   halves the file. Activations and every other constant stay float32; the GPU, which computes in FP16
+   at its default precision, reads float16 weights either way.
 Then it checks, on the CPU, that the fold changed nothing (torch, folded against stock with external
-normalization) and that the .tflite matches torch.
+normalization), that the float32 .tflite matches torch and, with --fp16, that storing the weights as
+float16 moved the output by no more than their rounding.
 
-Needs torch, transformers, litert-torch and ai-edge-litert.
+Needs torch, transformers, litert-torch and ai-edge-litert; --fp16 also ai-edge-quantizer.
     python export.py 392 224 out/depth.tflite        # height width, both multiples of 14
+    python export.py 392 224 out/depth.tflite --fp16
 """
 import os
 import sys
@@ -26,6 +32,7 @@ import types
 import litert_torch
 import numpy as np
 import torch
+from ai_edge_litert.interpreter import Interpreter
 from transformers import AutoModelForDepthEstimation
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
@@ -76,6 +83,51 @@ def fold_embeddings(model, h, w):
     emb.forward = types.MethodType(forward, emb)
 
 
+def cast_weights_fp16(buf):
+    """The model with its FC / convolution weights stored as float16 behind explicit DEQUANTIZE ops."""
+    from ai_edge_quantizer import qtyping, quantizer
+
+    q = quantizer.Quantizer(buf)
+    q.update_quantization_recipe(
+        regex=".*",
+        operation_name=qtyping.TFLOperationName.ALL_SUPPORTED,
+        op_config=qtyping.OpQuantizationConfig(
+            weight_tensor_config=qtyping.TensorQuantizationConfig(num_bits=16, dtype=qtyping.TensorDataType.FLOAT),
+            compute_precision=qtyping.ComputePrecision.FLOAT,
+            explicit_dequantize=True,
+        ),
+        algorithm_key="float_casting",
+    )
+    return bytes(q.quantize().quantized_model)
+
+
+def run_cpu(buf, x):
+    """The model's output for one input, on the CPU."""
+    interpreter = Interpreter(model_content=buf)
+    interpreter.allocate_tensors()
+    interpreter.set_tensor(interpreter.get_input_details()[0]["index"], x.numpy())
+    interpreter.invoke()
+    return interpreter.get_tensor(interpreter.get_output_details()[0]["index"])
+
+
+def tensor_types(buf):
+    """How many tensors of each type the model holds, and the operator counts, for the printout."""
+    from ai_edge_litert import schema_py_generated as S
+
+    m = S.ModelT.InitFromPackedBuf(buf, 0)
+    g = m.subgraphs[0]
+    names = {v: k for k, v in vars(S.TensorType).items() if not k.startswith("_")}
+    ops = {v: k for k, v in vars(S.BuiltinOperator).items() if not k.startswith("_")}
+    types_, codes = {}, {}
+    for t in g.tensors:
+        types_[names[t.type]] = types_.get(names[t.type], 0) + 1
+    for op in g.operators:
+        oc = m.operatorCodes[op.opcodeIndex]
+        name = ops[max(oc.builtinCode, oc.deprecatedBuiltinCode)]
+        codes[name] = codes.get(name, 0) + 1
+    return types_, codes
+
+
 def relative_error(a, b):
     a, b = np.asarray(a, np.float64).ravel(), np.asarray(b, np.float64).ravel()
     den = np.maximum(np.abs(b), 0.05 * np.abs(b).max())
@@ -83,7 +135,9 @@ def relative_error(a, b):
 
 
 if __name__ == "__main__":
-    h, w, out = int(sys.argv[1]), int(sys.argv[2]), sys.argv[3]
+    args = [a for a in sys.argv[1:] if a != "--fp16"]
+    fp16 = len(args) != len(sys.argv) - 1
+    h, w, out = int(args[0]), int(args[1]), args[2]
     assert h % 14 == 0 and w % 14 == 0, "DINOv2 patch size is 14"
     model = AutoModelForDepthEstimation.from_pretrained(REPO, revision=REVISION).eval()
     torch.manual_seed(0)
@@ -102,16 +156,22 @@ if __name__ == "__main__":
         raw = os.path.join(tmp, "raw.tflite")
         litert_torch.convert(Wrapper(model), (x01,)).export(raw)
         patched, reshapes, fcs = patch_rank3.patch(open(raw, "rb").read())
-    open(out, "wb").write(patched)
     print(f"lifted {reshapes} RESHAPE, {fcs} FULLY_CONNECTED")
-
-    from ai_edge_litert.interpreter import Interpreter
-    interpreter = Interpreter(model_path=out)
-    interpreter.allocate_tensors()
-    interpreter.set_tensor(interpreter.get_input_details()[0]["index"], x01.numpy())
-    interpreter.invoke()
-    lite = interpreter.get_tensor(interpreter.get_output_details()[0]["index"])
-    lite_err = relative_error(lite, stock)
-    print(f"tflite (CPU) vs torch stock: median relative error {np.median(lite_err):.2e}, p99 {np.percentile(lite_err, 99):.2e}")
+    lite32 = run_cpu(patched, x01)
+    lite_err = relative_error(lite32, stock)
+    print(f"tflite float32 (CPU) vs torch stock: median relative error {np.median(lite_err):.2e}, p99 {np.percentile(lite_err, 99):.2e}")
     assert np.median(lite_err) <= 1e-4, "the .tflite does not compute what torch does"
-    print(f"input {interpreter.get_input_details()[0]['shape']} -> output {interpreter.get_output_details()[0]['shape']}: {out}")
+    if fp16:
+        patched = cast_weights_fp16(patched)
+        types_, codes = tensor_types(patched)
+        print(f"float16 weights: tensors {types_}, {codes.get('DEQUANTIZE', 0)} DEQUANTIZE")
+        lite16 = run_cpu(patched, x01)
+        cast_err = relative_error(lite16, lite32)
+        print(f"tflite float16 weights (CPU) vs float32: median relative error {np.median(cast_err):.2e}, "
+              f"p99 {np.percentile(cast_err, 99):.2e}")
+        # Rounding to float16 moves a weight by at most 2^-11 (4.9e-4) of itself; at 392x224 the output
+        # moved about a quarter of that. A cast that broke a tensor moves it by far more.
+        assert np.median(cast_err) <= 1e-3, "storing the weights as float16 changed more than their rounding"
+    open(out, "wb").write(patched)
+    shapes = Interpreter(model_path=out)
+    print(f"input {shapes.get_input_details()[0]['shape']} -> output {shapes.get_output_details()[0]['shape']}: {out}")
