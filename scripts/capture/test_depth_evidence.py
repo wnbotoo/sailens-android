@@ -151,14 +151,42 @@ class ComparisonTest(unittest.TestCase):
         candidate[0, 2:8] = np.inf
         self.assertEqual(de.relative_error(reference, candidate, transform)[1], math.inf)
 
-    def test_shapes_follow_the_contract(self):
-        self.assertEqual(de.tensor_layout([1, 392, 224, 3]), (224, 392, "NHWC"))
-        self.assertEqual(de.tensor_layout([1, 3, 392, 224]), (224, 392, "NCHW"))
-        self.assertEqual(de.single_channel_size([1, 392, 224]), (392, 224))
-        self.assertEqual(de.single_channel_size([1, 1, 392, 224]), (392, 224))
-        self.assertEqual(de.single_channel_size([1, 392, 224, 1]), (392, 224))
-        with self.assertRaises(ValueError):
-            de.single_channel_size([1, 2, 392, 224])
+    def test_identical_zero_outputs_agree_and_a_value_against_zero_is_infinitely_off(self):
+        # compareDisparity's rule where the denominator is 0 (DepthConsistencyTest).
+        transform = {"padLeft": 0.0, "sourceWidth": 4.0, "scaleX": 1.0, "padTop": 0.0, "sourceHeight": 4.0, "scaleY": 1.0}
+        zeros = np.zeros((4, 4), dtype=f)
+        self.assertEqual(de.relative_error(zeros, zeros.copy(), transform), (0.0, 0.0))
+        self.assertEqual(de.relative_error(zeros, np.full((4, 4), 0.1, dtype=f), transform), (math.inf, math.inf))
+        self.assertEqual(de.relative_error(zeros, np.full((4, 4), np.nan, dtype=f), transform), (math.inf, math.inf))
+
+    def test_shapes_resolve_as_the_contract_resolves_them(self):
+        # The cases of DepthTensorContractTest: (input, output) -> (width, height, layout), or refused.
+        resolved = {
+            ((1, 3, 392, 224), (1, 392, 224)): (224, 392, "NCHW"),
+            ((1, 3, 512, 288), (1, 1, 512, 288)): (288, 512, "NCHW"),
+            ((1, 392, 224, 3), (1, 392, 224, 1)): (224, 392, "NHWC"),
+            # A shape that reads two ways takes the reading whose input and output sizes match.
+            ((1, 3, 4, 3), (1, 4, 3)): (3, 4, "NCHW"),
+            ((1, 3, 4, 3), (1, 3, 4)): (4, 3, "NHWC"),
+            ((1, 1, 4, 3), (1, 1, 4, 1)): (4, 1, "NHWC"),
+            ((1, 3, 4, 1), (1, 1, 4, 1)): (1, 4, "NCHW"),
+        }
+        for (input_shape, output_shape), expected in resolved.items():
+            with self.subTest(input=input_shape, output=output_shape):
+                self.assertEqual(de.resolve_tensors(input_shape, output_shape), expected)
+        refused = [
+            ((1, 3, 3, 3), (1, 3, 3)),        # both layouts fit: the layout cannot be told
+            ((1, 3, 4, 3), (1, 5, 5)),        # neither fits
+            ((1, 3, 224, 392), (1, 112, 112)),
+            ((1, 4, 392, 224), (1, 392, 224)),
+            ((1, 3, 0, 224), (1, 392, 224)),
+            ((1, 3, 392, 224), (1, 2, 392, 224)),
+            ((1, 3, 392, 224), (392, 224)),
+        ]
+        for input_shape, output_shape in refused:
+            with self.subTest(input=input_shape, output=output_shape):
+                with self.assertRaises(ValueError):
+                    de.resolve_tensors(input_shape, output_shape)
 
 
 # ---- a synthetic capture in the app's format ---------------------------------------------------------------------

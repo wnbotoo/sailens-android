@@ -4,6 +4,7 @@ import com.sailens.camera.CameraCharacteristicsProvider
 import com.sailens.core.frame.ImageFrame
 import com.sailens.core.runtime.MlRuntimeInfo
 import com.sailens.guidance.depth.geometry.DepthEvidenceRun
+import com.sailens.guidance.depth.geometry.DepthEvidenceSlot
 import com.sailens.guidance.geometry.CameraGeometry
 import com.sailens.guidance.geometry.CameraIntrinsics
 import com.sailens.guidance.geometry.GeometryQuality
@@ -34,7 +35,11 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
+import kotlin.concurrent.thread
 
 /**
  * The depth evidence stream (docs/field-capture.md §11): what a run's record holds once written and read back,
@@ -209,6 +214,36 @@ class DepthEvidenceCaptureTest {
         assertEquals(1L, stats.droppedAtEnd)
         assertEquals(1L, stats.firstDroppedRunId)
         assertEquals(0L, read("s2").manifest.depthEvidence!!.stats.dropped)
+    }
+
+    @Test
+    fun `a copy under way when the stream finishes is counted by the finish, not after it`() = runBlocking {
+        val registered = CountDownLatch(1)
+        val finished = CountDownLatch(1)
+        val evidence = DepthEvidenceCapture(
+            log,
+            writer.asCoroutineDispatcher(),
+            afterRegister = {
+                registered.countDown()
+                finished.await(5, TimeUnit.SECONDS)
+            },
+        )
+        evidence.startSession("s1")
+        val directory = tmp.newFolder("s1")
+        evidence.attach("s1", directory)
+        val slot = AtomicReference<DepthEvidenceSlot?>()
+        val copying = thread { slot.set(evidence.copy("s1", 1, 7, yuvFrame(7))) }
+        assertTrue("the copy is registered", registered.await(5, TimeUnit.SECONDS))
+        // The stream finishes while the copy is being made.
+        val stats = evidence.finish("s1")!!
+        finished.countDown()
+        copying.join(5_000)
+        assertEquals(1L, stats.droppedAtEnd)
+        assertEquals(1L, stats.dropped)
+        assertEquals(7L, stats.firstDroppedRunId)
+        // The copy completes and the lane submits it: nothing more is written or counted.
+        slot.get()?.submit(run(yuvFrame(7), output(0), GroundFitter(), 0))
+        assertFalse(File(directory, DepthEvidenceFiles.RECORDS_FILE).readLines().any { it.isNotBlank() })
     }
 
     @Test

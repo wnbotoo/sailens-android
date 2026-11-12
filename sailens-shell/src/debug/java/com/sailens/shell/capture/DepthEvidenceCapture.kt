@@ -56,6 +56,8 @@ internal class DepthEvidenceCapture(
     private val log: LogService,
     private val writerDispatcher: CoroutineDispatcher,
     private val config: DepthEvidenceCaptureConfig = DepthEvidenceCaptureConfig(),
+    /** Runs after a copy is registered and before it is made; tests hold a copy there. */
+    private val afterRegister: () -> Unit = {},
 ) : DepthEvidenceRecorder {
 
     @Volatile
@@ -185,8 +187,9 @@ internal class DepthEvidenceCapture(
         private var allocated = 0
 
         /**
-         * The copies handed to the lane and not yet settled. [close], a submit and a discard each hold [lending] for
-         * their whole step, so a copy is settled exactly once: by the lane, or by [close] as dropped at the end.
+         * The runs registered for a copy -- from before the copy is made -- and not yet settled. [close], a submit, a
+         * discard and the copy's own outcome each take [lending] for their step, so a run is settled exactly once: by
+         * the lane, by a failed copy, or by [close] as dropped at the end.
          */
         private val lending = Any()
 
@@ -260,7 +263,18 @@ internal class DepthEvidenceCapture(
 
         fun giveBack(planes: Planes) = synchronized(free) { free.addLast(planes) }
 
+        /**
+         * The run is registered as lent before anything is copied, so that [close] settles it whatever point the copy
+         * has reached: a run that comes in while the stream is open is counted exactly once -- written, dropped by
+         * whoever settles it first, or (closed before it came in) not part of this stream at all.
+         */
         fun copy(generation: Long, runId: Long, frame: ImageFrame): DepthEvidenceSlot? {
+            val slot = Slot(generation, runId)
+            synchronized(lending) {
+                if (!recording) return null
+                lent += slot
+            }
+            afterRegister()
             val planes = borrow()
             val yuv = frame.yuvData
             val filled = try {
@@ -271,7 +285,8 @@ internal class DepthEvidenceCapture(
             }
             if (planes == null || yuv == null || !filled) {
                 planes?.let(::giveBack)
-                drop(generation, runId, Drop.NO_BUFFER)
+                // Unless close() settled it meanwhile, and counted it then.
+                synchronized(lending) { if (lent.remove(slot)) drop(generation, runId, Drop.NO_BUFFER) }
                 return null
             }
             val facts = FrameFacts(
@@ -287,29 +302,29 @@ internal class DepthEvidenceCapture(
                 vRowStride = yuv.v.rowStride,
                 vPixelStride = yuv.v.pixelStride,
             )
-            val slot = Slot(generation, runId, facts, planes)
             synchronized(lending) {
-                if (!recording) {
-                    // Closed while this copy was being made: counted like any copy lent out at the end.
-                    giveBack(planes)
-                    drop(generation, runId, Drop.AT_END)
-                    return null
-                }
-                lent += slot
+                slot.planes = planes
+                slot.facts = facts
             }
             return slot
         }
 
-        private inner class Slot(
-            val generation: Long,
-            val runId: Long,
-            private val facts: FrameFacts,
-            private val planes: Planes,
-        ) : DepthEvidenceSlot {
+        /** A run's copy; its planes are filled in after it is registered, under [lending]. */
+        private inner class Slot(val generation: Long, val runId: Long) : DepthEvidenceSlot {
+            var planes: Planes? = null
+            var facts: FrameFacts? = null
+
             override fun submit(run: DepthEvidenceRun) {
                 synchronized(lending) {
                     // Already settled: by an earlier call, or by close() as dropped at the end.
                     if (!lent.remove(this)) return
+                    val planes = planes
+                    val facts = facts
+                    if (planes == null || facts == null) {
+                        // The lane holds a slot only once copy() returned it filled; counted, never lost, all the same.
+                        drop(generation, runId, Drop.NO_BUFFER)
+                        return
+                    }
                     val sent = queue.trySend(Pending(generation, runId, facts, planes, run))
                     if (sent.isFailure) {
                         giveBack(planes)
@@ -320,7 +335,7 @@ internal class DepthEvidenceCapture(
 
             override fun discard() {
                 synchronized(lending) {
-                    if (lent.remove(this)) giveBack(planes)
+                    if (lent.remove(this)) planes?.let(::giveBack)
                 }
             }
         }

@@ -192,15 +192,18 @@ def content_range(pad: float, extent: float, scale: float, size: int) -> range:
 
 
 def relative_error(reference: np.ndarray, candidate: np.ndarray, transform: dict) -> tuple[float, float]:
-    """(median, p95) over the content pixels of |candidate - reference| / max(|reference|, 5 % of max |reference|)."""
+    """(median, p95) over the content pixels of |candidate - reference| / max(|reference|, 5 % of max |reference|), as
+    ``compareDisparity`` computes it: where that denominator is 0, equal values are no error and different ones an
+    infinite one; a non-finite value is infinitely off."""
     h, w = reference.shape
     cols = content_range(transform["padLeft"], transform["sourceWidth"], transform["scaleX"], w)
     rows = content_range(transform["padTop"], transform["sourceHeight"], transform["scaleY"], h)
     r = reference[rows.start:rows.stop, cols.start:cols.stop].astype(F32)
     c = candidate[rows.start:rows.stop, cols.start:cols.stop].astype(F32)
     floor = F32(0.05) * F32(np.max(np.abs(r))) if r.size else F32(0)
+    denominator = np.maximum(np.abs(r), floor)
     with np.errstate(divide="ignore", invalid="ignore"):
-        e = np.abs(c - r) / np.maximum(np.abs(r), floor)
+        e = np.where(denominator > 0, np.abs(c - r) / denominator, np.where(c == r, F32(0), F32(np.inf)))
     e = np.where(np.isfinite(e), e, np.inf).ravel()
     if e.size == 0:
         return math.inf, math.inf
@@ -223,30 +226,55 @@ def load_interpreter(model_path: str):
     return interpreter
 
 
-def tensor_layout(input_shape) -> tuple[int, int, str]:
-    """(width, height, layout) of a ``[1,H,W,3]`` or ``[1,3,H,W]`` float input, NHWC first, as the runtime reads it."""
+def input_readings(input_shape) -> list:
+    """Every (width, height, layout) a float input reads as: ``[1,H,W,3]`` (NHWC), ``[1,3,H,W]`` (NCHW) or both, as
+    ``DepthTensorContract.inputReadings``."""
     shape = list(input_shape)
-    if len(shape) != 4 or shape[0] != 1:
-        raise ValueError(f"expected [1,3,H,W] or [1,H,W,3], got {shape}")
+    if len(shape) != 4 or shape[0] != 1 or any(d <= 0 for d in shape):
+        return []
+    readings = []
     if shape[3] == 3:
-        return shape[2], shape[1], "NHWC"
+        readings.append((shape[2], shape[1], "NHWC"))
     if shape[1] == 3:
-        return shape[3], shape[2], "NCHW"
-    raise ValueError(f"expected [1,3,H,W] or [1,H,W,3], got {shape}")
+        readings.append((shape[3], shape[2], "NCHW"))
+    return readings
 
 
-def single_channel_size(output_shape) -> tuple[int, int]:
-    """(height, width) of a ``[1,H,W]``, ``[1,1,H,W]`` or ``[1,H,W,1]`` output."""
+def single_channel_sizes(output_shape) -> list:
+    """Every (height, width) a ``[1,H,W]``, ``[1,1,H,W]`` or ``[1,H,W,1]`` output reads as, as
+    ``DepthTensorContract.singleChannelSizes``: with one channel both four-dimensional layouts hold the values in the
+    same order, so only the size matters."""
     shape = list(output_shape)
     if not shape or shape[0] != 1 or any(d <= 0 for d in shape):
-        raise ValueError(f"expected [1,H,W], [1,1,H,W] or [1,H,W,1], got {shape}")
+        return []
     if len(shape) == 3:
-        return shape[1], shape[2]
-    if len(shape) == 4 and shape[1] == 1:
-        return shape[2], shape[3]
-    if len(shape) == 4 and shape[3] == 1:
-        return shape[1], shape[2]
-    raise ValueError(f"expected [1,H,W], [1,1,H,W] or [1,H,W,1], got {shape}")
+        return [(shape[1], shape[2])]
+    if len(shape) == 4:
+        sizes = []
+        if shape[1] == 1:
+            sizes.append((shape[2], shape[3]))
+        if shape[3] == 1 and (shape[1], shape[2]) not in sizes:
+            sizes.append((shape[1], shape[2]))
+        return sizes
+    return []
+
+
+def resolve_tensors(input_shape, output_shape) -> tuple[int, int, str]:
+    """(width, height, input layout) under the depth contract (``DepthTensorContract.resolve``): the input reading
+    whose size the output has. An input whose two layouts both fit cannot be told apart and is refused."""
+    readings = input_readings(input_shape)
+    if not readings:
+        raise ValueError(f"expected [1,3,H,W] or [1,H,W,3], got {list(input_shape)}")
+    sizes = single_channel_sizes(output_shape)
+    if not sizes:
+        raise ValueError(f"expected [1,H,W], [1,1,H,W] or [1,H,W,1], got {list(output_shape)}")
+    fitting = [r for r in readings if (r[1], r[0]) in sizes]
+    if not fitting:
+        raise ValueError(f"output {list(output_shape)} differs from input {list(input_shape)} in size")
+    if len(fitting) > 1:
+        raise ValueError(f"input {list(input_shape)} reads as both [1,3,H,W] and [1,H,W,3] at the output's size; "
+                         "its layout cannot be told")
+    return fitting[0]
 
 
 class Model:
@@ -262,10 +290,7 @@ class Model:
         self.input, self.output = inputs[0], outputs[0]
         if self.input["dtype"] != np.float32 or self.output["dtype"] != np.float32:
             raise ValueError("the depth contract needs a float32 input and output")
-        self.width, self.height, self.layout = tensor_layout(self.input["shape"])
-        out_h, out_w = single_channel_size(self.output["shape"])
-        if (out_w, out_h) != (self.width, self.height):
-            raise ValueError(f"output {out_w}x{out_h} differs from input {self.width}x{self.height}")
+        self.width, self.height, self.layout = resolve_tensors(self.input["shape"], self.output["shape"])
         self.shape_label = "x".join(map(str, self.input["shape"])) + ">" + "x".join(map(str, self.output["shape"]))
 
     def run(self, rgb: np.ndarray) -> np.ndarray:
