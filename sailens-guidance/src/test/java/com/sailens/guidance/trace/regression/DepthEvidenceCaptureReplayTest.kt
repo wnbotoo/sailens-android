@@ -74,7 +74,8 @@ class DepthEvidenceCaptureReplayTest {
                     r.pc?.let { pc ->
                         appendLine(
                             "  pc runs ${pc.runs}: relative error median ${pc.medianRelativeError} p95 ${pc.p95RelativeError} max ${pc.maxRelativeError}, " +
-                                "fit agreement ${pc.fitAgreement} (${pc.disagreementCount} disagreeing), label agreement ${pc.labelAgreement} " +
+                                "fit agreement ${pc.fitAgreement} (${pc.disagreementCount} disagreeing, ${pc.unsettledAtEnd} unsettled at the end), " +
+                                "label agreement ${pc.labelAgreement} " +
                                 "over ${pc.labelRuns} (the PC's output fitted from the phone's history); each side's own history in " +
                                 "session order, validity agreement ${pc.sessionValidityAgreement} (not judged)",
                         )

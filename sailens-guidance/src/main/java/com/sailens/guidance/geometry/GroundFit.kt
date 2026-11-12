@@ -145,11 +145,25 @@ class GroundFitter(
         it.holdingSwitch = holdingSwitch
     }
 
-    /** The part of the history that can change a later fit's validity. */
+    /** The part of the history that can change a later fit's validity, in short. */
     internal fun guardState(): GroundGuardState = GroundGuardState(
         holdingSwitch = holdingSwitch,
         armed = lastBelow?.let { it.countTrue() >= MIN_BELOW_CELLS_FRACTION * it.width * it.height } ?: false,
     )
+
+    /**
+     * Whether [other]'s history can still change a later fit's validity differently from this one's: the hold, and
+     * the very cells the last valid fit saw below ground. The coverage history changes only the confidence.
+     */
+    internal fun sameGuardHistory(other: GroundFitter): Boolean {
+        if (holdingSwitch != other.holdingSwitch) return false
+        val mine = lastBelow
+        val theirs = other.lastBelow
+        if (mine === theirs) return true
+        if (mine == null || theirs == null) return false
+        return mine.width == theirs.width && mine.height == theirs.height &&
+            mine.copyPackedBits().contentEquals(theirs.copyPackedBits())
+    }
 
     /**
      * @param intrinsics of the analysis image the depth input was made from (same size as

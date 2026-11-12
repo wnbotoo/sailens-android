@@ -122,7 +122,8 @@ when the session stopped) comes after every recorded run and cuts nothing.
 
 Judged per [`../field-capture.md`](../field-capture.md) §11: output median relative error ≤ 1 %; fit
 agreement ≥ 95 %, the PC's output of each run fitted from the phone's history and compared on validity, on
-the guard state it leaves and on what that state gives the next run; label agreement ≥ 95 % over the runs
+the guard state it leaves and on what the history it leaves gives later runs until it is the phone's again;
+label agreement ≥ 95 % over the runs
 where both of those fits are valid. The validity agreement with each side's own fitter fitting the session
 in order is reported.
 
@@ -140,7 +141,9 @@ The curb was in view: 20 of the judged curb session's 293 valid fits had at leas
 ground (up to 50 %). Over the seven sessions 73 of 3016 runs disagreed: 46 on the guard alone, a valid fit
 whose below-ground region crossed the 2 % that arms the guard on one side only (the PC's output armed it 30
 times, the phone's 16); 24 on validity (phone `SUPPORT_SWITCH` and PC another validity 11 times, the reverse
-4, the rest between `NO_GROUND`, `NO_SUPPORT` and `VALID`); 3 on the next run only. Where the session-order
+4, the rest between `NO_GROUND`, `NO_SUPPORT` and `VALID`); 3 only through a later run, in all three the
+next one. At the end of three sessions one run's history was still different and had shown nothing. Where
+the session-order
 agreement is low, one such call put the two fitters' holds at different runs and kept them apart until both
 saw two levels again (30–74 runs indoors).
 

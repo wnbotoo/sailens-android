@@ -59,15 +59,19 @@ data class DepthPcAgreement(
      * Judged. Before each run, the phone's fitter (the replay's, in the session's order) is copied, history and all,
      * and the copy fits the PC's output. The run agrees when that fit has the phone's validity, leaves the guard as
      * the phone's fit leaves it ([com.sailens.guidance.geometry.GroundGuardState]: the hold, and whether the guard
-     * is armed), and the state it leaves gives the next run's phone output the validity the phone's state gives it.
-     * A call that goes differently counts on the run it happens, once; the next run starts from the phone's history
-     * again, so a hold it would have started is not counted on every run after, while a difference that recurs is
-     * counted every time.
+     * is armed), and the history it leaves gives every later run's phone output the validity the phone's history
+     * gives it, for as long as the two histories differ: the copy goes on fitting the phone's outputs until its
+     * history is the phone's ([GroundFitter.sameGuardHistory]), which the next valid fit on both makes it. A fit
+     * that returns early keeps the history it found, so the check carries on past it. A call that goes differently
+     * counts once, on the run where it happens, whenever its consequence shows; a difference that recurs counts
+     * every time.
      */
     val fitAgreement: Float,
-    /** The first disagreeing runs, in order, and how many there were in all. */
+    /** The first disagreeing runs, in the order found, and how many there were in all. */
     val disagreements: List<DepthFitDisagreement>,
     val disagreementCount: Int,
+    /** Runs whose PC output left a different history that neither showed nor settled before the comparison ended. */
+    val unsettledAtEnd: Int,
     /** Mean label agreement over [labelRuns], the runs where both of those fits are valid; null when none were. */
     val labelAgreement: Float?,
     val labelRuns: Int,
@@ -268,8 +272,10 @@ class DepthEvidenceReplay(
         var labelSum = 0.0
         var labelRuns = 0
         var stoppedAt: String? = null
-        // The state the PC's output left the previous run's copy in: this run's phone output is fitted from it once.
-        var pcLeft: GroundFitter? = null
+        // Copies whose history a PC output left different from the phone's: each follows the phone's outputs until
+        // its history is the phone's, or a later run's validity shows the difference.
+        class Branch(val origin: Int, val fitter: GroundFitter)
+        var branches = mutableListOf<Branch>()
         for ((index, record) in acceptable.withIndex()) {
             val values = candidate(record)
             if (values == null) {
@@ -288,21 +294,29 @@ class DepthEvidenceReplay(
             val pc = fit(shared, record, values)
             val phone = fit(phoneFitter, record, phoneValues)
             agrees += true
-            // The previous run's PC output left a state: does it give this run what the phone's history gives?
-            pcLeft?.let { left ->
-                val next = fit(left, record, phoneValues)
-                if (next.validity != phone.validity) disagree(index - 1, "next run", phone.validity.text(), next.validity.text())
+            // Histories earlier PC outputs left: does this run's phone output show them?
+            val following = mutableListOf<Branch>()
+            for (branch in branches) {
+                val later = fit(branch.fitter, record, phoneValues)
+                when {
+                    later.validity != phone.validity -> disagree(
+                        branch.origin, "run ${record.runId} (fit ${record.fitOrdinal}) from its history", phone.validity.text(), later.validity.text(),
+                    )
+                    !branch.fitter.sameGuardHistory(phoneFitter) -> following += branch
+                }
             }
+            branches = following
             if (pc.validity != phone.validity) {
                 disagree(index, "validity", phone.validity.text(), pc.validity.text())
             } else if (shared.guardState() != phoneFitter.guardState()) {
                 disagree(index, "guard", phoneFitter.guardState().text(), shared.guardState().text())
+            } else if (!shared.sameGuardHistory(phoneFitter)) {
+                branches += Branch(index, shared)
             }
             if (phone.isValid && pc.isValid) {
                 labelSum += labelAgreement(phone, pc)
                 labelRuns++
             }
-            pcLeft = shared
             if (replayed[index].validity == fit(sessionFitter, record, values).validity) sessionValidityAgrees++
         }
         val sorted = errors.sorted()
@@ -315,6 +329,7 @@ class DepthEvidenceReplay(
             fitAgreement = if (n > 0) (n - disagreementCount).toFloat() / n else 0f,
             disagreements = disagreements,
             disagreementCount = disagreementCount,
+            unsettledAtEnd = branches.size,
             labelAgreement = if (labelRuns > 0) (labelSum / labelRuns).toFloat() else null,
             labelRuns = labelRuns,
             sessionValidityAgreement = if (n > 0) sessionValidityAgrees.toFloat() / n else 0f,

@@ -341,9 +341,13 @@ with one fitter per depth session over the acceptable runs and must reproduce ev
 (validity, gravity agreement, each mask by CRC). Against the PC, the PC's output of each run is fitted from
 the phone's history: before the run, the replay's fitter is copied, history and all, and the copy fits the
 PC's output. The run agrees when that fit has the phone's validity, leaves the support-switch guard as the
-phone's fit leaves it (the hold on or off, the guard armed or not), and the state it leaves gives the next
-run's phone output the validity the phone's own state gives it. A call that goes differently therefore
-counts once, on the run where it happens, and a difference that recurs counts every time. Fitting each side
+phone's fit leaves it (the hold on or off, the guard armed or not), and the history it leaves gives every
+later run's phone output the validity the phone's history gives it, for as long as the two histories differ:
+the copy goes on fitting the phone's outputs until its history is the phone's (the hold, and the very cells
+last seen below ground), which the next fit valid on both makes it. A fit that returns early (no ground, no
+support) keeps the history it found, so the check carries on past it. A call that goes differently therefore
+counts once, on the run where it happens, whenever its consequence shows, and a difference that recurs
+counts every time. Fitting each side
 in its own order instead would let one call count many times over: the hold ends only when two levels are
 seen together again, so it keeps the two apart until then, however close the outputs are. That
 session-order agreement is still reported, not judged. Every acceptable run needs its PC output: one

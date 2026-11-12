@@ -118,14 +118,34 @@ class DepthEvidenceReplayTest {
      * and a patch that large arms the support-switch guard: 11.8 % and 12.2 % differ by 0.45 % of disparity and fall
      * on either side.
      */
-    private fun patchedGround(depression: Float): FloatArray {
+    private fun patchedGround(depression: Float): FloatArray =
+        ground { u, v -> if (u >= 0.42f * aw && u < 0.58f * aw && nearRows(v)) depression else 0f }
+
+    private fun nearRows(v: Float) = v >= 0.78f * ah && v < 0.95f * ah
+
+    /** Level ground, its disparity lowered by `depressionAt(u, v)` (a fraction) at analysis pixel (u, v). */
+    private fun ground(depressionAt: (Float, Float) -> Float): FloatArray {
         val g = gravity(standing)
         return FloatArray(mw * mh) { i ->
             val u = transform.toAnalysisX(i % mw + 0.5f)
             val v = transform.toAnalysisY(i / mw + 0.5f)
             val q = g.x * (u - intrinsics.cx) / intrinsics.fx + g.y * (v - intrinsics.cy) / intrinsics.fy + g.z
-            val patch = u >= 0.42f * aw && u < 0.58f * aw && v >= 0.78f * ah && v < 0.95f * ah
-            10f * q * (if (patch) 1f - depression else 1f) + 0.2f
+            10f * q * (1f - depressionAt(u, v)) + 0.2f
+        }
+    }
+
+    /**
+     * Two patches near the feet, each large enough to arm the guard, overlapping by less than half: A spans 40–56 %
+     * of the width, B 50–66 %. In [below] the depression passes the 12 % band (below ground), in the rest of A and B
+     * it stays short of it.
+     */
+    private fun twoPatches(below: (inA: Boolean, inB: Boolean) -> Boolean): FloatArray = ground { u, v ->
+        val inA = nearRows(v) && u >= 0.40f * aw && u < 0.56f * aw
+        val inB = nearRows(v) && u >= 0.50f * aw && u < 0.66f * aw
+        when {
+            !inA && !inB -> 0f
+            below(inA, inB) -> 0.122f
+            else -> 0.118f
         }
     }
 
@@ -242,6 +262,30 @@ class DepthEvidenceReplayTest {
         assertEquals("not holding, not armed", only.phone)
         assertEquals("not holding, armed", only.pc)
         assertEquals(report.verdictReason, DepthEvidenceVerdict.PASS, report.verdict)
+    }
+
+    @Test
+    fun `a different history that shows only after fits that keep it counts against the run that left it`() {
+        // Both sides arm the guard, on different cells: the phone's patch B, the PC's patch A. No-ground runs follow,
+        // which keep the history they find. Then B alone stays below and the rest of A reads as ground: the phone's
+        // history (B) sees no switch, the PC's (A) switches. Every third and every fifth run.
+        val phonePatch = twoPatches { _, inB -> inB }
+        val pcPatch = twoPatches { inA, _ -> inA }
+        val target = ground { u, v -> if (nearRows(v) && u >= 0.50f * aw && u < 0.66f * aw) 0.122f else 0f }
+        val noGround = FloatArray(mw * mh) { 1f }
+        for (period in listOf(3, 5)) {
+            val phoneOutputs = List(45) { when (it % period) { 0 -> phonePatch; period - 1 -> target; else -> noGround } }
+            val pcOutputs = List(45) { when (it % period) { 0 -> pcPatch; period - 1 -> target; else -> noGround } }
+            val session = record(phoneOutputs) { standing }
+            assertTrue(session.records.none { it.observation?.validity == GroundFitValidity.SUPPORT_SWITCH.name.lowercase() })
+            val report = DepthEvidenceReplay(few).replay(session.records, session::output, candidate = { pcOutputs[it.fitOrdinal!!.toInt()] }).single()
+            assertEquals(45, report.exactRuns)
+            val agreement = report.pc!!
+            assertEquals("period $period", 45 - 45 / period, 45 - agreement.disagreementCount)
+            assertTrue(agreement.disagreements.all { it.fitOrdinal % period == 0L && "from its history" in it.what })
+            assertEquals("period $period", DepthEvidenceVerdict.FAIL, report.verdict)
+            assertTrue(report.verdictReason, "fit agreement" in report.verdictReason)
+        }
     }
 
     @Test
