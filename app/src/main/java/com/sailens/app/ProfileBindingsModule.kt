@@ -39,8 +39,8 @@ val profileBindingsModule = module {
         )
     }
     single<CameraRuntimeConfig> { get<SailensRuntimeProfile>().camera }
-    // Which file each model is: this host's models are the git-ignored assets ModelCatalog names.
-    // The runners and the static preflight (App.kt -> sailensEditionSpec) share this one instance.
+    // Which file each model is: the assets ModelCatalog names.
+    // The runners and the static preflight (editionModule in SailensEdition.kt) share this one instance.
     single<ModelSourceResolver> { CatalogModelSourceResolver }
     single<SemanticModelConfig> { get<SailensRuntimeProfile>().semanticModel }
     single<DetectionModelConfig> { get<SailensRuntimeProfile>().realtimeObstacleModel }

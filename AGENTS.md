@@ -23,6 +23,10 @@ pipeline that turns the scene ahead into speech and haptics. This file is the re
   `applicationId = "com.sailens.reference"`; both keep namespace `com.sailens`.
 - Do not add store branding, official bundled weights or release-product identity to the platform
   repository. Reusable capability belongs here; distribution choices belong in the shipping app.
+- The shipping app keeps its host (`app/src/main`) byte-identical to this one except `SailensEdition.kt` (its
+  spec and the binding that builds it from whatever it checks) and its product strings; its CI checks this.
+  So a host change here is mirrored there, and anything an edition varies goes through `SailensEdition.kt`,
+  never through `App.kt` or a shared DI module.
 - The `sailens-*` Gradle modules are architecture/API boundaries, not a commitment to publish nine
   Maven artifacts. Source/composite consumption remains the policy until a stable external SDK
   surface and independent consumers justify Maven publication.
@@ -61,7 +65,7 @@ pipeline that turns the scene ahead into speech and haptics. This file is the re
 - Check `app/SailensRuntimeProfile.kt`, `app/DomainBindingsModule.kt`, `app/SailensEdition.kt`, `sailens-shell/di/ShellModule.kt` and `sailens-guidance/di/GuidanceModule.kt` first; DI is explicit constructor injection via Koin.
 - Constructor defaults in `PerceptionConfig` are conservative (`BASIC`, obstacle provider type `NONE`), but the app's runtime profile overrides them to sem + realtime det mode.
 - There is one runtime profile, `standard`: every model, the VLM included, targets the GPU. Add a second profile only when a second hardware path exists.
-- Treat `SailensRuntimeProfile.kt` as the source of truth for runtime backend targets and cadence; physical model files are resolved by `ModelCatalog` / `ModelSourceResolver` from `(ModelType, actual accelerator)`. Which resolver is the host's choice: the host binds one (`app/ProfileBindingsModule.kt` binds `CatalogModelSourceResolver`) and hands that same instance, with each model config's `acceleratorBackend`, to its static preflight (`App.kt` → `sailensEditionSpec`), so the check reads the file the runner loads. No platform module binds a resolver, and no platform constructor defaults one.
+- Treat `SailensRuntimeProfile.kt` as the source of truth for runtime backend targets and cadence; physical model files are resolved by `ModelCatalog` / `ModelSourceResolver` from `(ModelType, actual accelerator)`. Which resolver is the host's choice: the host binds one (`app/ProfileBindingsModule.kt` binds `CatalogModelSourceResolver`) and hands that same instance, with each model config's `acceleratorBackend`, to its static preflight (`editionModule` in `SailensEdition.kt` → `sailensEditionSpec`), so the check reads the file the runner loads. No platform module binds a resolver, and no platform constructor defaults one.
 - Runtime hardware label comes from `DeviceHardwareProfileProvider` (`Build.SOC_MANUFACTURER` + `Build.SOC_MODEL`, with board/model fallback), not a hardcoded SoC string.
 - ML backend reporting is carried by `MlRuntimeInfo` through outputs, scene debug info, trace JSON, trace replay, and UI.
 - Accelerator selection is explicit by default; do not hide initialization failures with backend fallback while debugging model/backend compatibility. The app trace label reports the requested/active LiteRT accelerator, not proof that every op stayed on that backend.

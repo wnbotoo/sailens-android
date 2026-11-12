@@ -83,6 +83,11 @@ BYO-model 工作流。这个 host 合法地允许零 available pipeline。
 官方 App 应保持很薄。如果其中出现可被一般 Sailens consumer 复用的 capability，应在许可检查后
 回到 Sailens Android，而不是在发行仓库里继续长大。
 
+它的 host 代码就是 reference host 的：`app/src/main` 下的每个文件都和钉住的版本逐字节相同（它的 CI 会检查），
+例外只有 `SailensEdition.kt` 和产品字符串。一个 edition 在"提供什么、承诺什么"上的所有差异都放在
+`SailensEdition.kt`：它的 `SailensAppSpec`，以及从这个 edition 要检查的东西构造它的 Koin 绑定（`editionModule`），
+例如为自己的静态预检多拿一个模型的配置。`App.kt` 只注入这个 spec，所以永远不需要不同。
+
 ## 4. 当前继续 source consumption，不发布 Maven
 
 9 个 Gradle library module 首先是 **architecture、compile、dependency、test、native boundary**，
