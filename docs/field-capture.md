@@ -338,19 +338,22 @@ a line-by-line transcription of the kernel in `test_depth_evidence.py`; the kern
 multiply-add, so values can differ in the last bit), runs the model in float32 on the CPU and writes
 `<pc dir>/<sessionId>/g<session>_r<run>.f32`. The replay (`DepthEvidenceReplay`) fits the phone's outputs
 with one fitter per depth session over the acceptable runs and must reproduce every recorded fit
-(validity, gravity agreement, each mask by CRC). Against the PC, each run is fitted on its own, from the
-phone's output and from the PC's, by a new fitter each: the fitter's history is checked by the exact replay,
-and a borderline call that goes differently on the two sides would otherwise count many times over (the
-support-switch hold ends only when two levels are seen together again, so one such call gives a stretch of
-differing fits however close the outputs are). A second fitter also fits the PC's outputs in the session's
-order; its validity agreement with the replay is reported, not judged. Every acceptable run needs its PC
-output: one missing ends the comparison there and the session cannot be judged, however many runs came
-before it. A session passes when, over its acceptable runs:
+(validity, gravity agreement, each mask by CRC). Against the PC, the PC's output of each run is fitted from
+the phone's history: before the run, the replay's fitter is copied, history and all, and the copy fits the
+PC's output. The run agrees when that fit has the phone's validity, leaves the support-switch guard as the
+phone's fit leaves it (the hold on or off, the guard armed or not), and the state it leaves gives the next
+run's phone output the validity the phone's own state gives it. A call that goes differently therefore
+counts once, on the run where it happens, and a difference that recurs counts every time. Fitting each side
+in its own order instead would let one call count many times over: the hold ends only when two levels are
+seen together again, so it keeps the two apart until then, however close the outputs are. That
+session-order agreement is still reported, not judged. Every acceptable run needs its PC output: one
+missing ends the comparison there and the session cannot be judged, however many runs came before it.
+A session passes when, over its acceptable runs:
 
 | | Band |
 |---|---|
 | Output | the median of each run's median relative error (`compareDisparity`, the content pixels, the PC's output the reference) ≤ 1 % |
-| Fit validity | each run fitted on its own: the same validity in ≥ 95 % of the runs |
+| Fit | the PC's output fitted from the phone's history agrees, as above, in ≥ 95 % of the runs |
 | Labels | over the runs where both of those fits are valid, the mean share of grid cells with the same label ≥ 95 % |
 
 Without PC outputs the test checks the exact replay only. Reports go to

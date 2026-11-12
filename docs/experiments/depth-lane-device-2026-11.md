@@ -73,8 +73,9 @@ neither was the power this costs.
 - **Stop and restart.** Over the 24 depth sessions of these traces and the two extra stops, every depth
   session's records are its own (its generation, in order), no run was published after its session
   closed, no frame carried an observation from another session or from before its session's first
-  publish, and no run failed. Stops landed while the model compiled (5), in prepare (1), in inference
-  (4) and in the fit (6).
+  publish, and no run failed. Stops landed while the model compiled (5) and while the lane ran (21):
+  inside prepare 1, inside inference 4, inside the fit 6 and between runs 10. Inference is about 30 ms of
+  each 333 ms period, so a stop lands inside it about one time in ten.
 - **Resources.** Idle threads 78–83 after the first session (67 before any), at most 87 while running;
   idle graphics memory back to 61–62 MB. GL mtrack moved from 1536 to 2304 KB over the 24 depth
   sessions, and between 1920 and 2496 KB within one idle stretch: under 1 MB, not shown to be a leak.
@@ -119,23 +120,29 @@ the first that met the preconditions (complete, at least 300 acceptable runs, no
 them, the scene in view); all are listed. A run dropped at the end (`droppedAtEnd`: the one in flight
 when the session stopped) comes after every recorded run and cuts nothing.
 
-Judged per [`../field-capture.md`](../field-capture.md) §11: output median relative error ≤ 1 %, fit
-validity agreement ≥ 95 % and label agreement ≥ 95 %, each run fitted on its own. The agreement with
-each side's fitter fitting the session in order is reported.
+Judged per [`../field-capture.md`](../field-capture.md) §11: output median relative error ≤ 1 %; fit
+agreement ≥ 95 %, the PC's output of each run fitted from the phone's history and compared on validity, on
+the guard state it leaves and on what that state gives the next run; label agreement ≥ 95 % over the runs
+where both of those fits are valid. The validity agreement with each side's own fitter fitting the session
+in order is reported.
 
-| Scene | Runs | Exact replay | Output error (median) | Validity | Labels (runs) | In session order | Verdict |
+| Scene | Runs | Exact replay | Output error (median) | Fit (disagreeing runs) | Labels (runs) | In session order | Verdict |
 |---|---|---|---|---|---|---|---|
-| **Indoor floor** | 470 | 470/470 | 0.49 % | 98.7 % | 99.2 % (423) | 75.1 % | pass |
-| **Staircase top** | 446 | 446/446 | 0.59 % | 98.7 % | 99.1 % (416) | 77.4 % | pass |
-| **Granite sidewalk** | 455 | 455/455 | 0.58 % | 100 % | 98.0 % (455) | 56.0 % | pass |
-| Granite sidewalk, second | 442 | 442/442 | 0.77 % | 100 % | 97.6 % (442) | 95.2 % | pass |
-| **Curb** | 370 | 370/370 | 0.64 % | 99.7 % | 98.3 % (367) | 91.4 % | pass |
-| Curb, second | 383 | 383/383 | 0.65 % | 99.7 % | 96.3 % (377) | 96.6 % | pass |
-| Curb, third | 450 | 450/450 | 0.79 % | 100 % | 98.3 % (447) | 99.6 % | pass |
+| **Indoor floor** | 470 | 470/470 | 0.49 % | 97.9 % (10) | 99.3 % (97) | 75.1 % | pass |
+| **Staircase top** | 446 | 446/446 | 0.59 % | 98.0 % (9) | 98.9 % (178) | 77.4 % | pass |
+| **Granite sidewalk** | 455 | 455/455 | 0.58 % | 96.5 % (16) | 96.9 % (251) | 56.0 % | pass |
+| Granite sidewalk, second | 442 | 442/442 | 0.77 % | 96.2 % (17) | 97.6 % (419) | 95.2 % | pass |
+| **Curb** | 370 | 370/370 | 0.64 % | 98.4 % (6) | 98.4 % (292) | 91.4 % | pass |
+| Curb, second | 383 | 383/383 | 0.65 % | 96.9 % (12) | 96.4 % (375) | 96.6 % | pass |
+| Curb, third | 450 | 450/450 | 0.79 % | 99.3 % (3) | 98.4 % (356) | 99.6 % | pass |
 
 The curb was in view: 20 of the judged curb session's 293 valid fits had at least 2 % of the grid below
-ground (up to 50 %). Where the session-order agreement is low, the two fitters took the support-switch
-hold at different runs and kept them apart until both saw two levels again (30–74 runs indoors).
+ground (up to 50 %). Over the seven sessions 73 of 3016 runs disagreed: 46 on the guard alone, a valid fit
+whose below-ground region crossed the 2 % that arms the guard on one side only (the PC's output armed it 30
+times, the phone's 16); 24 on validity (phone `SUPPORT_SWITCH` and PC another validity 11 times, the reverse
+4, the rest between `NO_GROUND`, `NO_SUPPORT` and `VALID`); 3 on the next run only. Where the session-order
+agreement is low, one such call put the two fitters' holds at different runs and kept them apart until both
+saw two levels again (30–74 runs indoors).
 
 ## 5. Swapping in ZipDepth
 

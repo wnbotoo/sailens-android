@@ -81,6 +81,12 @@ data class GroundObservation(
 }
 
 /**
+ * The support-switch guard's state after a fit: whether the hold is on, and whether the last valid fit saw enough
+ * below ground to arm the guard for the next one. The cells it saw below ground are compared through the labels.
+ */
+internal data class GroundGuardState(val holdingSwitch: Boolean, val armed: Boolean)
+
+/**
  * Gravity-constrained ground fit on a disparity map: sample the lower image below the horizon,
  * RANSAC the line `d = A·q + t`, refit on the inliers, then label a grid. Deterministic (seeded).
  * Not thread-safe: one per pipeline. It keeps a little history -- coverage for stability, the last
@@ -124,6 +130,26 @@ class GroundFitter(
         lastBelow = null
         holdingSwitch = false
     }
+
+    /**
+     * A fitter with these thresholds in this one's state, history and all, so another output can be fitted from
+     * the history this fitter has reached without changing it (the depth evidence replay does this).
+     */
+    internal fun copy(): GroundFitter = GroundFitter(
+        inlierThreshold, structureFactor, minQ, minInlierRatio, sampleFromRow, sampleColumns, sampleRows,
+        iterations, maxGravityAngleDeg, stabilityFrames,
+    ).also {
+        it.recentCoverage.addAll(recentCoverage)
+        // A fit stores a mask it made for itself and never changes it afterwards.
+        it.lastBelow = lastBelow
+        it.holdingSwitch = holdingSwitch
+    }
+
+    /** The part of the history that can change a later fit's validity. */
+    internal fun guardState(): GroundGuardState = GroundGuardState(
+        holdingSwitch = holdingSwitch,
+        armed = lastBelow?.let { it.countTrue() >= MIN_BELOW_CELLS_FRACTION * it.width * it.height } ?: false,
+    )
 
     /**
      * @param intrinsics of the analysis image the depth input was made from (same size as
