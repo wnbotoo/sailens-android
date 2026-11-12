@@ -15,6 +15,25 @@ import com.sailens.shell.app.StaticUnavailableReason
 import com.sailens.vision.semantic.SemanticModelConfig
 import com.sailens.vision.taxonomy.CityscapesTaxonomy
 import com.sailens.vlm.SceneDescriber
+import org.koin.android.ext.koin.androidContext
+import org.koin.dsl.module
+
+/**
+ * This edition's [SailensAppSpec], built from the bindings it checks. Everything a distribution changes about
+ * what it offers and promises -- the spec, and what it hands the static preflight -- lives in this file, so
+ * `App.kt` and the module list are the same in every host: a distribution keeps them identical to the
+ * reference host's.
+ */
+val editionModule = module {
+    single<SailensAppSpec> {
+        sailensEditionSpec(
+            context = androidContext(),
+            sceneDescriber = get(),
+            modelSourceResolver = get(),
+            semanticModel = get(),
+        )
+    }
+}
 
 /**
  * What the Sailens Android reference host offers.
