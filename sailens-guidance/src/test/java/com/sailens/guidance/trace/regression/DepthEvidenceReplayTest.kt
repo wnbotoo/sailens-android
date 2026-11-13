@@ -396,6 +396,33 @@ class DepthEvidenceReplayTest {
     }
 
     @Test
+    fun `the PC is compared from the evaluated rule's history, not the recorded one's`() {
+        // Recorded under the label threshold, which the phone's 19.8 % patch and the PC's 20.2 % both arm: under that rule
+        // the two sides agree everywhere. Under the current rule only the PC's arms -- one guard difference, and in
+        // session order the PC's own history then switches on the plain ground and holds to the end.
+        val plain = patchedGround(0f)
+        val phoneOutputs = listOf(patchedGround(0.198f)) + List(49) { plain }
+        val pcOutputs = listOf(patchedGround(0.202f)) + List(49) { plain }
+        val session = record(phoneOutputs, rule = SupportGuardRule.LABEL_THRESHOLD) { standing }
+        val pc = { record: DepthEvidenceRecord -> pcOutputs[record.fitOrdinal!!.toInt()] }
+
+        val asRecorded = DepthEvidenceReplay(few).replay(session.records, session::output, recordedRule = null, candidate = pc).single()
+        assertEquals(50, asRecorded.exactRuns)
+        assertEquals(1f, asRecorded.pc!!.fitAgreement, 0f)
+        assertEquals(1f, asRecorded.pc!!.sessionValidityAgreement, 0f)
+
+        val evaluated = DepthEvidenceReplay(few).replay(
+            session.records, session::output, recordedRule = null, candidate = pc, evaluatedRule = SupportGuardRule.QUARTER_HEIGHT,
+        ).single()
+        assertEquals("still verified under the recorded rule", 50, evaluated.exactRuns)
+        assertEquals(49f / 50f, evaluated.pc!!.fitAgreement, 1e-6f)
+        assertEquals(1f / 50f, evaluated.pc!!.sessionValidityAgreement, 1e-6f)
+        val only = evaluated.pc!!.disagreements.single()
+        assertEquals(0L, only.fitOrdinal)
+        assertEquals("guard", only.what)
+    }
+
+    @Test
     fun `a capture that names a guard rule this build does not know cannot be judged`() {
         val session = record(25)
         val report = DepthEvidenceReplay(few).replay(session.records, session::output, recordedRule = 99, candidate = session::output).single()
