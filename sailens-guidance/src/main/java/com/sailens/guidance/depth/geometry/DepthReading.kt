@@ -4,6 +4,7 @@ import com.sailens.guidance.geometry.CameraGeometry
 import com.sailens.guidance.geometry.CameraIntrinsics
 import com.sailens.guidance.geometry.GeometryQuality
 import com.sailens.guidance.geometry.GroundObservation
+import com.sailens.guidance.geometry.HeightSource
 import com.sailens.guidance.geometry.PhoneGeometrySettings
 import com.sailens.guidance.geometry.TimeBasis
 import com.sailens.guidance.geometry.Vec3
@@ -18,6 +19,31 @@ enum class ScaleBasis {
 
     /** Metric depth: lengths are the source's measurements, in metres. */
     MEASURED,
+}
+
+/** The scale a source's lengths have. */
+internal fun scaleBasisOf(kind: DepthKind): ScaleBasis = when (kind) {
+    DepthKind.RELATIVE_DISPARITY -> ScaleBasis.ASSUMED_PHONE_HEIGHT
+    DepthKind.METRIC_DEPTH -> ScaleBasis.MEASURED
+}
+
+/**
+ * Metric depth measures the phone's height: the fitted ground's `1/A`. This sets it beside the one the settings
+ * assume, for the trace, the debug panel and a reader. It changes nothing: the settings, the ground-contact distance
+ * and every prompt keep the assumed height. A relative reading has none, which is not a check passed.
+ *
+ * @param relativeDifference `(measured − setting) / setting`.
+ */
+data class PhoneHeightCheck(
+    val measuredM: Float,
+    val settingM: Float,
+    val settingSource: HeightSource,
+    val relativeDifference: Float,
+) {
+    companion object {
+        fun of(measuredM: Float, setting: PhoneGeometrySettings): PhoneHeightCheck =
+            PhoneHeightCheck(measuredM, setting.heightMeters, setting.source, (measuredM - setting.heightMeters) / setting.heightMeters)
+    }
 }
 
 /** Which run of which depth session an observation came from: for reconciling records and traces, never for counting evidence. */
@@ -54,6 +80,7 @@ data class DepthReadingTimes(
  * reads a reading to decide anything yet.
  *
  * @param kind the source's kind; null until it has published an observation.
+ * @param phoneHeight metric depth with a valid fit: the measured phone height against the setting.
  */
 data class DepthReading(
     val status: CapabilityStatus,
@@ -64,6 +91,7 @@ data class DepthReading(
     val view: DepthViewGeometry?,
     val observation: GroundObservation?,
     val cells: DepthCells?,
+    val phoneHeight: PhoneHeightCheck? = null,
 ) {
     companion object {
         /** No depth session: nothing to read. */
@@ -79,12 +107,12 @@ data class DepthReading(
             val runId = snapshot.runId
             val key = snapshot.measurementKey
             if (observation == null || runId == null || key == null) {
-                return DepthReading(status, snapshot.kind, snapshot.kind?.scaleBasis(), null, null, null, null, null)
+                return DepthReading(status, snapshot.kind, snapshot.kind?.let(::scaleBasisOf), null, null, null, null, null)
             }
             return DepthReading(
                 status = status,
                 kind = snapshot.kind,
-                scaleBasis = snapshot.kind?.scaleBasis(),
+                scaleBasis = snapshot.kind?.let(::scaleBasisOf),
                 observationId = ObservationId(snapshot.generation, runId),
                 times = DepthReadingTimes(
                     measurementTimeNanos = snapshot.measurementTimeNanos,
@@ -97,12 +125,8 @@ data class DepthReading(
                 view = snapshot.view,
                 observation = observation,
                 cells = snapshot.cells,
+                phoneHeight = snapshot.phoneHeight,
             )
-        }
-
-        private fun DepthKind.scaleBasis(): ScaleBasis = when (this) {
-            DepthKind.RELATIVE_DISPARITY -> ScaleBasis.ASSUMED_PHONE_HEIGHT
-            DepthKind.METRIC_DEPTH -> ScaleBasis.MEASURED
         }
     }
 }

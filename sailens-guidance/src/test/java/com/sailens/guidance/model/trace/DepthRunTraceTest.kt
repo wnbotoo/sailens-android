@@ -52,6 +52,36 @@ class DepthRunTraceTest {
     }
 
     @Test
+    fun `a metric run's kind, times, measurement and phone height parse, a line from before them has none`() {
+        val metric = """{"type":"depth_run","sessionId":"s","seq":1,"generation":3,"runId":4,"outcome":"published","atElapsedMs":5000,""" +
+            """"validity":"valid","depthKind":"metric_depth","scaleBasis":"measured","unknownFraction":0.25,""" +
+            """"measurementTimeNanos":900,"viewTimeNanos":1000,"measurementEpoch":1,"measurementId":17,""" +
+            """"measuredPhoneHeightM":1.16,"phoneHeightDifference":-0.1,"metricShiftRatio":0.002}"""
+        val skipped = """{"type":"depth_run","sessionId":"s","seq":2,"generation":3,"runId":5,"outcome":"no_measurement","atElapsedMs":5300,""" +
+            """"depthKind":"metric_depth","scaleBasis":"measured","unknownFraction":0.95}"""
+        val mismatch = """{"type":"depth_run","sessionId":"s","seq":3,"generation":3,"runId":6,"outcome":"depth_time_mismatch","atElapsedMs":5600}"""
+        val (run, none, off) = TraceReplayParser.parse(listOf(metric, skipped, mismatch)).depthRuns
+        assertEquals("metric_depth", run.depthKind)
+        assertEquals("measured", run.scaleBasis)
+        assertEquals(0.25f, run.unknownFraction)
+        assertEquals(900L, run.measurementTimeNanos)
+        assertEquals(1000L, run.viewTimeNanos)
+        assertEquals(1L, run.measurementEpoch)
+        assertEquals(17L, run.measurementId)
+        assertEquals(1.16f, run.measuredPhoneHeightM)
+        assertEquals(-0.1f, run.phoneHeightDifference)
+        assertEquals(0.002f, run.metricShiftRatio)
+        assertEquals(DepthRunTrace.NO_MEASUREMENT, none.outcome)
+        assertEquals(0.95f, none.unknownFraction)
+        assertEquals(DepthRunTrace.DEPTH_TIME_MISMATCH, off.outcome)
+        // The line of the test above, from before these fields: all absent.
+        val old = TraceReplayParser.parse(
+            listOf("""{"type":"depth_run","sessionId":"s","seq":1,"generation":2,"runId":1,"outcome":"published","atElapsedMs":5000,"validity":"valid"}"""),
+        ).depthRuns.single()
+        assertEquals(listOf(null, null, null, null, null, null, null, null, null, null), listOf(old.depthKind, old.scaleBasis, old.unknownFraction, old.measurementTimeNanos, old.viewTimeNanos, old.measurementEpoch, old.measurementId, old.measuredPhoneHeightM, old.phoneHeightDifference, old.metricShiftRatio))
+    }
+
+    @Test
     fun `an unknown outcome is rejected with its line number`() {
         val error = assertThrows(IllegalArgumentException::class.java) {
             TraceReplayParser.parse(listOf("""{"type":"depth_run","sessionId":"s","seq":1,"generation":1,"runId":1,"outcome":"maybe","atElapsedMs":1}"""))

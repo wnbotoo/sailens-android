@@ -20,6 +20,8 @@ import com.sailens.vision.depth.DepthMap
 import com.sailens.vision.depth.DepthRun
 import com.sailens.vision.depth.DisparityMap
 import com.sailens.vision.depth.MeasurementKey
+import com.sailens.vision.depth.MetricDepthMap
+import kotlin.math.abs
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineExceptionHandler
@@ -40,6 +42,9 @@ enum class DepthLaneState {
     NOT_CONFIGURED,
     MODEL_UNREADABLE,
     INIT_FAILED,
+
+    /** The source refused itself at initialization ([DepthSourceUnavailable]): its reason is the state's issue. */
+    SOURCE_UNAVAILABLE,
     RUNNING,
     PREPROCESS_UNAVAILABLE,
     PAUSED_THERMAL,
@@ -81,6 +86,10 @@ data class DepthGeometrySnapshot(
     val measurementKey: MeasurementKey? = null,
     val view: DepthViewGeometry? = null,
     val cells: DepthCells? = null,
+    /** Metric depth, a valid fit: the phone height the depths measure against the one the settings assume. */
+    val phoneHeight: PhoneHeightCheck? = null,
+    /** The detail behind a failed or refused [state]: `DepthSession.stateIssue` when the snapshot was read. */
+    val stateIssue: String? = null,
 )
 
 /** What a depth session needs from the Guidance session that starts it. */
@@ -193,7 +202,20 @@ class DepthGeometryLane(
             }
             val created = producerFactory()
             runner = created
-            if (runCatchingNonCancellation { created.initialize() } == null) {
+            var refused: String? = null
+            val initialized = runCatchingNonCancellation {
+                try {
+                    created.initialize()
+                } catch (error: DepthSourceUnavailable) {
+                    logService.warning(TAG, "Depth source unavailable: ${error.reason}")
+                    refused = error.reason
+                }
+            }
+            refused?.let { reason ->
+                setState(DepthLaneState.SOURCE_UNAVAILABLE, reason)
+                return
+            }
+            if (initialized == null) {
                 setState(DepthLaneState.INIT_FAILED, "init_failed")
                 return
             }
@@ -319,6 +341,20 @@ class DepthGeometryLane(
                 return
             }
 
+            // A view more than the allowed offset from its frame is not that frame's: the frame's facts do not place it.
+            val viewTime = run.map.times.viewTimeNanos
+            if (viewTime != null && abs(viewTime - facts.sensorTimestampNanos) > config.maxViewOffsetPeriods * periodMs * 1_000_000L) {
+                commit(attempt, DepthRunTrace.DEPTH_TIME_MISMATCH, snapshot = null, prepareMs = prepareMs, admitWaitMs = admitWaitMs, run = run, skipReason = SKIP_TIME_MISMATCH)
+                return
+            }
+            // Holes and low confidence are unknown, not failure; a map that is mostly unknown measured nothing. Not a
+            // failure either: it neither counts toward stopping the lane nor refreshes the last observation's time.
+            val metric = run.map as? MetricDepthMap
+            if (metric != null && metric.unknownFraction > config.maxUnknownFraction) {
+                commit(attempt, DepthRunTrace.NO_MEASUREMENT, snapshot = null, prepareMs = prepareMs, admitWaitMs = admitWaitMs, run = run, skipReason = SKIP_NO_MEASUREMENT)
+                return
+            }
+
             // The map's pixels belong to its view: gravity and intrinsics at that moment. A model's view is its frame.
             val view = viewGeometry(run.map, facts, geometry, context)
             check(view.canFit()) { "no usable geometry at the map's view time" }
@@ -384,8 +420,17 @@ class DepthGeometryLane(
         fitCpuUs: Long?,
     ) {
         val times = run.map.times
-        // On the view's time basis: the view's own time, less however much earlier the source measured.
-        val measuredBefore = times.viewTimeNanos?.let { viewTime -> times.measurementTimeNanos?.let { viewTime - it } } ?: 0L
+        // On the view's time basis: the view's own time, less however much earlier the source measured. A model measures
+        // its own frame; a metric source that cannot say when it measured has no age, so it is never fresh.
+        val measurementTime = when (run.map.kind) {
+            DepthKind.RELATIVE_DISPARITY -> view.frameTimeNanos?.let { viewAt ->
+                viewAt - (times.viewTimeNanos?.let { v -> times.measurementTimeNanos?.let { v - it } } ?: 0L)
+            }
+            DepthKind.METRIC_DEPTH -> times.measurementTimeNanos?.let { measured ->
+                view.frameTimeNanos?.let { viewAt -> viewAt - ((times.viewTimeNanos ?: measured) - measured) }
+            }
+        }
+        val phoneHeight = observation.measuredPhoneHeightM?.let { measured -> PhoneHeightCheck.of(measured, view.phone) }
         val snapshot = DepthGeometrySnapshot(
             generation = this.generation,
             state = DepthLaneState.RUNNING,
@@ -404,11 +449,12 @@ class DepthGeometryLane(
             detail = run.detail,
             modelShape = run.shapeLabel,
             kind = run.map.kind,
-            measurementTimeNanos = view.frameTimeNanos?.let { it - measuredBefore },
+            measurementTimeNanos = measurementTime,
             viewTimeNanos = view.frameTimeNanos,
             measurementKey = times.measurementKey ?: MeasurementKey(this.generation, attempt.runId),
             view = viewGeometry,
             cells = cells,
+            phoneHeight = phoneHeight,
         )
         commit(attempt, DepthRunTrace.PUBLISHED, snapshot, prepareMs, admitWaitMs, run, observation, fitMs, fitCpuUs)
     }
@@ -450,6 +496,10 @@ class DepthGeometryLane(
         const val SKIP_NO_BASELINE: String = "no_baseline_yet"
         const val SKIP_FRAME_UNQUALIFIED: String = "frame_unqualified"
         const val SKIP_GEOMETRY: String = "geometry_unavailable"
+
+        /** After the run, not before it: the attempt has its record; the capability names the reason while it lasts. */
+        const val SKIP_NO_MEASUREMENT: String = "no_measurement"
+        const val SKIP_TIME_MISMATCH: String = "depth_time_mismatch"
         const val STAGE_PREPARE: String = "prepare"
         const val STAGE_ADMIT: String = "admit"
         const val STAGE_INFER: String = "infer"

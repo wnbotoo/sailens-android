@@ -63,6 +63,16 @@ internal object TraceJsonEncoder {
         record.cancelledStage?.let { put("cancelledStage", it) }
         record.failuresTotal?.let { put("failuresTotal", it) }
         record.finalState?.let { put("finalState", it) }
+        record.depthKind?.let { put("depthKind", it) }
+        record.scaleBasis?.let { put("scaleBasis", it) }
+        record.unknownFraction?.let { put("unknownFraction", it.toDouble()) }
+        record.measurementTimeNanos?.let { put("measurementTimeNanos", it) }
+        record.viewTimeNanos?.let { put("viewTimeNanos", it) }
+        record.measurementEpoch?.let { put("measurementEpoch", it) }
+        record.measurementId?.let { put("measurementId", it) }
+        record.measuredPhoneHeightM?.let { put("measuredPhoneHeightM", it.toDouble()) }
+        record.phoneHeightDifference?.let { put("phoneHeightDifference", it.toDouble()) }
+        record.metricShiftRatio?.let { put("metricShiftRatio", it.toDouble()) }
     }
 
     fun encodeSafetyState(state: SafetyStateTrace): JSONObject = JSONObject().apply {

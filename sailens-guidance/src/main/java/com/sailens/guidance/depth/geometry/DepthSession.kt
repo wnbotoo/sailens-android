@@ -6,6 +6,7 @@ import com.sailens.guidance.geometry.TimeBasis
 import com.sailens.guidance.model.trace.DepthRunTrace
 import com.sailens.guidance.service.TraceService
 import com.sailens.vision.depth.DepthRun
+import com.sailens.vision.depth.MetricDepthMap
 import kotlinx.coroutines.Job
 
 /**
@@ -69,7 +70,7 @@ class DepthSession internal constructor(
      */
     fun latest(): DepthGeometrySnapshot = synchronized(lock) {
         (published ?: DepthGeometrySnapshot(generation = generation, state = state, periodMs = periodMs))
-            .copy(state = state, lastSkipReason = lastSkip, periodMs = periodMs)
+            .copy(state = state, lastSkipReason = lastSkip, periodMs = periodMs, stateIssue = issue)
     }
 
     /** The detail behind a failed state, for the capability's issues. */
@@ -121,7 +122,9 @@ class DepthSession internal constructor(
 
     /**
      * Settles [attempt] with its record. A [snapshot] is published in the same step, which also ends a failure streak
-     * and returns a paused or failing state to running (a stopped lane stays stopped).
+     * and returns a paused or failing state to running (a stopped lane stays stopped). [skipReason]: an attempt that ran
+     * and was skipped after its run (no measurement, a view off its frame); the reason stays the last skip, for the
+     * capability, until something else replaces it. It is no failure and publishes nothing.
      *
      * @return false when the session was closed meanwhile and the attempt was settled by the closing record.
      */
@@ -135,6 +138,7 @@ class DepthSession internal constructor(
         observation: GroundObservation? = null,
         fitMs: Long? = null,
         fitCpuUs: Long? = null,
+        skipReason: String? = null,
     ): Boolean = synchronized(lock) {
         if (closed || inFlight !== attempt) return false
         if (snapshot != null) {
@@ -180,10 +184,21 @@ class DepthSession internal constructor(
                     postprocessBackend = run?.runtimeInfo?.postprocessBackend,
                     modelShape = run?.shapeLabel,
                     skipsSinceLast = LinkedHashMap(skips),
+                    depthKind = run?.map?.kind?.name?.lowercase(),
+                    scaleBasis = run?.map?.kind?.let { scaleBasisOf(it).name.lowercase() },
+                    unknownFraction = (run?.map as? MetricDepthMap)?.unknownFraction,
+                    measurementTimeNanos = snapshot?.measurementTimeNanos,
+                    viewTimeNanos = snapshot?.viewTimeNanos,
+                    measurementEpoch = snapshot?.measurementKey?.sourceEpoch,
+                    measurementId = snapshot?.measurementKey?.measurement,
+                    measuredPhoneHeightM = observation?.measuredPhoneHeightM,
+                    phoneHeightDifference = snapshot?.phoneHeight?.relativeDifference,
+                    metricShiftRatio = observation?.metricShiftRatio,
                 ),
             )
         }
         skips.clear()
+        if (snapshot == null && skipReason != null) lastSkip = skipReason
         inFlight = null
         inFlightStage = null
         true

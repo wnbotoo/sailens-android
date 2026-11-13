@@ -58,6 +58,22 @@ data class DepthRunTrace(
     /** Closing record only. */
     val failuresTotal: Int? = null,
     val finalState: String? = null,
+    /** The run's `DepthKind` and the scale its lengths have, lower case; absent before the source ran. */
+    val depthKind: String? = null,
+    val scaleBasis: String? = null,
+    /** Metric depth: the share of the map's pixels the source did not measure. */
+    val unknownFraction: Float? = null,
+    /** A published run: when its depth was measured and the moment of its view, on the frame's time basis. */
+    val measurementTimeNanos: Long? = null,
+    val viewTimeNanos: Long? = null,
+    /** A published run: which measurement it holds, `MeasurementKey` (a model's is its generation and run id). */
+    val measurementEpoch: Long? = null,
+    val measurementId: Long? = null,
+    /** Metric depth, a valid fit: the phone height the depths measure, and how far it is from the setting's, a fraction. */
+    val measuredPhoneHeightM: Float? = null,
+    val phoneHeightDifference: Float? = null,
+    /** Metric depth: the fit's shift check (`GroundObservation.metricShiftRatio`). */
+    val metricShiftRatio: Float? = null,
 ) {
     companion object Outcomes {
         const val PUBLISHED: String = "published"
@@ -65,9 +81,15 @@ data class DepthRunTrace(
         const val YIELD_DROPPED: String = "yield_dropped"
         const val FAILED: String = "failed"
         const val NON_FINITE_OUTPUT: String = "non_finite_output"
+
+        /** A metric map mostly unknown: it measured nothing. Not a failure. */
+        const val NO_MEASUREMENT: String = "no_measurement"
+
+        /** A map whose view is too far from its frame's time to be placed with it. Not a failure. */
+        const val DEPTH_TIME_MISMATCH: String = "depth_time_mismatch"
         const val CLOSED: String = "closed"
 
         /** A closed set: the parser rejects any other. */
-        val ALL: Set<String> = setOf(PUBLISHED, PREPROCESS_UNAVAILABLE, YIELD_DROPPED, FAILED, NON_FINITE_OUTPUT, CLOSED)
+        val ALL: Set<String> = setOf(PUBLISHED, PREPROCESS_UNAVAILABLE, YIELD_DROPPED, FAILED, NON_FINITE_OUTPUT, NO_MEASUREMENT, DEPTH_TIME_MISMATCH, CLOSED)
     }
 }

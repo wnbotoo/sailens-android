@@ -1,13 +1,14 @@
 package com.sailens.shell.sim
 
 import com.sailens.guidance.sim.SimulatedDepthModel
+import com.sailens.guidance.sim.SimulatedMetricDepth
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
  * The depth lane changes nothing the user gets (docs/geometry.md §6, I1): every session script, run with no lane and
- * with a lane and a depth model beside the pipeline, writes the same timeline -- speech, motor, alerts, safety states,
+ * with a lane and a depth model (or a metric depth source) beside the pipeline, writes the same timeline -- speech, motor, alerts, safety states,
  * cooldown receipts -- and leaves the same status cards and the same screen. The lane runs on its own threads,
  * unsynchronised with the session's.
  */
@@ -15,21 +16,25 @@ class DepthLaneSessionTest {
 
     @Test
     fun `every session script is the same with or without the depth lane`() {
-        var inferences = 0
-        for (script in SessionScenarios.all) {
-            val without = SessionSimulator.run(script)
-            val with = SessionSimulator.run(script, depth = SimulatedDepthModel())
-            assertEquals(script.name, without.lines, with.lines)
-            assertEquals(script.name, without.delivered, with.delivered)
-            assertEquals(script.name, without.ledger, with.ledger)
-            assertEquals(script.name, canonical(without.cards), canonical(with.cards))
-            assertEquals(script.name, canonical(without.screens), canonical(with.screens))
-            assertEquals(script.name, without.observationFaults, with.observationFaults)
-            assertEquals(script.name, 0, without.depthInferences)
-            inferences += with.depthInferences
+        // A depth model, and a metric source beside it.
+        for (model in listOf(SimulatedDepthModel(), SimulatedDepthModel(metric = SimulatedMetricDepth()))) {
+            var inferences = 0
+            for (script in SessionScenarios.all) {
+                val without = SessionSimulator.run(script)
+                val with = SessionSimulator.run(script, depth = model)
+                val label = "${script.name} / $model"
+                assertEquals(label, without.lines, with.lines)
+                assertEquals(label, without.delivered, with.delivered)
+                assertEquals(label, without.ledger, with.ledger)
+                assertEquals(label, canonical(without.cards), canonical(with.cards))
+                assertEquals(label, canonical(without.screens), canonical(with.screens))
+                assertEquals(label, without.observationFaults, with.observationFaults)
+                assertEquals(label, 0, without.depthInferences)
+                inferences += with.depthInferences
+            }
+            // The lane did run beside the sessions: the proof is not of an idle lane.
+            assertTrue("$model: depth runs: $inferences", inferences > 100)
         }
-        // The lane did run beside the sessions: the proof is not of an idle lane.
-        assertTrue("depth runs: $inferences", inferences > 100)
     }
 
     /** Each random event id replaced by the order it first appears in: two runs differ in their ids, not in which event is which. */

@@ -15,7 +15,8 @@ class DepthInputTransformTest {
 
     @Test
     fun `analysis to tensor and back is the identity for every policy and orientation`() {
-        for ((aw, ah) in sizes) for ((mw, mh) in tensors) for (policy in ResizePolicy.entries) {
+        // The resizes `create` makes; a source's own mapping is DepthSourceMapping's (MetricDepthMapTest).
+        for ((aw, ah) in sizes) for ((mw, mh) in tensors) for (policy in ResizePolicy.entries - ResizePolicy.SOURCE_MAPPED) {
             val t = DepthInputTransform.create(aw, ah, mw, mh, policy)
             for ((u, v) in listOf(0f to 0f, aw / 2f to ah / 2f, aw - 0.5f to ah - 0.5f, 123.4f to 567.8f)) {
                 assertEquals("$policy ${aw}x$ah→${mw}x$mh u", u, t.toAnalysisX(t.toTensorX(u)), 1e-3f)

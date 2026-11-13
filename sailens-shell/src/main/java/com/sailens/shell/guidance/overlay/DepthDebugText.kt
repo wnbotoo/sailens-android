@@ -23,6 +23,11 @@ internal fun depthDebugText(snapshot: DepthGeometrySnapshot?, status: Capability
         append(" above ").append(percent(observation.aboveGroundMask))
         append(" below ").append(percent(observation.belowGroundMask))
     }
+    // Metric depth: the phone height it measures, against the setting.
+    snapshot.phoneHeight?.let { check ->
+        append(" · height ").append("%.2f".format(java.util.Locale.ROOT, check.measuredM)).append(" m (setting ")
+        append("%+.0f".format(java.util.Locale.ROOT, check.relativeDifference * 100)).append("%)")
+    }
     append(" · prepare/infer/fit ")
     append(listOf(snapshot.prepareMs, snapshot.inferMs, snapshot.fitMs).joinToString("/") { it?.toString() ?: "-" })
     append(" ms")

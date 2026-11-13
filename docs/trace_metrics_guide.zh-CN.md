@@ -740,7 +740,9 @@ Guidance 此刻对用户处在什么状态，合成为一个值，由 shell 从�
   `session_summary.depthRunCount` 是会话排进队列的条数。
 - `outcome`：`published`（观测成了会话的快照）、`preprocess_unavailable`（原生预处理接不了这一帧；没有兜底）、
   `yield_dropped`（预处理之后更高档位开了让路区间，模型没跑）、`failed`（某一步抛了异常）、`non_finite_output`
-  （输出里有 NaN 或无穷）、`closed`（会话的收尾记录，一定是它的最后一条）。
+  （输出里有 NaN 或无穷）、`no_measurement`（公制图未知超过 80 %：什么也没测到，不算失败）、`depth_time_mismatch`
+  （图的视角时刻离它那一帧的时间超过一个周期；不算失败）、`closed`（会话的收尾记录，一定是它的最后一条）。中间这两个
+  随公制来源加入；更早的解析器读到含有它们的 trace 会拒收。
 - `frameSequence`、`frameTimeNanos`、`timeBasis`、`geometryQuality`：这次尝试用的帧和几何。
 - 发布了的运行还有：`validity`（地面拟合的有效性，小写：`valid`、`no_ground`、`inverse_output` 等）、
   `inlierRatio`、`confidence`、`planeAgreesWithGravity`、`groundRatio` / `aboveGroundRatio` / `belowGroundRatio`
@@ -752,6 +754,12 @@ Guidance 此刻对用户处在什么状态，合成为一个值，由 shell 从�
   里而不在差值里；要分辨它得另有调度或频率的证据。`fitMs` 是整毫秒，所以一两毫秒以内的差值说明不了什么；运行时的
   `accelerator`、`acceleratorSelection`（含 GPU 精度和队列优先级）、`preprocessBackend`、`postprocessBackend`；
   `modelShape`，输入与输出（`1x3x392x224>1x392x224`）。
+- 来源：运行过之后有 `depthKind`（`relative_disparity`、`metric_depth`）和 `scaleBasis`（`assumed_phone_height`、
+  `measured`）；`unknownFraction`，公制图里没测到的像素比例。发布了的运行还有 `measurementTimeNanos` 和
+  `viewTimeNanos`（在帧的时间基准上：年龄从前者算起，逐格深度属于后者；模型的就是它那一帧的时间），以及
+  `measurementEpoch` / `measurementId`，是哪一次测量（模型的是它的 generation 和运行编号）。公制深度另有
+  `metricShiftRatio`（拟合的偏移检查），拟合有效时还有 `measuredPhoneHeightM` 和 `phoneHeightDifference`（测出的高度
+  相对设置的差，比例）。这些字段出现之前的记录一项也没有，照旧解析。
 - 收尾记录：停止时有尝试在途，就带 `cancelledRunId` 和 `cancelledStage`（`prepare`、`admit`、`infer`、`fit`）——
   这就是那次尝试的结算，之后不再为它写任何记录——以及 `failuresTotal`、`finalState` 和最后一段的跳过。
 

@@ -29,6 +29,17 @@ interface DepthProducer {
     suspend fun release()
 }
 
+/**
+ * Thrown by [DepthProducer.initialize] when the source cannot be used as it stands -- `mapping`: what it reports does
+ * not place its depth on the camera image as a scale per axis and an offset. The capability is unavailable with
+ * [reason]; nothing is approximated.
+ */
+class DepthSourceUnavailable(val reason: String) : Exception(reason) {
+    companion object {
+        const val MAPPING: String = "mapping"
+    }
+}
+
 /** A frame's input, written by [DepthProducer.prepare]; [payload] belongs to the producer. */
 class DepthPreparedInput(
     val transform: DepthInputTransform,
@@ -91,6 +102,9 @@ fun interface ThermalStatusSource {
  * @param maxAgePeriods an observation older than this many periods (by frame time) is stale.
  * @param maxConsecutiveFailures this many failed attempts in a row stop the session's lane.
  * @param gridWidth the ground fit's label grid (portrait 9:16), the size the experiments measured on.
+ * @param maxUnknownFraction a metric map with more of its pixels unknown than this measured nothing (`no_measurement`).
+ * @param maxViewOffsetPeriods a map whose view is more than this many periods from its frame's time is skipped
+ *   (`depth_time_mismatch`): the frame's facts do not place it. A measurement older than its view is fine.
  */
 data class DepthGeometryConfig(
     val targetFps: Float = 3f,
@@ -100,6 +114,8 @@ data class DepthGeometryConfig(
     val maxConsecutiveFailures: Int = 30,
     val gridWidth: Int = 90,
     val gridHeight: Int = 160,
+    val maxUnknownFraction: Float = 0.8f,
+    val maxViewOffsetPeriods: Int = 1,
 ) {
     val frameIntervalMs: Long get() = (1000f / targetFps).toLong()
 }
