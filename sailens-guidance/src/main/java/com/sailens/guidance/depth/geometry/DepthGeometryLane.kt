@@ -6,6 +6,7 @@ import com.sailens.core.frame.ImageFrame
 import com.sailens.core.log.LogService
 import com.sailens.core.runtime.MlRuntimeInfo
 import com.sailens.guidance.geometry.CameraGeometry
+import com.sailens.guidance.geometry.FrameFacts
 import com.sailens.guidance.geometry.GeometryQuality
 import com.sailens.guidance.geometry.GroundFitter
 import com.sailens.guidance.geometry.GroundObservation
@@ -14,7 +15,11 @@ import com.sailens.guidance.model.trace.DepthRunTrace
 import com.sailens.guidance.safety.BaselineQualification
 import com.sailens.guidance.service.TraceService
 import com.sailens.runtime.accelerator.AcceleratorCoordinator
+import com.sailens.vision.depth.DepthKind
+import com.sailens.vision.depth.DepthMap
 import com.sailens.vision.depth.DepthRun
+import com.sailens.vision.depth.DisparityMap
+import com.sailens.vision.depth.MeasurementKey
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineExceptionHandler
@@ -43,7 +48,13 @@ enum class DepthLaneState {
     CLOSED,
 }
 
-/** The latest published observation of a depth session, and where the session stands now. */
+/**
+ * The latest published observation of a depth session, and where the session stands now.
+ *
+ * [frameTimeNanos] is the time of the frame the run was made from; the observation's own times, on the same basis, are
+ * [measurementTimeNanos] (its age counts from it) and [viewTimeNanos] (its cells and [view] belong to it). A model
+ * measures and views at its frame's time, so for it the three are one.
+ */
 data class DepthGeometrySnapshot(
     val generation: Long,
     val state: DepthLaneState,
@@ -63,6 +74,13 @@ data class DepthGeometrySnapshot(
     val runtimeInfo: MlRuntimeInfo? = null,
     val detail: Float? = null,
     val modelShape: String? = null,
+    val kind: DepthKind? = null,
+    val measurementTimeNanos: Long? = null,
+    val viewTimeNanos: Long? = null,
+    /** Which measurement the observation holds: the source's own key, or for a model `(generation, runId)`. */
+    val measurementKey: MeasurementKey? = null,
+    val view: DepthViewGeometry? = null,
+    val cells: DepthCells? = null,
 )
 
 /** What a depth session needs from the Guidance session that starts it. */
@@ -72,8 +90,11 @@ class DepthStartContext(
     val releaseFrame: (ImageFrame) -> Unit,
     /** The main pipeline's latest baseline qualification; null before its first result. */
     val baseline: () -> BaselineQualification?,
-    /** This frame's camera geometry, resolved now. */
-    val geometry: (ImageFrame) -> CameraGeometry,
+    /**
+     * The camera geometry of a frame's facts, resolved now: the frame's own, and, for a map whose view is at another
+     * time than its frame's, the same facts at that time ([atView]).
+     */
+    val geometry: (FrameFacts) -> CameraGeometry,
     /** The trace session the records belong to; null when tracing is off. */
     val traceSessionId: String?,
 )
@@ -103,7 +124,7 @@ class DepthStartContext(
  * without a recorder the lane does and records the same.
  */
 class DepthGeometryLane(
-    private val runnerFactory: () -> DepthModelRunner,
+    private val producerFactory: () -> DepthProducer,
     private val modelCheck: DepthModelCheck,
     private val coordinator: AcceleratorCoordinator,
     private val thermal: ThermalStatusSource,
@@ -161,7 +182,7 @@ class DepthGeometryLane(
     }
 
     private suspend fun DepthSession.run(earlier: Job?, context: DepthStartContext) {
-        var runner: DepthModelRunner? = null
+        var runner: DepthProducer? = null
         try {
             earlier?.join()
             when (val check = runCatchingNonCancellation { modelCheck.check() }) {
@@ -170,7 +191,7 @@ class DepthGeometryLane(
                 is DepthModelCheckResult.Unreadable -> { setState(DepthLaneState.MODEL_UNREADABLE, check.detail); return }
                 DepthModelCheckResult.Compatible -> Unit
             }
-            val created = runnerFactory()
+            val created = producerFactory()
             runner = created
             if (runCatchingNonCancellation { created.initialize() } == null) {
                 setState(DepthLaneState.INIT_FAILED, "init_failed")
@@ -212,7 +233,7 @@ class DepthGeometryLane(
     private suspend fun DepthSession.handle(
         frame: ImageFrame,
         release: FrameRelease,
-        runner: DepthModelRunner,
+        runner: DepthProducer,
         fitter: GroundFitter,
         context: DepthStartContext,
     ) {
@@ -230,7 +251,7 @@ class DepthGeometryLane(
             }
             else -> periodMs = config.frameIntervalMs
         }
-        if (coordinator.isYielding(AcceleratorCoordinator.Priority.BACKGROUND)) {
+        if (runner.needsAccelerator && coordinator.isYielding(AcceleratorCoordinator.Priority.BACKGROUND)) {
             setState(DepthLaneState.PAUSED_YIELD, null)
             return skip(SKIP_YIELD)
         }
@@ -239,10 +260,10 @@ class DepthGeometryLane(
             is BaselineQualification.Unqualified -> return skip(SKIP_FRAME_UNQUALIFIED)
             else -> Unit
         }
-        val geometry = context.geometry(frame)
-        val intrinsics = geometry.intrinsics
-        val down = geometry.gravityInCamera
-        if (geometry.quality is GeometryQuality.Unavailable || intrinsics == null || down == null) return skip(SKIP_GEOMETRY)
+        // Read while the frame is held: a map whose view is at another time is placed with these facts at that time.
+        val facts = FrameFacts.of(frame)
+        val geometry = context.geometry(facts)
+        if (!geometry.canFit()) return skip(SKIP_GEOMETRY)
 
         val attempt = begin(frame.sequenceNumber, geometry.frameTimeNanos, geometry.timeBasis, geometry.quality) ?: return release()
         lastAttemptFrameNanos = frame.timestamp
@@ -262,32 +283,47 @@ class DepthGeometryLane(
                 return
             }
 
-            stage(attempt, STAGE_ADMIT)
-            val admitStart = elapsedMs()
-            val admission = coordinator.tryAdmit(AcceleratorCoordinator.Priority.BACKGROUND)
-            if (admission == null) {
-                commit(attempt, DepthRunTrace.YIELD_DROPPED, snapshot = null, prepareMs = prepareMs)
-                return
+            // Only a source that runs on the accelerator waits for its admission.
+            var admitWaitMs: Long? = null
+            val admission = if (runner.needsAccelerator) {
+                stage(attempt, STAGE_ADMIT)
+                val admitStart = elapsedMs()
+                val admitted = coordinator.tryAdmit(AcceleratorCoordinator.Priority.BACKGROUND)
+                if (admitted == null) {
+                    commit(attempt, DepthRunTrace.YIELD_DROPPED, snapshot = null, prepareMs = prepareMs)
+                    return
+                }
+                admitWaitMs = elapsedMs() - admitStart
+                admitted
+            } else {
+                null
             }
-            val admitWaitMs = elapsedMs() - admitStart
             stage(attempt, STAGE_INFER)
             val run = try {
                 runner.infer(prepared)
             } finally {
-                admission.close()
+                admission?.close()
             }
+            // The evidence stream records a model's outputs, which are disparity maps.
+            val evidenceRun = run.asDisparityRun()
+            if (evidenceRun == null) evidenceSlot?.let { slot -> evidenceSlot = null; observeEvidence { slot.discard() } }
             if (run.nonFiniteCount > 0) {
                 noteFailure(DepthLaneState.RUNNING)
                 commit(attempt, DepthRunTrace.NON_FINITE_OUTPUT, snapshot = null, prepareMs = prepareMs, run = run)
                 evidenceSlot?.let { slot ->
                     evidenceSlot = null
                     observeEvidence {
-                        slot.submit(DepthEvidenceRun(DepthRunTrace.NON_FINITE_OUTPUT, null, geometry, config.gridWidth, config.gridHeight, run, null))
+                        slot.submit(DepthEvidenceRun(DepthRunTrace.NON_FINITE_OUTPUT, null, geometry, config.gridWidth, config.gridHeight, checkNotNull(evidenceRun), null))
                     }
                 }
                 return
             }
 
+            // The map's pixels belong to its view: gravity and intrinsics at that moment. A model's view is its frame.
+            val view = viewGeometry(run.map, facts, geometry, context)
+            check(view.canFit()) { "no usable geometry at the map's view time" }
+            val intrinsics = checkNotNull(view.intrinsics)
+            val down = checkNotNull(view.gravityInCamera)
             stage(attempt, STAGE_FIT)
             // Counted before the call: a fit that throws still leaves its gap in the ordinals.
             val fitOrdinal = fitCalls++
@@ -296,17 +332,20 @@ class DepthGeometryLane(
             val observation = withContext(fitDispatcher) {
                 // The fit does not suspend: both readings are of the thread that ran it.
                 val cpuStart = threadCpuNanos()
-                val fitted = fitter.fit(run.map, intrinsics, down, config.gridWidth, config.gridHeight, geometry.frameTimeNanos)
+                val fitted = fitter.fit(run.map, intrinsics, down, config.gridWidth, config.gridHeight, view.frameTimeNanos)
                 val cpuEnd = threadCpuNanos()
                 if (cpuStart >= 0 && cpuEnd >= cpuStart) fitCpuUs = (cpuEnd - cpuStart) / 1_000
                 fitted
             }
             val fitMs = elapsedMs() - fitStart
-            publish(attempt, frame, geometry, prepareMs, admitWaitMs, run, observation, fitMs, fitCpuUs)
+            // Outside the fit's own time: what the reading of each cell holds, for every main frame that reads this run.
+            val viewGeometry = DepthViewGeometry(intrinsics, down, config.gridWidth, config.gridHeight, view.phone, view.timeBasis, view.quality)
+            val cells = DepthCells.of(run.map, observation, viewGeometry)
+            publish(attempt, frame, geometry, view, viewGeometry, cells, prepareMs, admitWaitMs, run, observation, fitMs, fitCpuUs)
             evidenceSlot?.let { slot ->
                 evidenceSlot = null
                 observeEvidence {
-                    slot.submit(DepthEvidenceRun(DepthRunTrace.PUBLISHED, fitOrdinal, geometry, config.gridWidth, config.gridHeight, run, observation))
+                    slot.submit(DepthEvidenceRun(DepthRunTrace.PUBLISHED, fitOrdinal, view, config.gridWidth, config.gridHeight, checkNotNull(evidenceRun), observation))
                 }
             }
         } finally {
@@ -314,17 +353,39 @@ class DepthGeometryLane(
         }
     }
 
+    /**
+     * The geometry of [map]'s view: the frame's own when the view is at the frame's time (or the map does not say), the
+     * frame's facts at the view time otherwise.
+     */
+    private fun viewGeometry(map: DepthMap, facts: FrameFacts, frameGeometry: CameraGeometry, context: DepthStartContext): CameraGeometry {
+        val viewTime = map.times.viewTimeNanos ?: return frameGeometry
+        if (viewTime == facts.sensorTimestampNanos) return frameGeometry
+        return context.geometry(facts.atView(viewTime))
+    }
+
+    private fun CameraGeometry.canFit(): Boolean = quality !is GeometryQuality.Unavailable && intrinsics != null && gravityInCamera != null
+
+    /** A model's run as the evidence stream takes it; null for a map that is not a model's disparity. */
+    @Suppress("UNCHECKED_CAST")
+    private fun DepthRun<DepthMap>.asDisparityRun(): DepthRun<DisparityMap>? = if (map is DisparityMap) this as DepthRun<DisparityMap> else null
+
     private fun DepthSession.publish(
         attempt: DepthAttempt,
         frame: ImageFrame,
         geometry: CameraGeometry,
+        view: CameraGeometry,
+        viewGeometry: DepthViewGeometry,
+        cells: DepthCells?,
         prepareMs: Long,
-        admitWaitMs: Long,
-        run: DepthRun,
+        admitWaitMs: Long?,
+        run: DepthRun<DepthMap>,
         observation: GroundObservation,
         fitMs: Long,
         fitCpuUs: Long?,
     ) {
+        val times = run.map.times
+        // On the view's time basis: the view's own time, less however much earlier the source measured.
+        val measuredBefore = times.viewTimeNanos?.let { viewTime -> times.measurementTimeNanos?.let { viewTime - it } } ?: 0L
         val snapshot = DepthGeometrySnapshot(
             generation = this.generation,
             state = DepthLaneState.RUNNING,
@@ -333,7 +394,7 @@ class DepthGeometryLane(
             frameSequence = frame.sequenceNumber,
             frameTimeNanos = geometry.frameTimeNanos,
             timeBasis = geometry.timeBasis,
-            geometryQuality = geometry.quality,
+            geometryQuality = view.quality,
             periodMs = periodMs,
             prepareMs = prepareMs,
             inferMs = run.inferenceMs,
@@ -342,6 +403,12 @@ class DepthGeometryLane(
             runtimeInfo = run.runtimeInfo,
             detail = run.detail,
             modelShape = run.shapeLabel,
+            kind = run.map.kind,
+            measurementTimeNanos = view.frameTimeNanos?.let { it - measuredBefore },
+            viewTimeNanos = view.frameTimeNanos,
+            measurementKey = times.measurementKey ?: MeasurementKey(this.generation, attempt.runId),
+            view = viewGeometry,
+            cells = cells,
         )
         commit(attempt, DepthRunTrace.PUBLISHED, snapshot, prepareMs, admitWaitMs, run, observation, fitMs, fitCpuUs)
     }

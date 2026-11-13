@@ -9,6 +9,7 @@ import com.sailens.guidance.depth.geometry.DepthGeometryCapability
 import com.sailens.guidance.depth.geometry.DepthGeometryConfig
 import com.sailens.guidance.depth.geometry.DepthGeometryLane
 import com.sailens.guidance.depth.geometry.DepthGeometrySwitch
+import com.sailens.guidance.depth.geometry.DepthReading
 import com.sailens.guidance.depth.geometry.DepthSession
 import com.sailens.guidance.depth.geometry.DepthStartContext
 import com.sailens.guidance.geometry.CameraFactsSource
@@ -199,10 +200,10 @@ class StartSceneAnalysisUseCase(
                     frames = checkNotNull(depthFrames)(depthConfig.frameIntervalMs),
                     releaseFrame = releaseFrame,
                     baseline = latestBaseline::get,
-                    geometry = { frame ->
+                    geometry = { facts ->
                         cameraGeometryResolver.resolve(
                             cameraFactsSource.current(),
-                            FrameFacts.of(frame),
+                            facts,
                             orientationSource::gravityNear,
                             phoneGeometry(),
                         )
@@ -284,6 +285,11 @@ class StartSceneAnalysisUseCase(
                 latestBaseline.set(baseline)
                 val depthSnapshot = depthSession?.latest()
                 val depthStatus = DepthGeometryCapability.status(depthSnapshot, geometry, depthConfig.maxAgePeriods)
+                val depthReading = if (depthSession == null) {
+                    DepthReading.NOT_CONFIGURED
+                } else {
+                    DepthReading.of(depthSnapshot, depthStatus, geometry, depthConfig.maxAgePeriods)
+                }
                 val qualification = GuidanceQualification(
                     baseline = baseline,
                     capabilities = GuidanceQualifier.capabilities(
@@ -514,6 +520,7 @@ class StartSceneAnalysisUseCase(
                         qualification = qualification,
                         frameReceivedAtMs = receivedElapsedMs(frame),
                         depthGeometry = depthSnapshot,
+                        depthReading = depthReading,
                     ),
                     frameTrace = frameTrace,
                 )

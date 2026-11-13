@@ -9,13 +9,8 @@ import com.sailens.guidance.depth.geometry.DepthSession
 import com.sailens.guidance.depth.geometry.DepthStartContext
 import com.sailens.guidance.depth.geometry.ThermalLevel
 import com.sailens.guidance.geometry.CameraGeometry
-import com.sailens.guidance.geometry.CameraGeometryResolver
 import com.sailens.guidance.geometry.FrameFacts
 import com.sailens.guidance.geometry.GroundFitValidity
-import com.sailens.guidance.geometry.PhoneGeometrySettings
-import com.sailens.guidance.geometry.SensorSample
-import com.sailens.guidance.geometry.Vec3
-import com.sailens.guidance.geometry.toCameraFacts
 import com.sailens.guidance.safety.BaselineQualification
 import com.sailens.guidance.safety.CapabilityStatus
 import kotlinx.coroutines.channels.Channel
@@ -26,7 +21,6 @@ import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import kotlin.math.abs
 
 /**
  * The depth lane on simulator scenes (docs/geometry.md §6), through the real lane and ground fit with the simulator's
@@ -34,8 +28,6 @@ import kotlin.math.abs
  * not change is `DepthLaneInvarianceTest`'s.
  */
 class DepthLaneScenarioTest {
-
-    private val resolver = CameraGeometryResolver()
 
     /** Runs the lane on [indices] of [scenario], one frame at a time, and returns the snapshot after each. */
     private fun snapshots(scenario: Scenario, indices: List<Int>, model: SimulatedDepthModel = SimulatedDepthModel()): List<Pair<DepthGeometrySnapshot, CameraGeometry>> = runBlocking {
@@ -48,7 +40,7 @@ class DepthLaneScenarioTest {
                 frames = frames.receiveAsFlow(),
                 releaseFrame = { released.trySend(it.sequenceNumber) },
                 baseline = { BaselineQualification.Qualified },
-                geometry = { frame -> geometry(scenario, frame) },
+                geometry = { facts -> scenario.geometryOf(facts) },
                 traceSessionId = null,
             ),
         )
@@ -70,15 +62,7 @@ class DepthLaneScenarioTest {
         }
     }
 
-    private fun geometry(scenario: Scenario, frame: ImageFrame): CameraGeometry {
-        val facts = scenario.facts((frame.sequenceNumber - 1).toInt())
-        return resolver.resolve(
-            facts.camera.toCameraFacts(),
-            FrameFacts.of(frame),
-            { t -> facts.gravity.minByOrNull { abs(it.timestampNanos - t) }?.let { SensorSample(it.timestampNanos, Vec3(it.values[0], it.values[1], it.values[2])) } },
-            PhoneGeometrySettings.DEFAULT,
-        )
-    }
+    private fun geometry(scenario: Scenario, frame: ImageFrame): CameraGeometry = scenario.geometryOf(FrameFacts.of(frame))
 
     private fun status(snapshot: DepthGeometrySnapshot, frame: CameraGeometry) =
         DepthGeometryCapability.status(snapshot, frame, DepthGeometryConfig().maxAgePeriods)
@@ -123,7 +107,7 @@ class DepthLaneScenarioTest {
     fun `a model whose initialization throws leaves the lane failed, and says so`() = runBlocking {
         val pipeline = SimulatedPipeline(Scenarios.straightClearPath, depth = SimulatedDepthModel(initFails = true))
         val lane = checkNotNull(pipeline.depthLane)
-        val session = lane.start(DepthStartContext(Channel<ImageFrame>().receiveAsFlow(), {}, { BaselineQualification.Qualified }, { geometry(Scenarios.straightClearPath, it) }, null))
+        val session = lane.start(DepthStartContext(Channel<ImageFrame>().receiveAsFlow(), {}, { BaselineQualification.Qualified }, { Scenarios.straightClearPath.geometryOf(it) }, null))
         withTimeout(60_000) { while (session.latest().state == DepthLaneState.INITIALIZING) delay(5) }
         val frame = geometry(Scenarios.straightClearPath, pipeline.cameraFrame(0))
         assertEquals(CapabilityStatus.Unavailable(setOf(DepthGeometryCapability.INIT_FAILED)), status(session.latest(), frame))

@@ -2,26 +2,34 @@ package com.sailens.guidance.depth.geometry
 
 import com.sailens.core.frame.ImageFrame
 import com.sailens.vision.depth.DepthInputTransform
+import com.sailens.vision.depth.DepthMap
 import com.sailens.vision.depth.DepthRun
 import com.sailens.vision.depth.LiteRtDepthRunner
 
 /**
- * The depth model as the lane sees it: [prepare] reads the frame (CPU), [infer] does not (GPU). The lane
- * gives the frame back between the two. `LiteRtDepthRunner` behind [LiteRtDepthModelRunner] in the app;
- * a fake in tests and in the simulator.
+ * Whatever makes the lane's depth maps, as the lane sees it: [prepare] reads the frame (CPU), [infer] does not. The
+ * lane gives the frame back between the two. The source's kind is in its maps (`DepthMap.kind`); the lane and the fit
+ * branch on that, never on which producer it is. The depth model (`LiteRtDepthRunner` behind [LiteRtDepthProducer])
+ * in the app; a fake in tests and in the simulator.
  */
-interface DepthModelRunner {
+interface DepthProducer {
+    /**
+     * Whether [infer] runs on the accelerator, and so waits for the accelerator coordinator's admission and pauses when
+     * it asks the background to yield. A model does; a source whose depth comes ready with the frame does not.
+     */
+    val needsAccelerator: Boolean
+
     suspend fun initialize()
 
-    /** Null when the native preprocessing could not take the frame. */
+    /** Null when the frame cannot be taken (the native preprocessing could not take it). */
     suspend fun prepare(frame: ImageFrame): DepthPreparedInput?
 
-    suspend fun infer(input: DepthPreparedInput): DepthRun
+    suspend fun infer(input: DepthPreparedInput): DepthRun<DepthMap>
 
     suspend fun release()
 }
 
-/** A frame's input, written by [DepthModelRunner.prepare]; [payload] belongs to the runner. */
+/** A frame's input, written by [DepthProducer.prepare]; [payload] belongs to the producer. */
 class DepthPreparedInput(
     val transform: DepthInputTransform,
     val detail: Float?,
@@ -29,13 +37,16 @@ class DepthPreparedInput(
     val payload: Any? = null,
 )
 
-class LiteRtDepthModelRunner(private val runner: LiteRtDepthRunner) : DepthModelRunner {
+/** The depth model: its inference runs on the accelerator. */
+class LiteRtDepthProducer(private val runner: LiteRtDepthRunner) : DepthProducer {
+    override val needsAccelerator: Boolean get() = true
+
     override suspend fun initialize() = runner.initialize()
 
     override suspend fun prepare(frame: ImageFrame): DepthPreparedInput? =
         runner.prepare(frame)?.let { DepthPreparedInput(it.transform, it.detail, it.preprocessMs, it) }
 
-    override suspend fun infer(input: DepthPreparedInput): DepthRun =
+    override suspend fun infer(input: DepthPreparedInput): DepthRun<DepthMap> =
         runner.infer(input.payload as com.sailens.vision.depth.DepthPrepared)
 
     override suspend fun release() = runner.release()

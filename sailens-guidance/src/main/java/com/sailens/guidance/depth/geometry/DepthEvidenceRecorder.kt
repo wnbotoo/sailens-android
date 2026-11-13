@@ -4,6 +4,7 @@ import com.sailens.core.frame.ImageFrame
 import com.sailens.guidance.geometry.CameraGeometry
 import com.sailens.guidance.geometry.GroundObservation
 import com.sailens.vision.depth.DepthRun
+import com.sailens.vision.depth.DisparityMap
 
 /**
  * Observes the depth lane for the debug capture's depth evidence stream (docs/field-capture.md §11): for each
@@ -47,11 +48,11 @@ class DepthEvidenceRun(
      * was called. A replay can redo the fitter's history only over an unbroken run of these.
      */
     val fitOrdinal: Long?,
-    /** The geometry the run used, as resolved for its frame. */
+    /** The geometry the run used: the frame's, resolved at the view time of the map (a model's view is its frame). */
     val geometry: CameraGeometry,
     val gridWidth: Int,
     val gridHeight: Int,
     /** The model's output; its values array is the runner's own copy and is not written again. */
-    val run: DepthRun,
+    val run: DepthRun<DisparityMap>,
     val observation: GroundObservation?,
 )

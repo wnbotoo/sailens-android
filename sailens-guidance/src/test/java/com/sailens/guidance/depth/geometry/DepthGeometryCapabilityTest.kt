@@ -56,6 +56,7 @@ class DepthGeometryCapabilityTest {
         runId = if (observed) 1 else null,
         observation = if (observed) observation else null,
         frameTimeNanos = if (observed) observedAtNanos else null,
+        measurementTimeNanos = if (observed) observedAtNanos else null,
         timeBasis = if (observed) basis else null,
         geometryQuality = if (observed) quality else null,
         periodMs = periodMs,

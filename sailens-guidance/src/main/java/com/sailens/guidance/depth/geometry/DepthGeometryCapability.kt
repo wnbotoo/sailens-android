@@ -14,7 +14,7 @@ import kotlin.math.abs
  * 4. initialization failed, or too many runs in a row failed: `init_failed` / `run_failed`;
  * 5. still initializing (including the wait for an earlier session's teardown): `initializing`;
  * 6. paused for heat or for a higher-priority GPU user: `paused_thermal` / `paused_yield`;
- * 7. no observation yet, or the latest is older than [DepthGeometryConfig.maxAgePeriods] periods by frame
+ * 7. no observation yet, or the latest is older than [DepthGeometryConfig.maxAgePeriods] periods by measurement
  *    time (or on another time basis): `stale`, with the last skip reason when there is one;
  * 8. a fresh observation on degraded geometry: degraded, with the geometry's issues;
  * 9. a fresh observation: available.
@@ -48,9 +48,12 @@ object DepthGeometryCapability {
         }
     }
 
-    /** Main frame time minus observation frame time; null when either is missing or they are on different bases. */
+    /**
+     * Main frame time minus the observation's measurement time (a model's is its frame's); null when either is missing
+     * or they are on different bases.
+     */
     fun ageNanos(snapshot: DepthGeometrySnapshot, frame: CameraGeometry): Long? {
-        val observed = snapshot.frameTimeNanos ?: return null
+        val observed = snapshot.measurementTimeNanos ?: return null
         val now = frame.frameTimeNanos ?: return null
         if (snapshot.timeBasis != frame.timeBasis) return null
         return now - observed

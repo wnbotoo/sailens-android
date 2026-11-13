@@ -70,6 +70,7 @@ class LiteRtDepthRunner(
         preparedSerial++
         DepthPrepared(
             serial = preparedSerial,
+            frameTimestampNanos = frame.timestamp,
             transform = transform,
             detail = detail,
             preprocessMs = SystemClock.uptimeMillis() - start,
@@ -77,7 +78,7 @@ class LiteRtDepthRunner(
     }
 
     /** Runs the model on the input [prepared] wrote. Only the most recent [prepare] can be inferred. */
-    suspend fun infer(prepared: DepthPrepared): DepthRun = withContext(dispatcher) {
+    suspend fun infer(prepared: DepthPrepared): DepthRun<DisparityMap> = withContext(dispatcher) {
         val b = checkNotNull(bound) { "depth runner not initialized" }
         check(prepared.serial == preparedSerial) { "a later prepare overwrote this input" }
         val start = SystemClock.uptimeMillis()
@@ -87,7 +88,7 @@ class LiteRtDepthRunner(
         val values = b.session.outputBuffers.single().readFloat()
         val afterRead = SystemClock.uptimeMillis()
         DepthRun(
-            map = DisparityMap(b.spec.outputWidth, b.spec.outputHeight, values, prepared.transform),
+            map = DisparityMap(b.spec.outputWidth, b.spec.outputHeight, values, prepared.transform, DepthTimes.ofFrame(prepared.frameTimestampNanos)),
             nonFiniteCount = values.count { !it.isFinite() },
             detail = prepared.detail,
             preprocessMs = prepared.preprocessMs,
@@ -189,15 +190,23 @@ class LiteRtDepthRunner(
 /** A frame's input, written into the runner's tensor by [LiteRtDepthRunner.prepare]. */
 class DepthPrepared internal constructor(
     internal val serial: Long,
+    /** The camera timestamp of the frame the input was made from: the output is measured and viewed then. */
+    val frameTimestampNanos: Long,
     val transform: DepthInputTransform,
     val detail: Float?,
     val preprocessMs: Long,
 )
 
-/** One depth inference: the disparity map in the frame's geometry, and what it took. */
-class DepthRun(
-    val map: DisparityMap,
-    /** NaN or infinite values in the output; any is a failed run (docs/models.md). */
+/**
+ * One run of a depth source: its map in the frame's geometry, and what it took. A model's map is a [DisparityMap]
+ * ([LiteRtDepthRunner] says so in its type); a reader of any source sees a [DepthMap].
+ */
+class DepthRun<out M : DepthMap>(
+    val map: M,
+    /**
+     * NaN or infinite values in a model's output; any is a failed run (docs/models.md). A source that marks what it did
+     * not measure (a metric map's holes) reports those as unknown in the map, not here.
+     */
     val nonFiniteCount: Int,
     val detail: Float?,
     val preprocessMs: Long,

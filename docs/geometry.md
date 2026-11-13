@@ -335,6 +335,8 @@ without the lane and compare the results, and the user's timeline, line for line
   inference and the fit (I7); a native failure is `preprocess_unavailable`, never an OpenCV fallback.
   Admission (`AcceleratorCoordinator.tryAdmit(BACKGROUND)`), inference on the GPU at `LOW` queue
   priority, a non-finite output is a failed run, then `GroundFitter.fit` on a dispatcher of one thread.
+  A producer that does not run on the accelerator (`DepthProducer.needsAccelerator` false) neither
+  pauses for a yield nor waits for admission.
   A frame the source replaced while the lane was busy never reaches it, so there is no "busy" skip.
 - **Accounting.** Every step a record or the snapshot shows is under the session's own lock: `begin`
   gives the run id, `commit` publishes the snapshot together with the attempt's `depth_run` record, and
@@ -348,11 +350,12 @@ without the lane and compare the results, and the user's timeline, line for line
   cancellation is rethrown. The lane's jobs are children of its own supervisor, not of the flow.
 - **Capability** (`DepthGeometryCapability`, first match wins): no session or no model → not configured;
   `model_unreadable`; `preprocess_unavailable`; `init_failed` / `run_failed`; `initializing`;
-  `paused_thermal` / `paused_yield`; no observation yet, or one older than 2 periods by frame time (or on
-  another time basis) → `stale`, with the last skip reason; a fresh observation on degraded geometry →
-  degraded; else available. What the fit found (no ground, inverted output, a support switch) is the
-  observation's content, not a failure of the capability. The age is the main frame's time minus the
-  observation's, so it can be negative; it is judged by its size.
+  `paused_thermal` / `paused_yield`; no observation yet, or one older than 2 periods by measurement time
+  (or on another time basis) → `stale`, with the last skip reason; a fresh observation on degraded
+  geometry → degraded; else available. What the fit found (no ground, inverted output, a support switch)
+  is the observation's content, not a failure of the capability. The age is the main frame's time minus
+  the observation's measurement time (a model's is its frame's), so it can be negative; it is judged by
+  its size.
 - **Debug views** (debug builds). The switch is on the ground-contact distance screen. The debug panel
   has a depth line: the capability, then the latest run's number, age, the fit's validity and label
   shares, its timings and the model's shape. The `GROUND_GEOMETRY` overlay draws the latest valid fit
@@ -364,6 +367,21 @@ without the lane and compare the results, and the user's timeline, line for line
   used, its output and its fit (`DepthEvidenceRecorder`, fed by the lane under the same guard as any
   observation: a recorder that fails changes nothing the lane does or records), so that a PC can redo the
   preprocessing and the model and the JVM the fit ([field-capture.md](field-capture.md) §11).
+- **Sources, times and what a reader gets.** The lane runs a `DepthProducer` (in the app the model,
+  `LiteRtDepthProducer`). Its maps are `DepthMap`s of a `DepthKind`, and the lane and the fit branch on
+  the kind only, never on the producer: `RELATIVE_DISPARITY` (`DisparityMap`, a model's `a/Z + b`). A map
+  carries `DepthTimes`: when it was measured, the moment of the view its pixels belong to, and which
+  measurement it is (`MeasurementKey`). A model measures and views at its frame's time, and each run is a
+  new measurement, keyed `(generation, runId)`. The fit's gravity and intrinsics are resolved at the view
+  time; the age counts from the measurement time. Each main frame carries one `DepthReading`
+  (`SceneResult.depthReading`): the capability, the kind and its scale basis, the observation's id
+  `(generation, runId)` and times, the view's geometry (`DepthViewGeometry`: intrinsics, gravity, the
+  grid, the phone the settings describe), the observation, and `DepthCells` -- each cell's depth along
+  the optical axis at its centre and its height above the fitted ground, for relative depth in units of
+  the assumed phone height, with the share of the cell that was seen. Frames that read one run share its
+  observation, view and cells, which are never copied or written. A cell's value is a point observation
+  at its centre, and its coverage is what was seen, not what is free. Nothing reads a `DepthReading` to
+  decide anything.
 
 ## 7. Simulator
 

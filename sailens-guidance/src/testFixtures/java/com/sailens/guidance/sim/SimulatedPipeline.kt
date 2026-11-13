@@ -18,8 +18,8 @@ import com.sailens.guidance.depth.geometry.DepthGeometryConfig
 import com.sailens.guidance.depth.geometry.DepthGeometryLane
 import com.sailens.guidance.depth.geometry.DepthGeometrySwitch
 import com.sailens.guidance.depth.geometry.DepthModelCheckResult
-import com.sailens.guidance.depth.geometry.DepthModelRunner
 import com.sailens.guidance.depth.geometry.DepthPreparedInput
+import com.sailens.guidance.depth.geometry.DepthProducer
 import com.sailens.guidance.depth.geometry.ThermalLevel
 import com.sailens.guidance.geometry.CameraFactsSource
 import com.sailens.guidance.geometry.GroundFitter
@@ -65,7 +65,9 @@ import com.sailens.guidance.usecase.scene.StopSceneAnalysisUseCase
 import com.sailens.core.runtime.MlRuntimeInfo
 import com.sailens.runtime.accelerator.AcceleratorCoordinator
 import com.sailens.vision.depth.DepthInputTransform
+import com.sailens.vision.depth.DepthMap
 import com.sailens.vision.depth.DepthRun
+import com.sailens.vision.depth.DepthTimes
 import com.sailens.vision.depth.DisparityMap
 import com.sailens.vision.depth.ResizePolicy
 import kotlinx.coroutines.CompletableDeferred
@@ -297,7 +299,7 @@ class SimulatedPipeline(
     /** The depth lane, wired as `GuidanceModule` wires it; null without [depth]. */
     val depthLane: DepthGeometryLane? = depth?.let { model ->
         DepthGeometryLane(
-            runnerFactory = { SimulatedDepthRunner(model).also { depthRunners += it } },
+            producerFactory = { SimulatedDepthRunner(model).also { depthRunners += it } },
             modelCheck = {
                 if (model.checkThrows) throw IllegalStateException("simulated depth model check failure")
                 DepthModelCheckResult.Compatible
@@ -317,9 +319,11 @@ class SimulatedPipeline(
      * The depth model for [depth]: the disparity [renderDisparity] gives each frame's own pose and world, `a/Z + b`,
      * at the model's size and with the letterbox the contract fixes.
      */
-    inner class SimulatedDepthRunner internal constructor(private val model: SimulatedDepthModel) : DepthModelRunner {
+    inner class SimulatedDepthRunner internal constructor(private val model: SimulatedDepthModel) : DepthProducer {
         /** Runs that reached the model. */
         val inferences = AtomicInteger()
+
+        override val needsAccelerator: Boolean get() = true
 
         override suspend fun initialize() {
             if (model.initFails) throw UnsatisfiedLinkError("simulated depth model initialization failure")
@@ -334,12 +338,15 @@ class SimulatedPipeline(
                 model.height,
                 ResizePolicy.PAD_KEEP_ASPECT,
             )
-            return DepthPreparedInput(transform, detail = null, preprocessMs = 0, payload = contentIndex[indexOf(frame)])
+            return DepthPreparedInput(transform, detail = null, preprocessMs = 0, payload = Prepared(contentIndex[indexOf(frame)], frame.timestamp))
         }
 
-        override suspend fun infer(input: DepthPreparedInput): DepthRun {
+        private inner class Prepared(val content: Int, val timestampNanos: Long)
+
+        override suspend fun infer(input: DepthPreparedInput): DepthRun<DepthMap> {
             inferences.incrementAndGet()
-            val content = scenario.frames[input.payload as Int]
+            val prepared = input.payload as Prepared
+            val content = scenario.frames[prepared.content]
             val t = input.transform
             var values = renderDisparity(
                 scenario.camera, content.pose, content.world, model.width, model.height, t.analysisWidth, t.analysisHeight,
@@ -348,7 +355,7 @@ class SimulatedPipeline(
             // A model that outputs depth: Z = a / (d - b), the sky capped far away.
             if (model.inverted) values = FloatArray(values.size) { i -> if (values[i] > 0.2001f) (10f / (values[i] - 0.2f)).coerceAtMost(200f) else 200f }
             return DepthRun(
-                DisparityMap(model.width, model.height, values, t), nonFiniteCount = 0, detail = null, preprocessMs = 0,
+                DisparityMap(model.width, model.height, values, t, DepthTimes.ofFrame(prepared.timestampNanos)), nonFiniteCount = 0, detail = null, preprocessMs = 0,
                 inferenceMs = 0, outputReadMs = 0, runtimeInfo = MlRuntimeInfo("simulated", "simulated", "simulated", "kotlin_ground_fit"),
                 shapeLabel = "1x3x${model.height}x${model.width}>1x${model.height}x${model.width}",
             )
