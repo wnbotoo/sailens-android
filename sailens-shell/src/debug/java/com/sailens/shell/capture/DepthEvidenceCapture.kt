@@ -5,6 +5,7 @@ import com.sailens.core.log.LogService
 import com.sailens.guidance.depth.geometry.DepthEvidenceRecorder
 import com.sailens.guidance.depth.geometry.DepthEvidenceRun
 import com.sailens.guidance.depth.geometry.DepthEvidenceSlot
+import com.sailens.guidance.geometry.SupportGuardRule
 import com.sailens.guidance.trace.capture.CaptureSchema
 import com.sailens.guidance.trace.capture.DepthBlobRef
 import com.sailens.guidance.trace.capture.DepthEvidenceData
@@ -83,8 +84,15 @@ internal class DepthEvidenceCapture(
     private fun sessionFor(sessionId: String): Session? =
         session?.takeIf { it.id == sessionId } ?: superseded?.takeIf { it.id == sessionId }
 
-    /** The manifest block written when the capture starts; [finish] fills in the counters. */
-    fun manifestBlock(): DepthEvidenceManifest = DepthEvidenceManifest(poolSize = config.poolSize, queueCapacity = config.queueCapacity)
+    /**
+     * The manifest block written when the capture starts; [finish] fills in the counters. The guard rule is the one the
+     * lane's fitter takes by default, so a replay fits with it.
+     */
+    fun manifestBlock(): DepthEvidenceManifest = DepthEvidenceManifest(
+        poolSize = config.poolSize,
+        queueCapacity = config.queueCapacity,
+        groundFitRule = SupportGuardRule.CURRENT.id,
+    )
 
     /** The session directory exists now: the writer may start. */
     fun attach(sessionId: String, directory: File) {

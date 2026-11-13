@@ -261,12 +261,36 @@ turned into a ray.
    depth, else the result is `NO_SUPPORT`. Ranked by total inliers instead, the floor of a drop being
    approached becomes "the ground" once it fills more of the view. Selection and refit are
    deliberately redundant: each alone handles the approach.
-5. **Support-switch guard.** When more than half of the cells the last valid fit saw below ground now
-   read as ground (on a grid where at least 2% was below), the result is `SUPPORT_SWITCH`, which is
-   unknown: relative depth cannot tell "stepped down" from "looking over the edge". It is released
-   only when a fit sees a level below its ground again (two levels together, the near one under the
-   user) or a new session starts — not after some number of fits, because a user standing at the edge
-   gives any number of identical frames. Only a translation estimate could release it otherwise.
+5. **Support-switch guard.** The guard counts as another level only cells at least a quarter of the
+   camera height below the fitted ground: depth ratio `Z_ground/Z ≤ 1/(1 + 1/4)`, −0.2 or less, which
+   holds for any camera height, so no phone height is read (`SupportGuardRule.QUARTER_HEIGHT`). When
+   more than half of the cells the last valid fit saw that far below now read as ground (on a grid
+   where at least 2% was that far below), the result is `SUPPORT_SWITCH`, which is unknown: relative
+   depth cannot tell "stepped down" from "looking over the edge". It is released when a fit sees
+   another level that far below its own ground again (2% of the grid), or a new session starts — not
+   after some number of fits, because a user standing at the edge gives any number of identical frames.
+   Only a translation estimate could release it otherwise. Shallower levels arm nothing and release
+   nothing: on the reference model a few metres of flat floor or pavement read that deep (−0.13 to
+   −0.2), which armed the guard on flat ground and then held it for hundreds of fits; a single step or
+   a curb is that shallow too, and is not guarded.
+
+   What it does and does not establish (`GroundFitterTest`, noise-free disparity, 1.3 m, 25° down):
+   - Approaching drops of 0.6 m and more, slowly or at walking pace, it switches once only the floor
+     is in view; so does pitching the phone up at the edge until only the floor is in view.
+   - Drops of 0.4 m and less are not caught on a slow approach, under this rule or under the label
+     threshold it replaced: one fit just before the near ground runs out takes a line across both
+     levels, sees nothing below it and clears the history. At walking pace a 0.4 m drop is caught or
+     not depending on where the fits fall.
+   - It is only as deep as the model reads the drop: a 1.5 m drop read with half its depth difference
+     is caught, with 45% it is not.
+   - Seeing two levels again ends the suspicion; it does not prove the nearer one is the user's. A
+     further drop beyond the floor of the first releases the hold with the user still at the top, and
+     a floor that ends in a further drop is not caught at all.
+   So a `VALID` observation says this frame's candidate plane fits, not that it is confirmed to be the
+   one under the user: a reader that needs that needs evidence of its own. A navigation decision that
+   reads depth has to be validated on these known failures itself -- a passing fit clearing the
+   guard's history, a drop read shallow, more than one level below -- before it relies on the guard;
+   `VALID` is no confirmation of the user's level.
 6. **A flat line is no ground**: a wall filling the view fits one too, and the run-span check rejects
    it.
 7. **Labels** above / below ground by signed depth ratio (3× the threshold); metric height of a pixel

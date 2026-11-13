@@ -3,6 +3,7 @@ package com.sailens.guidance.trace.regression
 import com.sailens.guidance.geometry.GroundFitValidity
 import com.sailens.guidance.geometry.GroundFitter
 import com.sailens.guidance.geometry.GroundGuardState
+import com.sailens.guidance.geometry.SupportGuardRule
 import com.sailens.guidance.geometry.GroundObservation
 import com.sailens.guidance.trace.capture.DepthEvidenceRecord
 import com.sailens.guidance.trace.capture.DepthObservationRecord
@@ -85,8 +86,19 @@ data class DepthPcAgreement(
     val stoppedAt: String?,
 )
 
+/**
+ * How the support-switch guard went over a session's fits: [switches] fits gave `SUPPORT_SWITCH`, [holdsBegun] of them
+ * began a hold, and the hold stayed on for at most [longestHold] fits in a row -- the fits that returned early while
+ * it was on included, which is not the same count as a run of `SUPPORT_SWITCH` results.
+ */
+data class GuardSummary(val switches: Int, val holdsBegun: Int, val longestHold: Int)
+
 data class DepthEvidenceReport(
     val generation: Long,
+    /** The guard rule the capture names ([SupportGuardRule.id]); null when it names none (recorded before rules were). */
+    val recordedRule: Int?,
+    /** The rule the PC comparison and [evaluatedGuard] fit with: the recorded one unless another was asked for. */
+    val evaluatedRule: Int,
     val records: Int,
     val fittedRecords: Int,
     val nonFiniteRecords: Int,
@@ -100,6 +112,9 @@ data class DepthEvidenceReport(
     /** Largest differences of the fit's numbers on runs that matched otherwise (ART and HotSpot may differ by an ulp). */
     val maxScaleDifference: Float,
     val maxShiftDifference: Float,
+    /** The guard over the exact replay (the recorded rule), and over the phone's outputs fitted with the evaluated rule. */
+    val recordedGuard: GuardSummary?,
+    val evaluatedGuard: GuardSummary?,
     val pc: DepthPcAgreement?,
     val verdict: DepthEvidenceVerdict,
     val verdictReason: String,
@@ -112,17 +127,26 @@ data class DepthEvidenceReport(
  * on an unbroken run of fits from the session's start: it ends at the first missing ordinal, or at the first run
  * the stream counted as dropped, and nothing after a gap counts, however many runs follow.
  *
+ * Two guard rules can be at play ([SupportGuardRule]). The exact replay always fits with the rule the capture was
+ * recorded with: it checks the recording, and a summary recorded under one rule never matches a fit under another.
+ * The rest -- the PC comparison and [DepthEvidenceReport.evaluatedGuard] -- fits with the evaluated rule, the recorded
+ * one unless another is asked for: the phone's outputs are fitted again under it from each depth session's first fit,
+ * and that history is what the PC's outputs are compared from. A capture that names a rule this build does not know
+ * cannot be judged.
+ *
  * With a [candidate] -- the same runs' outputs computed on a PC from the recorded planes -- the PC's outputs are
  * compared with the phone's, and fitted from the phone's history run by run ([DepthPcAgreement.fitAgreement],
  * [DepthEvidenceThresholds]). A second fitter also fits the PC's outputs in the session's order on its own, and its
- * agreement with the replay is reported ([DepthPcAgreement.sessionValidityAgreement]).
+ * agreement with the phone's history is reported ([DepthPcAgreement.sessionValidityAgreement]).
  */
 class DepthEvidenceReplay(
     private val thresholds: DepthEvidenceThresholds = DepthEvidenceThresholds(),
-    private val fitterFactory: () -> GroundFitter = { GroundFitter() },
+    private val fitterFactory: (SupportGuardRule) -> GroundFitter = { GroundFitter(guardRule = it) },
     private val mismatchesKept: Int = 20,
 ) {
     /**
+     * @param recordedRule the capture's `depthEvidence.groundFitRule`, as recorded: null when it names none.
+     * @param evaluatedRule the rule to compare the PC with and to summarise the guard under; null for the recorded one.
      * @param firstDropped the first run the stream dropped, from the manifest's counters
      *   (`DepthEvidenceStats.firstDroppedGeneration` and `firstDroppedRunId`): acceptance ends there too, even when
      *   the dropped run made no fit.
@@ -130,15 +154,48 @@ class DepthEvidenceReplay(
     fun replay(
         records: List<DepthEvidenceRecord>,
         output: (DepthEvidenceRecord) -> FloatArray,
+        recordedRule: Int?,
         candidate: ((DepthEvidenceRecord) -> FloatArray?)? = null,
         firstDropped: DroppedRun? = null,
-    ): List<DepthEvidenceReport> =
-        records.groupBy { it.generation }.toSortedMap().map { (generation, session) ->
-            replaySession(generation, session, output, candidate, firstDropped?.takeIf { it.generation == generation }?.runId)
+        evaluatedRule: SupportGuardRule? = null,
+    ): List<DepthEvidenceReport> {
+        val recorded = SupportGuardRule.recorded(recordedRule)
+        return records.groupBy { it.generation }.toSortedMap().map { (generation, session) ->
+            if (recorded == null) {
+                unknownRule(generation, session, recordedRule, evaluatedRule)
+            } else {
+                replaySession(
+                    generation, session, output, candidate, firstDropped?.takeIf { it.generation == generation }?.runId,
+                    recordedRule, recorded, evaluatedRule ?: recorded,
+                )
+            }
         }
+    }
 
     /** A run of depth session [generation] the stream counted as dropped. */
     data class DroppedRun(val generation: Long, val runId: Long)
+
+    private fun unknownRule(generation: Long, records: List<DepthEvidenceRecord>, recordedRule: Int?, evaluatedRule: SupportGuardRule?) =
+        DepthEvidenceReport(
+            generation = generation,
+            recordedRule = recordedRule,
+            evaluatedRule = (evaluatedRule ?: SupportGuardRule.CURRENT).id,
+            records = records.size,
+            fittedRecords = records.count { it.fitOrdinal != null },
+            nonFiniteRecords = records.count { it.fitOrdinal == null },
+            acceptableRuns = 0,
+            firstGap = null,
+            exactRuns = 0,
+            mismatches = emptyList(),
+            mismatchCount = 0,
+            maxScaleDifference = 0f,
+            maxShiftDifference = 0f,
+            recordedGuard = null,
+            evaluatedGuard = null,
+            pc = null,
+            verdict = DepthEvidenceVerdict.CANNOT_JUDGE,
+            verdictReason = "recorded with guard rule $recordedRule, which this build does not know",
+        )
 
     private fun replaySession(
         generation: Long,
@@ -146,22 +203,24 @@ class DepthEvidenceReplay(
         output: (DepthEvidenceRecord) -> FloatArray,
         candidate: ((DepthEvidenceRecord) -> FloatArray?)?,
         firstDroppedRunId: Long?,
+        recordedRule: Int?,
+        recorded: SupportGuardRule,
+        evaluated: SupportGuardRule,
     ): DepthEvidenceReport {
         val fitted = records.filter { it.fitOrdinal != null }.sortedBy { it.fitOrdinal }
         val (acceptable, firstGap) = acceptablePrefix(fitted, firstDroppedRunId)
 
-        val fitter = fitterFactory()
+        val fitter = fitterFactory(recorded)
+        val recordedGuard = GuardTally(fitter)
         val mismatches = mutableListOf<DepthReplayMismatch>()
         var mismatchCount = 0
         var exact = 0
         var maxScale = 0f
         var maxShift = 0f
-        val replayed = ArrayList<GroundObservation>(acceptable.size)
         for (record in acceptable) {
             val ordinal = checkNotNull(record.fitOrdinal)
             val expected = record.observation
-            val actual = fit(fitter, record, output(record))
-            replayed += actual
+            val actual = recordedGuard.fit { fit(it, record, output(record)) }
             val problem = if (expected == null) {
                 Triple("observation", "a recorded fit", "none recorded")
             } else {
@@ -177,10 +236,17 @@ class DepthEvidenceReplay(
             }
         }
 
-        val pc = candidate?.let { pcAgreement(acceptable, replayed, output, it) }
+        val evaluatedGuard = if (evaluated == recorded) {
+            recordedGuard.summary()
+        } else {
+            GuardTally(fitterFactory(evaluated)).also { tally -> acceptable.forEach { record -> tally.fit { fit(it, record, output(record)) } } }.summary()
+        }
+        val pc = candidate?.let { pcAgreement(acceptable, output, it, evaluated) }
         val (verdict, reason) = judge(acceptable.size, mismatchCount, pc, candidate != null)
         return DepthEvidenceReport(
             generation = generation,
+            recordedRule = recordedRule,
+            evaluatedRule = evaluated.id,
             records = records.size,
             fittedRecords = fitted.size,
             nonFiniteRecords = records.count { it.fitOrdinal == null },
@@ -191,10 +257,38 @@ class DepthEvidenceReplay(
             mismatchCount = mismatchCount,
             maxScaleDifference = maxScale,
             maxShiftDifference = maxShift,
+            recordedGuard = recordedGuard.summary(),
+            evaluatedGuard = evaluatedGuard,
             pc = pc,
             verdict = verdict,
             verdictReason = reason,
         )
+    }
+
+    /** Counts what the guard does over one fitter's fits, in order. */
+    private class GuardTally(val fitter: GroundFitter) {
+        private var switches = 0
+        private var holdsBegun = 0
+        private var holding = 0
+        private var longest = 0
+
+        fun fit(call: (GroundFitter) -> GroundObservation): GroundObservation {
+            val before = fitter.guardState().holdingSwitch
+            val observation = call(fitter)
+            if (observation.validity == GroundFitValidity.SUPPORT_SWITCH) {
+                switches++
+                if (!before) holdsBegun++
+            }
+            if (fitter.guardState().holdingSwitch) {
+                holding++
+                longest = max(longest, holding)
+            } else {
+                holding = 0
+            }
+            return observation
+        }
+
+        fun summary() = GuardSummary(switches, holdsBegun, longest)
     }
 
     /**
@@ -249,14 +343,14 @@ class DepthEvidenceReplay(
 
     private fun pcAgreement(
         acceptable: List<DepthEvidenceRecord>,
-        replayed: List<GroundObservation>,
         output: (DepthEvidenceRecord) -> FloatArray,
         candidate: (DepthEvidenceRecord) -> FloatArray?,
+        rule: SupportGuardRule,
     ): DepthPcAgreement {
-        // The phone's history, rebuilt in the session's order as the exact replay rebuilds it.
-        val phoneFitter = fitterFactory()
+        // The phone's history under [rule], rebuilt in the session's order: under the recorded rule, the exact replay's.
+        val phoneFitter = fitterFactory(rule)
         // The PC's own history, for the reported session-order agreement only.
-        val sessionFitter = fitterFactory()
+        val sessionFitter = fitterFactory(rule)
         val errors = ArrayList<Float>(acceptable.size)
         val agrees = ArrayList<Boolean>(acceptable.size)
         val disagreements = mutableListOf<DepthFitDisagreement>()
@@ -317,7 +411,7 @@ class DepthEvidenceReplay(
                 labelSum += labelAgreement(phone, pc)
                 labelRuns++
             }
-            if (replayed[index].validity == fit(sessionFitter, record, values).validity) sessionValidityAgrees++
+            if (phone.validity == fit(sessionFitter, record, values).validity) sessionValidityAgrees++
         }
         val sorted = errors.sorted()
         val n = sorted.size

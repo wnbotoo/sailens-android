@@ -1,6 +1,7 @@
 package com.sailens.guidance.geometry
 
 import com.sailens.guidance.sim.Box
+import com.sailens.guidance.sim.GroundPatch
 import com.sailens.guidance.sim.Pose
 import com.sailens.guidance.sim.SceneClasses
 import com.sailens.guidance.sim.Scenarios
@@ -302,5 +303,153 @@ class GroundFitterTest {
     fun `heights read nothing from an invalid fit`() {
         val observation = fit(disparity(street, asDepth = true))
         assertEquals(null, observation.heightAboveGroundM(1f, 0.5f, 1.3f))
+    }
+
+    // ---- the support-switch guard's level: a quarter of the camera height (docs/geometry.md §6, step 5)
+
+    /** A sidewalk ending [edgeZ] ahead, then ground [depthM] lower out to the horizon. */
+    private fun dropWorld(depthM: Double, edgeZ: Double = 4.0) =
+        World(Scenarios.street(sidewalkEndZ = edgeZ, beyond = listOf(GroundPatch(SceneClasses.TERRAIN, -30.0, 30.0, edgeZ, 39.9, y = -depthM))))
+
+    /**
+     * [map] with the disparity of everything below the true ground at 1.3 m pulled toward that ground by [kept]: a model
+     * that reads a drop's floor nearer than it is. The ground itself is untouched, so the fit finds the same plane.
+     */
+    private fun compressBelowGround(map: DisparityMap, pose: Pose, kept: Float): DisparityMap {
+        val g = gravity(pose)
+        val values = FloatArray(map.values.size) { i ->
+            val u = map.transform.toAnalysisX(i % map.width + 0.5f)
+            val v = map.transform.toAnalysisY(i / map.width + 0.5f)
+            val q = g.x * (u - intrinsics.cx) / intrinsics.fx + g.y * (v - intrinsics.cy) / intrinsics.fy + g.z
+            val onGround = 10f / 1.3f * q + 0.2f
+            val d = map.values[i]
+            if (q > 0f && d < onGround * 0.99f) onGround + kept * (d - onGround) else d
+        }
+        return DisparityMap(map.width, map.height, values, map.transform)
+    }
+
+    /** [map] with the rows [fromRow] until [toRow] (fractions of the image) [ratio] further down than whatever they show. */
+    private fun lowerRows(map: DisparityMap, fromRow: Float, toRow: Float, ratio: Float): DisparityMap {
+        val values = FloatArray(map.values.size) { i ->
+            val v = map.transform.toAnalysisY(i / map.width + 0.5f) / ah
+            val d = map.values[i]
+            if (v in fromRow..toRow) 0.2f + (1f + ratio) * (d - 0.2f) else d
+        }
+        return DisparityMap(map.width, map.height, values, map.transform)
+    }
+
+    /** Walks toward [world]'s edge 8 cm per fit, pitched down [pitch], fitting each frame; returns metres walked and fit. */
+    private fun approach(fitter: GroundFitter, world: World, toM: Float, pitch: Float = 25f, change: (DisparityMap, Pose) -> DisparityMap = { m, _ -> m }) =
+        (0..(toM / 0.08f).toInt()).map { i ->
+            val pose = Pose(1.3f, pitch, walkedM = i * 0.08f)
+            pose.walkedM to fitter.fit(change(disparity(world, pose = pose), pose), intrinsics, gravity(pose), gridW, gridH)
+        }
+
+    @Test
+    fun `drops of 0·6 m and more are guarded on a slow approach, and a 1·5 m one at walking pace`() {
+        for (depth in listOf(0.6, 0.8, 1.5)) {
+            val fits = approach(GroundFitter(), dropWorld(depth), toM = 3.92f)
+            assertTrue("$depth m: the sidewalk", fits.filter { it.first <= 2.8f }.all { it.second.isValid })
+            assertEquals("$depth m: only the floor in view", GroundFitValidity.SUPPORT_SWITCH, fits.last().second.validity)
+        }
+        // 0.4 m a fit, about 1.2 m/s at 3 Hz, wherever the fits fall on the way.
+        for (start in listOf(0f, 0.1f, 0.2f, 0.3f)) {
+            val fitter = GroundFitter()
+            var walked = start
+            var last: GroundObservation? = null
+            while (walked <= 3.95f) {
+                val pose = Pose(1.3f, 25f, walkedM = walked)
+                last = fitter.fit(disparity(dropWorld(1.5), pose = pose), intrinsics, gravity(pose), gridW, gridH)
+                walked += 0.4f
+            }
+            assertEquals("from $start m", GroundFitValidity.SUPPORT_SWITCH, last!!.validity)
+        }
+    }
+
+    /**
+     * Not covered: shallower drops, however the guard's level is set. Approaching 0.2-0.4 m slowly, one fit just before
+     * the near ground runs out takes a line across the last of it and the level below (a scale twice the ground's): a
+     * valid fit that sees no level below, so the guard's history is cleared, and the level below is then taken for the
+     * ground. The label threshold, which counts every below-ground cell, does no better.
+     */
+    @Test
+    fun `not covered - a drop of 0·4 m or less, approached slowly, is taken for the ground`() {
+        for (rule in SupportGuardRule.entries) for (depth in listOf(0.2, 0.3, 0.4)) {
+            val fits = approach(GroundFitter(guardRule = rule), dropWorld(depth), toM = 3.92f)
+            val where = "$depth m, ${rule.name}"
+            assertTrue(where, fits.none { it.second.validity == GroundFitValidity.SUPPORT_SWITCH })
+            val atEdge = fits.last().second
+            assertTrue(where, atEdge.isValid)
+            // The level below is the ground now: its scale is a / (h + depth).
+            assertEquals(where, (10.0 / (1.3 + depth)).toFloat(), atEdge.disparityScale, 0.02f * 10f / 1.3f)
+        }
+    }
+
+    @Test
+    fun `tilting the phone up at the edge, so that only the floor below is in view, is a switch too`() {
+        val drop = dropWorld(1.5)
+        val fitter = GroundFitter()
+        // Walked 2.8 m: the edge 1.2 m ahead, the sidewalk still under the near view.
+        approach(fitter, drop, toM = 2.8f)
+        val standing = 2.8f
+        val down = Pose(1.3f, 25f, walkedM = standing)
+        assertTrue(fitter.fit(disparity(drop, pose = down), intrinsics, gravity(down), gridW, gridH).isValid)
+        // Pitched up: the bottom of the view now falls past the edge.
+        val up = Pose(1.3f, 12f, walkedM = standing)
+        assertEquals(GroundFitValidity.SUPPORT_SWITCH, fitter.fit(disparity(drop, pose = up), intrinsics, gravity(up), gridW, gridH).validity)
+    }
+
+    /**
+     * The guard is only as deep as the model reads the drop. With the floor's disparity pulled toward the ground's, a
+     * 1.5 m drop (depth ratio −0.54) is still guarded with half its depth difference kept (−0.27), and not with 45 %
+     * (−0.24): by then it is a 0.4 m drop to the fit, and goes as one (above).
+     */
+    @Test
+    fun `a drop the model reads shallow enough is not guarded`() {
+        for ((kept, guarded) in listOf(0.5f to true, 0.45f to false)) {
+            val fits = approach(GroundFitter(), dropWorld(1.5), toM = 3.92f) { map, pose -> compressBelowGround(map, pose, kept) }
+            val last = fits.last().second.validity
+            val where = "a 1.5 m drop read with $kept of its depth difference"
+            if (guarded) assertEquals(where, GroundFitValidity.SUPPORT_SWITCH, last) else assertEquals(where, GroundFitValidity.VALID, last)
+        }
+    }
+
+    @Test
+    fun `holding at a drop's edge, a shallow region below its floor does not release, a deep one does`() {
+        val drop = dropWorld(1.5)
+        val fitter = GroundFitter()
+        approach(fitter, drop, toM = 2.96f)
+        val atEdge = Pose(1.3f, 25f, walkedM = 3.6f)
+        val edgeFrame = disparity(drop, pose = atEdge)
+        assertEquals(GroundFitValidity.SUPPORT_SWITCH, fitter.fit(edgeFrame, intrinsics, gravity(atEdge), gridW, gridH).validity)
+        // A band across the upper view reads 15 % further than the floor: below it by the labels, not by the guard.
+        val shallow = lowerRows(edgeFrame, 0.45f, 0.6f, -0.15f)
+        assertEquals(GroundFitValidity.SUPPORT_SWITCH, fitter.fit(shallow, intrinsics, gravity(atEdge), gridW, gridH).validity)
+        // 25 %: another level a quarter of the camera height down, seen with the near one -- the hold ends. That is also
+        // what is not covered: here the user is still at the top, and a further drop beyond the floor ends the hold
+        // just the same. Seeing two levels again does not prove the nearer one is the user's.
+        val deep = lowerRows(edgeFrame, 0.45f, 0.6f, -0.25f)
+        assertTrue(fitter.fit(deep, intrinsics, gravity(atEdge), gridW, gridH).isValid)
+    }
+
+    /**
+     * Not covered: a drop's floor that ends in a further drop. On the approach the last valid fit sees both lower levels;
+     * when the first one takes over the near view, the second is still below it (2.8 / 3.8 − 1 = −0.26) and takes
+     * most of those cells, so fewer than half of them read as ground and nothing switches: the floor is the ground.
+     */
+    @Test
+    fun `not covered - at the edge of a drop with a further drop beyond, its floor is taken for the ground`() {
+        val world = World(
+            Scenarios.street(
+                sidewalkEndZ = 4.0,
+                beyond = listOf(
+                    GroundPatch(SceneClasses.TERRAIN, -30.0, 30.0, 4.0, 8.0, y = -1.5),
+                    GroundPatch(SceneClasses.TERRAIN, -30.0, 30.0, 8.0, 39.9, y = -2.5),
+                ),
+            ),
+        )
+        val fits = approach(GroundFitter(), world, toM = 3.92f)
+        assertTrue(fits.none { it.second.validity == GroundFitValidity.SUPPORT_SWITCH })
+        assertEquals(10f / 2.8f, fits.last().second.disparityScale, 0.02f * 10f / 1.3f)
     }
 }

@@ -2,6 +2,7 @@ package com.sailens.guidance.trace.capture
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -101,6 +102,19 @@ class CaptureSessionReaderTest {
         val result = CaptureSessionReader.read(session(manifestJson = future))
 
         assertTrue(result is CaptureReadResult.Rejected)
+    }
+
+    @Test
+    fun `a depth evidence block from before the guard rule names none, one from after names its rule`() {
+        val before = CaptureSchema.encodeManifest(
+            manifest.copy(schemaMinor = 9, depthEvidence = DepthEvidenceManifest(poolSize = 4, queueCapacity = 4)),
+        )
+        assertTrue("written without the field", "groundFitRule" !in before)
+        assertNull(CaptureSessionReader.read(session(manifestJson = before)).orThrow().manifest.depthEvidence!!.groundFitRule)
+        val after = CaptureSchema.encodeManifest(
+            manifest.copy(depthEvidence = DepthEvidenceManifest(poolSize = 4, queueCapacity = 4, groundFitRule = 2)),
+        )
+        assertEquals(2, CaptureSessionReader.read(session(manifestJson = after)).orThrow().manifest.depthEvidence!!.groundFitRule)
     }
 
     @Test

@@ -143,13 +143,15 @@ data class DepthObservationRecord(
 /**
  * [CaptureManifest.depthEvidence]: present when the session recorded the stream. [poolSize] buffers hold the
  * planes between the lane and the writer, and [queueCapacity] records wait for it; a run that finds neither
- * free is dropped and counted.
+ * free is dropped and counted. [groundFitRule] is the support-switch guard rule the lane fitted with
+ * (`SupportGuardRule.id`); a capture without it was recorded with rule 1, the label threshold (schema 1.9).
  */
 @Serializable
 data class DepthEvidenceManifest(
     val poolSize: Int,
     val queueCapacity: Int,
     val stats: DepthEvidenceStats = DepthEvidenceStats(),
+    val groundFitRule: Int? = null,
 )
 
 /**
