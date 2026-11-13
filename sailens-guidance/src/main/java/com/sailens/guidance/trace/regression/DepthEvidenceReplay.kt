@@ -93,6 +93,38 @@ data class DepthPcAgreement(
  */
 data class GuardSummary(val switches: Int, val holdsBegun: Int, val longestHold: Int)
 
+/** Which of the replay's fits a [DepthReplayFit] is. */
+enum class DepthReplayRole {
+    /** The exact replay: the phone's output, the recorded rule, the session's own history. */
+    EXACT,
+
+    /** The phone's output again under the evaluated rule, when it is not the recorded one. */
+    EVALUATED,
+
+    /** The PC's output, fitted by a copy of the phone's history. */
+    PC,
+
+    /** The phone's output, on the history the PC comparison follows. */
+    PHONE,
+
+    /** The phone's output, fitted from a history an earlier PC output left. */
+    BRANCH,
+
+    /** The PC's output, in session order on its own history. */
+    SESSION,
+}
+
+/**
+ * One fit the replay made, in the order it made them, and the [fitter] right after it: for a caller that keeps every
+ * fit and the history it left (the depth baseline). The fitter is the replay's own; the caller only reads it.
+ */
+class DepthReplayFit internal constructor(
+    val role: DepthReplayRole,
+    val record: DepthEvidenceRecord,
+    val observation: GroundObservation,
+    internal val fitter: GroundFitter,
+)
+
 data class DepthEvidenceReport(
     val generation: Long,
     /** The guard rule the capture names ([SupportGuardRule.id]); null when it names none (recorded before rules were). */
@@ -143,6 +175,8 @@ class DepthEvidenceReplay(
     private val thresholds: DepthEvidenceThresholds = DepthEvidenceThresholds(),
     private val fitterFactory: (SupportGuardRule) -> GroundFitter = { GroundFitter(guardRule = it) },
     private val mismatchesKept: Int = 20,
+    /** Told of every fit as it is made; observation only. */
+    private val observer: ((DepthReplayFit) -> Unit)? = null,
 ) {
     /**
      * @param recordedRule the capture's `depthEvidence.groundFitRule`, as recorded: null when it names none.
@@ -220,7 +254,7 @@ class DepthEvidenceReplay(
         for (record in acceptable) {
             val ordinal = checkNotNull(record.fitOrdinal)
             val expected = record.observation
-            val actual = recordedGuard.fit { fit(it, record, output(record)) }
+            val actual = recordedGuard.fit { fit(it, record, output(record), DepthReplayRole.EXACT) }
             val problem = if (expected == null) {
                 Triple("observation", "a recorded fit", "none recorded")
             } else {
@@ -239,7 +273,9 @@ class DepthEvidenceReplay(
         val evaluatedGuard = if (evaluated == recorded) {
             recordedGuard.summary()
         } else {
-            GuardTally(fitterFactory(evaluated)).also { tally -> acceptable.forEach { record -> tally.fit { fit(it, record, output(record)) } } }.summary()
+            GuardTally(fitterFactory(evaluated)).also { tally ->
+                acceptable.forEach { record -> tally.fit { fit(it, record, output(record), DepthReplayRole.EVALUATED) } }
+            }.summary()
         }
         val pc = candidate?.let { pcAgreement(acceptable, output, it, evaluated) }
         val (verdict, reason) = judge(acceptable.size, mismatchCount, pc, candidate != null)
@@ -315,7 +351,7 @@ class DepthEvidenceReplay(
         return fitted to null
     }
 
-    private fun fit(fitter: GroundFitter, record: DepthEvidenceRecord, values: FloatArray): GroundObservation {
+    private fun fit(fitter: GroundFitter, record: DepthEvidenceRecord, values: FloatArray, role: DepthReplayRole): GroundObservation {
         val geometry = record.geometry.toGeometry()
         val map = DisparityMap(record.output.width, record.output.height, values, record.transform.toTransform())
         return fitter.fit(
@@ -325,7 +361,7 @@ class DepthEvidenceReplay(
             record.gridWidth,
             record.gridHeight,
             geometry.frameTimeNanos,
-        )
+        ).also { observation -> observer?.invoke(DepthReplayFit(role, record, observation, fitter)) }
     }
 
     private fun differs(expected: DepthObservationRecord, actual: DepthObservationRecord): Triple<String, String, String>? = when {
@@ -385,13 +421,13 @@ class DepthEvidenceReplay(
             errors += compareDisparity(reference = pcMap, candidate = phoneMap).medianRelativeError
 
             val shared = phoneFitter.copy()
-            val pc = fit(shared, record, values)
-            val phone = fit(phoneFitter, record, phoneValues)
+            val pc = fit(shared, record, values, DepthReplayRole.PC)
+            val phone = fit(phoneFitter, record, phoneValues, DepthReplayRole.PHONE)
             agrees += true
             // Histories earlier PC outputs left: does this run's phone output show them?
             val following = mutableListOf<Branch>()
             for (branch in branches) {
-                val later = fit(branch.fitter, record, phoneValues)
+                val later = fit(branch.fitter, record, phoneValues, DepthReplayRole.BRANCH)
                 when {
                     later.validity != phone.validity -> disagree(
                         branch.origin, "run ${record.runId} (fit ${record.fitOrdinal}) from its history", phone.validity.text(), later.validity.text(),
@@ -411,7 +447,7 @@ class DepthEvidenceReplay(
                 labelSum += labelAgreement(phone, pc)
                 labelRuns++
             }
-            if (phone.validity == fit(sessionFitter, record, values).validity) sessionValidityAgrees++
+            if (phone.validity == fit(sessionFitter, record, values, DepthReplayRole.SESSION).validity) sessionValidityAgrees++
         }
         val sorted = errors.sorted()
         val n = sorted.size

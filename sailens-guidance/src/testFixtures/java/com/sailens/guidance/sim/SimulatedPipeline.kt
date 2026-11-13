@@ -13,6 +13,7 @@ import com.sailens.guidance.config.TraceRuntimeConfig
 import com.sailens.guidance.depth.DefaultDepthRepository
 import com.sailens.guidance.depth.GroundContactDistanceEstimator
 import com.sailens.guidance.depth.ImagePositionDepthEstimator
+import com.sailens.guidance.depth.geometry.DepthEvidenceRecorder
 import com.sailens.guidance.depth.geometry.DepthGeometryConfig
 import com.sailens.guidance.depth.geometry.DepthGeometryLane
 import com.sailens.guidance.depth.geometry.DepthGeometrySwitch
@@ -21,6 +22,7 @@ import com.sailens.guidance.depth.geometry.DepthModelRunner
 import com.sailens.guidance.depth.geometry.DepthPreparedInput
 import com.sailens.guidance.depth.geometry.ThermalLevel
 import com.sailens.guidance.geometry.CameraFactsSource
+import com.sailens.guidance.geometry.GroundFitter
 import com.sailens.guidance.geometry.PhoneGeometrySettings
 import com.sailens.guidance.geometry.SensorSample
 import com.sailens.guidance.geometry.Vec3
@@ -122,6 +124,10 @@ class SimulatedPipeline(
     detectionInit: ModelInitGate? = null,
     renders: ScenarioRenders? = null,
     val depth: SimulatedDepthModel? = null,
+    /** The lane's fitter for each depth session; the lane's own default unless a test watches it. */
+    depthFitter: () -> GroundFitter = { GroundFitter() },
+    /** The lane's depth evidence recorder; none unless a test watches the runs. */
+    depthEvidence: DepthEvidenceRecorder = DepthEvidenceRecorder.None,
 ) {
     private val semantics = CityscapesNavigationSemantics
 
@@ -301,7 +307,9 @@ class SimulatedPipeline(
             traceService = NoOpTraceService,
             config = DepthGeometryConfig(),
             logService = SilentLog,
+            fitterFactory = depthFitter,
             elapsedMs = clock,
+            evidence = depthEvidence,
         )
     }
 
