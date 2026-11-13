@@ -14,9 +14,10 @@ graph is ordinary operators. What the export does, all with the model's own weig
 3. Each 1x1 convolution that sees a 1x1 map at this input size (squeeze-excitation) written as the linear
    layer it is.
 4. With --fp16 only: the weights stored as float16 (../tflite_tools.py), which halves the file.
-Then it checks, on the CPU, that steps 1-3 changed nothing (torch against the stock model), that the float32
-.tflite matches torch and, with --fp16, that storing the weights as float16 moved the output by no more than
-their rounding.
+Then it checks, on the CPU and on two inputs (uniform noise and a fixed picture-like image), that steps 1-3
+changed nothing (torch against the stock model), that the float32 .tflite matches torch and, with --fp16, that
+storing the weights as float16 moved the output by no more than measured bounds: every value finite, and the
+median, the 99th percentile and each region of the output within its bound (../tflite_tools.py check).
 
 Needs torch, litert-torch and ai-edge-litert; --fp16 also ai-edge-quantizer.
     python export.py <ZipDepth checkout> 512 288 out/depth.tflite        # height width
@@ -29,7 +30,6 @@ import sys
 import tempfile
 
 import litert_torch
-import numpy as np
 import torch
 from ai_edge_litert.interpreter import Interpreter
 
@@ -152,35 +152,34 @@ if __name__ == "__main__":
     model = load(root)
     torch.manual_seed(0)
     x01 = torch.rand(1, 3, h, w)
-    stock = torch_output(model, x01, h, w)
+    inputs = {"random": x01, "picture": torch.from_numpy(tt.picture(h, w))}
+    stock = {k: torch_output(model, x, h, w) for k, x in inputs.items()}
     model = copy.deepcopy(model).fuse_for_inference()
-    fused_err = tt.relative_error(torch_output(model, x01, h, w), stock)
-    print(f"torch fused vs stock: {tt.summary(fused_err)}")
+    for k, x in inputs.items():
+        tt.check(f"torch fused vs stock, {k}", torch_output(model, x, h, w), stock[k], median=1e-5, p99=1e-4, cell=1e-5, largest=1e-3)
     splits = split_grouped_pointwise(model)
     linears = pointwise_on_1x1_as_linear(model, x01)
-    rewritten = torch_output(model, x01, h, w)
-    rewrite_err = tt.relative_error(rewritten, stock)
-    print(f"split {splits} grouped 1x1 convolutions, {linears} 1x1 convolutions on a 1x1 map as linear; "
-          f"torch rewritten vs stock: {tt.summary(rewrite_err)}")
-    assert np.median(rewrite_err) <= 1e-5, "fusing or rewriting changed the output"
+    print(f"split {splits} grouped 1x1 convolutions, {linears} 1x1 convolutions on a 1x1 map as linear")
+    for k, x in inputs.items():
+        tt.check(f"torch rewritten vs stock, {k}", torch_output(model, x, h, w), stock[k],
+                 median=1e-5, p99=1e-4, cell=1e-5, largest=1e-3)
 
     with tempfile.TemporaryDirectory() as tmp:
         raw = os.path.join(tmp, "raw.tflite")
         litert_torch.convert(Wrapper(model, h, w), (x01,)).export(raw)
         model_bytes = open(raw, "rb").read()
-    lite32 = tt.run_cpu(model_bytes, x01.numpy())
-    lite_err = tt.relative_error(lite32, stock)
-    print(f"tflite float32 (CPU) vs torch stock: {tt.summary(lite_err)}")
-    assert np.median(lite_err) <= 1e-4, "the .tflite does not compute what torch does"
+    lite32 = {k: tt.run_cpu(model_bytes, x.numpy()) for k, x in inputs.items()}
+    for k in inputs:
+        tt.check(f"tflite float32 (CPU) vs torch stock, {k}", lite32[k], stock[k], median=1e-4, p99=1e-4, cell=1e-4, largest=1e-3)
     if fp16:
         model_bytes = tt.cast_weights_fp16(model_bytes)
         types_, ops = tt.contents(model_bytes)
         print(f"float16 weights: tensors {types_}, {ops.get('DEQUANTIZE', 0)} DEQUANTIZE")
-        cast_err = tt.relative_error(tt.run_cpu(model_bytes, x01.numpy()), lite32)
-        print(f"tflite float16 weights (CPU) vs float32: {tt.summary(cast_err)}")
-        # At 512x288 the output moved 9.4e-4 (median), p99 5.0e-3: twice the bound for one weight, the rounding
-        # of many fused layers adding up. A cast that broke a tensor moves it by far more.
-        assert np.median(cast_err) <= 5e-3, "storing the weights as float16 changed more than their rounding"
+        # Measured at 512x288: median 9.4e-4 / 3.0e-4, p99 5.0e-3 / 1.7e-3, worst cell 3.6e-3 / 1.3e-3, largest 6.8e-3 /
+        # 3.9e-3 (random / picture), larger than the reference model's: many fused layers each round their weights.
+        for k, x in inputs.items():
+            tt.check(f"tflite float16 weights (CPU) vs float32, {k}", tt.run_cpu(model_bytes, x.numpy()), lite32[k],
+                     median=5e-3, p99=2e-2, cell=1e-2, largest=0.1)
     open(out, "wb").write(model_bytes)
     shapes = Interpreter(model_path=out)
     print(f"input {shapes.get_input_details()[0]['shape']} -> output {shapes.get_output_details()[0]['shape']}: {out}")

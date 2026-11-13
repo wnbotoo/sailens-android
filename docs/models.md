@@ -170,8 +170,11 @@ GPU it runs five to six times slower, so LOW relies on sem+det keeping the GPU b
 ([experiments/depth-lane-device-2026-11.md](experiments/depth-lane-device-2026-11.md)). Export it with
 [`scripts/depth/dav2/export.py`](../scripts/depth/dav2/export.py), which folds the normalization and the
 position embedding in, applies the rank-3 patch and checks on the CPU that none of it changed the
-output. With `--fp16` it stores the weights as float16 (49.9 MB instead of 98.0 MB at 392×224; the CPU
-output moves by a median 1.3e-4); the GPU computes in FP16 either way. Distill-Any-Depth Small has the same
+output (on a noise and a picture-like input: every value finite, and the median, the 99th percentile and
+each region of the output within measured bounds). With `--fp16` it stores the weights as float16
+(49.9 MB instead of 98.0 MB at 392×224; the CPU output moves by a median 1.3e-4); the GPU computes in
+FP16 either way. These checks catch an export that computes something else; they say nothing about the
+GPU, which only the Model consistency check on the device does. Distill-Any-Depth Small has the same
 architecture and fits the contract the same way.
 
 **ZipDepth** (its repository, which holds the checkpoints, is MIT and states no separate terms for the
