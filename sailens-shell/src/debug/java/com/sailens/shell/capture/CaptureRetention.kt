@@ -24,6 +24,11 @@ internal class CaptureRetention(
     private val fixedMaxTotalBytes: Long = DEFAULT_MAX_TOTAL_BYTES,
     /** The cap chosen on the capture page (2 / 5 / 10 GB); overrides [fixedMaxTotalBytes] when given. */
     private val maxTotalBytesSetting: (() -> Long)? = null,
+    /**
+     * Runs in each pass after the sessions on disk are measured and before any is deleted. Tests let the active
+     * capture grow there, as the depth evidence stream does on its own thread while a pass runs.
+     */
+    private val afterScan: () -> Unit = {},
 ) {
     constructor(root: File, maxAgeMs: Long = DEFAULT_MAX_AGE_MS, maxTotalBytes: Long) :
         this(root, maxAgeMs, fixedMaxTotalBytes = maxTotalBytes, maxTotalBytesSetting = null)
@@ -45,6 +50,7 @@ internal class CaptureRetention(
         val sessions = root.listFiles { file -> file.isDirectory }.orEmpty()
             .filter { it.name != activeSessionId }
             .map { describe(it) }
+        afterScan()
         val deleted = mutableListOf<String>()
         fun deletable(session: SessionOnDisk) = !session.pinned && session.directory.name !in busySessionIds
 
