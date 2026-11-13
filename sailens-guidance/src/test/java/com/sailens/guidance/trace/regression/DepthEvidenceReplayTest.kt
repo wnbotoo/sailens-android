@@ -7,6 +7,7 @@ import com.sailens.guidance.geometry.GroundFitValidity
 import com.sailens.guidance.geometry.GroundFitter
 import com.sailens.guidance.geometry.IntrinsicsSource
 import com.sailens.guidance.geometry.PhoneGeometrySettings
+import com.sailens.guidance.geometry.SupportGuardRule
 import com.sailens.guidance.geometry.TimeBasis
 import com.sailens.guidance.geometry.Vec3
 import com.sailens.guidance.model.trace.DepthRunTrace
@@ -68,9 +69,14 @@ class DepthEvidenceReplayTest {
         generation,
     ) { walkPose(it) }
 
-    /** Records [outputs] in order through one live fitter, the way the lane records them. */
-    private fun record(outputs: List<FloatArray>, generation: Long = 1, poseOf: (Int) -> Pose): Recorded {
-        val fitter = GroundFitter()
+    /** Records [outputs] in order through one live fitter with [rule], the way the lane records them. */
+    private fun record(
+        outputs: List<FloatArray>,
+        generation: Long = 1,
+        rule: SupportGuardRule = SupportGuardRule.CURRENT,
+        poseOf: (Int) -> Pose,
+    ): Recorded {
+        val fitter = GroundFitter(guardRule = rule)
         val records = mutableListOf<DepthEvidenceRecord>()
         val byRun = mutableMapOf<Long, FloatArray>()
         val noBlob = DepthBlobRef(0, 0, 0)
@@ -114,9 +120,9 @@ class DepthEvidenceReplayTest {
 
     /**
      * Level ground, disparity `10·q + 0.2`, with a patch near the feet (about 2.7 % of the view) whose disparity is
-     * [depression] lower. The fit labels a cell below ground past 12 % (the inlier band times the structure factor),
-     * and a patch that large arms the support-switch guard: 11.8 % and 12.2 % differ by 0.45 % of disparity and fall
-     * on either side.
+     * [depression] lower. A patch that large arms the support-switch guard once it is another level by the guard's rule:
+     * 20 % or more below (a quarter of the camera height down). 19.8 % and 20.2 % differ by 0.5 % of disparity and fall
+     * on either side; both are below ground by the labels.
      */
     private fun patchedGround(depression: Float): FloatArray =
         ground { u, v -> if (u >= 0.42f * aw && u < 0.58f * aw && nearRows(v)) depression else 0f }
@@ -136,20 +142,23 @@ class DepthEvidenceReplayTest {
 
     /**
      * Two patches near the feet, each large enough to arm the guard, overlapping by less than half: A spans 40–56 %
-     * of the width, B 50–66 %. In [below] the depression passes the 12 % band (below ground), in the rest of A and B
-     * it stays short of it.
+     * of the width, B 50–66 %. In [below] the depression reaches the guard's 20 %, in the rest of A and B it stays short
+     * of it.
      */
     private fun twoPatches(below: (inA: Boolean, inB: Boolean) -> Boolean): FloatArray = ground { u, v ->
         val inA = nearRows(v) && u >= 0.40f * aw && u < 0.56f * aw
         val inB = nearRows(v) && u >= 0.50f * aw && u < 0.66f * aw
         when {
             !inA && !inB -> 0f
-            below(inA, inB) -> 0.122f
-            else -> 0.118f
+            below(inA, inB) -> 0.202f
+            else -> 0.198f
         }
     }
 
     private val few = DepthEvidenceThresholds(minAcceptableRuns = 20)
+
+    /** The rule [record]'s live fitter fits with, as a capture would name it. */
+    private val CURRENT_RULE = SupportGuardRule.CURRENT.id
 
     @Test
     fun `a whole session replays exactly, its later fits standing on the history`() {
@@ -158,7 +167,7 @@ class DepthEvidenceReplayTest {
             "the walk reaches the hold that only history explains",
             session.records.any { it.observation?.validity == GroundFitValidity.SUPPORT_SWITCH.name.lowercase() },
         )
-        val report = DepthEvidenceReplay(few).replay(session.records, session::output).single()
+        val report = DepthEvidenceReplay(few).replay(session.records, session::output, CURRENT_RULE).single()
         assertEquals(50, report.acceptableRuns)
         assertEquals(50, report.exactRuns)
         assertNull(report.firstGap)
@@ -170,7 +179,7 @@ class DepthEvidenceReplayTest {
     fun `nothing after the first gap counts, however many runs follow`() {
         val session = record(50)
         val gapped = session.records.filter { it.fitOrdinal != 30L }
-        val report = DepthEvidenceReplay(few).replay(gapped, session::output).single()
+        val report = DepthEvidenceReplay(few).replay(gapped, session::output, CURRENT_RULE).single()
         assertEquals(30, report.acceptableRuns)
         assertEquals(49, report.fittedRecords)
         assertTrue(report.firstGap!!, "fit call 30 is missing" in report.firstGap!!)
@@ -180,10 +189,10 @@ class DepthEvidenceReplayTest {
     fun `a run the stream dropped ends acceptance there, though it made no fit`() {
         val session = record(40)
         // Run 21 is fit call 20; a dropped run 21 of another depth session changes nothing here.
-        val report = DepthEvidenceReplay(few).replay(session.records, session::output, firstDropped = DepthEvidenceReplay.DroppedRun(1, 21)).single()
+        val report = DepthEvidenceReplay(few).replay(session.records, session::output, CURRENT_RULE, firstDropped = DepthEvidenceReplay.DroppedRun(1, 21)).single()
         assertEquals(20, report.acceptableRuns)
         assertTrue(report.firstGap!!, "dropped run 21" in report.firstGap!!)
-        val other = DepthEvidenceReplay(few).replay(session.records, session::output, firstDropped = DepthEvidenceReplay.DroppedRun(2, 21)).single()
+        val other = DepthEvidenceReplay(few).replay(session.records, session::output, CURRENT_RULE, firstDropped = DepthEvidenceReplay.DroppedRun(2, 21)).single()
         assertEquals(40, other.acceptableRuns)
     }
 
@@ -191,7 +200,7 @@ class DepthEvidenceReplayTest {
     fun `a session whose first fit was not recorded has nothing acceptable and cannot pass`() {
         val session = record(40)
         val late = session.records.drop(1)
-        val report = DepthEvidenceReplay(few).replay(late, session::output, candidate = session::output).single()
+        val report = DepthEvidenceReplay(few).replay(late, session::output, CURRENT_RULE, candidate = session::output).single()
         assertEquals(0, report.acceptableRuns)
         assertEquals(DepthEvidenceVerdict.CANNOT_JUDGE, report.verdict)
     }
@@ -200,7 +209,7 @@ class DepthEvidenceReplayTest {
     fun `runs without a fit leave no gap, and records may come in any order`() {
         val session = record(30)
         val nonFinite = session.records[5].copy(runId = 1000, fitOrdinal = null, outcome = DepthRunTrace.NON_FINITE_OUTPUT, observation = null)
-        val report = DepthEvidenceReplay(few).replay((session.records + nonFinite).shuffled(java.util.Random(7)), session::output).single()
+        val report = DepthEvidenceReplay(few).replay((session.records + nonFinite).shuffled(java.util.Random(7)), session::output, CURRENT_RULE).single()
         assertEquals(30, report.acceptableRuns)
         assertEquals(1, report.nonFiniteRecords)
         assertEquals(30, report.exactRuns)
@@ -212,7 +221,7 @@ class DepthEvidenceReplayTest {
         val tampered = session.records.mapIndexed { i, r ->
             if (i == 5) r.copy(observation = r.observation!!.copy(groundMaskCrc32 = r.observation!!.groundMaskCrc32 xor 1)) else r
         }
-        val report = DepthEvidenceReplay(few).replay(tampered, session::output, candidate = session::output).single()
+        val report = DepthEvidenceReplay(few).replay(tampered, session::output, CURRENT_RULE, candidate = session::output).single()
         assertEquals(DepthEvidenceVerdict.FAIL, report.verdict)
         assertEquals(1, report.mismatchCount)
         assertEquals("ground mask", report.mismatches.single().what)
@@ -223,7 +232,7 @@ class DepthEvidenceReplayTest {
     fun `a PC within the bands passes`() {
         val session = record(30)
         val pc = { r: DepthEvidenceRecord -> session.output(r).let { v -> FloatArray(v.size) { v[it] * 1.002f } } }
-        val report = DepthEvidenceReplay(few).replay(session.records, session::output, candidate = pc).single()
+        val report = DepthEvidenceReplay(few).replay(session.records, session::output, CURRENT_RULE, candidate = pc).single()
         assertEquals(report.verdictReason, DepthEvidenceVerdict.PASS, report.verdict)
         val agreement = report.pc!!
         assertEquals(30, agreement.runs)
@@ -237,7 +246,7 @@ class DepthEvidenceReplayTest {
         val session = record(30)
         // A uniform scale changes no label: only the tensor band can catch it.
         val pc = { r: DepthEvidenceRecord -> session.output(r).let { v -> FloatArray(v.size) { v[it] * 1.05f } } }
-        val report = DepthEvidenceReplay(few).replay(session.records, session::output, candidate = pc).single()
+        val report = DepthEvidenceReplay(few).replay(session.records, session::output, CURRENT_RULE, candidate = pc).single()
         assertEquals(DepthEvidenceVerdict.FAIL, report.verdict)
         assertEquals(1f, report.pc!!.fitAgreement, 0f)
         assertTrue(report.verdictReason, "median relative error" in report.verdictReason)
@@ -248,11 +257,11 @@ class DepthEvidenceReplayTest {
         // The first run's patch arms the guard on the PC and not on the phone; plain ground follows. In session order
         // the PC's fitter then switches and holds to the end, as nothing shows two levels again.
         val plain = patchedGround(0f)
-        val phoneOutputs = listOf(patchedGround(0.118f)) + List(49) { plain }
-        val pcOutputs = listOf(patchedGround(0.122f)) + List(49) { plain }
+        val phoneOutputs = listOf(patchedGround(0.198f)) + List(49) { plain }
+        val pcOutputs = listOf(patchedGround(0.202f)) + List(49) { plain }
         val session = record(phoneOutputs) { standing }
         assertTrue(session.records.all { it.observation?.validity == GroundFitValidity.VALID.name.lowercase() })
-        val report = DepthEvidenceReplay(few).replay(session.records, session::output, candidate = { pcOutputs[it.fitOrdinal!!.toInt()] }).single()
+        val report = DepthEvidenceReplay(few).replay(session.records, session::output, CURRENT_RULE, candidate = { pcOutputs[it.fitOrdinal!!.toInt()] }).single()
         val agreement = report.pc!!
         assertEquals(1f / 50f, agreement.sessionValidityAgreement, 1e-6f)
         assertEquals(49f / 50f, agreement.fitAgreement, 1e-6f)
@@ -271,14 +280,14 @@ class DepthEvidenceReplayTest {
         // history (B) sees no switch, the PC's (A) switches. Every third and every fifth run.
         val phonePatch = twoPatches { _, inB -> inB }
         val pcPatch = twoPatches { inA, _ -> inA }
-        val target = ground { u, v -> if (nearRows(v) && u >= 0.50f * aw && u < 0.66f * aw) 0.122f else 0f }
+        val target = ground { u, v -> if (nearRows(v) && u >= 0.50f * aw && u < 0.66f * aw) 0.202f else 0f }
         val noGround = FloatArray(mw * mh) { 1f }
         for (period in listOf(3, 5)) {
             val phoneOutputs = List(45) { when (it % period) { 0 -> phonePatch; period - 1 -> target; else -> noGround } }
             val pcOutputs = List(45) { when (it % period) { 0 -> pcPatch; period - 1 -> target; else -> noGround } }
             val session = record(phoneOutputs) { standing }
             assertTrue(session.records.none { it.observation?.validity == GroundFitValidity.SUPPORT_SWITCH.name.lowercase() })
-            val report = DepthEvidenceReplay(few).replay(session.records, session::output, candidate = { pcOutputs[it.fitOrdinal!!.toInt()] }).single()
+            val report = DepthEvidenceReplay(few).replay(session.records, session::output, CURRENT_RULE, candidate = { pcOutputs[it.fitOrdinal!!.toInt()] }).single()
             assertEquals(45, report.exactRuns)
             val agreement = report.pc!!
             assertEquals("period $period", 45 - 45 / period, 45 - agreement.disagreementCount)
@@ -293,11 +302,11 @@ class DepthEvidenceReplayTest {
         // The patch comes back every other run: on the PC it arms the guard each time and the plain run after it
         // switches; on the phone it never arms. Fitted on their own, every run is valid on both sides.
         val plain = patchedGround(0f)
-        val phoneOutputs = List(40) { if (it % 2 == 0) patchedGround(0.118f) else plain }
-        val pcOutputs = List(40) { if (it % 2 == 0) patchedGround(0.122f) else plain }
+        val phoneOutputs = List(40) { if (it % 2 == 0) patchedGround(0.198f) else plain }
+        val pcOutputs = List(40) { if (it % 2 == 0) patchedGround(0.202f) else plain }
         assertTrue(pcOutputs.indices.all { i -> fitAlone(phoneOutputs[i]).isValid && fitAlone(pcOutputs[i]).isValid })
         val session = record(phoneOutputs) { standing }
-        val report = DepthEvidenceReplay(few).replay(session.records, session::output, candidate = { pcOutputs[it.fitOrdinal!!.toInt()] }).single()
+        val report = DepthEvidenceReplay(few).replay(session.records, session::output, CURRENT_RULE, candidate = { pcOutputs[it.fitOrdinal!!.toInt()] }).single()
         assertEquals(40, report.exactRuns)
         val agreement = report.pc!!
         assertEquals(0.5f, agreement.fitAgreement, 1e-6f)
@@ -315,7 +324,7 @@ class DepthEvidenceReplayTest {
         val session = record(30)
         // Five runs read as depth instead of disparity; the median over the runs stays on the 25 identical ones.
         val pc = { r: DepthEvidenceRecord -> session.output(r).let { v -> if (r.fitOrdinal!! < 5) FloatArray(v.size) { -v[it] } else v } }
-        val report = DepthEvidenceReplay(few).replay(session.records, session::output, candidate = pc).single()
+        val report = DepthEvidenceReplay(few).replay(session.records, session::output, CURRENT_RULE, candidate = pc).single()
         assertEquals(DepthEvidenceVerdict.FAIL, report.verdict)
         assertEquals(25f / 30f, report.pc!!.fitAgreement, 1e-6f)
         assertTrue(report.verdictReason, "fit agreement" in report.verdictReason)
@@ -326,7 +335,7 @@ class DepthEvidenceReplayTest {
     fun `the comparison stops at the first run without a PC output`() {
         val session = record(30)
         val pc = { r: DepthEvidenceRecord -> if (r.fitOrdinal == 15L) null else session.output(r) }
-        val report = DepthEvidenceReplay(few).replay(session.records, session::output, candidate = pc).single()
+        val report = DepthEvidenceReplay(few).replay(session.records, session::output, CURRENT_RULE, candidate = pc).single()
         assertEquals(15, report.pc!!.runs)
         assertTrue(report.pc!!.stoppedAt!!, "fit call 15" in report.pc!!.stoppedAt!!)
         assertEquals(DepthEvidenceVerdict.CANNOT_JUDGE, report.verdict)
@@ -337,21 +346,63 @@ class DepthEvidenceReplayTest {
         // 21 acceptable runs, a floor of 20: the PC has the first 20, all agreeing, and not the 21st.
         val session = record(21)
         val pc = { r: DepthEvidenceRecord -> if (r.fitOrdinal == 20L) null else session.output(r) }
-        val report = DepthEvidenceReplay(few).replay(session.records, session::output, candidate = pc).single()
+        val report = DepthEvidenceReplay(few).replay(session.records, session::output, CURRENT_RULE, candidate = pc).single()
         assertEquals(20, report.pc!!.runs)
         assertEquals(1f, report.pc!!.fitAgreement, 0f)
         assertEquals(DepthEvidenceVerdict.CANNOT_JUDGE, report.verdict)
         assertTrue(report.verdictReason, "PC outputs incomplete" in report.verdictReason)
         // With every output there, the same session passes.
-        assertEquals(DepthEvidenceVerdict.PASS, DepthEvidenceReplay(few).replay(session.records, session::output, candidate = session::output).single().verdict)
+        assertEquals(DepthEvidenceVerdict.PASS, DepthEvidenceReplay(few).replay(session.records, session::output, CURRENT_RULE, candidate = session::output).single().verdict)
     }
 
     @Test
     fun `fewer acceptable runs than the minimum cannot be judged, however well they agree`() {
         val session = record(50)
-        val report = DepthEvidenceReplay().replay(session.records, session::output, candidate = session::output).single()
+        val report = DepthEvidenceReplay().replay(session.records, session::output, CURRENT_RULE, candidate = session::output).single()
         assertEquals(DepthEvidenceVerdict.CANNOT_JUDGE, report.verdict)
         assertTrue(report.verdictReason, "fewer than 300" in report.verdictReason)
+    }
+
+    @Test
+    fun `a capture recorded under the label threshold replays exactly under it, and can be evaluated under the current rule`() {
+        // A 15 % patch, then plain ground: the label threshold arms on it and switches; the current rule does neither.
+        val plain = patchedGround(0f)
+        val outputs = List(10) { if (it % 5 == 0) patchedGround(0.15f) else plain }
+        val session = record(outputs, rule = SupportGuardRule.LABEL_THRESHOLD) { standing }
+        assertTrue(session.records.any { it.observation?.validity == GroundFitValidity.SUPPORT_SWITCH.name.lowercase() })
+
+        // Named as recorded -- none, so rule 1: exact, and that rule's holds reported.
+        val recorded = DepthEvidenceReplay(few).replay(session.records, session::output, recordedRule = null).single()
+        assertEquals(10, recorded.exactRuns)
+        assertEquals(null, recorded.recordedRule)
+        assertEquals(SupportGuardRule.LABEL_THRESHOLD.id, recorded.evaluatedRule)
+        assertTrue(recorded.recordedGuard!!.holdsBegun > 0)
+        assertEquals(recorded.recordedGuard, recorded.evaluatedGuard)
+
+        // Evaluated under the current rule: still verified exactly under rule 1, then fitted again under rule 2.
+        val evaluated = DepthEvidenceReplay(few).replay(
+            session.records, session::output, recordedRule = null, candidate = session::output, evaluatedRule = SupportGuardRule.QUARTER_HEIGHT,
+        ).single()
+        assertEquals(10, evaluated.exactRuns)
+        assertEquals(SupportGuardRule.QUARTER_HEIGHT.id, evaluated.evaluatedRule)
+        assertEquals(GuardSummary(switches = 0, holdsBegun = 0, longestHold = 0), evaluated.evaluatedGuard)
+        assertEquals(1f, evaluated.pc!!.fitAgreement, 0f)
+        assertEquals(1f, evaluated.pc!!.sessionValidityAgreement, 0f)
+
+        // Named as the current rule, the recording does not replay: the rule decides the fits.
+        val misnamed = DepthEvidenceReplay(few).replay(session.records, session::output, recordedRule = SupportGuardRule.QUARTER_HEIGHT.id).single()
+        assertTrue(misnamed.mismatchCount > 0)
+        assertEquals(DepthEvidenceVerdict.FAIL, misnamed.verdict)
+    }
+
+    @Test
+    fun `a capture that names a guard rule this build does not know cannot be judged`() {
+        val session = record(25)
+        val report = DepthEvidenceReplay(few).replay(session.records, session::output, recordedRule = 99, candidate = session::output).single()
+        assertEquals(DepthEvidenceVerdict.CANNOT_JUDGE, report.verdict)
+        assertTrue(report.verdictReason, "guard rule 99" in report.verdictReason)
+        assertEquals(0, report.exactRuns)
+        assertEquals(null, report.pc)
     }
 
     @Test
@@ -359,7 +410,7 @@ class DepthEvidenceReplayTest {
         // The same run ids and fit ordinals in both: one fitter for the two would see call 0 twice.
         val first = record(25, generation = 1)
         val second = record(25, generation = 2)
-        val reports = DepthEvidenceReplay(few).replay(first.records + second.records, { r -> (if (r.generation == 1L) first else second).output(r) })
+        val reports = DepthEvidenceReplay(few).replay(first.records + second.records, { r -> (if (r.generation == 1L) first else second).output(r) }, CURRENT_RULE)
         assertEquals(listOf(1L, 2L), reports.map { it.generation })
         assertTrue(reports.all { it.acceptableRuns == 25 && it.exactRuns == 25 })
     }

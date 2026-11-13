@@ -27,8 +27,8 @@ enum class GroundFitValidity {
     NO_SUPPORT,
 
     /**
-     * The fitted ground jumped to a level the previous fits saw below ground -- the floor of a drop
-     * now filling the near view. Relative depth cannot tell "stepped down" from "looking over the
+     * The fitted ground jumped to a level the last valid fit saw well below ground ([SupportGuardRule]) -- the
+     * floor of a drop now filling the near view. Relative depth cannot tell "stepped down" from "looking over the
      * edge", so the fit is unknown until two levels are seen together again, or a new session.
      */
     SUPPORT_SWITCH,
@@ -81,8 +81,35 @@ data class GroundObservation(
 }
 
 /**
- * The support-switch guard's state after a fit: whether the hold is on, and whether the last valid fit saw enough
- * below ground to arm the guard for the next one. The cells it saw below ground are compared through the labels.
+ * Which cells below the fitted ground the support-switch guard counts as another level: the ones it remembers from a
+ * valid fit, compares the next fits with, and waits for to release a hold (docs/geometry.md §6, step 5). [id] is what
+ * the depth evidence stream records with each capture, so a replay fits with the rule the phone fitted with.
+ */
+enum class SupportGuardRule(val id: Int) {
+    /** Every cell labelled below ground (depth ratio more than three inlier bands below 1). */
+    LABEL_THRESHOLD(1),
+
+    /**
+     * A level at least a quarter of the camera height below the fitted ground: `Z_ground / Z ≤ 1 / (1 + 1/4)`, a depth
+     * ratio of −0.2 or less. That holds for any camera height, so no phone height is read. Shallower drops -- a
+     * single step, a curb -- are within what a relative-depth model reads on flat ground a few metres out, and are
+     * not guarded.
+     */
+    QUARTER_HEIGHT(2),
+    ;
+
+    companion object {
+        /** The rule the lane fits with, and the depth evidence stream records. */
+        val CURRENT: SupportGuardRule = QUARTER_HEIGHT
+
+        /** The rule depth evidence was recorded with: none recorded is [LABEL_THRESHOLD]; null when [id] is unknown. */
+        fun recorded(id: Int?): SupportGuardRule? = if (id == null) LABEL_THRESHOLD else entries.firstOrNull { it.id == id }
+    }
+}
+
+/**
+ * The support-switch guard's state after a fit: whether the hold is on, and whether the last valid fit saw enough of
+ * another level ([SupportGuardRule]) to arm the guard for the next one. Its cells are compared through the labels.
  */
 internal data class GroundGuardState(val holdingSwitch: Boolean, val armed: Boolean)
 
@@ -90,7 +117,12 @@ internal data class GroundGuardState(val holdingSwitch: Boolean, val armed: Bool
  * Gravity-constrained ground fit on a disparity map: sample the lower image below the horizon,
  * RANSAC the line `d = A·q + t`, refit on the inliers, then label a grid. Deterministic (seeded).
  * Not thread-safe: one per pipeline. It keeps a little history -- coverage for stability, the last
- * below-ground region for the support-switch guard -- so [reset] between sessions.
+ * valid fit's cells of another level for the support-switch guard -- so [reset] between sessions.
+ *
+ * A [GroundFitValidity.VALID] observation says this frame's candidate plane fits; it does not say the plane is
+ * confirmed to be the one under the user. After a support switch, seeing two levels again ends the hold without
+ * proving which one the user stands on, and a drop the model reads shallower than the guard's level is not guarded
+ * at all. A reader that needs the user's own level confirmed needs evidence of its own.
  *
  * Which plane is "the ground": the one under the user. Samples are taken nearest first (the bottom
  * of the view, closest to the feet), and a candidate is scored by the unbroken run of them it
@@ -106,6 +138,7 @@ internal data class GroundGuardState(val holdingSwitch: Boolean, val armed: Bool
  *   ground dominates there; far ground is where a small step or a gentle slope differs from the
  *   plane by less than the threshold, and would bend the fit if it were sampled. The labels still
  *   cover the whole image.
+ * @param guardRule which cells below ground the support-switch guard counts as another level.
  */
 class GroundFitter(
     private val inlierThreshold: Float = 0.04f,
@@ -118,10 +151,11 @@ class GroundFitter(
     private val iterations: Int = 200,
     private val maxGravityAngleDeg: Float = 10f,
     private val stabilityFrames: Int = 3,
+    val guardRule: SupportGuardRule = SupportGuardRule.CURRENT,
 ) {
     private val recentCoverage = ArrayDeque<Float>()
 
-    /** The below-ground cells of the last valid fit: the guard compares the next fit with them. */
+    /** The cells of another level ([guardRule]) the last valid fit saw: the guard compares the next fit with them. */
     private var lastBelow: BinaryMask? = null
     private var holdingSwitch = false
 
@@ -145,12 +179,12 @@ class GroundFitter(
     }
 
     /**
-     * A fitter with these thresholds in this one's state, history and all, so another output can be fitted from
-     * the history this fitter has reached without changing it (the depth evidence replay does this).
+     * A fitter with these thresholds and this guard rule in this one's state, history and all, so another output can
+     * be fitted from the history this fitter has reached without changing it (the depth evidence replay does this).
      */
     internal fun copy(): GroundFitter = GroundFitter(
         inlierThreshold, structureFactor, minQ, minInlierRatio, sampleFromRow, sampleColumns, sampleRows,
-        iterations, maxGravityAngleDeg, stabilityFrames,
+        iterations, maxGravityAngleDeg, stabilityFrames, guardRule,
     ).also {
         it.recentCoverage.addAll(recentCoverage)
         // A fit stores a mask it made for itself and never changes it afterwards.
@@ -166,7 +200,7 @@ class GroundFitter(
 
     /**
      * Whether [other]'s history can still change a later fit's validity differently from this one's: the hold, and
-     * the very cells the last valid fit saw below ground. The coverage history changes only the confidence.
+     * the very cells of another level the last valid fit saw. The coverage history changes only the confidence.
      */
     internal fun sameGuardHistory(other: GroundFitter): Boolean {
         if (holdingSwitch != other.holdingSwitch) return false
@@ -326,6 +360,8 @@ class GroundFitter(
         val ground = BinaryMask(gridWidth, gridHeight)
         val above = BinaryMask(gridWidth, gridHeight)
         val below = BinaryMask(gridWidth, gridHeight)
+        // Another level, for the guard: the below-ground label itself, or a deeper cut of it.
+        val level = if (guardRule == SupportGuardRule.LABEL_THRESHOLD) below else BinaryMask(gridWidth, gridHeight)
         for (gy in 0 until gridHeight) {
             val v = (gy + 0.5f) * transform.analysisHeight / gridHeight
             for (gx in 0 until gridWidth) {
@@ -346,12 +382,15 @@ class GroundFitter(
                     ratio > inlierThreshold * structureFactor -> above.set(gx, gy, true)
                     ratio < -inlierThreshold * structureFactor -> below.set(gx, gy, true)
                 }
+                if (guardRule == SupportGuardRule.QUARTER_HEIGHT && ratio <= QUARTER_HEIGHT_RATIO) level.set(gx, gy, true)
             }
         }
 
-        // 5. The support-switch guard: the cells the last valid fit saw below ground now read as
-        // ground. The floor of a drop has taken over the near view; that is not the user's level
-        // until shown otherwise.
+        // 5. The support-switch guard: the cells of another level the last valid fit saw now read as ground. The
+        // floor of a drop has taken over the near view; that is not the user's level until shown otherwise. Under
+        // QUARTER_HEIGHT only a level at least a quarter of the camera height down counts, for arming and release
+        // alike: a shallower one is what the model reads on flat ground, and would both arm the guard there and let a
+        // real hold go.
         val previousBelow = lastBelow
         if (previousBelow != null && previousBelow.width == gridWidth && previousBelow.height == gridHeight) {
             val previousCount = previousBelow.countTrue()
@@ -363,12 +402,12 @@ class GroundFitter(
                     }
                 }
                 val switched = !holdingSwitch && flipped >= SWITCH_FLIP_FRACTION * previousCount
-                // Held until a fit again sees a level below its ground: two levels together, the
-                // near one under the user. Nothing else releases it -- not time: a user standing at
-                // the edge gives any number of identical frames, and none of them shows a step down.
-                // Rotation-only motion cannot show one either; only a translation estimate could.
-                // A new session starts clear ([reset]).
-                val twoLevelsAgain = below.countTrue() >= MIN_BELOW_CELLS_FRACTION * gridWidth * gridHeight
+                // Held until a fit again sees another level below its ground, or a new session starts ([reset]).
+                // Not time: a user standing at the edge gives any number of identical frames, and none of them shows
+                // a step down; rotation-only motion cannot show one either, only a translation estimate could.
+                // Seeing two levels again ends the suspicion; it does not prove the nearer one is the user's: from the
+                // edge of a drop with a further drop beyond, the drop's floor and the further one are two levels too.
+                val twoLevelsAgain = level.countTrue() >= MIN_BELOW_CELLS_FRACTION * gridWidth * gridHeight
                 if (switched || (holdingSwitch && !twoLevelsAgain)) {
                     holdingSwitch = true
                     return empty(GroundFitValidity.SUPPORT_SWITCH)
@@ -383,7 +422,7 @@ class GroundFitter(
         while (recentCoverage.size > stabilityFrames) recentCoverage.removeFirst()
         val confidence = ((inlierRatio - minInlierRatio) / (GOOD_INLIER_RATIO - minInlierRatio)).coerceIn(0f, 1f) *
             (if (agrees) 1f else 0.5f) * stability()
-        lastBelow = below
+        lastBelow = level
 
         return GroundObservation(
             frameTimeNanos, GroundFitValidity.VALID, ground, above, below,
@@ -481,11 +520,14 @@ class GroundFitter(
         /** The support run must span at least this much in depth (far / near − 1) to pin a line. */
         const val MIN_DEPTH_SPAN = 0.25f
 
-        /** A below-ground region smaller than this fraction of the grid does not arm the switch guard. */
+        /** Another level smaller than this fraction of the grid does not arm the switch guard, nor release a hold. */
         const val MIN_BELOW_CELLS_FRACTION = 0.02f
 
-        /** The switch: at least this fraction of the last below-ground cells now read as ground. */
+        /** The switch: at least this fraction of the last valid fit's cells of another level now read as ground. */
         const val SWITCH_FLIP_FRACTION = 0.5f
+
+        /** [SupportGuardRule.QUARTER_HEIGHT]: `Z_ground / Z − 1` at or below this, a quarter of the camera height down. */
+        const val QUARTER_HEIGHT_RATIO = -0.2f
 
         /** A sort key holds a sample's index in its low bits, below its q's order. */
         const val INDEX_BITS = 31

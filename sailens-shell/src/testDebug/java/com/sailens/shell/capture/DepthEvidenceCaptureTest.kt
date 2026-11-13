@@ -11,6 +11,7 @@ import com.sailens.guidance.geometry.GeometryQuality
 import com.sailens.guidance.geometry.GroundFitter
 import com.sailens.guidance.geometry.IntrinsicsSource
 import com.sailens.guidance.geometry.PhoneGeometrySettings
+import com.sailens.guidance.geometry.SupportGuardRule
 import com.sailens.guidance.geometry.TimeBasis
 import com.sailens.guidance.geometry.Vec3
 import com.sailens.guidance.model.trace.DepthRunTrace
@@ -103,7 +104,7 @@ class DepthEvidenceCaptureTest {
     private fun read(sessionId: String) = CaptureSessionReader.read(File(tmp.root, sessionId)).orThrow()
 
     @Test
-    fun `a run's record holds its planes as copied, its output and its fit, and the fit replays`() = runBlocking {
+    fun `a run's record holds its planes as copied, its output and its fit, and the fit replays under the rule the manifest names`() = runBlocking {
         val evidence = stream()
         val capture = controller(evidence)
         capture.onSessionStarted("s1", null)!!.join()
@@ -139,7 +140,14 @@ class DepthEvidenceCaptureTest {
             assertEquals(3_000_000L, record.geometry.gravityAgeNanos)
             assertEquals("PAD_KEEP_ASPECT", record.transform.policy)
         }
-        val report = DepthEvidenceReplay().replay(session.depthEvidence, { CaptureSessionReader.depthOutput(session, it) }).single()
+        // The guard rule the lane's fitter takes by default, so the replay fits as the phone did.
+        assertEquals(fitter.guardRule.id, session.manifest.depthEvidence!!.groundFitRule)
+        assertEquals(SupportGuardRule.CURRENT.id, session.manifest.depthEvidence!!.groundFitRule)
+        val report = DepthEvidenceReplay().replay(
+            session.depthEvidence,
+            { CaptureSessionReader.depthOutput(session, it) },
+            recordedRule = session.manifest.depthEvidence!!.groundFitRule,
+        ).single()
         assertEquals(3, report.exactRuns)
         assertEquals(0, report.mismatchCount)
     }

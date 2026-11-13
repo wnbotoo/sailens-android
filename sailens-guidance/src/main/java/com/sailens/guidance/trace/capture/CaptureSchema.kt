@@ -53,8 +53,9 @@ object CaptureSchema {
      * 8: `safety_hold`, a new value of the open string `RegressionRevokeRecord.reason`; no new field or record.
      * 9: the depth evidence stream -- `depth.jsonl` (`DepthEvidenceRecord`), `depth.bin`,
      * `CaptureManifest.depthEvidence`.
+     * 10: `DepthEvidenceManifest.groundFitRule`.
      */
-    const val MINOR: Int = 9
+    const val MINOR: Int = 10
 
     const val MANIFEST_FILE: String = "manifest.json"
     const val FRAMES_FILE: String = "frames.jsonl"

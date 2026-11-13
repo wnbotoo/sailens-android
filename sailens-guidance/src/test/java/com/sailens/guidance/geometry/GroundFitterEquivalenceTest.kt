@@ -24,8 +24,8 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 /**
- * [GroundFitter] against [GroundFitterBaseline], the fit as written before its inner loops were rewritten: every fit of
- * every sequence gives the same result, bit for bit -- validity, the Float fields' raw bits, every mask, gravity
+ * [GroundFitter] under [SupportGuardRule.LABEL_THRESHOLD] against [GroundFitterBaseline], the fit as written before
+ * its inner loops were rewritten, with that guard rule: every fit of every sequence gives the same result, bit for bit -- validity, the Float fields' raw bits, every mask, gravity
  * agreement -- and so leaves the same history, which the later fits of each sequence check. The cases are the ones
  * the rewrite could get wrong: equal q (no roll makes whole rows equal), lines that tie, a tail bin, fractional
  * padding, a sample count that shrinks and grows on one fitter, outputs with NaN and infinity, and copies that go on
@@ -98,7 +98,7 @@ class GroundFitterEquivalenceTest {
     }
 
     /** Fits [inputs] in order on a fresh pair; returns how many were valid. */
-    private fun sameSequence(name: String, inputs: List<Input>, baseline: GroundFitterBaseline = GroundFitterBaseline(), fitter: GroundFitter = GroundFitter()): Int {
+    private fun sameSequence(name: String, inputs: List<Input>, baseline: GroundFitterBaseline = GroundFitterBaseline(), fitter: GroundFitter = GroundFitter(guardRule = SupportGuardRule.LABEL_THRESHOLD)): Int {
         var valid = 0
         for ((index, input) in inputs.withIndex()) {
             val expected = baseline.fit(input.map, intrinsics, input.gravity, gridW, gridH, input.time)
@@ -187,7 +187,7 @@ class GroundFitterEquivalenceTest {
         val history = (0 until 37).map { i -> input(drop, pose = Pose(1.3f, 25f, walkedM = i * 0.08f), noise = 0.01, seed = i) }
         val atEdge = input(drop, pose = Pose(1.3f, 25f, walkedM = 3.6f))
         val elsewhere = input(street, noise = 0.03, seed = 3)
-        val fitter = GroundFitter()
+        val fitter = GroundFitter(guardRule = SupportGuardRule.LABEL_THRESHOLD)
         val first = GroundFitterBaseline()
         val second = GroundFitterBaseline()
         for (h in history) {
@@ -207,7 +207,7 @@ class GroundFitterEquivalenceTest {
     @Test
     fun `reset clears the same history`() {
         val baseline = GroundFitterBaseline()
-        val fitter = GroundFitter()
+        val fitter = GroundFitter(guardRule = SupportGuardRule.LABEL_THRESHOLD)
         val approach = (0 until 40).map { i -> input(drop, pose = Pose(1.3f, 25f, walkedM = i * 0.09f)) }
         sameSequence("before reset", approach, baseline, fitter)
         baseline.reset()
@@ -226,27 +226,61 @@ class GroundFitterEquivalenceTest {
         assumeTrue("set -PreplayDepth=<capture dir> to compare on recorded outputs", path.isNotBlank())
         val found = SealedCaptures.forMetrics(File(path))
         var fits = 0
+        val baselineNanos = mutableListOf<Long>()
+        val currentNanos = mutableListOf<Long>()
         for (directory in found.open) {
             val session = CaptureSessionReader.read(directory).orThrow()
             for ((generation, records) in session.depthEvidence.groupBy { it.generation }) {
-                val baseline = GroundFitterBaseline()
-                val fitter = GroundFitter()
-                for (record in records.filter { it.fitOrdinal != null }.sortedBy { it.fitOrdinal }) {
+                // One depth session's outputs at a time: all of them at once do not fit in the test's heap.
+                val inputs = records.filter { it.fitOrdinal != null }.sortedBy { it.fitOrdinal }.map { record ->
                     val geometry = record.geometry.toGeometry()
                     val map = DisparityMap(record.output.width, record.output.height, CaptureSessionReader.depthOutput(session, record), record.transform.toTransform())
-                    val where = "${session.manifest.sessionId}/$generation run ${record.runId}"
-                    val k = checkNotNull(geometry.intrinsics)
-                    val g = checkNotNull(geometry.gravityInCamera)
-                    assertSameFit(
-                        where,
-                        baseline.fit(map, k, g, record.gridWidth, record.gridHeight, geometry.frameTimeNanos),
-                        fitter.fit(map, k, g, record.gridWidth, record.gridHeight, geometry.frameTimeNanos),
-                    )
+                    RecordedFit("${session.manifest.sessionId}/$generation run ${record.runId}", map, checkNotNull(geometry.intrinsics), checkNotNull(geometry.gravityInCamera), record.gridWidth, record.gridHeight, geometry.frameTimeNanos)
+                }
+                val baseline = GroundFitterBaseline()
+                val fitter = GroundFitter(guardRule = SupportGuardRule.LABEL_THRESHOLD)
+                for (input in inputs) {
+                    assertSameFit(input.where, input.fit(baseline::fit), input.fit(fitter::fit))
                     fits++
+                }
+                // The cost of each, on the same outputs in the same order: warmed up, then alternated so drift is shared.
+                repeat(2) { timed(inputs) { GroundFitterBaseline()::fit }; timed(inputs) { GroundFitter(guardRule = SupportGuardRule.LABEL_THRESHOLD)::fit } }
+                repeat(2) {
+                    baselineNanos += timed(inputs) { GroundFitterBaseline()::fit }
+                    currentNanos += timed(inputs) { GroundFitter(guardRule = SupportGuardRule.LABEL_THRESHOLD)::fit }
                 }
             }
         }
         println("recorded depth outputs: $fits fits the same on both")
+        println("fit time, before the rewrite: ${timing(baselineNanos)}; after: ${timing(currentNanos)}")
         assertTrue("no depth evidence under $path", fits > 0)
+    }
+
+    private class RecordedFit(
+        val where: String,
+        val map: DisparityMap,
+        val intrinsics: CameraIntrinsics,
+        val gravity: Vec3,
+        val gridWidth: Int,
+        val gridHeight: Int,
+        val time: Long?,
+    ) {
+        fun fit(fit: (DisparityMap, CameraIntrinsics, Vec3, Int, Int, Long?) -> GroundObservation) = fit(map, intrinsics, gravity, gridWidth, gridHeight, time)
+    }
+
+    /** Each fit's wall time, one fresh fitter from [make] over all of [inputs] in order. */
+    private fun timed(inputs: List<RecordedFit>, make: () -> (DisparityMap, CameraIntrinsics, Vec3, Int, Int, Long?) -> GroundObservation): List<Long> {
+        val fit = make()
+        return inputs.map { input ->
+            val start = System.nanoTime()
+            input.fit(fit)
+            System.nanoTime() - start
+        }
+    }
+
+    private fun timing(nanos: List<Long>): String {
+        val sorted = nanos.sorted()
+        fun ms(p: Int) = "%.2f".format(sorted[((sorted.size - 1) * p) / 100] / 1e6)
+        return "p50 ${ms(50)} ms, p95 ${ms(95)} ms over ${sorted.size} fits"
     }
 }

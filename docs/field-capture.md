@@ -47,7 +47,7 @@ Captures never enter this repository or CI.
   type; that is a major version. Closed enums inside records are not extended in a minor version.
   Minor versions have added build provenance (1.2), the model-regression record (1.3), recorded
   geometry (1.4), the speech lifecycle (1.5), speech ranks and cut receipts (1.6), the frame's
-  qualification (1.7), the revoke reason `safety_hold` (1.8) and the depth evidence stream (1.9, §11). A revoke record's `reason` is an open
+  qualification (1.7), the revoke reason `safety_hold` (1.8), the depth evidence stream (1.9, §11) and its guard rule (1.10). A revoke record's `reason` is an open
   string, a value of the trace's revoke reasons when written: a reader keeps a value it does not know as
   it is, and replay does not read it.
 - Sensor cadence is computed from event timestamps; `SENSOR_DELAY_GAME` is only the requested rate.
@@ -292,7 +292,7 @@ step or kerb, with no prompt before it was reached.
 
 ## 11. The depth evidence stream
 
-Schema 1.9. With "Also record depth evidence" on (field capture page) and the depth lane on (the
+Schema 1.9; 1.10 adds the guard rule (`depthEvidence.groundFitRule`). With "Also record depth evidence" on (field capture page) and the depth lane on (the
 ground-contact page, [geometry.md](geometry.md) §6), a field-evidence or model-regression capture also
 records every depth run that produced an output, so that the whole depth path can be redone off the
 phone: the native preprocessing and the model on a PC, the ground fit on the JVM. The timing-sync burst
@@ -312,7 +312,7 @@ never carries it. The switch is read once, when the session starts, like the mod
   dropped run. A run that ends without an output gives its buffer back and writes nothing. A record is about 2.2 MB at 1280×720 with a 392×224 output, about 6.6 MB/s at 3 Hz:
   a 10 GB cap holds about 25 minutes, less the capture's other data. The stream counts toward the cap.
 - **Fit ordinals.** The ground fit keeps history with no expiry (the support-switch hold and the last
-  below-ground region end only when two levels are seen again), so its fits can be redone only in its own
+  valid fit's cells of another level end only when two levels are seen again), so its fits can be redone only in its own
   call order from the session's first, without a gap: one missed run can change every fit after it.
   `fitOrdinal` counts the calls of the session's fitter from 0; a run with a non-finite output calls no fit
   and leaves no gap.
@@ -322,12 +322,27 @@ never carries it. The switch is read once, when the session starts, like the mod
   scene needs at least 300 acceptable runs (about 100 s at 3 Hz, from the start of a session); fewer, or
   none, cannot be judged, which is never a pass. Resuming after a gap would first need a checkpoint of the
   fitter's state in the record.
+- **Guard rule.** `depthEvidence.groundFitRule` names the support-switch guard rule the lane fitted with
+  (`SupportGuardRule.id`, [geometry.md](geometry.md) §6, step 5); a capture that names none was recorded
+  with rule 1, the label threshold. The exact replay always fits with the recorded rule: it checks the
+  recording, and a fit recorded under one rule does not replay under another. `-PdepthGuardRule=<id>`
+  evaluates another rule on the same outputs: the PC comparison and the evaluated guard summary then fit
+  the phone's outputs under it, from each depth session's first fit, and the PC's outputs from that
+  history. The report names both rules and summarises the guard under each: support switches, holds
+  begun, and the longest hold in fits (the fits that returned early while it was on included, which is
+  not the same count as a run of `SUPPORT_SWITCH` results). A capture naming a rule the build does not
+  know cannot be judged.
+- **Older captures under a new fitter.** The outputs and the geometry are recorded, so a capture can be
+  fitted again under any rule. What it cannot give is the new fitter's timing: when each observation
+  was published, its age, which frames were picked for a run all come from the recording build's fit
+  cost, and a replay that needs them cannot take them from an older capture. The recorded frame times
+  still tell when each frame was taken.
 
 Rerun on the PC, then replay and compare on the JVM:
 
 ```
 python scripts/capture/depth_evidence.py <capture or folder> --model depth.tflite --out <pc dir>
-gradlew :sailens-guidance:testDebugUnitTest --tests "*DepthEvidenceCaptureReplayTest*" -PreplayDepth=<capture or folder> -PdepthPcOutputs=<pc dir>
+gradlew :sailens-guidance:testDebugUnitTest --tests "*DepthEvidenceCaptureReplayTest*" -PreplayDepth=<capture or folder> -PdepthPcOutputs=<pc dir> [-PdepthGuardRule=<id>]
 ```
 
 The script follows the depth contract ([models.md](models.md)), not a model: input size and layout and

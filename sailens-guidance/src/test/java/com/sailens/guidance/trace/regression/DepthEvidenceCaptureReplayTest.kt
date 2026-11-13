@@ -1,6 +1,7 @@
 package com.sailens.guidance.trace.regression
 
 import com.sailens.guidance.evaluation.SealedCaptures
+import com.sailens.guidance.geometry.SupportGuardRule
 import com.sailens.guidance.trace.capture.CaptureSessionReader
 import com.sailens.guidance.trace.capture.DepthEvidenceData
 import com.sailens.guidance.trace.capture.DepthEvidenceRecord
@@ -15,7 +16,7 @@ import java.io.File
  * given -- captures contain faces and places and never enter the repository or CI:
  *
  * ```
- * gradlew :sailens-guidance:testDebugUnitTest --tests "*DepthEvidenceCaptureReplayTest*" -PreplayDepth=<capture or folder> [-PdepthPcOutputs=<dir>]
+ * gradlew :sailens-guidance:testDebugUnitTest --tests "*DepthEvidenceCaptureReplayTest*" -PreplayDepth=<capture or folder> [-PdepthPcOutputs=<dir>] [-PdepthGuardRule=<id>]
  * ```
  *
  * `-PdepthPcOutputs` is the `--out` folder of `scripts/capture/depth_evidence.py`, which reran the same runs on
@@ -23,6 +24,10 @@ import java.io.File
  * the test checks the exact replay only and fails when a replayed fit differs from the phone's. With them it is the
  * acceptance: every depth session must pass, and one that cannot be judged (too few acceptable runs, PC outputs
  * missing) fails it. Sealed captures are skipped unless `-PunsealCapture`.
+ *
+ * The exact replay fits with the guard rule each capture was recorded with (its manifest's `groundFitRule`; none named
+ * is rule 1). `-PdepthGuardRule` evaluates another rule on the same outputs: the PC comparison and the evaluated guard
+ * summary then fit the phone's outputs under it from each depth session's first fit ([DepthEvidenceReplay]).
  */
 class DepthEvidenceCaptureReplayTest {
 
@@ -32,6 +37,9 @@ class DepthEvidenceCaptureReplayTest {
         assumeTrue("set -PreplayDepth=<capture dir> to replay depth evidence", path.isNotBlank())
         val pcRoot = System.getProperty("sailens.replay.depthPc").orEmpty().takeIf { it.isNotBlank() }?.let(::File)
         val out = File(System.getProperty("sailens.replay.out").orEmpty().ifBlank { "build/replay" }).apply { mkdirs() }
+        val evaluatedRule = System.getProperty("sailens.replay.depthRule").orEmpty().takeIf { it.isNotBlank() }?.let { id ->
+            checkNotNull(SupportGuardRule.entries.firstOrNull { it.id == id.toInt() }) { "no guard rule $id" }
+        }
         val found = SealedCaptures.forMetrics(File(path))
         found.sealed.forEach { println("skipped sealed capture ${it.path}") }
 
@@ -55,7 +63,9 @@ class DepthEvidenceCaptureReplayTest {
             val reports = DepthEvidenceReplay().replay(
                 records = session.depthEvidence,
                 output = { CaptureSessionReader.depthOutput(session, it) },
+                recordedRule = manifest.depthEvidence?.groundFitRule,
                 candidate = candidate,
+                evaluatedRule = evaluatedRule,
                 firstDropped = stats?.firstDroppedRunId?.let { runId ->
                     DepthEvidenceReplay.DroppedRun(checkNotNull(stats.firstDroppedGeneration), runId)
                 },
@@ -67,6 +77,9 @@ class DepthEvidenceCaptureReplayTest {
                 appendLine("pc ${pcDir?.path ?: "none"}")
                 for (r in reports) {
                     appendLine("depth session ${r.generation}: ${r.verdict} -- ${r.verdictReason}")
+                    appendLine("  guard rule recorded ${r.recordedRule ?: "none (1)"}, evaluated ${r.evaluatedRule}")
+                    r.recordedGuard?.let { appendLine("  guard, recorded rule: ${it.switches} support switch(es), ${it.holdsBegun} hold(s) begun, longest hold ${it.longestHold} fits") }
+                    r.evaluatedGuard?.let { appendLine("  guard, evaluated rule: ${it.switches} support switch(es), ${it.holdsBegun} hold(s) begun, longest hold ${it.longestHold} fits") }
                     appendLine("  records ${r.records}, fitted ${r.fittedRecords}, non-finite ${r.nonFiniteRecords}, acceptable ${r.acceptableRuns}")
                     r.firstGap?.let { appendLine("  acceptance ends: $it") }
                     appendLine("  exact ${r.exactRuns}, mismatches ${r.mismatchCount}, max scale diff ${r.maxScaleDifference}, max shift diff ${r.maxShiftDifference}")
