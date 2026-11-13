@@ -38,6 +38,7 @@ import com.sailens.shell.design.components.SettingsInlineNote
 import com.sailens.shell.design.components.SettingsSection
 import com.sailens.shell.design.components.ToggleRow
 import com.sailens.shell.design.theme.SailensDimens
+import com.sailens.shell.safetynotice.SafetyNoticeParagraphs
 import org.koin.androidx.compose.koinViewModel
 
 @Composable
@@ -282,33 +283,18 @@ private fun GuidanceHaptic.rhythmResId(): Int = when (this) {
 }
 
 /**
- * What Guidance cannot do, in the words of the operating envelope.
- *
- * Plain body text in the normal colour rather than an inline note: this is the part of the screen
- * a user should not skim past. One `Text` per paragraph, so TalkBack reads each as its own stop.
+ * What Guidance cannot do, in the words of the operating envelope: the same notice a person confirms
+ * before Guidance first starts, so it can be read again here.
  */
 @Composable
 private fun SafetyNotice(
     modifier: Modifier = Modifier,
 ) {
-    Column(
+    SafetyNoticeParagraphs(
         modifier = modifier
             .fillMaxWidth()
             .padding(vertical = SailensDimens.spaceMd),
-        verticalArrangement = Arrangement.spacedBy(SailensDimens.spaceMd),
-    ) {
-        listOf(
-            R.string.safety_notice_assistive_only,
-            R.string.safety_notice_no_prompt,
-            R.string.safety_notice_background,
-            R.string.safety_notice_privacy,
-        ).forEach { resId ->
-            Text(
-                text = stringResource(resId),
-                style = MaterialTheme.typography.bodyMedium,
-            )
-        }
-    }
+    )
 }
 
 @Composable

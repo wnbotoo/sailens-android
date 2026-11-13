@@ -26,6 +26,8 @@ import com.sailens.shell.describe.DescribeVoice
 import com.sailens.shell.describe.SceneDescriptionCoordinator
 import com.sailens.shell.describe.SpeechManagerDescribeVoice
 import com.sailens.shell.device.SharedEngineOwner
+import com.sailens.shell.guidance.safety.GuidanceSafetyState
+import com.sailens.shell.guidance.safety.StopReason
 import com.sailens.shell.guidance.screen.SceneAnalysisViewModel
 import com.sailens.vlm.SceneDescriber
 import com.sailens.vlm.SceneDescription
@@ -129,10 +131,21 @@ class DescribeGuidanceCoordinationTest {
         // Start guidance with the lens covered: the real pipeline reports an obstructed camera.
         camera.obstructed = true
         val guidanceStartedAt = System.nanoTime()
-        instrumentation.runOnMainSync { guidanceScreen.toggleAnalysis() }
-        awaitTrue("Guidance to announce a warning", 10_000) {
-            guidanceScreen.uiState.value.lastAnnouncedEvent != null
+        instrumentation.runOnMainSync {
+            guidanceScreen.toggleAnalysis()
+            // Shown instead of the start until confirmed (a fresh install); its button is what starts Guidance then.
+            if (guidanceScreen.isSafetyNoticeShown.value) guidanceScreen.confirmSafetyNotice()
         }
+        // Vision-fault alerts bypass replay history; wait for their actual preemption of Describe.
+        awaitTrue("Guidance to withdraw Describe's speech", 10_000) {
+            voice.firstWithdrawalAfter(guidanceStartedAt) != null
+        }
+        // The withdrawal is the warning's: Guidance stopped for the covered lens, rather than failing or stalling,
+        // which withdraw Describe too.
+        assertEquals(
+            GuidanceSafetyState.StopRequired(StopReason.CAMERA_OBSTRUCTED),
+            guidanceScreen.uiState.value.safetyState,
+        )
         // Not the first withdrawal of the test: starting the description withdrew too.
         val preemptedAt = voice.firstWithdrawalAfter(guidanceStartedAt)
         assertNotNull("the warning must withdraw Describe's speech", preemptedAt)

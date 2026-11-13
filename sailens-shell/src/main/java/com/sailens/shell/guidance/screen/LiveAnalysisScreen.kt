@@ -86,6 +86,7 @@ import com.sailens.output.SpeechEngineState
 import com.sailens.shell.device.toSceneEventText
 import com.sailens.shell.design.components.PrimaryActionButton
 import com.sailens.shell.design.theme.SailensDimens
+import com.sailens.shell.safetynotice.SafetyNoticeDialog
 import org.koin.androidx.compose.koinViewModel
 
 /**
@@ -156,6 +157,15 @@ fun LiveAnalysisScreen(
     val onToggleClick = viewModel::toggleAnalysis
     val onReplay = viewModel::replayLastGuidance
     val onOverlayModeChange: (SceneOverlayMode) -> Unit = viewModel::setOverlayMode
+
+    // Shown instead of the start until its current version is confirmed (SafetyNoticeGate).
+    val safetyNoticeShown by viewModel.isSafetyNoticeShown.collectAsStateWithLifecycle()
+    if (safetyNoticeShown) {
+        SafetyNoticeDialog(
+            onConfirm = viewModel::confirmSafetyNotice,
+            onDismiss = viewModel::dismissSafetyNotice,
+        )
+    }
 
     if (isLandscape) {
         ContentForLandscape(

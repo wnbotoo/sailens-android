@@ -43,6 +43,8 @@ import com.sailens.shell.guidance.overlay.SceneOverlayMode
 import com.sailens.shell.guidance.safety.GuidanceSystemAlerts
 import com.sailens.shell.guidance.safety.OutputFacts
 import com.sailens.shell.guidance.settings.GuidanceSettingsStore
+import com.sailens.shell.safetynotice.SafetyNoticeGate
+import com.sailens.shell.safetynotice.SafetyNoticeStore
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -104,6 +106,8 @@ class SceneAnalysisViewModel(
     /** Tells Guidance a channel took a decided event. */
     private val acceptedPrompt: AcceptedPromptUseCase,
     private val noticeText: GuidanceNoticeText,
+    /** Which version of the safety notice the person has confirmed; see [SafetyNoticeGate]. */
+    safetyNoticeStore: SafetyNoticeStore,
     /** The policy switches, the same ones Guidance decided with. */
     private val detFirst: DetFirstConfig = DetFirstConfig(),
     /** Bound only by debug tooling; null means Guidance may always start. */
@@ -126,6 +130,10 @@ class SceneAnalysisViewModel(
 
     private val _uiEffect = MutableSharedFlow<SceneAnalysisUiEffect>()
     val uiEffect: SharedFlow<SceneAnalysisUiEffect> = _uiEffect.asSharedFlow()
+
+    /** Shown instead of a start until the person confirms it; Guidance is not running while it shows. */
+    private val safetyNotice = SafetyNoticeGate(safetyNoticeStore)
+    val isSafetyNoticeShown: StateFlow<Boolean> = safetyNotice.isShown
 
     /** The processors are reset only after a stopped run's last frame is done; see [GuidanceRunSequencer]. */
     private val runs = GuidanceRunSequencer(viewModelScope) { stopSceneAnalysisUseCase() }
@@ -335,7 +343,7 @@ class SceneAnalysisViewModel(
     )
 
     fun toggleAnalysis() {
-        when (val action = guidanceToggleAction(_uiState.value.isRunning, startGate)) {
+        when (val action = guidanceToggleAction(_uiState.value.isRunning, startGate, safetyNotice.isConfirmed)) {
             GuidanceToggleAction.Stop -> stopSceneAnalysis()
             GuidanceToggleAction.Start -> {
                 _uiState.startRequested { alerts.onStartRequested() }
@@ -343,7 +351,22 @@ class SceneAnalysisViewModel(
             }
             is GuidanceToggleAction.Refuse ->
                 viewModelScope.launch { _uiEffect.emit(SceneAnalysisUiEffect.ShowToast(action.reason)) }
+            GuidanceToggleAction.ShowSafetyNotice -> safetyNotice.show()
         }
+    }
+
+    /**
+     * The safety notice's button: the notice is confirmed, and the start it stood in front of goes
+     * ahead through the same decision as the start control, so a bound gate is asked again. Never a
+     * stop: a press arriving while Guidance already runs starts nothing.
+     */
+    fun confirmSafetyNotice() {
+        if (safetyNotice.confirm() && !_uiState.value.isRunning) toggleAnalysis()
+    }
+
+    /** Back, or a tap outside the safety notice: nothing is recorded, and Guidance does not start. */
+    fun dismissSafetyNotice() {
+        safetyNotice.dismiss()
     }
 
     fun setSpeechEnabled(enabled: Boolean) {

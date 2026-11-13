@@ -27,6 +27,8 @@ import com.sailens.shell.describe.SpeechManagerDescribeVoice
 import com.sailens.shell.guidance.screen.SceneAnalysisViewModel
 import com.sailens.shell.guidance.settings.GuidanceSettingsStore
 import com.sailens.shell.guidance.settings.PerceptionSettingsStore
+import com.sailens.shell.safetynotice.SafetyNoticeStore
+import com.sailens.shell.safetynotice.SharedPreferencesSafetyNoticeStore
 import com.sailens.shell.settings.SettingsViewModel
 import com.sailens.vlm.SceneDescriber
 import kotlinx.coroutines.CoroutineScope
@@ -67,6 +69,7 @@ val shellModule = module {
     single { GuidanceSettingsStore(androidContext()) }
     single { PerceptionSettingsStore(androidContext()) }
     single { PhoneGeometryStore(androidContext()) }
+    single<SafetyNoticeStore> { SharedPreferencesSafetyNoticeStore(androidContext()) }
     single { GuidanceDiagnosticsStore(sceneOverlayConfig = get(), uiFeatureFlags = get()) }
 
     // Shared output ownership (architecture.md §6.6). Every screen that speaks goes through these
@@ -141,6 +144,7 @@ val shellModule = module {
             confirmDeliveredEvent = get(),
             revokeUndeliveredEvent = get(),
             noticeText = get(),
+            safetyNoticeStore = get(),
             startGate = getOrNull(),
         )
     }
