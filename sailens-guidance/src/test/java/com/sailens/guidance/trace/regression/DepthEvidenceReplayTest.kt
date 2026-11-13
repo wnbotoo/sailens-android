@@ -423,6 +423,25 @@ class DepthEvidenceReplayTest {
     }
 
     @Test
+    fun `a capture recorded under the current rule is evaluated under the label threshold on every path`() {
+        // A 15 % patch at fits 0 and 5, plain ground otherwise. The current rule does nothing with it; the label
+        // threshold arms on each patch, switches on the plain ground after it and is released by the next patch.
+        val plain = patchedGround(0f)
+        val outputs = List(10) { if (it % 5 == 0) patchedGround(0.15f) else plain }
+        val session = record(outputs, rule = SupportGuardRule.QUARTER_HEIGHT) { standing }
+        val report = DepthEvidenceReplay(few).replay(
+            session.records, session::output, recordedRule = SupportGuardRule.QUARTER_HEIGHT.id,
+            candidate = session::output, evaluatedRule = SupportGuardRule.LABEL_THRESHOLD,
+        ).single()
+        assertEquals("verified under the recorded rule", 10, report.exactRuns)
+        assertEquals(GuardSummary(switches = 0, holdsBegun = 0, longestHold = 0), report.recordedGuard)
+        // The guard summary, the phone's history and the PC's own history all fit with the evaluated rule.
+        assertEquals(GuardSummary(switches = 8, holdsBegun = 2, longestHold = 4), report.evaluatedGuard)
+        assertEquals(1f, report.pc!!.fitAgreement, 0f)
+        assertEquals(1f, report.pc!!.sessionValidityAgreement, 0f)
+    }
+
+    @Test
     fun `a capture that names a guard rule this build does not know cannot be judged`() {
         val session = record(25)
         val report = DepthEvidenceReplay(few).replay(session.records, session::output, recordedRule = 99, candidate = session::output).single()

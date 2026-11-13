@@ -287,7 +287,10 @@ turned into a ray.
      further drop beyond the floor of the first releases the hold with the user still at the top, and
      a floor that ends in a further drop is not caught at all.
    So a `VALID` observation says this frame's candidate plane fits, not that it is confirmed to be the
-   one under the user: a reader that needs that needs evidence of its own.
+   one under the user: a reader that needs that needs evidence of its own. A navigation decision that
+   reads depth has to be validated on these known failures itself -- a passing fit clearing the
+   guard's history, a drop read shallow, more than one level below -- before it relies on the guard;
+   `VALID` is no confirmation of the user's level.
 6. **A flat line is no ground**: a wall filling the view fits one too, and the run-span check rejects
    it.
 7. **Labels** above / below ground by signed depth ratio (3× the threshold); metric height of a pixel

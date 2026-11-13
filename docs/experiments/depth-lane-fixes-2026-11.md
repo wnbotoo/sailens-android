@@ -125,7 +125,7 @@ own CPU time to the records (`6b96f0e`), then, after the phone had cooled back t
   same code takes 84 ms of CPU on the phone and under 2 ms on the desktop JVM, so the phone is slower in the computing
   itself, not in waiting for the dispatcher. What in the computing -- the debuggable build's runtime, the core it ran on,
   its clock -- these numbers cannot tell apart: a slower core lengthens the CPU time as much as the wall time. The rewrite
-  halves it, and the lane's fit uses about 0.11 of a core where it used 0.23.
+  halves it, and the lane's fit uses about 0.12 of a core where it used 0.23.
 - This scene's fits were faster than the device record's (146 ms p50 there, other scenes and a warmer phone), so only the
   two columns here compare.
 - With the rewrite sem and det were slightly slower and more frames were dropped. The device record saw sem and det run
