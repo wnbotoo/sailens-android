@@ -1,5 +1,6 @@
 package com.sailens.shell.safetynotice
 
+import android.view.KeyEvent
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -16,6 +17,9 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.unit.Density
 import androidx.test.espresso.Espresso
+import androidx.test.espresso.action.ViewActions.pressKey
+import androidx.test.espresso.matcher.RootMatchers.isDialog as isDialogRoot
+import androidx.test.espresso.matcher.ViewMatchers.isRoot
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.sailens.shell.R
@@ -96,7 +100,7 @@ class SafetyNoticeDialogTest {
     fun backLeavesItWithoutConfirming() {
         show()
 
-        Espresso.pressBack()
+        Espresso.onView(isRoot()).inRoot(isDialogRoot()).perform(pressKey(KeyEvent.KEYCODE_BACK))
         compose.runOnIdle {
             assertEquals(0, confirmed)
             assertEquals(1, dismissed)
