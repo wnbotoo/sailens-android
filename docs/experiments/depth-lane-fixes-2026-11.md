@@ -69,6 +69,13 @@ seen from the curb, and a hold ends only when a level a quarter of the camera he
 Rule 2 does not make the fit agreement higher everywhere: on the second curb session it fell to 95.6 %, still within the
 band.
 
+**On the phone.** The same phone, a build of this change (`919c657`), one field-evidence capture with depth evidence on
+an indoor floor, held at the chest and walked from the start of the session: 464 runs, none dropped, recorded under rule
+2 (the manifest names it). Every run replays exactly under rule 2 (464 of 464, scale and shift differences 0). Rule 2
+gave no `SUPPORT_SWITCH`; the same outputs fitted under rule 1 give 145, from a single hold that lasts 162 fits.
+Against the PC (the same model in float32 on the CPU, `depth_evidence.py`): output error median 0.42 %, fit agreement
+98.9 % (5 runs), labels 98.9 % over 439 runs, session order 99.4 %: a pass.
+
 ## 3. What the guard still catches
 
 `GroundFitterTest`, the same under rule 1 and rule 2 unless said:
@@ -96,23 +103,49 @@ plane is under the user.
 | JVM, after | 1.09 ms | 1.51 ms |
 
 Every fit of the 3016 is bit for bit the same before and after (`GroundFitterEquivalenceTest`); in the depth evidence
-replay all seven sessions pass with the numbers of the device record's §4. The phone measured 146 ms p50 and 196 ms p95
-for the fit's wall time in the same build of the code that takes about 2 ms here. Not measured yet: the phone, with the
-build that only adds the fit's own CPU time to the records (`fitCpuUs`) and the build with the rewrite, three 90 s
-sessions each with the lane on (`fit_cost.py`), to tell the fit's own work from waiting and core speed.
+replay all seven sessions pass with the numbers of the device record's §4.
+
+On the phone, the device record's procedure for the budget pairs: the phone on a stand facing one fixed indoor scene, not
+charging, other apps closed, the lane on, three sessions of about 90 s per build. First the build that only adds the fit's
+own CPU time to the records (`6b96f0e`), then, after the phone had cooled back to the first build's starting temperature
+(31.9 °C against 30.4 °C), the build with the rewrite (`814fa77`); both fit under rule 1.
+
+| | Before the rewrite | After |
+|---|---|---|
+| Published runs | 848 | 845 |
+| Fit wall time p50 / p95 | 90 / 110 ms | 44 / 57 ms |
+| Fit CPU time (`fitCpuUs`) p50 / p95 | 84 / 101 ms | 41 / 52 ms |
+| Wall − CPU, per run, p50 / p95 | 5.0 / 11.1 ms | 2.6 / 6.5 ms |
+| Publishes per second | 2.76–2.81 | 2.72–2.80 |
+| Observation age p50 / p95 | 266 / 433 ms | 199 / 366 ms |
+| sem p95 / det p95 | 48 / 29 ms | 51 / 30 ms |
+| Dropped frames | 19.0 % | 25.2 % |
+
+- **The fit is computing, not waiting**: its own CPU time is over 90 % of its wall time, before the rewrite and after. The
+  same code takes 84 ms of CPU on the phone and under 2 ms on the desktop JVM: the phone's debuggable build and its cores,
+  not the dispatcher. The rewrite halves it, and the lane's fit uses about 0.11 of a core where it used 0.23.
+- This scene's fits were faster than the device record's (146 ms p50 there, other scenes and a warmer phone), so only the
+  two columns here compare.
+- With the rewrite sem and det were slightly slower and more frames were dropped. The device record saw sem and det run
+  faster with the lane on than off, perhaps because the extra load kept the clocks up; a lighter lane would then hold them
+  up less. The clocks were not read, so that stays a guess.
 
 ## 5. Stopping with a real inference in flight
 
-Not run yet. `DepthLaneStopDuringInferenceTest` stops five sessions with the real runner's inference held at a gate
-until the stop has returned, then lets it run: each must close with its attempt in the `infer` stage, read a whole
-output, release the runner after it, and leave the next session to initialize only after that. It proves that order,
-not that the GPU was executing at the instant of a stop. The device record's four stops that landed in inference by
-timing stand.
+`DepthLaneStopDuringInferenceTest` on the phone (build `919c657`, the reference model in the test app's files), run twice:
+both pass, each in about 40 s. Each run compiles the model six times on the GPU (715 of 715 nodes delegated to
+`LITERT_CL`): five sessions stopped with their inference held at the gate until the stop had returned, then run to the
+end, and one normal session that publishes. Thermal status 0. This proves the order -- sealed while the call is in
+flight, the real inference finished and its output read, the runner released after it, the next session initialized
+only after that, also when it was started before the stopped one was done -- not that the GPU was executing at the
+instant of a stop. The device record's four stops that landed in inference by timing stand.
 
 ## 6. Watched, not changed
 
-The LOW queue priority leaning on sem and det to keep the GPU clocked, and the small rise of the GL mtrack figure
-over many depth sessions (device record §1, §2): to be sampled again during §4's sessions; nothing is changed for them.
+During §4's sessions (`sampler.ps1`, every 10 s): the GL mtrack figure went from 384 KB at the app's start to 1.7–2.3 MB
+over three depth sessions, for both builds, the same range as in the device record (1.5–2.3 MB), with no further rise;
+threads 52–89; thermal status 0 throughout, battery 29.5–36.4 °C. The LOW queue priority was not looked at again: the lane
+still runs only beside sem and det. Nothing is changed for either.
 
 ## 7. Older captures under a changed fitter
 
@@ -137,6 +170,7 @@ gradlew :sailens-guidance:testDebugUnitTest --tests "*DepthEvidenceCaptureReplay
 gradlew :sailens-guidance:testDebugUnitTest --tests "*GroundFitterEquivalenceTest*" -PreplayDepth=<captures>
 gradlew :sailens-guidance:testDebugUnitTest --tests "*GroundFitterTest*"
 python scripts/experiments/depth_lane_budget/fit_cost.py <traces before> <traces after>
+adb shell am instrument -w -e class com.sailens.guidance.depth.geometry.DepthLaneStopDuringInferenceTest com.sailens.guidance.test/androidx.test.runner.AndroidJUnitRunner
 ```
 
 Without `-PdepthGuardRule` the replay evaluates the recorded rule (rule 1 for these captures), which gives §1's table.
