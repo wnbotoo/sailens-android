@@ -747,8 +747,9 @@ Guidance 此刻对用户处在什么状态，合成为一个值，由 shell 从�
   （占标签网格的比例）、`disparityScale` / `disparityShift`（拟合出的 `A` 和 `t`）、`detail`（车道在 Y 平面上量的
   画面细节）。
 - 耗时（ms）：`prepareMs`（原生预处理）、`admitWaitMs`、`inferMs`、`outputReadMs`、`fitMs`（交给拟合的调度器前后的墙钟时间）；
-  `fitCpuUs`，微秒，拟合线程在拟合里用掉的 CPU 时间（平台量不了时没有这一项），`fitMs` 减去它就是不属于拟合自身 CPU 的
-  墙钟时间：调度、被抢占、跑在更慢的核上；运行时的
+  `fitCpuUs`，微秒，拟合线程在拟合里用掉的 CPU 时间（平台量不了时没有这一项）。逐次算 `fitMs - fitCpuUs / 1000.0`，得到的是
+  拟合 CPU 时间以外的墙钟时间：交给调度器和交回来、被抢占、阻塞。核慢或频率低会让 CPU 时间和墙钟时间一起变长，体现在两者
+  里而不在差值里；要分辨它得另有调度或频率的证据。`fitMs` 是整毫秒，所以一两毫秒以内的差值说明不了什么；运行时的
   `accelerator`、`acceleratorSelection`（含 GPU 精度和队列优先级）、`preprocessBackend`、`postprocessBackend`；
   `modelShape`，输入与输出（`1x3x392x224>1x392x224`）。
 - 收尾记录：停止时有尝试在途，就带 `cancelledRunId` 和 `cancelledStage`（`prepare`、`admit`、`infer`、`fit`）——
