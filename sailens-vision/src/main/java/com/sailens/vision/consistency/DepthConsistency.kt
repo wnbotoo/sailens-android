@@ -26,25 +26,15 @@ data class DisparityAgreement(
 )
 
 fun compareDisparity(reference: DisparityMap, candidate: DisparityMap): DisparityAgreement {
-    require(reference.width == candidate.width && reference.height == candidate.height) {
-        "maps differ in size: ${reference.width}x${reference.height} vs ${candidate.width}x${candidate.height}"
-    }
+    requireSameSize(reference, candidate)
     val columns = reference.contentColumns
     val rows = reference.contentRows
-    var maxAbs = 0f
-    for (y in rows) for (x in columns) maxAbs = max(maxAbs, abs(reference.values[y * reference.width + x]))
-    val floor = 0.05f * maxAbs
+    val floor = errorFloor(reference)
     val errors = FloatArray((rows.last - rows.first + 1) * (columns.last - columns.first + 1))
     var n = 0
     for (y in rows) for (x in columns) {
         val i = y * reference.width + x
-        val r = reference.values[i]
-        val c = candidate.values[i]
-        val denominator = max(abs(r), floor)
-        // A zero denominator is not an error in itself: two equal values agree, whatever they are.
-        val e = if (denominator > 0f) abs(c - r) / denominator else if (c == r) 0f else Float.POSITIVE_INFINITY
-        // A non-finite value is as wrong as a value can be.
-        errors[n++] = if (e.isFinite()) e else Float.POSITIVE_INFINITY
+        errors[n++] = relativeError(reference.values[i], candidate.values[i], floor)
     }
     errors.sort(0, n)
     return DisparityAgreement(
@@ -52,6 +42,61 @@ fun compareDisparity(reference: DisparityMap, candidate: DisparityMap): Disparit
         p95RelativeError = if (n > 0) errors[((n - 1) * 95) / 100] else Float.POSITIVE_INFINITY,
         pixelCount = n,
     )
+}
+
+/**
+ * [compareDisparity]'s per-pixel error by region: the content area split into [grid] × [grid] cells, row-major, each
+ * the median error over its pixels with the same denominator rule. A region the accelerator computed wrongly can hide
+ * under the whole-map median; here it is a cell far above the others. A cell with no content pixels (content narrower
+ * than [grid]) is `NaN`.
+ */
+fun compareDisparityByRegion(reference: DisparityMap, candidate: DisparityMap, grid: Int): FloatArray {
+    require(grid > 0) { "grid must be positive, was $grid" }
+    requireSameSize(reference, candidate)
+    val columns = reference.contentColumns
+    val rows = reference.contentRows
+    val floor = errorFloor(reference)
+    val contentWidth = columns.last - columns.first + 1
+    val contentHeight = rows.last - rows.first + 1
+    val cells = FloatArray(grid * grid)
+    for (gy in 0 until grid) for (gx in 0 until grid) {
+        val y0 = rows.first + gy * contentHeight / grid
+        val y1 = rows.first + (gy + 1) * contentHeight / grid
+        val x0 = columns.first + gx * contentWidth / grid
+        val x1 = columns.first + (gx + 1) * contentWidth / grid
+        val errors = FloatArray(maxOf(0, (y1 - y0) * (x1 - x0)))
+        var n = 0
+        for (y in y0 until y1) for (x in x0 until x1) {
+            val i = y * reference.width + x
+            errors[n++] = relativeError(reference.values[i], candidate.values[i], floor)
+        }
+        errors.sort(0, n)
+        cells[gy * grid + gx] = if (n > 0) errors[n / 2] else Float.NaN
+    }
+    return cells
+}
+
+private fun requireSameSize(reference: DisparityMap, candidate: DisparityMap) {
+    require(reference.width == candidate.width && reference.height == candidate.height) {
+        "maps differ in size: ${reference.width}x${reference.height} vs ${candidate.width}x${candidate.height}"
+    }
+}
+
+/** 5% of the largest |reference| over the content pixels: the smallest denominator of a relative error. */
+private fun errorFloor(reference: DisparityMap): Float {
+    var maxAbs = 0f
+    for (y in reference.contentRows) for (x in reference.contentColumns) {
+        maxAbs = max(maxAbs, abs(reference.values[y * reference.width + x]))
+    }
+    return 0.05f * maxAbs
+}
+
+private fun relativeError(r: Float, c: Float, floor: Float): Float {
+    val denominator = max(abs(r), floor)
+    // A zero denominator is not an error in itself: two equal values agree, whatever they are.
+    val e = if (denominator > 0f) abs(c - r) / denominator else if (c == r) 0f else Float.POSITIVE_INFINITY
+    // A non-finite value is as wrong as a value can be.
+    return if (e.isFinite()) e else Float.POSITIVE_INFINITY
 }
 
 /** One frame's ground-fit agreement. Absent (null in [DepthFrameAgreement]) when the frame had no geometry. */

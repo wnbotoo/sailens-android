@@ -4,6 +4,7 @@ import com.sailens.vision.depth.DepthInputTransform
 import com.sailens.vision.depth.DisparityMap
 import com.sailens.vision.depth.ResizePolicy
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DepthConsistencyTest {
@@ -17,6 +18,34 @@ class DepthConsistencyTest {
         assertEquals(0f, compareDisparity(reference, reference).medianRelativeError, 0f)
         val scaled = map { i -> 1.01f * (1f + (i % 224) / 224f) }
         assertEquals(0.01f, compareDisparity(reference, scaled).medianRelativeError, 1e-4f)
+    }
+
+    @Test
+    fun `a region off by itself shows in its own cell, though the whole-map median hides it`() {
+        val square = DepthInputTransform.create(16, 16, 16, 16, ResizePolicy.STRETCH)
+        val flat = DisparityMap(16, 16, FloatArray(256) { 1f }, square)
+        // The top-left quarter of the top-left quarter, doubled: 1/16 of the pixels.
+        val block = DisparityMap(16, 16, FloatArray(256) { i -> if (i % 16 < 4 && i / 16 < 4) 2f else 1f }, square)
+        assertEquals(0f, compareDisparity(flat, block).medianRelativeError, 0f)
+        val cells = compareDisparityByRegion(flat, block, grid = 4)
+        assertEquals(16, cells.size)
+        assertEquals(1f, cells[0], 0f)
+        for (i in 1 until 16) assertEquals("cell $i", 0f, cells[i], 0f)
+    }
+
+    @Test
+    fun `regions cover only the content the model saw, and a NaN is infinitely off there too`() {
+        val padded = map { i -> 1f + (i % 224) / 224f }
+        val withNaN = map { i -> 1f + (i % 224) / 224f }.also { it.values[it.contentRows.first * 224 + it.contentColumns.first] = Float.NaN }
+        val cells = compareDisparityByRegion(padded, withNaN, grid = 8)
+        // The NaN sits in the first content pixel, so the first cell; one value moves no cell's median.
+        assertEquals(0f, cells[0], 0f)
+        assertEquals(64, cells.size)
+        assertEquals(0f, cells.max(), 0f)
+        // Padding is not content: values there change no cell. 540x960 into 224x392 pads the left and right columns.
+        assertTrue(reference.contentColumns.first > 0)
+        val paddingChanged = map { i -> if (i % 224 < reference.contentColumns.first) 99f else 1f + (i % 224) / 224f }
+        assertEquals(0f, compareDisparityByRegion(reference, paddingChanged, grid = 8).max(), 0f)
     }
 
     @Test

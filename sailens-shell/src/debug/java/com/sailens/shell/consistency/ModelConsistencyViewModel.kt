@@ -56,7 +56,9 @@ internal class ModelConsistencyViewModel(
             try {
                 val result = checker.run { done, total -> phase.update { ConsistencyPhase.Running(done, total) } }
                 val path = withContext(Dispatchers.IO) {
-                    runCatching { writer.write(result.toReport(wallClock(), build, semanticLabel)).path }
+                    runCatching {
+                        writer.write(result.toReport(wallClock(), build, semanticLabel), result.depth.result?.details.orEmpty()).path
+                    }
                         .onFailure { log.warning(TAG, "Could not write the consistency report", throwable = it) }
                         .getOrNull()
                 }
