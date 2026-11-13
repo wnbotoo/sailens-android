@@ -47,6 +47,9 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlin.coroutines.CoroutineContext
+import com.sailens.shell.safetynotice.SAFETY_NOTICE_VERSION
+import com.sailens.shell.safetynotice.SafetyNoticeGate
+import com.sailens.shell.safetynotice.SafetyNoticeStore
 
 private const val TAG = "SceneAnalysisViewModel"
 
@@ -65,7 +68,9 @@ internal typealias AnalysisPipeline = suspend (
  * file by `SimulatorMirrorPinTest`; that the steps are the view model's, in its order, is `MirrorOrderTest`'s.
  *
  * Left out, because they only draw: the overlay (its collector, renders and the semantic-mask copy, which is never
- * asked for here) and the debug panel's info. The first-frame diagnostics log is left out too.
+ * asked for here) and the debug panel's info. The first-frame diagnostics log is left out too. The safety notice is
+ * mirrored, with the real gate; unless a test gives it a store of its own, the person has confirmed it, so every start
+ * goes ahead.
  *
  * What the mirror adds is observation only, never a call the view model makes: [observer] hears a run asked for and
  * its block beginning, each result arriving and handled, and each reset a stop asks for; the alerts' four ports onto
@@ -103,8 +108,9 @@ internal class ViewModelMirror(
     context: CoroutineContext,
     private val observer: MirrorObserver,
     seams: MirrorSeams,
+    safetyNoticeStore: SafetyNoticeStore = ConfirmedSafetyNotice,
 ) {
-    // SceneAnalysisViewModel.kt:115-124 (the diagnostics store's fields keep their defaults: diagnostics off)
+    // SceneAnalysisViewModel.kt:119-128 (the diagnostics store's fields keep their defaults: diagnostics off)
     val uiState = MutableStateFlow(
         SceneAnalysisUiState(
             isSpeechEnabled = settings.value.speechEnabled,
@@ -113,14 +119,18 @@ internal class ViewModelMirror(
         )
     )
 
+    // SceneAnalysisViewModel.kt:135-136
+    private val safetyNotice = SafetyNoticeGate(safetyNoticeStore)
+    val isSafetyNoticeShown: StateFlow<Boolean> = safetyNotice.isShown
+
     /** `viewModelScope`: cancelled when the screen goes, before [onCleared]. */
     val viewModelScope = CoroutineScope(SupervisorJob() + context)
 
-    // SceneAnalysisViewModel.kt:131
+    // SceneAnalysisViewModel.kt:139
     private val runs = GuidanceRunSequencer(viewModelScope) { resetProcessors() }
     private var stallWatchJob: Job? = null
 
-    // SceneAnalysisViewModel.kt:139-185
+    // SceneAnalysisViewModel.kt:147-193
     private val alerts: MirrorAlerts = seams.alerts {
         GuidanceSystemAlerts(
             cancelStallLoop = ::cancelStallLoop,
@@ -184,7 +194,7 @@ internal class ViewModelMirror(
         )
     }
 
-    // SceneAnalysisViewModel.kt:188-239
+    // SceneAnalysisViewModel.kt:196-247
     private val guidanceOutput: MirrorOutput = seams.output {
         GuidanceOutputWiring(
             speakOwn = { announcement, onSpoken, onOutcome, atMs -> speech.speak(announcement, onSpoken, onOutcome, atMs) },
@@ -240,17 +250,17 @@ internal class ViewModelMirror(
 
     private var releaseJob: Job? = null
 
-    // SceneAnalysisViewModel.kt:246-247
+    // SceneAnalysisViewModel.kt:254-255
     private val engineLease = sharedEngineOwner.acquire()
     val releaseScope = CoroutineScope(SupervisorJob() + context)
     private var frameCount: Long = 0
     private var latestSceneResult: SceneResult? = null
 
-    // SceneAnalysisViewModel.kt:255-256
+    // SceneAnalysisViewModel.kt:263-264
     @Volatile
     private var isReleasingResources = false
 
-    // SceneAnalysisViewModel.kt:258-292 (the overlay's collector left out)
+    // SceneAnalysisViewModel.kt:266-300 (the overlay's collector left out)
     init {
         speech.setSpeechRate(settings.value.speechRate)
         if (settings.value.speechEnabled) {
@@ -279,7 +289,7 @@ internal class ViewModelMirror(
         }
     }
 
-    // SceneAnalysisViewModel.kt:294-305
+    // SceneAnalysisViewModel.kt:302-313
     private fun initializeSpeech() {
         if (uiState.value.isScreenReaderActive) {
             logger.info(TAG, "Screen reader active; deferring to it instead of starting own TTS")
@@ -288,7 +298,7 @@ internal class ViewModelMirror(
         speech.initialize()
     }
 
-    // SceneAnalysisViewModel.kt:307-320
+    // SceneAnalysisViewModel.kt:315-328
     private fun applyScreenReaderMode(active: Boolean) {
         val wasActive = uiState.value.isScreenReaderActive
         uiState.update { it.copy(isScreenReaderActive = active) }
@@ -302,13 +312,13 @@ internal class ViewModelMirror(
         checkSpeechUnavailable()
     }
 
-    // SceneAnalysisViewModel.kt:323-326
+    // SceneAnalysisViewModel.kt:331-334
     private fun checkSpeechUnavailable() {
         val state = uiState.value
         alerts.onOutput(state.speechEngineState, state.isSpeechEnabled, state.isScreenReaderActive, state.isHapticsEnabled)
     }
 
-    // SceneAnalysisViewModel.kt:329-335
+    // SceneAnalysisViewModel.kt:337-343
     private fun SceneAnalysisUiState.outputFacts() = OutputFacts(
         engineState = speechEngineState,
         speechEnabled = isSpeechEnabled,
@@ -317,19 +327,30 @@ internal class ViewModelMirror(
         speechReady = speech.isReady,
     )
 
-    // SceneAnalysisViewModel.kt:337-347 (no start gate is bound here)
+    // SceneAnalysisViewModel.kt:345-356 (no start gate is bound here)
     fun toggleAnalysis() {
-        when (val action = guidanceToggleAction(uiState.value.isRunning, startGate = null)) {
+        when (val action = guidanceToggleAction(uiState.value.isRunning, startGate = null, safetyNotice.isConfirmed)) {
             GuidanceToggleAction.Stop -> stopSceneAnalysis()
             GuidanceToggleAction.Start -> {
                 uiState.startRequested { alerts.onStartRequested() }
                 startSceneAnalysis()
             }
             is GuidanceToggleAction.Refuse -> error("no start gate is bound, so nothing refuses: ${action.reason}")
+            GuidanceToggleAction.ShowSafetyNotice -> safetyNotice.show()
         }
     }
 
-    // SceneAnalysisViewModel.kt:361-385
+    // SceneAnalysisViewModel.kt:363-365
+    fun confirmSafetyNotice() {
+        if (safetyNotice.confirm() && !uiState.value.isRunning) toggleAnalysis()
+    }
+
+    // SceneAnalysisViewModel.kt:368-370
+    fun dismissSafetyNotice() {
+        safetyNotice.dismiss()
+    }
+
+    // SceneAnalysisViewModel.kt:384-408
     private fun applyFeedbackSettings(settings: GuidanceFeedbackSettings) {
         val previous = uiState.value
         uiState.update {
@@ -354,7 +375,7 @@ internal class ViewModelMirror(
         guidanceOutput.settingsChanged()
     }
 
-    // SceneAnalysisViewModel.kt:421-487
+    // SceneAnalysisViewModel.kt:444-510
     private fun startSceneAnalysis() {
         frameCount = 0
         val run = observer.runRequested()
@@ -406,7 +427,7 @@ internal class ViewModelMirror(
         }
     }
 
-    // SceneAnalysisViewModel.kt:490-499
+    // SceneAnalysisViewModel.kt:513-522
     private fun startStallWatch() {
         stallWatchJob?.cancel()
         alerts.onStallWatchStarted()
@@ -418,29 +439,29 @@ internal class ViewModelMirror(
         }
     }
 
-    // SceneAnalysisViewModel.kt:501-504
+    // SceneAnalysisViewModel.kt:524-527
     private fun stopStallWatch() {
         cancelStallLoop()
         alerts.onStallWatchStopped()
     }
 
-    // SceneAnalysisViewModel.kt:506-509
+    // SceneAnalysisViewModel.kt:529-532
     fun cancelStallLoop() {
         stallWatchJob?.cancel()
         stallWatchJob = null
     }
 
-    // SceneAnalysisViewModel.kt:515-517
+    // SceneAnalysisViewModel.kt:538-540
     fun onGuidanceInterrupted(noticeText: String) {
         alerts.onLifecycleStop(noticeText)
     }
 
-    // SceneAnalysisViewModel.kt:520-522
+    // SceneAnalysisViewModel.kt:543-545
     fun acknowledgeInterruption() {
         alerts.onLifecycleStart()
     }
 
-    // SceneAnalysisViewModel.kt:550-563 (the overlay's render is not mirrored)
+    // SceneAnalysisViewModel.kt:573-586 (the overlay's render is not mirrored)
     private fun stopSceneAnalysis() {
         stopStallWatch()
         guidanceOutput.stop {
@@ -452,7 +473,7 @@ internal class ViewModelMirror(
     }
 
     /**
-     * SceneAnalysisViewModel.kt:565-578. The real `viewModelScope` is cancelled before `onCleared` runs (Android's
+     * SceneAnalysisViewModel.kt:588-601. The real `viewModelScope` is cancelled before `onCleared` runs (Android's
      * `ViewModel` contract; the view model relies on it at :635), so this cancels it first: the state-flow
      * collectors, the stall loop and the analysis collector run no more after it.
      */
@@ -467,7 +488,7 @@ internal class ViewModelMirror(
         engineLease.close()
     }
 
-    // SceneAnalysisViewModel.kt:638-668 (the release runs in the release scope itself, not in Dispatchers.IO)
+    // SceneAnalysisViewModel.kt:661-691 (the release runs in the release scope itself, not in Dispatchers.IO)
     private fun releaseSceneAnalysisResources() {
         releaseJob?.cancel()
         isReleasingResources = true
@@ -493,4 +514,10 @@ internal class ViewModelMirror(
             }
         }
     }
+}
+
+/** A person who has confirmed the current safety notice, as in every simulated session. */
+internal object ConfirmedSafetyNotice : SafetyNoticeStore {
+    override fun confirmedVersion(): Int = SAFETY_NOTICE_VERSION
+    override fun recordConfirmed(version: Int) = Unit
 }

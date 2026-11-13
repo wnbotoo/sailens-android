@@ -66,9 +66,13 @@
     <string name="about_tagline">Sailens is an on-device smart lens that describes the path ahead for blind and low-vision users.</string>
     <string name="settings_section_safety">Safety</string>
     <string name="safety_notice_assistive_only">Sailens is an assistive tool. It does not replace a white cane, a guide dog or orientation and mobility training. Keep checking the way ahead the way you normally do.</string>
-    <string name="safety_notice_no_prompt">No prompt does not mean the way ahead is clear. Sailens cannot see stairs, curbs or drops, does not guide you across roads, often misses glass doors, water and unusual objects such as sculptures, and sees nothing outside the camera\'s view.</string>
+    <string name="safety_notice_no_prompt">No prompt does not mean the way ahead is clear. Sailens cannot see stairs, curbs or drops, does not guide you across roads, and sees nothing outside the camera\'s view. It may miss glass doors, water and unusual objects such as sculptures; do not rely on it to rule these out.</string>
+    <string name="safety_notice_walking">Use Sailens only while walking. It does not support running or any other way of moving. Hold the phone upright at chest height, with the rear camera facing the way you are walking.</string>
     <string name="safety_notice_background">When the screen turns off or the app goes to the background, the camera stops and nothing is being detected.</string>
     <string name="safety_notice_privacy">Video is processed only on this phone and is not uploaded.</string>
+    <string name="safety_notice_title">Before you start</string>
+    <string name="safety_notice_footer">You can read this again any time under Safety in Settings.</string>
+    <string name="safety_notice_confirm">I understand, start</string>
     <string name="oss_title">Open-source licenses</string>
     <string name="label_speech_rate">Speech rate</string>
     <string name="settings_speech_rate_value">%1$.1f×</string>
