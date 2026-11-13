@@ -66,9 +66,13 @@
     <string name="about_tagline">Sailens 是一款端侧智能镜头，为盲人/低视力用户描述前方道路。</string>
     <string name="settings_section_safety">安全须知</string>
     <string name="safety_notice_assistive_only">Sailens 是辅助工具，不能替代盲杖、导盲犬或定向行走训练。请继续用你熟悉的方式确认前方安全。</string>
-    <string name="safety_notice_no_prompt">没有提示不等于前方能走。Sailens 看不到楼梯、路缘和落差，不能指引过马路，常常发现不了玻璃门、水面和雕塑这类不常见的物体，也看不到摄像头视野以外的东西。</string>
+    <string name="safety_notice_no_prompt">没有提示不等于前方能走。Sailens 看不到楼梯、路缘和落差，不能指引过马路，也看不到摄像头视野以外的东西。玻璃门、水面和雕塑这类不常见的物体可能漏检，请不要依赖它排除这些危险。</string>
+    <string name="safety_notice_walking">只在步行时使用，不支持跑步或其他移动方式。请把手机竖着拿在胸前，后置摄像头朝向前进方向。</string>
     <string name="safety_notice_background">熄屏或切到后台时，摄像头会停止，什么都没有在检测。</string>
     <string name="safety_notice_privacy">画面只在这台手机上处理，不会上传。</string>
+    <string name="safety_notice_title">开始之前请读一下</string>
+    <string name="safety_notice_footer">设置里的“安全须知”随时可以再看。</string>
+    <string name="safety_notice_confirm">我知道了，开始</string>
     <string name="oss_title">开源许可</string>
     <string name="label_speech_rate">语速</string>
     <string name="settings_speech_rate_value">%1$.1f 倍速</string>

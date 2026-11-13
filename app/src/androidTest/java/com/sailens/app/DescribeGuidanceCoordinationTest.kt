@@ -129,7 +129,11 @@ class DescribeGuidanceCoordinationTest {
         // Start guidance with the lens covered: the real pipeline reports an obstructed camera.
         camera.obstructed = true
         val guidanceStartedAt = System.nanoTime()
-        instrumentation.runOnMainSync { guidanceScreen.toggleAnalysis() }
+        instrumentation.runOnMainSync {
+            guidanceScreen.toggleAnalysis()
+            // Shown instead of the start until confirmed (a fresh install); its button is what starts Guidance then.
+            if (guidanceScreen.isSafetyNoticeShown.value) guidanceScreen.confirmSafetyNotice()
+        }
         awaitTrue("Guidance to announce a warning", 10_000) {
             guidanceScreen.uiState.value.lastAnnouncedEvent != null
         }
