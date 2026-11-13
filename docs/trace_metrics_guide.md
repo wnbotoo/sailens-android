@@ -1002,8 +1002,10 @@ next record's `skipsSinceLast` (`stopped`, `thermal`, `thermal_cadence`, `yield`
   and so on), `inlierRatio`, `confidence`, `planeAgreesWithGravity`, `groundRatio` /
   `aboveGroundRatio` / `belowGroundRatio` (fractions of the label grid), `disparityScale` /
   `disparityShift` (the fit's `A` and `t`), `detail` (the picture detail the lane measures on Y).
-- Timings, ms: `prepareMs` (native preprocessing), `admitWaitMs`, `inferMs`, `outputReadMs`, `fitMs`;
-  the runtime's `accelerator`, `acceleratorSelection` (with the GPU precision and queue priority),
+- Timings, ms: `prepareMs` (native preprocessing), `admitWaitMs`, `inferMs`, `outputReadMs`, `fitMs`
+  (the wall time around the hand-off to the fit's dispatcher); `fitCpuUs`, microseconds, the fit thread's CPU time
+  inside the fit (absent where the platform does not measure it), so `fitMs` minus it is the wall time that was not
+  the fit's own CPU time -- dispatching, preemption, a slower core; the runtime's `accelerator`, `acceleratorSelection` (with the GPU precision and queue priority),
   `preprocessBackend`, `postprocessBackend`; `modelShape`, input and output (`1x3x392x224>1x392x224`).
 - The closing record: `cancelledRunId` and `cancelledStage` (`prepare`, `admit`, `infer`, `fit`) when an
   attempt was in flight at the stop -- that is its settlement, and nothing more is written for it --
@@ -1034,8 +1036,9 @@ The report's depth lines, from the records alone, each attempt once:
   gap within a session, or a depth session with no closing record), `possibly_incomplete` (no summary to
   count against) or `not recorded`;
 - `depthMs`: `prepare`, `admitWait`, `infer`, `read` (the output read back), `gpu` (each run's `infer` +
-  `read`, the accelerator's share the device budget judges: percentiles of the per-run sum) and `fit`, as
-  p50/p95/max(count), nearest rank; `age`, the attached observation's age on the traced frames, the only
+  `read`, the accelerator's share the device budget judges: percentiles of the per-run sum), `fit` and
+  `fitCpu` (from the records that have `fitCpuUs`, rounded up to whole milliseconds), as p50/p95/max(count),
+  nearest rank; `age`, the attached observation's age on the traced frames, the only
   figure taken from frames.
 
 A trace with the lane switched off is `complete` with no attempts.

@@ -40,6 +40,11 @@ data class DepthRunTrace(
     val inferMs: Long? = null,
     val outputReadMs: Long? = null,
     val fitMs: Long? = null,
+    /**
+     * The fit thread's CPU time inside the fit, microseconds; null where the platform does not measure it. [fitMs] is the
+     * wall time around the hand-off to the fit dispatcher, so it also holds what is not the fit's own CPU time.
+     */
+    val fitCpuUs: Long? = null,
     val accelerator: String? = null,
     val acceleratorSelection: String? = null,
     val preprocessBackend: String? = null,

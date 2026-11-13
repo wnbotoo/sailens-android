@@ -50,6 +50,7 @@ internal object TraceJsonEncoder {
         record.inferMs?.let { put("inferMs", it) }
         record.outputReadMs?.let { put("outputReadMs", it) }
         record.fitMs?.let { put("fitMs", it) }
+        record.fitCpuUs?.let { put("fitCpuUs", it) }
         record.accelerator?.let { put("accelerator", it) }
         record.acceleratorSelection?.let { put("acceleratorSelection", it) }
         record.preprocessBackend?.let { put("preprocessBackend", it) }

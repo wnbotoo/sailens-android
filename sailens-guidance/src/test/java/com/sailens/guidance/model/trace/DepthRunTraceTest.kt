@@ -26,7 +26,7 @@ class DepthRunTraceTest {
             """"frameSequence":41,"frameTimeNanos":123456789,"timeBasis":"camera_realtime","geometryQuality":"ok","validity":"valid",""" +
             """"inlierRatio":0.8,"confidence":0.7,"planeAgreesWithGravity":true,"groundRatio":0.4,"aboveGroundRatio":0.2,""" +
             """"belowGroundRatio":0.01,"disparityScale":7.5,"disparityShift":0.2,"detail":3.5,"prepareMs":6,"admitWaitMs":0,""" +
-            """"inferMs":31,"outputReadMs":2,"fitMs":9,"accelerator":"gpu","acceleratorSelection":"explicit gpu precision=fp16 priority=low",""" +
+            """"inferMs":31,"outputReadMs":2,"fitMs":9,"fitCpuUs":4250,"accelerator":"gpu","acceleratorSelection":"explicit gpu precision=fp16 priority=low",""" +
             """"preprocessBackend":"native_yuv","postprocessBackend":"kotlin_ground_fit","modelShape":"1x3x392x224>1x392x224",""" +
             """"skipsSinceLast":{"no_baseline_yet":2}}"""
         val closed = """{"type":"depth_run","sessionId":"s","seq":2,"generation":2,"runId":2,"outcome":"closed","atElapsedMs":6000,""" +
@@ -39,7 +39,7 @@ class DepthRunTraceTest {
                 frameSequence = 41, frameTimeNanos = 123456789, timeBasis = "camera_realtime", geometryQuality = "ok", validity = "valid",
                 inlierRatio = 0.8f, confidence = 0.7f, planeAgreesWithGravity = true, groundRatio = 0.4f, aboveGroundRatio = 0.2f,
                 belowGroundRatio = 0.01f, disparityScale = 7.5f, disparityShift = 0.2f, detail = 3.5f, prepareMs = 6, admitWaitMs = 0,
-                inferMs = 31, outputReadMs = 2, fitMs = 9, accelerator = "gpu", acceleratorSelection = "explicit gpu precision=fp16 priority=low",
+                inferMs = 31, outputReadMs = 2, fitMs = 9, fitCpuUs = 4250, accelerator = "gpu", acceleratorSelection = "explicit gpu precision=fp16 priority=low",
                 preprocessBackend = "native_yuv", postprocessBackend = "kotlin_ground_fit", modelShape = "1x3x392x224>1x392x224",
                 skipsSinceLast = mapOf("no_baseline_yet" to 2),
             ),
@@ -89,9 +89,11 @@ class DepthRunTraceTest {
         validity: String? = "valid",
         skips: Map<String, Int> = emptyMap(),
         outputReadMs: Long? = null,
+        fitMs: Long? = null,
+        fitCpuUs: Long? = null,
     ) = DepthRunTrace(
         sessionId = "s", generation = generation, runId = runId, outcome = outcome, seq = seq, atElapsedMs = seq, inferMs = inferMs,
-        outputReadMs = outputReadMs, validity = validity, skipsSinceLast = skips,
+        outputReadMs = outputReadMs, fitMs = fitMs, fitCpuUs = fitCpuUs, validity = validity, skipsSinceLast = skips,
     )
 
     private fun closed(seq: Long, lastRunId: Long, generation: Long = 1, cancelled: Long? = null, skips: Map<String, Int> = emptyMap()) =
@@ -159,6 +161,20 @@ class DepthRunTraceTest {
         assertEquals(TimingStats(count = 2, p50 = 100, p95 = 101, max = 101), split.gpuMs)
         assertEquals(100L, split.inferMs!!.max)
         assertEquals(90L, split.outputReadMs!!.max)
+    }
+
+    @Test
+    fun `the fit's own CPU time is reported in whole milliseconds rounded up, from the runs that have it`() {
+        val runs = listOf(
+            run(1, 1, fitMs = 150, fitCpuUs = 1_200),
+            run(2, 2, fitMs = 160, fitCpuUs = 3_000),
+            run(3, 3, fitMs = 170, fitCpuUs = null),
+            closed(4, 3),
+        )
+        val report = DepthRunReportBuilder.build(session(runs))
+        assertEquals(TimingStats(count = 3, p50 = 160, p95 = 170, max = 170), report.fitMs)
+        assertEquals(TimingStats(count = 2, p50 = 2, p95 = 3, max = 3), report.fitCpuMs)
+        assertNull(DepthRunReportBuilder.build(session(listOf(run(1, 1, fitMs = 9), closed(2, 1)))).fitCpuMs)
     }
 
     @Test

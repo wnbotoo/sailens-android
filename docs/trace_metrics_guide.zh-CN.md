@@ -746,7 +746,9 @@ Guidance 此刻对用户处在什么状态，合成为一个值，由 shell 从�
   `inlierRatio`、`confidence`、`planeAgreesWithGravity`、`groundRatio` / `aboveGroundRatio` / `belowGroundRatio`
   （占标签网格的比例）、`disparityScale` / `disparityShift`（拟合出的 `A` 和 `t`）、`detail`（车道在 Y 平面上量的
   画面细节）。
-- 耗时（ms）：`prepareMs`（原生预处理）、`admitWaitMs`、`inferMs`、`outputReadMs`、`fitMs`；运行时的
+- 耗时（ms）：`prepareMs`（原生预处理）、`admitWaitMs`、`inferMs`、`outputReadMs`、`fitMs`（交给拟合的调度器前后的墙钟时间）；
+  `fitCpuUs`，微秒，拟合线程在拟合里用掉的 CPU 时间（平台量不了时没有这一项），`fitMs` 减去它就是不属于拟合自身 CPU 的
+  墙钟时间：调度、被抢占、跑在更慢的核上；运行时的
   `accelerator`、`acceleratorSelection`（含 GPU 精度和队列优先级）、`preprocessBackend`、`postprocessBackend`；
   `modelShape`，输入与输出（`1x3x392x224>1x392x224`）。
 - 收尾记录：停止时有尝试在途，就带 `cancelledRunId` 和 `cancelledStage`（`prepare`、`admit`、`infer`、`fit`）——
@@ -772,7 +774,7 @@ Guidance 此刻对用户处在什么状态，合成为一个值，由 shell 从�
 - `records`：`complete`、`incomplete (missing n)`（`seq` 有缺口、少于 `depthRunCount`、会话内 `runId` 有缺口，或某个
   深度会话没有收尾记录）、`possibly_incomplete`（没有汇总可以对照）或 `not recorded`；
 - `depthMs`：`prepare`、`admitWait`、`infer`、`read`（读回输出）、`gpu`（每次运行的 `infer` + `read`，即真机预算判断的
-  加速器部分：按每次运行的和取分位数）和 `fit`，格式 p50/p95/最大值(条数)，最近秩；`age` 是被记下的帧上挂着的观测的年龄，
+  加速器部分：按每次运行的和取分位数）、`fit` 和 `fitCpu`（取有 `fitCpuUs` 的记录，向上取整到毫秒），格式 p50/p95/最大值(条数)，最近秩；`age` 是被记下的帧上挂着的观测的年龄，
   唯一从帧算的量。
 
 车道关着的 trace 是 `complete`，尝试数为 0。

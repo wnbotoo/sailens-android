@@ -132,6 +132,7 @@ class DepthGeometryLaneTest {
     private val coordinator = AcceleratorCoordinator()
     private val runners = mutableListOf<FakeRunner>()
     private var configure: (FakeRunner) -> Unit = {}
+    private var threadCpu: () -> Long = { -1L }
 
     private fun lane(
         check: DepthModelCheck = DepthModelCheck { DepthModelCheckResult.Compatible },
@@ -148,6 +149,7 @@ class DepthGeometryLaneTest {
         config = DepthGeometryConfig(maxConsecutiveFailures = maxFailures, gridWidth = 9, gridHeight = 16),
         logService = logs,
         elapsedMs = { 0L },
+        threadCpuNanos = { threadCpu() },
         laneDispatcher = laneDispatcher,
         fitDispatcher = fitDispatcher,
         evidence = evidence,
@@ -491,6 +493,34 @@ class DepthGeometryLaneTest {
         feedB.send(1)
         until("b published") { b.latest().runId == 1L }
         assertEquals(listOf(1L), records.of(2).map { it.runId })
+    }
+
+    @Test
+    fun `the fit's own CPU time is read on the fit's thread around the fit, and none is recorded where the platform cannot`() = runBlocking {
+        var fitThread: Thread? = null
+        val fitExecutor = Executors.newSingleThreadExecutor { Thread(it).also { thread -> fitThread = thread } }
+        try {
+            val readers = Collections.synchronizedList(mutableListOf<Thread>())
+            val readings = ArrayDeque(listOf(5_000_000L, 7_250_000L))
+            threadCpu = {
+                readers += Thread.currentThread()
+                synchronized(readings) { readings.removeFirstOrNull() ?: -1L }
+            }
+            val lane = lane(fitDispatcher = fitExecutor.asCoroutineDispatcher())
+            val feed = Feed("a")
+            val session = lane.start(feed.context())
+            feed.send(1)
+            until("first published") { session.latest().runId == 1L }
+            feed.send(2)
+            until("second published") { session.latest().runId == 2L }
+            val published = records.all.filter { it.outcome == DepthRunTrace.PUBLISHED }
+            assertEquals(2_250L, published[0].fitCpuUs)
+            assertNull("a platform that cannot measure records nothing", published[1].fitCpuUs)
+            assertEquals(List(4) { checkNotNull(fitThread) }, readers.toList())
+            lane.stop(session)
+        } finally {
+            fitExecutor.shutdownNow()
+        }
     }
 
     @Test

@@ -134,6 +134,7 @@ class DepthSession internal constructor(
         run: DepthRun? = null,
         observation: GroundObservation? = null,
         fitMs: Long? = null,
+        fitCpuUs: Long? = null,
     ): Boolean = synchronized(lock) {
         if (closed || inFlight !== attempt) return false
         if (snapshot != null) {
@@ -172,6 +173,7 @@ class DepthSession internal constructor(
                     inferMs = run?.inferenceMs,
                     outputReadMs = run?.outputReadMs,
                     fitMs = fitMs,
+                    fitCpuUs = fitCpuUs,
                     accelerator = run?.runtimeInfo?.accelerator,
                     acceleratorSelection = run?.runtimeInfo?.acceleratorSelection,
                     preprocessBackend = run?.runtimeInfo?.preprocessBackend,

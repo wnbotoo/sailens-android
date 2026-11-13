@@ -292,6 +292,7 @@ object TraceReplayParser {
             inferMs = entry.optionalLong("inferMs"),
             outputReadMs = entry.optionalLong("outputReadMs"),
             fitMs = entry.optionalLong("fitMs"),
+            fitCpuUs = entry.optionalLong("fitCpuUs"),
             accelerator = entry.optionalString("accelerator"),
             acceleratorSelection = entry.optionalString("acceleratorSelection"),
             preprocessBackend = entry.optionalString("preprocessBackend"),
