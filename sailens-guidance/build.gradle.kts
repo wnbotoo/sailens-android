@@ -104,4 +104,7 @@ dependencies {
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
+    // A test that builds the real depth runner implements ModelSourceResolver, whose signature names LiteRT's
+    // Accelerator; the main code never does.
+    androidTestImplementation(libs.google.litert)
 }

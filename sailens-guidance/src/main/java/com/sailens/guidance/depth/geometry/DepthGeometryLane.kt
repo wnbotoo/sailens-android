@@ -1,5 +1,6 @@
 package com.sailens.guidance.depth.geometry
 
+import android.os.Debug
 import android.os.SystemClock
 import com.sailens.core.frame.ImageFrame
 import com.sailens.core.log.LogService
@@ -111,6 +112,8 @@ class DepthGeometryLane(
     private val logService: LogService,
     private val fitterFactory: () -> GroundFitter = { GroundFitter() },
     private val elapsedMs: () -> Long = SystemClock::elapsedRealtime,
+    /** The calling thread's CPU time, nanoseconds; negative where the platform does not measure it. */
+    private val threadCpuNanos: () -> Long = Debug::threadCpuTimeNanos,
     @OptIn(ExperimentalCoroutinesApi::class)
     private val laneDispatcher: CoroutineDispatcher = Dispatchers.Default.limitedParallelism(1),
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -289,11 +292,17 @@ class DepthGeometryLane(
             // Counted before the call: a fit that throws still leaves its gap in the ordinals.
             val fitOrdinal = fitCalls++
             val fitStart = elapsedMs()
+            var fitCpuUs: Long? = null
             val observation = withContext(fitDispatcher) {
-                fitter.fit(run.map, intrinsics, down, config.gridWidth, config.gridHeight, geometry.frameTimeNanos)
+                // The fit does not suspend: both readings are of the thread that ran it.
+                val cpuStart = threadCpuNanos()
+                val fitted = fitter.fit(run.map, intrinsics, down, config.gridWidth, config.gridHeight, geometry.frameTimeNanos)
+                val cpuEnd = threadCpuNanos()
+                if (cpuStart >= 0 && cpuEnd >= cpuStart) fitCpuUs = (cpuEnd - cpuStart) / 1_000
+                fitted
             }
             val fitMs = elapsedMs() - fitStart
-            publish(attempt, frame, geometry, prepareMs, admitWaitMs, run, observation, fitMs)
+            publish(attempt, frame, geometry, prepareMs, admitWaitMs, run, observation, fitMs, fitCpuUs)
             evidenceSlot?.let { slot ->
                 evidenceSlot = null
                 observeEvidence {
@@ -314,6 +323,7 @@ class DepthGeometryLane(
         run: DepthRun,
         observation: GroundObservation,
         fitMs: Long,
+        fitCpuUs: Long?,
     ) {
         val snapshot = DepthGeometrySnapshot(
             generation = this.generation,
@@ -333,7 +343,7 @@ class DepthGeometryLane(
             detail = run.detail,
             modelShape = run.shapeLabel,
         )
-        commit(attempt, DepthRunTrace.PUBLISHED, snapshot, prepareMs, admitWaitMs, run, observation, fitMs)
+        commit(attempt, DepthRunTrace.PUBLISHED, snapshot, prepareMs, admitWaitMs, run, observation, fitMs, fitCpuUs)
     }
 
     private inline fun <T> runCatchingNonCancellation(block: () -> T): T? = try {

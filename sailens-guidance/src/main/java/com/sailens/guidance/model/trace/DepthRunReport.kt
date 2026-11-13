@@ -15,6 +15,8 @@ package com.sailens.guidance.model.trace
  * @param inferMs the model run; [outputReadMs] reading its output back.
  * @param gpuMs per run, [inferMs] + [outputReadMs]: the accelerator's share of a run, which the device budget
  *   judges. Percentiles of the sum, never the sum of the two percentiles.
+ * @param fitMs the wall time of the fit, the hand-off to its dispatcher included; [fitCpuMs] the fit thread's CPU time
+ *   inside it, from the records that have it (rounded up to whole milliseconds).
  * @param ageMs the attached observation's age on the traced frames, by frame time.
  */
 data class DepthRunReport(
@@ -32,6 +34,7 @@ data class DepthRunReport(
     val outputReadMs: TimingStats? = null,
     val gpuMs: TimingStats? = null,
     val fitMs: TimingStats? = null,
+    val fitCpuMs: TimingStats? = null,
     val ageMs: TimingStats? = null,
 ) {
     companion object {
