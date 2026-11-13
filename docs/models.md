@@ -308,7 +308,12 @@ overall means every model that runs on an accelerator was compared and passed; t
 how many were. A correct accelerator differs from the CPU only
 along class boundaries; a wrong one replaces whole regions, which the result names (for example
 `car→building 31%`). The report is written to `files/diagnostics/consistency/` with the model
-hashes, numbers only.
+hashes, numbers only. For the depth model it also records, per frame, the disparity error in each
+of 8×8 regions, both ground fits and which labels changed; when the two runs disagree on any frame
+(a non-finite output, a median outside the pass band, fits that differ in validity, labels below the
+agreement), both outputs of every frame are kept beside it as float32 files, with the geometry the
+fits used, so the frame can be refitted on a PC. They are model outputs, not camera pixels; no camera
+frame is kept.
 
 Run it whenever the model file, the LiteRT version or the target device changes. A distribution
 that ships models is responsible for running it on the devices it supports.

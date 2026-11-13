@@ -12,6 +12,7 @@ import com.sailens.runtime.PinnedModelSourceResolver
 import com.sailens.guidance.geometry.CameraGeometry
 import com.sailens.guidance.geometry.GeometryQuality
 import com.sailens.guidance.geometry.GroundFitter
+import com.sailens.guidance.geometry.GroundObservation
 import com.sailens.vision.consistency.ClassMapAgreement
 import com.sailens.vision.consistency.ConsistencyVerdict
 import com.sailens.vision.consistency.DEFAULT_CONFIDENCE_MARGIN
@@ -25,6 +26,7 @@ import com.sailens.vision.consistency.SemanticConsistency
 import com.sailens.vision.consistency.compareClassMaps
 import com.sailens.vision.consistency.compareDetections
 import com.sailens.vision.consistency.compareDisparity
+import com.sailens.vision.consistency.compareDisparityByRegion
 import com.sailens.vision.consistency.judgeDepth
 import com.sailens.vision.consistency.judgeDetection
 import com.sailens.vision.consistency.judgeSemantic
@@ -69,7 +71,7 @@ internal class ModelConsistencyChecker(
     private val frameCount: Int = DEFAULT_FRAME_COUNT,
     private val frameIntervalMs: Long = DEFAULT_FRAME_INTERVAL_MS,
     /** The optional depth model; not applicable when the host configures none. */
-    private val depthPairs: ComparisonPairFactory<DepthFrameAgreement> = ComparisonPairFactory { ComparisonPair.notApplicable() },
+    private val depthPairs: ComparisonPairFactory<DepthFrameEvidence> = ComparisonPairFactory { ComparisonPair.notApplicable() },
     private val geometry: ConsistencyGeometry = ConsistencyGeometry.None,
 ) {
 
@@ -106,12 +108,12 @@ internal class ModelConsistencyChecker(
     private suspend fun compare(
         semantic: ComparisonPair<ClassMapAgreement>,
         detection: ComparisonPair<DetectionAgreement>,
-        depth: ComparisonPair<DepthFrameAgreement>,
+        depth: ComparisonPair<DepthFrameEvidence>,
         onFrame: (done: Int, total: Int) -> Unit,
     ): ConsistencyRunResult {
         val semFrames = mutableListOf<ClassMapAgreement>()
         val detFrames = mutableListOf<DetectionAgreement>()
-        val depthFrames = mutableListOf<DepthFrameAgreement>()
+        val depthFrames = mutableListOf<DepthFrameEvidence>()
         var semAccelerators = AcceleratorPair()
         var detAccelerators = AcceleratorPair()
         var depthAccelerators = AcceleratorPair()
@@ -170,7 +172,11 @@ internal class ModelConsistencyChecker(
                 DetectionModelResult(detAccelerators, judgeDetection(detFrames))
             },
             depth = depth.outcome(framesUsed, frameCount) {
-                DepthModelResult(depthAccelerators, judgeDepth(depthFrames, DepthConsistencyThresholds(framesRequired = frameCount)))
+                DepthModelResult(
+                    depthAccelerators,
+                    judgeDepth(depthFrames.map { it.agreement }, DepthConsistencyThresholds(framesRequired = frameCount)),
+                    details = depthFrames.map { it.detail },
+                )
             },
         )
     }
@@ -361,7 +367,7 @@ private suspend fun liteRtDepthPair(
     config: DepthModelConfig,
     resolver: ModelSourceResolver,
     log: LogService,
-): ComparisonPair<DepthFrameAgreement> {
+): ComparisonPair<DepthFrameEvidence> {
     if (config.acceleratorBackend == ModelAcceleratorBackend.CPU) return ComparisonPair.notApplicable()
     val pinned = PinnedModelSourceResolver.pin(resolver, ModelType.DEPTH_ESTIMATION, config.acceleratorBackend)
     when (val preflight = DepthModelPreflight.check(context, pinned.pinned)) {
@@ -390,6 +396,32 @@ private suspend fun liteRtDepthPair(
 }
 
 /**
+ * One frame of the depth pair: the agreement the verdict is judged on, and what the report keeps to locate a
+ * disagreement afterwards. [detail] is null only for a stand-in pair that has no outputs to keep.
+ */
+internal data class DepthFrameEvidence(val agreement: DepthFrameAgreement, val detail: DepthFrameDetail? = null)
+
+/**
+ * What one depth frame leaves for the report beside its agreement: both outputs, the geometry they were fitted with,
+ * both fits, the disparity error in each region of the content area, and which labels changed. The lowest label
+ * agreement says that a frame disagreed, not where or why: a label grid that changes class over a fifth of its cells
+ * while the disparity moved by half a percent is either the fit reacting to a small difference or a region the
+ * accelerator computed wrongly, and only the regions and the outputs (refitted on a PC) tell the two apart.
+ */
+internal class DepthFrameDetail(
+    val reference: DisparityMap,
+    val candidate: DisparityMap,
+    val geometry: CameraGeometry?,
+    /** The two fits; null when the frame was not fitted (no usable geometry, or a NaN or infinite output). */
+    val referenceFit: GroundObservation?,
+    val candidateFit: GroundObservation?,
+    /** [compareDisparityByRegion] with [DEPTH_REGION_GRID]. */
+    val regionMedianRelativeError: FloatArray,
+    /** Label-grid cells whose label differs, "reference->candidate" to how many; empty unless both fits are valid. */
+    val labelChanges: Map<String, Int>,
+)
+
+/**
  * One frame of the depth pair. A NaN or infinite value in either output is a failed run (docs/models.md), counted
  * from the values themselves: such a frame fails the check whatever the other values' statistics say, and neither
  * fitter sees it, so the two fitters keep the same history.
@@ -400,49 +432,91 @@ internal fun compareDepthFrame(
     candidate: DisparityMap,
     referenceFitter: GroundFitter,
     candidateFitter: GroundFitter,
-): DepthFrameAgreement {
+): DepthFrameEvidence {
     val disparity = compareDisparity(reference = reference, candidate = candidate)
+    val regions = compareDisparityByRegion(reference, candidate, DEPTH_REGION_GRID)
     val referenceNonFinite = reference.values.count { !it.isFinite() }
     val candidateNonFinite = candidate.values.count { !it.isFinite() }
     if (referenceNonFinite > 0 || candidateNonFinite > 0) {
-        return DepthFrameAgreement(disparity, fit = null, candidateNonFinite = candidateNonFinite, referenceNonFinite = referenceNonFinite)
+        return DepthFrameEvidence(
+            DepthFrameAgreement(disparity, fit = null, candidateNonFinite = candidateNonFinite, referenceNonFinite = referenceNonFinite),
+            DepthFrameDetail(reference, candidate, geometry, null, null, regions, emptyMap()),
+        )
     }
-    val fit = geometry?.let { compareGroundFits(it, reference, candidate, referenceFitter, candidateFitter) }
-    return DepthFrameAgreement(disparity, fit)
+    val fits = geometry?.let { fitBoth(it, reference, candidate, referenceFitter, candidateFitter) }
+    return DepthFrameEvidence(
+        DepthFrameAgreement(disparity, fits?.agreement),
+        DepthFrameDetail(reference, candidate, geometry, fits?.reference, fits?.candidate, regions, fits?.labelChanges.orEmpty()),
+    )
 }
 
-/** The two fits of one frame; null when the frame's geometry cannot carry a fit. */
-internal fun compareGroundFits(
+/** The two fits of one frame and how they compare. */
+private class GroundFits(
+    val reference: GroundObservation,
+    val candidate: GroundObservation,
+    val agreement: GroundFitAgreement,
+    val labelChanges: Map<String, Int>,
+)
+
+/** Null when the frame's geometry cannot carry a fit. */
+private fun fitBoth(
     geometry: CameraGeometry,
     reference: DisparityMap,
     candidate: DisparityMap,
     referenceFitter: GroundFitter,
     candidateFitter: GroundFitter,
-): GroundFitAgreement? {
+): GroundFits? {
     val intrinsics = geometry.intrinsics ?: return null
     val down = geometry.gravityInCamera ?: return null
     if (geometry.quality is GeometryQuality.Unavailable) return null
     if (intrinsics.width != reference.transform.analysisWidth || intrinsics.height != reference.transform.analysisHeight) return null
     val r = referenceFitter.fit(reference, intrinsics, down, FIT_GRID_WIDTH, FIT_GRID_HEIGHT)
     val c = candidateFitter.fit(candidate, intrinsics, down, FIT_GRID_WIDTH, FIT_GRID_HEIGHT)
+    val changes = if (r.isValid && c.isValid) labelChanges(r, c) else emptyMap()
     val labels = if (r.isValid && c.isValid) {
-        var same = 0
-        for (y in 0 until FIT_GRID_HEIGHT) for (x in 0 until FIT_GRID_WIDTH) {
-            if (r.groundMask.get(x, y) == c.groundMask.get(x, y) &&
-                r.aboveGroundMask.get(x, y) == c.aboveGroundMask.get(x, y) &&
-                r.belowGroundMask.get(x, y) == c.belowGroundMask.get(x, y)
-            ) same++
-        }
-        same.toFloat() / (FIT_GRID_WIDTH * FIT_GRID_HEIGHT)
+        val cells = FIT_GRID_WIDTH * FIT_GRID_HEIGHT
+        (cells - changes.values.sum()).toFloat() / cells
     } else {
         null
     }
-    return GroundFitAgreement(validityAgrees = r.validity == c.validity, referenceValid = r.isValid, labelAgreement = labels)
+    return GroundFits(
+        reference = r,
+        candidate = c,
+        agreement = GroundFitAgreement(validityAgrees = r.validity == c.validity, referenceValid = r.isValid, labelAgreement = labels),
+        labelChanges = changes,
+    )
+}
+
+/**
+ * The label-grid cells whose ground / above / below labels differ between [reference] and [candidate], counted by
+ * "reference->candidate" label, largest first. A cell's label is the set of masks that hold it ("none" for no mask).
+ */
+internal fun labelChanges(reference: GroundObservation, candidate: GroundObservation): Map<String, Int> {
+    val counts = HashMap<String, Int>()
+    for (y in 0 until FIT_GRID_HEIGHT) for (x in 0 until FIT_GRID_WIDTH) {
+        val r = cellLabel(reference, x, y)
+        val c = cellLabel(candidate, x, y)
+        if (r != c) counts.merge("$r->$c", 1, Int::plus)
+    }
+    return counts.entries.sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
+        .associate { it.key to it.value }
+}
+
+private fun cellLabel(o: GroundObservation, x: Int, y: Int): String {
+    val labels = buildList {
+        if (o.groundMask.get(x, y)) add("ground")
+        if (o.aboveGroundMask.get(x, y)) add("above")
+        if (o.belowGroundMask.get(x, y)) add("below")
+    }
+    return if (labels.isEmpty()) "none" else labels.joinToString("+")
 }
 
 /** The ground fit's label grid: the size the experiments measured agreement on (portrait 9:16). */
 internal const val FIT_GRID_WIDTH: Int = 90
 internal const val FIT_GRID_HEIGHT: Int = 160
+
+/** The depth disparity error is also reported per cell of this many × this many regions of the content area. */
+internal const val DEPTH_REGION_GRID: Int = 8
 
 private fun DepthModelConfig.onCpu() =
     copy(acceleratorBackend = ModelAcceleratorBackend.CPU, acceleratorSelectionMode = ModelAcceleratorSelectionMode.EXPLICIT)
@@ -526,7 +600,19 @@ internal data class DetectionModelResult(
 internal data class DepthModelResult(
     val accelerators: AcceleratorPair,
     val consistency: DepthConsistency,
+    /** Per frame, in the order of [DepthConsistency.frames]: what the report keeps beside the agreement. */
+    val details: List<DepthFrameDetail?> = emptyList(),
 )
+
+/**
+ * A frame the two depth runs disagree on, by the check's own bands: a NaN or infinite output, a disparity median
+ * outside the pass band, fits that disagree on validity, or labels below the agreement the check asks for.
+ */
+internal fun DepthFrameAgreement.disagrees(thresholds: DepthConsistencyThresholds): Boolean =
+    hasNonFiniteOutput ||
+        !(disparity.medianRelativeError <= thresholds.maxPassMedianRelativeError) ||
+        fit?.validityAgrees == false ||
+        fit?.labelAgreement?.let { it < thresholds.minLabelAgreement } == true
 
 internal data class ConsistencyRunResult(
     val framesRequested: Int,

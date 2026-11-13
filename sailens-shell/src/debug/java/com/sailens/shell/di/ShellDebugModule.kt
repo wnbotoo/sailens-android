@@ -192,7 +192,7 @@ private const val CAPTURES_DIR = "captures"
 /** Under `filesDir`: the speech-duration tables (numbers and the Guidance sentences only). */
 private const val TTS_DURATIONS_DIR = "diagnostics/tts-durations"
 
-/** Under `filesDir`: consistency reports (numbers only, no frames). */
+/** Under `filesDir`: consistency reports (numbers, and the depth outputs of a check the runs disagreed on; no camera frames). */
 private const val CONSISTENCY_DIR = "diagnostics/consistency"
 
 /** Under `cacheDir` (not backed up); the only capture path exposed through FileProvider. */
