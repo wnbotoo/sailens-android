@@ -1004,8 +1004,11 @@ next record's `skipsSinceLast` (`stopped`, `thermal`, `thermal_cadence`, `yield`
   `disparityShift` (the fit's `A` and `t`), `detail` (the picture detail the lane measures on Y).
 - Timings, ms: `prepareMs` (native preprocessing), `admitWaitMs`, `inferMs`, `outputReadMs`, `fitMs`
   (the wall time around the hand-off to the fit's dispatcher); `fitCpuUs`, microseconds, the fit thread's CPU time
-  inside the fit (absent where the platform does not measure it), so `fitMs` minus it is the wall time that was not
-  the fit's own CPU time -- dispatching, preemption, a slower core; the runtime's `accelerator`, `acceleratorSelection` (with the GPU precision and queue priority),
+  inside the fit (absent where the platform does not measure it). Run by run, `fitMs - fitCpuUs / 1000.0` is the wall
+  time spent other than on the fit's CPU: the hand-off to and from the dispatcher, preemption, blocking. A slower core
+  or a lower clock lengthens the CPU time as much as the wall time, so it shows in both, not in the difference; telling
+  it apart needs scheduling or clock evidence. `fitMs` is whole milliseconds, so a difference under a millisecond or
+  two says nothing; the runtime's `accelerator`, `acceleratorSelection` (with the GPU precision and queue priority),
   `preprocessBackend`, `postprocessBackend`; `modelShape`, input and output (`1x3x392x224>1x392x224`).
 - The closing record: `cancelledRunId` and `cancelledStage` (`prepare`, `admit`, `infer`, `fit`) when an
   attempt was in flight at the stop -- that is its settlement, and nothing more is written for it --
