@@ -134,8 +134,16 @@ profile 里的 `DepthModelConfig`。
 sem+det 一起以 3 Hz 运行：推理加读输出 p95 43 ms（最大 70 ms），CPU 上的地面拟合 p50 146 ms，sem/det 不比车道关时慢。模型单独跑时
 DEFAULT 优先级下 p95 23–28 ms；LOW 优先级、GPU 上没有别的工作时会慢五到六倍，所以 LOW 靠 sem+det 把 GPU 撑着
 （[experiments/depth-lane-device-2026-11.zh-CN.md](experiments/depth-lane-device-2026-11.zh-CN.md)）。用
-[`scripts/depth/dav2/export.py`](../scripts/depth/dav2/export.py) 导出：它把归一化和位置编码折进去、做三维修补，并在 CPU 上核对这些都没有改变输出。
+[`scripts/depth/dav2/export.py`](../scripts/depth/dav2/export.py) 导出：它把归一化和位置编码折进去、做三维修补，并在 CPU 上核对这些都没有改变输出
+（一张噪声输入和一张像照片的输入：每个值都有限，中位数、99 分位和输出的每一块都在实测的门槛内）。
+加 `--fp16` 时权重存成 float16（392×224 下 49.9 MB，原来 98.0 MB；CPU 上输出的中位变化 1.3e-4）；GPU 无论哪种都按 FP16 算。
+这些检查能发现导出算成了别的东西，但说明不了 GPU：那只有目标设备上的模型一致性检查能查。
 Distill-Any-Depth Small 是同一架构，用同样的方式符合契约。
+
+**ZipDepth**（它的仓库是 MIT，checkpoint 就在仓库里，没有单独写权重的条款；它由 Depth Anything V2 Large 蒸馏而来，后者的权重是 CC BY-NC 4.0）是一个 CNN，原样就符合契约：
+它的前向自己做输入归一化，输出仿射不变的逆深度。竖版 512×288 的计算量是 2.9 GMACs，参考模型是 13.7。用
+[`scripts/depth/zipdepth/export.py`](../scripts/depth/zipdepth/export.py) 从它的仓库检出导出（24.7 MB，加 `--fp16` 是 12.5 MB）。在 SM8850 上不改代码换上它，
+和 sem+det 一起时推理加读输出 p50 7 ms、p95 31 ms（[experiments/depth-lane-device-2026-11.zh-CN.md](experiments/depth-lane-device-2026-11.zh-CN.md) §5）。
 
 **换深度模型**不改代码，但要做和第一个模型一样的验收：
 1. 预检报 `Compatible`；

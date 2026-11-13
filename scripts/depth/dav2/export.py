@@ -12,11 +12,17 @@ What the export does to fit the contract and the LiteRT GPU, all with the model'
    compile.
 3. Token activations kept rank 3 around FULLY_CONNECTED (../patch_rank3.py): otherwise the GPU runs the
    graph without an error and computes it wrongly.
-Then it checks, on the CPU, that the fold changed nothing (torch, folded against stock with external
-normalization) and that the .tflite matches torch.
+4. With --fp16 only: the weights stored as float16 (../tflite_tools.py), which halves the file. The GPU,
+   which computes in FP16 at its default precision, reads float16 weights either way.
+Then it checks, on the CPU and on two inputs (uniform noise and a fixed picture-like image), that the fold
+changed nothing (torch, folded against stock with external normalization), that the float32 .tflite matches
+torch and, with --fp16, that storing the weights as float16 moved the output by no more than measured bounds:
+every value finite, and the median, the 99th percentile and each region of the output within its bound
+(../tflite_tools.py check).
 
-Needs torch, transformers, litert-torch and ai-edge-litert.
+Needs torch, transformers, litert-torch and ai-edge-litert; --fp16 also ai-edge-quantizer.
     python export.py 392 224 out/depth.tflite        # height width, both multiples of 14
+    python export.py 392 224 out/depth.tflite --fp16
 """
 import os
 import sys
@@ -24,12 +30,13 @@ import tempfile
 import types
 
 import litert_torch
-import numpy as np
 import torch
+from ai_edge_litert.interpreter import Interpreter
 from transformers import AutoModelForDepthEstimation
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 import patch_rank3  # noqa: E402
+import tflite_tools as tt  # noqa: E402
 
 REPO = "depth-anything/Depth-Anything-V2-Small-hf"
 REVISION = "5426e4f0f36572d16453bbda7a8389317b1bef99"
@@ -76,42 +83,42 @@ def fold_embeddings(model, h, w):
     emb.forward = types.MethodType(forward, emb)
 
 
-def relative_error(a, b):
-    a, b = np.asarray(a, np.float64).ravel(), np.asarray(b, np.float64).ravel()
-    den = np.maximum(np.abs(b), 0.05 * np.abs(b).max())
-    return np.abs(a - b) / den
-
-
 if __name__ == "__main__":
-    h, w, out = int(sys.argv[1]), int(sys.argv[2]), sys.argv[3]
+    args = [a for a in sys.argv[1:] if a != "--fp16"]
+    fp16 = len(args) != len(sys.argv) - 1
+    h, w, out = int(args[0]), int(args[1]), args[2]
     assert h % 14 == 0 and w % 14 == 0, "DINOv2 patch size is 14"
     model = AutoModelForDepthEstimation.from_pretrained(REPO, revision=REVISION).eval()
     torch.manual_seed(0)
     x01 = torch.rand(1, 3, h, w)
+    inputs = {"random": x01, "picture": torch.from_numpy(tt.picture(h, w))}
     with torch.no_grad():
-        stock = Wrapper(model)((x01 - MEAN.view(1, 3, 1, 1)) / STD.view(1, 3, 1, 1)).numpy()
+        stock = {k: Wrapper(model)((x - MEAN.view(1, 3, 1, 1)) / STD.view(1, 3, 1, 1)).numpy()
+                 for k, x in inputs.items()}
     fold_normalization(model)
     fold_embeddings(model, h, w)
-    with torch.no_grad():
-        folded = Wrapper(model)(x01).numpy()
-    fold_err = relative_error(folded, stock)
-    print(f"torch folded vs stock: median relative error {np.median(fold_err):.2e}, max {fold_err.max():.2e}")
-    assert np.median(fold_err) <= 1e-5, "the fold changed the output"
+    for k, x in inputs.items():
+        with torch.no_grad():
+            folded = Wrapper(model)(x).numpy()
+        tt.check(f"torch folded vs stock, {k}", folded, stock[k], median=1e-5, p99=1e-4, cell=1e-5, largest=1e-3)
 
     with tempfile.TemporaryDirectory() as tmp:
         raw = os.path.join(tmp, "raw.tflite")
         litert_torch.convert(Wrapper(model), (x01,)).export(raw)
         patched, reshapes, fcs = patch_rank3.patch(open(raw, "rb").read())
-    open(out, "wb").write(patched)
     print(f"lifted {reshapes} RESHAPE, {fcs} FULLY_CONNECTED")
-
-    from ai_edge_litert.interpreter import Interpreter
-    interpreter = Interpreter(model_path=out)
-    interpreter.allocate_tensors()
-    interpreter.set_tensor(interpreter.get_input_details()[0]["index"], x01.numpy())
-    interpreter.invoke()
-    lite = interpreter.get_tensor(interpreter.get_output_details()[0]["index"])
-    lite_err = relative_error(lite, stock)
-    print(f"tflite (CPU) vs torch stock: median relative error {np.median(lite_err):.2e}, p99 {np.percentile(lite_err, 99):.2e}")
-    assert np.median(lite_err) <= 1e-4, "the .tflite does not compute what torch does"
-    print(f"input {interpreter.get_input_details()[0]['shape']} -> output {interpreter.get_output_details()[0]['shape']}: {out}")
+    lite32 = {k: tt.run_cpu(patched, x.numpy()) for k, x in inputs.items()}
+    for k in inputs:
+        tt.check(f"tflite float32 (CPU) vs torch stock, {k}", lite32[k], stock[k], median=1e-4, p99=1e-4, cell=1e-4, largest=1e-3)
+    if fp16:
+        patched = tt.cast_weights_fp16(patched)
+        types_, ops = tt.contents(patched)
+        print(f"float16 weights: tensors {types_}, {ops.get('DEQUANTIZE', 0)} DEQUANTIZE")
+        # Measured at 392x224: median 1.3e-4 / 2.8e-5, p99 3.6e-4 / 3.5e-3, worst cell 3.6e-4 / 8.0e-4, largest 3.9e-4 /
+        # 2.0e-2 (random / picture).
+        for k, x in inputs.items():
+            tt.check(f"tflite float16 weights (CPU) vs float32, {k}", tt.run_cpu(patched, x.numpy()), lite32[k],
+                     median=1e-3, p99=1e-2, cell=3e-3, largest=0.1)
+    open(out, "wb").write(patched)
+    shapes = Interpreter(model_path=out)
+    print(f"input {shapes.get_input_details()[0]['shape']} -> output {shapes.get_output_details()[0]['shape']}: {out}")

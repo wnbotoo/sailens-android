@@ -86,7 +86,8 @@ neither was the power this costs.
 ## 2. The depth model on its own
 
 A local instrumentation loop on the app's LiteRT runtime: one `CompiledModel` on the GPU at FP16,
-input written from a fixed `[0,1]` tensor, 10 warm-up runs then 200, timing the run and the output
+input written from one fixed tensor of Gaussian noise clipped to [−2.1, 2.6] (not image values in the
+`[0,1]` the app feeds), 10 warm-up runs then 200, timing the run and the output
 read. All 715 nodes were delegated to the GPU (one partition); outputs finite; thermal status 0.
 
 | Queue priority | p50 | p95 (three or two runs) | GPU busy |
