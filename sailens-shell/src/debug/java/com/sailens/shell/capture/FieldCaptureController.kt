@@ -512,20 +512,40 @@ internal class FieldCaptureController(
     /**
      * Retention pass. The active session and sessions being exported are never deleted, only
      * counted; the active size comes from the writer so that no directory walk is needed per frame.
+     * Returns null when the pass failed. What it deleted is logged: an eviction leaves no other trace.
      */
     private fun maintain(
         activeSessionId: String? = active?.sessionId,
         activeBytes: Long = active?.let(::bytesOf) ?: 0,
-    ) {
+    ): CaptureRetention.Result? =
         runCatching { retention.prune(clock.wallMs(), activeSessionId, activeBytes, busySessions.toSet()) }
-            .onSuccess { otherSessionsBytes = it.otherSessionsBytes }
+            .onSuccess { result ->
+                otherSessionsBytes = result.otherSessionsBytes
+                if (result.deleted.isNotEmpty()) {
+                    log.info(
+                        TAG,
+                        "Capture retention deleted ${result.deleted.size} session(s)",
+                        mapOf(
+                            "sessions" to result.deleted.joinToString(","),
+                            "otherSessionsBytes" to result.otherSessionsBytes,
+                            "activeBytes" to activeBytes,
+                        ),
+                    )
+                }
+            }
             .onFailure { log.warning(TAG, "Capture retention failed", throwable = it) }
-    }
+            .getOrNull()
 
     /**
-     * The 2 GB cap is real, not a between-sessions tidy-up: when the active capture would take the
-     * total over it, older unpinned sessions go first, and if that is not enough the capture ends
-     * as incomplete with [STORAGE_LIMIT_REACHED] instead of writing until the disk is full.
+     * The cap is real, not a between-sessions tidy-up: when the active capture would take the total
+     * over it, older unpinned sessions go first, and only when none is left that may go does the
+     * capture end as incomplete with [STORAGE_LIMIT_REACHED], instead of writing until the disk is full.
+     *
+     * A pass makes room for the size the capture had when the pass began, and the depth evidence
+     * stream goes on writing on its own thread meanwhile, megabytes a run: often more than the room
+     * the pass left, when the session it deleted last was small. So a pass that made room is followed
+     * by another with the size as it is then; the capture ends only when a pass could not make room
+     * even for the size it was given.
      */
     private suspend fun enforceStorageLimit(capture: ActiveCapture) {
         if (capture.failed) return
@@ -533,8 +553,11 @@ internal class FieldCaptureController(
             fail(capture, STORAGE_LOW)
             return
         }
-        if (!overLimit(capture)) return
-        maintain()
+        while (overLimit(capture)) {
+            val activeBytes = bytesOf(capture)
+            val pass = maintain(activeBytes = activeBytes) ?: break
+            if (pass.otherSessionsBytes + activeBytes > retention.maxTotalBytes) break
+        }
         if (overLimit(capture)) fail(capture, STORAGE_LIMIT_REACHED)
     }
 

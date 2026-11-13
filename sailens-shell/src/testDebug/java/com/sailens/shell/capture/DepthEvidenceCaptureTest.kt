@@ -15,6 +15,7 @@ import com.sailens.guidance.geometry.SupportGuardRule
 import com.sailens.guidance.geometry.TimeBasis
 import com.sailens.guidance.geometry.Vec3
 import com.sailens.guidance.model.trace.DepthRunTrace
+import com.sailens.guidance.trace.capture.CaptureManifest
 import com.sailens.guidance.trace.capture.CaptureModes
 import com.sailens.guidance.trace.capture.CaptureSessionReader
 import com.sailens.guidance.trace.capture.DepthEvidenceFiles
@@ -39,6 +40,7 @@ import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.concurrent.thread
 
@@ -62,17 +64,24 @@ class DepthEvidenceCaptureTest {
     private fun stream(poolSize: Int = 4, queueCapacity: Int = 4) =
         DepthEvidenceCapture(log, writer.asCoroutineDispatcher(), DepthEvidenceCaptureConfig(poolSize, queueCapacity))
 
-    private fun controller(evidence: DepthEvidenceCapture, mode: String = CaptureModes.FIELD_EVIDENCE, selected: Boolean = true) =
+    private fun controller(
+        evidence: DepthEvidenceCapture,
+        mode: String = CaptureModes.FIELD_EVIDENCE,
+        selected: Boolean = true,
+        frames: FakeFrameSource = FakeFrameSource(),
+        retention: CaptureRetention = CaptureRetention(tmp.root),
+    ) =
         FieldCaptureController(
             root = tmp.root,
             sessionMode = { mode },
-            frameSource = FakeFrameSource(),
+            frameSource = frames,
             cameraFacts = CameraCharacteristicsProvider { null },
             sensors = FakeSensors(),
             encoder = JpegEncoder { image, _ -> ByteArray(image.width) },
             clock = FakeClock(),
             deviceInfo = TEST_DEVICE,
             log = log,
+            retention = retention,
             depthEvidence = evidence,
             depthEvidenceSelected = { selected },
         )
@@ -288,5 +297,80 @@ class DepthEvidenceCaptureTest {
         capture.onSessionFinished().join()
         assertNull(read("off").manifest.depthEvidence)
         assertFalse(File(File(tmp.root, "off"), DepthEvidenceFiles.RECORDS_FILE).exists())
+    }
+
+    /** A finished, unpinned session on disk; [startedWallMs] orders it among the others. */
+    private fun oldSession(id: String, startedWallMs: Long, imageBytes: Int) {
+        CaptureSessionWriter(
+            File(tmp.root, id),
+            CaptureManifest(
+                sessionId = id,
+                captureMode = CaptureModes.FIELD_EVIDENCE,
+                startedWallMs = startedWallMs,
+                startedElapsedRealtimeNanos = 0,
+                deviceManufacturer = "Acme",
+                deviceModel = "Phone",
+                sdkInt = 35,
+                complete = true,
+            ),
+        ).use { it.writeFrameImage("000001.jpg", ByteArray(imageBytes)) }
+    }
+
+    private fun bytesOnDisk(): Long = tmp.root.walk().filter { it.isFile }.sumOf { it.length() }
+
+    @Test
+    fun `what the stream writes while retention runs does not end the capture while an older session can still go`() = runBlocking {
+        // Both older than the capture and unpinned; the smaller one is the oldest, so it goes first.
+        oldSession("small", startedWallMs = 1, imageBytes = 20_000)
+        oldSession("large", startedWallMs = 2, imageBytes = 400_000)
+        val cap = AtomicLong(Long.MAX_VALUE / 2)
+        val duringPass = AtomicReference<(() -> Unit)?>()
+        val frames = FakeFrameSource()
+        val evidence = stream()
+        val capture = controller(
+            evidence,
+            frames = frames,
+            retention = CaptureRetention(
+                tmp.root,
+                maxAgeMs = Long.MAX_VALUE,
+                maxTotalBytesSetting = { cap.get() },
+                afterScan = { duringPass.getAndSet(null)?.invoke() },
+            ),
+        )
+        capture.onSessionStarted("s1", null)!!.join()
+        val fitter = GroundFitter()
+        evidence.copy("s1", 1, 1, yuvFrame(1))!!.submit(run(yuvFrame(1), output(0), fitter, 0))
+        awaitTrue("the first run written") { evidence.bytesWritten > 0 }
+
+        // The cap drops to about 10 kB below what the directory holds: the next frame needs a retention pass, and deleting
+        // the small session makes room for the capture as it is when the pass begins.
+        cap.set(bytesOnDisk() - 10_000)
+        // While the pass runs, the stream writes a run of about 90 kB, more than that room.
+        val passRan = CountDownLatch(1)
+        duringPass.set {
+            val before = evidence.bytesWritten
+            val large = yuvFrame(2, width = 240, height = 180)
+            evidence.copy("s1", 1, 2, large)!!.submit(run(large, output(1), fitter, 1))
+            awaitTrue("the large run written") { evidence.bytesWritten > before + 80_000 }
+            passRan.countDown()
+        }
+        frames.emit(yuvFrame(3))
+        assertTrue("a retention pass ran", passRan.await(5, TimeUnit.SECONDS))
+        awaitTrue("the larger session deleted, or the capture ended") {
+            !File(tmp.root, "large").exists() || log.warnings.any { FieldCaptureController.STORAGE_LIMIT_REACHED in it }
+        }
+        assertFalse(
+            "the capture ended while an older unpinned session was still on disk: ${tmp.root.list()!!.sorted()}",
+            log.warnings.any { FieldCaptureController.STORAGE_LIMIT_REACHED in it },
+        )
+        assertEquals("older unpinned sessions go first", setOf("s1"), tmp.root.list()!!.toSet())
+
+        // The capture goes on.
+        frames.emit(yuvFrame(4))
+        awaitTrue("the next frame released") { 4L in frames.released }
+        capture.onSessionFinished().join()
+        val session = read("s1")
+        assertTrue(session.manifest.complete)
+        assertEquals(2L, session.manifest.depthEvidence!!.stats.recordsWritten)
     }
 }
