@@ -125,8 +125,15 @@ class DisparityMap(val width: Int, val height: Int, val values: FloatArray, val 
      * The disparity seen at analysis point (u, v), bilinear between tensor pixel centres; null when
      * the model did not see the point (§9: unknown, never extrapolated) or it falls in padding.
      */
-    fun sampleAt(u: Float, v: Float): Float? {
-        if (!transform.covers(u, v)) return null
+    fun sampleAt(u: Float, v: Float): Float? = if (transform.covers(u, v)) interpolate(u, v) else null
+
+    /**
+     * [sampleAt] without the box: `NaN` where the model did not see the point. A value the model wrote as `NaN` reads
+     * the same, so a caller that tells the two apart uses [sampleAt]. For loops that sample thousands of points.
+     */
+    fun sampleOrNaN(u: Float, v: Float): Float = if (transform.covers(u, v)) interpolate(u, v) else Float.NaN
+
+    private fun interpolate(u: Float, v: Float): Float {
         // Pixel-centre coordinates, kept between the first and last pixels whose centres lie in the
         // content, so both interpolation neighbours are content even when the padding is fractional.
         val cx = (transform.toTensorX(u) - 0.5f).coerceIn(firstContentX.toFloat(), lastContentX.toFloat())

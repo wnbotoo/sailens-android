@@ -125,6 +125,19 @@ class GroundFitter(
     private var lastBelow: BinaryMask? = null
     private var holdingSwitch = false
 
+    // Work buffers, reused from fit to fit and never shared with a copy: only the first `n` entries of a fit count.
+    private val capacity = sampleColumns * sampleRows
+    private val qs = FloatArray(capacity)
+    private val ds = FloatArray(capacity)
+    private val xs = FloatArray(capacity)
+    private val ys = FloatArray(capacity)
+
+    /** The samples again, nearest first: [nearQ] and [nearD] are `qs` and `ds` in that order. */
+    private val nearQ = FloatArray(capacity)
+    private val nearD = FloatArray(capacity)
+    private val sortKeys = LongArray(capacity)
+    private val inlier = BooleanArray(capacity)
+
     fun reset() {
         recentCoverage.clear()
         lastBelow = null
@@ -186,12 +199,8 @@ class GroundFitter(
         fun q(u: Float, v: Float) = g.x * (u - intrinsics.cx) / intrinsics.fx + g.y * (v - intrinsics.cy) / intrinsics.fy + g.z
         val empty = { validity: GroundFitValidity -> invalid(validity, gridWidth, gridHeight, frameTimeNanos) }
 
-        // 1. Samples below the horizon, on a coarse grid of the lower part of the analysis image.
-        val capacity = sampleColumns * sampleRows
-        val qs = FloatArray(capacity)
-        val ds = FloatArray(capacity)
-        val xs = FloatArray(capacity)
-        val ys = FloatArray(capacity)
+        // 1. Samples below the horizon, on a coarse grid of the lower part of the analysis image, in row order: the
+        // RANSAC draws index this order, and the free-plane check sums in it.
         var n = 0
         val top = sampleFromRow * transform.analysisHeight
         for (row in 0 until sampleRows) {
@@ -200,7 +209,8 @@ class GroundFitter(
                 val u = (col + 0.5f) * transform.analysisWidth / sampleColumns
                 val qv = q(u, v)
                 if (qv < minQ) continue
-                val d = disparity.sampleAt(u, v) ?: continue
+                // Not seen and not finite are both skipped.
+                val d = disparity.sampleOrNaN(u, v)
                 if (!d.isFinite()) continue
                 qs[n] = qv; ds[n] = d
                 xs[n] = (u - intrinsics.cx) / intrinsics.fx; ys[n] = (v - intrinsics.cy) / intrinsics.fy
@@ -212,8 +222,15 @@ class GroundFitter(
         var qMax = -Float.MAX_VALUE
         for (i in 0 until n) { qMin = minOf(qMin, qs[i]); qMax = maxOf(qMax, qs[i]) }
         if (qMax - qMin < MIN_Q_SPAN) return empty(GroundFitValidity.DEGENERATE_VIEW)
-        // Samples nearest first, in bins: the support level runs outward from the feet without a gap.
-        val byNearness = (0 until n).sortedByDescending { qs[it] }.toIntArray()
+        // Samples nearest first, in bins: the support level runs outward from the feet without a gap. Larger q first,
+        // equal q in row order (a stable sort): the key is q's order, descending, above the index.
+        for (i in 0 until n) sortKeys[i] = (descendingOrder(qs[i]) shl INDEX_BITS) or i.toLong()
+        java.util.Arrays.sort(sortKeys, 0, n)
+        for (k in 0 until n) {
+            val i = (sortKeys[k] and INDEX_MASK).toInt()
+            nearQ[k] = qs[i]
+            nearD[k] = ds[i]
+        }
         val binSize = maxOf(1, n / SUPPORT_BINS)
 
         // 2. RANSAC over both slopes. Any positive line counts toward "is there ground at all"; a
@@ -235,15 +252,32 @@ class GroundFitter(
             val a = (ds[j] - ds[i]) / dq
             if (a == 0f) return@repeat
             val t = ds[i] - a * qs[i]
-            var count = 0
-            for (k in 0 until n) if (isInlier(a, t, qs[k], ds[k])) count++
+            // isInlier's test with its first product taken once: (threshold · |a|) · q, as isInlier evaluates it.
+            val band = inlierThreshold * abs(a)
             if (a < 0) {
+                var count = 0
+                for (k in 0 until n) if (abs(ds[k] - (a * qs[k] + t)) <= band * qs[k]) count++
                 bestNegative = maxOf(bestNegative, count)
             } else {
+                // One pass nearest first, bin by bin: every inlier counts toward the total; those in the bins before
+                // the first one explained less than half are the run's (runEnd and runInliers, in one).
+                var count = 0
+                var connected = 0
+                var end = 0
+                var running = true
+                var start = 0
+                while (start < n) {
+                    val stop = minOf(start + binSize, n)
+                    var hits = 0
+                    for (k in start until stop) if (abs(nearD[k] - (a * nearQ[k] + t)) <= band * nearQ[k]) hits++
+                    count += hits
+                    if (running) {
+                        if (hits * 2 < stop - start) running = false else { connected += hits; end = stop }
+                    }
+                    start = stop
+                }
                 bestPositive = maxOf(bestPositive, count)
-                val end = runEnd(a, t, qs, ds, byNearness, binSize)
                 if (end > 0) {
-                    val connected = runInliers(a, t, qs, ds, byNearness, end)
                     val outside = count - connected
                     if (connected > bestConnected || (connected == bestConnected && outside < bestOutside)) {
                         bestSupported = Line(a, t, count)
@@ -260,27 +294,30 @@ class GroundFitter(
         // 3. Least squares on the run's inliers only, so nothing beyond the near level pulls it;
         // then the refit's own run, which must still start at the feet and span enough depth to
         // pin a line.
-        val chosenEnd = runEnd(bestSupported.a, bestSupported.t, qs, ds, byNearness, binSize)
-        val refit = refit(bestSupported, qs, ds, byNearness, chosenEnd) ?: return empty(GroundFitValidity.NO_SUPPORT)
+        val chosenEnd = runEnd(bestSupported.a, bestSupported.t, n, binSize)
+        val refit = refit(bestSupported, chosenEnd) ?: return empty(GroundFitValidity.NO_SUPPORT)
         if (refit.a <= 0f) return empty(GroundFitValidity.NO_SUPPORT)
-        val end = runEnd(refit.a, refit.t, qs, ds, byNearness, binSize)
+        val end = runEnd(refit.a, refit.t, n, binSize)
         if (end == 0) return empty(GroundFitValidity.NO_SUPPORT)
         var runCount = 0
         var runQMin = Float.MAX_VALUE
         var runQMax = -Float.MAX_VALUE
         for (k in 0 until end) {
-            val i = byNearness[k]
-            if (!isInlier(refit.a, refit.t, qs[i], ds[i])) continue
+            if (!isInlier(refit.a, refit.t, nearQ[k], nearD[k])) continue
             runCount++
-            runQMin = minOf(runQMin, qs[i]); runQMax = maxOf(runQMax, qs[i])
+            runQMin = minOf(runQMin, nearQ[k]); runQMax = maxOf(runQMax, nearQ[k])
         }
         if (runCount < minInlierRatio * n) return empty(GroundFitValidity.NO_GROUND)
         // Ground recedes: the run must span a real range of depth (Z ∝ 1/q on ground). A wall
         // filling the view has none; the last strip of ground before a drop has too little to
         // pin both A and t.
         if (runQMax / runQMin < 1f + MIN_DEPTH_SPAN) return empty(GroundFitValidity.NO_SUPPORT)
-        val inlier = BooleanArray(n) { isInlier(refit.a, refit.t, qs[it], ds[it]) }
-        val inlierRatio = inlier.count { it }.toFloat() / n
+        var inliers = 0
+        for (i in 0 until n) {
+            inlier[i] = isInlier(refit.a, refit.t, qs[i], ds[i])
+            if (inlier[i]) inliers++
+        }
+        val inlierRatio = inliers.toFloat() / n
 
         // 6a. Agreement: a free plane d = k1·x + k2·y + k0 on the inliers should lean as gravity says.
         val agrees = freePlaneAgrees(refit.a, g, xs, ys, ds, inlier, n)
@@ -293,7 +330,9 @@ class GroundFitter(
             val v = (gy + 0.5f) * transform.analysisHeight / gridHeight
             for (gx in 0 until gridWidth) {
                 val u = (gx + 0.5f) * transform.analysisWidth / gridWidth
-                val d = disparity.sampleAt(u, v) ?: continue
+                // Not seen is unknown; a NaN the model wrote would match no label below either.
+                val d = disparity.sampleOrNaN(u, v)
+                if (d.isNaN()) continue
                 val qv = q(u, v)
                 val inverseDepth = d - refit.t
                 if (qv < minQ) {
@@ -358,34 +397,29 @@ class GroundFitter(
      * How far, in samples nearest first, the line's support runs from the feet: up to the first
      * bin it explains less than half of.
      */
-    private fun runEnd(a: Float, t: Float, qs: FloatArray, ds: FloatArray, byNearness: IntArray, binSize: Int): Int {
+    private fun runEnd(a: Float, t: Float, n: Int, binSize: Int): Int {
         var start = 0
-        while (start < byNearness.size) {
-            val end = minOf(start + binSize, byNearness.size)
+        while (start < n) {
+            val end = minOf(start + binSize, n)
             var hits = 0
-            for (k in start until end) if (isInlier(a, t, qs[byNearness[k]], ds[byNearness[k]])) hits++
+            for (k in start until end) if (isInlier(a, t, nearQ[k], nearD[k])) hits++
             if (hits * 2 < end - start) break
             start = end
         }
         return start
     }
 
-    private fun runInliers(a: Float, t: Float, qs: FloatArray, ds: FloatArray, byNearness: IntArray, end: Int): Int {
-        var count = 0
-        for (k in 0 until end) if (isInlier(a, t, qs[byNearness[k]], ds[byNearness[k]])) count++
-        return count
-    }
-
     /** Within the threshold of the line in depth ratio: `|d − (A·q + t)| ≤ thr · |A|·q`. */
     private fun isInlier(a: Float, t: Float, q: Float, d: Float): Boolean = abs(d - (a * q + t)) <= inlierThreshold * abs(a) * q
 
     /** Least squares on [line]'s inliers among the first [end] samples, nearest first. */
-    private fun refit(line: Line, qs: FloatArray, ds: FloatArray, byNearness: IntArray, end: Int): Line? {
+    private fun refit(line: Line, end: Int): Line? {
         var sq = 0.0; var sd = 0.0; var sqq = 0.0; var sqd = 0.0; var m = 0
         for (k in 0 until end) {
-            val i = byNearness[k]
-            if (!isInlier(line.a, line.t, qs[i], ds[i])) continue
-            sq += qs[i]; sd += ds[i]; sqq += qs[i].toDouble() * qs[i]; sqd += qs[i].toDouble() * ds[i]; m++
+            val q = nearQ[k]
+            val d = nearD[k]
+            if (!isInlier(line.a, line.t, q, d)) continue
+            sq += q; sd += d; sqq += q.toDouble() * q; sqd += q.toDouble() * d; m++
         }
         val det = m * sqq - sq * sq
         if (m < 2 || abs(det) < 1e-12) return null
@@ -398,13 +432,17 @@ class GroundFitter(
         // Normal equations for d = k1·x + k2·y + k0.
         val m = Array(3) { DoubleArray(3) }
         val b = DoubleArray(3)
+        // Row (x, y, 1) of each inlier in sample order, each product formed as `row[r] * row[c]` and `row[r] * d` would be.
         for (i in 0 until n) {
             if (!inlier[i]) continue
-            val row = doubleArrayOf(xs[i].toDouble(), ys[i].toDouble(), 1.0)
-            for (r in 0..2) {
-                b[r] += row[r] * ds[i]
-                for (c in 0..2) m[r][c] += row[r] * row[c]
-            }
+            val x = xs[i].toDouble()
+            val y = ys[i].toDouble()
+            val one = 1.0
+            val d = ds[i]
+            b[0] += x * d; b[1] += y * d; b[2] += one * d
+            m[0][0] += x * x; m[0][1] += x * y; m[0][2] += x * one
+            m[1][0] += y * x; m[1][1] += y * y; m[1][2] += y * one
+            m[2][0] += one * x; m[2][1] += one * y; m[2][2] += one * one
         }
         val k = solve3(m, b) ?: return false
         val expectedX = a * g.x
@@ -448,6 +486,22 @@ class GroundFitter(
 
         /** The switch: at least this fraction of the last below-ground cells now read as ground. */
         const val SWITCH_FLIP_FRACTION = 0.5f
+
+        /** A sort key holds a sample's index in its low bits, below its q's order. */
+        const val INDEX_BITS = 31
+        const val INDEX_MASK = (1L shl INDEX_BITS) - 1
+
+        /**
+         * A key that sorts ascending as [q] sorts descending, exactly as `Float.compareTo` orders them: `-0.0` below
+         * `0.0`, every NaN equal to every other and above infinity (`toBits` makes them one pattern). At most 2^32 - 1,
+         * so it fits above [INDEX_BITS] in a non-negative `Long`.
+         */
+        fun descendingOrder(q: Float): Long {
+            val bits = q.toBits()
+            // Flip the magnitude bits of negatives: the signed int then orders as the floats do.
+            val ascending = if (bits < 0) bits xor Int.MAX_VALUE else bits
+            return Int.MAX_VALUE.toLong() - ascending
+        }
 
         /** Gaussian elimination with partial pivoting; null when singular. */
         fun solve3(m: Array<DoubleArray>, b: DoubleArray): DoubleArray? {
