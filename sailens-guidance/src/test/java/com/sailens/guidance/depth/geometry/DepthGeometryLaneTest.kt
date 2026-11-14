@@ -19,6 +19,7 @@ import com.sailens.guidance.service.TraceService
 import com.sailens.guidance.trace.NoOpTraceService
 import com.sailens.runtime.accelerator.AcceleratorCoordinator
 import com.sailens.vision.depth.DepthInputTransform
+import com.sailens.vision.depth.DepthMap
 import com.sailens.vision.depth.DepthRun
 import com.sailens.vision.depth.DisparityMap
 import com.sailens.vision.depth.ResizePolicy
@@ -62,7 +63,9 @@ class DepthGeometryLaneTest {
         laneExecutor.shutdownNow()
     }
 
-    private inner class FakeRunner(val name: String) : DepthModelRunner {
+    private inner class FakeRunner(val name: String) : DepthProducer {
+        var accelerator = true
+        override val needsAccelerator: Boolean get() = accelerator
         var initGate: CompletableDeferred<Unit>? = null
         var initError: Throwable? = null
         var inferGate: CompletableDeferred<Unit>? = null
@@ -86,7 +89,7 @@ class DepthGeometryLaneTest {
             return if (prepareNull) null else DepthPreparedInput(transform, detail = 0.5f, preprocessMs = 1)
         }
 
-        override suspend fun infer(input: DepthPreparedInput): DepthRun {
+        override suspend fun infer(input: DepthPreparedInput): DepthRun<DepthMap> {
             log += "$name infer"
             inferStarted.complete(Unit)
             withContext(NonCancellable) {
@@ -141,7 +144,7 @@ class DepthGeometryLaneTest {
         maxFailures: Int = 30,
         evidence: DepthEvidenceRecorder = DepthEvidenceRecorder.None,
     ) = DepthGeometryLane(
-        runnerFactory = { FakeRunner(NAMES[runners.size]).also { configure(it); runners += it } },
+        producerFactory = { FakeRunner(NAMES[runners.size]).also { configure(it); runners += it } },
         modelCheck = check,
         coordinator = coordinator,
         thermal = thermal,
@@ -190,7 +193,7 @@ class DepthGeometryLaneTest {
             frames = channel.receiveAsFlow(),
             releaseFrame = { log += "$tag release frame ${it.sequenceNumber}" },
             baseline = { baseline },
-            geometry = { frame -> geometry(frame.timestamp, geometryQuality) },
+            geometry = { facts -> geometry(facts.sensorTimestampNanos, geometryQuality) },
             traceSessionId = "trace",
         )
 
@@ -301,6 +304,23 @@ class DepthGeometryLaneTest {
         until("published after the yield") { session.latest().runId == 2L }
         assertEquals(DepthLaneState.RUNNING, session.latest().state)
         assertEquals(mapOf(DepthGeometryLane.SKIP_YIELD to 1), records.all.last().skipsSinceLast)
+    }
+
+    @Test
+    fun `a producer that does not use the accelerator neither waits for admission nor pauses for a yield`() = runBlocking {
+        configure = { it.accelerator = false }
+        val interval = coordinator.yieldFor(AcceleratorCoordinator.Priority.INTERACTIVE)
+        val feed = Feed("a")
+        val session = lane().start(feed.context())
+        feed.send(1)
+        until("published") { session.latest().runId == 1L }
+        feed.send(2)
+        until("published again") { session.latest().runId == 2L }
+        assertEquals(listOf(DepthRunTrace.PUBLISHED, DepthRunTrace.PUBLISHED), outcomes(1))
+        assertTrue("never admitted", records.all.all { it.admitWaitMs == null })
+        assertEquals(emptyMap<Any, Any>(), coordinator.state.value.admitted.filterValues { it > 0 })
+        assertEquals(DepthLaneState.RUNNING, session.latest().state)
+        interval.close()
     }
 
     @Test

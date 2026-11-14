@@ -276,7 +276,7 @@ class StartSceneAnalysisFailureTest {
             }
         }
         val lane = DepthGeometryLane(
-            runnerFactory = { error("no model, no runner") },
+            producerFactory = { error("no model, no producer") },
             modelCheck = DepthModelCheck.None,
             coordinator = AcceleratorCoordinator(),
             thermal = ThermalStatusSource.None,

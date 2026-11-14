@@ -7,14 +7,7 @@ import com.sailens.guidance.depth.geometry.DepthEvidenceRun
 import com.sailens.guidance.depth.geometry.DepthEvidenceSlot
 import com.sailens.guidance.depth.geometry.DepthSession
 import com.sailens.guidance.depth.geometry.DepthStartContext
-import com.sailens.guidance.geometry.CameraGeometry
-import com.sailens.guidance.geometry.CameraGeometryResolver
-import com.sailens.guidance.geometry.FrameFacts
 import com.sailens.guidance.geometry.GroundFitter
-import com.sailens.guidance.geometry.PhoneGeometrySettings
-import com.sailens.guidance.geometry.SensorSample
-import com.sailens.guidance.geometry.Vec3
-import com.sailens.guidance.geometry.toCameraFacts
 import com.sailens.guidance.safety.BaselineQualification
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.receiveAsFlow
@@ -27,7 +20,6 @@ import java.io.File
 import java.util.Collections
 import java.util.zip.GZIPInputStream
 import java.util.zip.GZIPOutputStream
-import kotlin.math.abs
 
 /**
  * The depth lane's fits on every simulator scenario, frozen field by field ([DepthBaseline]): what a change to the
@@ -41,8 +33,6 @@ import kotlin.math.abs
  * ```
  */
 class DepthBaselineScenarioTest {
-
-    private val resolver = CameraGeometryResolver()
 
     private class Case(val name: String, val scenario: Scenario, val model: SimulatedDepthModel)
 
@@ -110,7 +100,7 @@ class DepthBaselineScenarioTest {
                 frames = frames.receiveAsFlow(),
                 releaseFrame = {},
                 baseline = { BaselineQualification.Qualified },
-                geometry = { frame -> geometry(case.scenario, frame) },
+                geometry = { facts -> case.scenario.geometryOf(facts) },
                 traceSessionId = "baseline",
             ),
         )
@@ -149,17 +139,7 @@ class DepthBaselineScenarioTest {
         }
     }
 
-    private fun geometry(scenario: Scenario, frame: ImageFrame): CameraGeometry {
-        val facts = scenario.facts((frame.sequenceNumber - 1).toInt())
-        return resolver.resolve(
-            facts.camera.toCameraFacts(),
-            FrameFacts.of(frame),
-            { t -> facts.gravity.minByOrNull { abs(it.timestampNanos - t) }?.let { SensorSample(it.timestampNanos, Vec3(it.values[0], it.values[1], it.values[2])) } },
-            PhoneGeometrySettings.DEFAULT,
-        )
-    }
-
-    private companion object {
+    internal companion object {
         const val DIR = "depth-baseline"
         /** Compressed: two thousand lines of digests and raw bits are read by the test, not by people. */
         const val FILE = "simulator.txt.gz"

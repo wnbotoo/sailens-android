@@ -15,7 +15,7 @@ import com.sailens.guidance.depth.geometry.DepthGeometryLane
 import com.sailens.guidance.depth.geometry.DepthGeometrySwitch
 import com.sailens.guidance.depth.geometry.DepthModelCheck
 import com.sailens.guidance.depth.geometry.LiteRtDepthModelCheck
-import com.sailens.guidance.depth.geometry.LiteRtDepthModelRunner
+import com.sailens.guidance.depth.geometry.LiteRtDepthProducer
 import com.sailens.guidance.depth.geometry.ThermalStatusSource
 import com.sailens.guidance.kernel.NativeConnectivityStatsExtractor
 import com.sailens.guidance.kernel.NavigationScorePostprocessor
@@ -154,8 +154,8 @@ val guidanceModule = module {
         val modelConfig = getOrNull<DepthModelConfig>()
         val resolver = modelConfig?.let { get<ModelSourceResolver>() }
         DepthGeometryLane(
-            runnerFactory = {
-                LiteRtDepthModelRunner(LiteRtDepthRunner(context, checkNotNull(modelConfig), checkNotNull(resolver), logService))
+            producerFactory = {
+                LiteRtDepthProducer(LiteRtDepthRunner(context, checkNotNull(modelConfig), checkNotNull(resolver), logService))
             },
             modelCheck = if (modelConfig != null && resolver != null) {
                 LiteRtDepthModelCheck(context, modelConfig, resolver)

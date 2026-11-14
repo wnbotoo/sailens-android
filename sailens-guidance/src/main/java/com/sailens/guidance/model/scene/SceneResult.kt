@@ -1,6 +1,7 @@
 package com.sailens.guidance.model.scene
 
 import com.sailens.guidance.depth.geometry.DepthGeometrySnapshot
+import com.sailens.guidance.depth.geometry.DepthReading
 import com.sailens.guidance.geometry.CameraGeometry
 import com.sailens.guidance.model.analysis.VisionFaults
 import com.sailens.guidance.motion.MotionState
@@ -35,4 +36,9 @@ data class SceneResult(
     val frameReceivedAtMs: Long? = null,
     /** The depth lane's latest snapshot when this frame was qualified: for the debug views only, read by no decision. */
     val depthGeometry: DepthGeometrySnapshot? = null,
+    /**
+     * What this frame reads of the depth lane, the one value a reader of depth uses: capability, observation, times,
+     * view and cells. Read by no decision.
+     */
+    val depthReading: DepthReading = DepthReading.NOT_CONFIGURED,
 )

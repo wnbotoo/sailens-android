@@ -24,7 +24,9 @@ import com.sailens.runtime.ModelSourceResolver
 import com.sailens.runtime.ModelType
 import com.sailens.runtime.accelerator.AcceleratorCoordinator
 import com.sailens.vision.depth.DepthModelConfig
+import com.sailens.vision.depth.DepthMap
 import com.sailens.vision.depth.DepthRun
+import com.sailens.vision.depth.DisparityMap
 import com.sailens.vision.depth.LiteRtDepthRunner
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.NonCancellable
@@ -86,12 +88,13 @@ class DepthLaneStopDuringInferenceTest {
     }
 
     /** The real runner behind a gate on its inference; [gated] false lets every call straight through. */
-    private inner class Gated(private val delegate: DepthModelRunner, val name: String, gated: Boolean) : DepthModelRunner {
+    private inner class Gated(private val delegate: DepthProducer, val name: String, gated: Boolean) : DepthProducer {
+        override val needsAccelerator: Boolean get() = delegate.needsAccelerator
         val inferEntered = CompletableDeferred<Unit>()
         val proceed = CompletableDeferred<Unit>().also { if (!gated) it.complete(Unit) }
 
         @Volatile
-        var output: DepthRun? = null
+        var output: DepthRun<DepthMap>? = null
 
         override suspend fun initialize() {
             log += "$name init start"
@@ -103,7 +106,7 @@ class DepthLaneStopDuringInferenceTest {
 
         // The stop cancels the session's job: outside NonCancellable the wait would end there, and the runner's own
         // withContext would not start the inference at all.
-        override suspend fun infer(input: DepthPreparedInput): DepthRun = withContext(NonCancellable) {
+        override suspend fun infer(input: DepthPreparedInput): DepthRun<DepthMap> = withContext(NonCancellable) {
             inferEntered.complete(Unit)
             proceed.await()
             log += "$name infer start"
@@ -132,9 +135,9 @@ class DepthLaneStopDuringInferenceTest {
     private var gatedNext = 0
 
     private fun lane() = DepthGeometryLane(
-        runnerFactory = {
+        producerFactory = {
             val name = "s${runners.size + 1}"
-            Gated(LiteRtDepthModelRunner(LiteRtDepthRunner(context, config, resolver, Silent)), name, gated = gatedNext-- > 0)
+            Gated(LiteRtDepthProducer(LiteRtDepthRunner(context, config, resolver, Silent)), name, gated = gatedNext-- > 0)
                 .also { runners += it }
         },
         modelCheck = LiteRtDepthModelCheck(context, config, resolver),
@@ -153,7 +156,7 @@ class DepthLaneStopDuringInferenceTest {
             frames = channel.receiveAsFlow(),
             releaseFrame = {},
             baseline = { BaselineQualification.Qualified },
-            geometry = { frame -> geometry(frame.timestamp) },
+            geometry = { facts -> geometry(facts.sensorTimestampNanos) },
             traceSessionId = "trace",
         )
 
@@ -228,7 +231,7 @@ class DepthLaneStopDuringInferenceTest {
             withTimeout(60_000) { session.done!!.join() }
             val output = assertNotNullOutput(runner)
             assertEquals("$cycle: the inference read a whole, finite output", 0, output.nonFiniteCount)
-            assertTrue(output.map.values.isNotEmpty())
+            assertTrue((output.map as DisparityMap).values.isNotEmpty())
             assertTrue("$cycle: stopped before the inference ran", index("s$cycle stop returned") < index("s$cycle infer start"))
             assertTrue("$cycle: released after the inference", index("s$cycle infer done") < index("s$cycle release start"))
             assertTrue(index("s$cycle release start") < index("s$cycle release done"))
@@ -250,7 +253,7 @@ class DepthLaneStopDuringInferenceTest {
         assertTrue(index("s5 release done") < index("s6 init start"))
     }
 
-    private fun assertNotNullOutput(runner: Gated): DepthRun {
+    private fun assertNotNullOutput(runner: Gated): DepthRun<DepthMap> {
         val output = runner.output
         assertNotNull("${runner.name}: the real inference never returned an output", output)
         return checkNotNull(output)

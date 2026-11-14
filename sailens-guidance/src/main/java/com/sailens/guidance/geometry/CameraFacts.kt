@@ -64,6 +64,19 @@ data class FrameFacts(
     val receivedElapsedRealtimeNanos: Long,
     val sensorToBufferTransform: List<Float>?,
 ) {
+    /**
+     * These facts at another moment of the same camera: the camera timestamp moved to [timestampNanos], and a known
+     * receipt time moved by as much. For a depth map whose view is at another time than the frame it came with.
+     */
+    fun atView(timestampNanos: Long): FrameFacts = copy(
+        sensorTimestampNanos = timestampNanos,
+        receivedElapsedRealtimeNanos = if (receivedElapsedRealtimeNanos > 0) {
+            receivedElapsedRealtimeNanos + (timestampNanos - sensorTimestampNanos)
+        } else {
+            receivedElapsedRealtimeNanos
+        },
+    )
+
     companion object {
         fun of(frame: ImageFrame) = FrameFacts(
             width = frame.width,

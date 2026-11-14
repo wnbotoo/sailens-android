@@ -1,7 +1,7 @@
 package com.sailens.guidance.geometry
 
 import com.sailens.core.mask.BinaryMask
-import com.sailens.vision.depth.DisparityMap
+import com.sailens.vision.depth.DepthMap
 import kotlin.math.abs
 import kotlin.math.acos
 import kotlin.math.sqrt
@@ -114,7 +114,7 @@ enum class SupportGuardRule(val id: Int) {
 internal data class GroundGuardState(val holdingSwitch: Boolean, val armed: Boolean)
 
 /**
- * Gravity-constrained ground fit on a disparity map: sample the lower image below the horizon,
+ * Gravity-constrained ground fit on a depth map, in the disparity domain: sample the lower image below the horizon,
  * RANSAC the line `d = A·q + t`, refit on the inliers, then label a grid. Deterministic (seeded).
  * Not thread-safe: one per pipeline. It keeps a little history -- coverage for stability, the last
  * valid fit's cells of another level for the support-switch guard -- so [reset] between sessions.
@@ -123,6 +123,10 @@ internal data class GroundGuardState(val holdingSwitch: Boolean, val armed: Bool
  * confirmed to be the one under the user. After a support switch, seeing two levels again ends the hold without
  * proving which one the user stands on, and a drop the model reads shallower than the guard's level is not guarded
  * at all. A reader that needs the user's own level confirmed needs evidence of its own.
+ *
+ * Either kind of depth fits the same way. A relative map is `a/Z + b`; a metric map is read as `1/Z`, which is a = 1,
+ * b = 0, so on ground at camera height h the fit gives `A = 1/h` and `t = 0`. Every decision is a depth ratio that
+ * no a and b change, so the thresholds, the labels and the guard are the same for both, and none reads a phone height.
  *
  * Which plane is "the ground": the one under the user. Samples are taken nearest first (the bottom
  * of the view, closest to the feet), and a candidate is scored by the unbroken run of them it
@@ -219,12 +223,13 @@ class GroundFitter(
     }
 
     /**
+     * @param disparity the depth map, read through `DepthMap.sampleOrNaN` and its transform only.
      * @param intrinsics of the analysis image the depth input was made from (same size as
-     *   [disparity]'s transform's analysis size).
-     * @param gravityDown unit down vector in the camera frame.
+     *   [disparity]'s transform's analysis size), at the map's view time.
+     * @param gravityDown unit down vector in the camera frame, at the map's view time.
      */
     fun fit(
-        disparity: DisparityMap,
+        disparity: DepthMap,
         intrinsics: CameraIntrinsics,
         gravityDown: Vec3,
         gridWidth: Int,

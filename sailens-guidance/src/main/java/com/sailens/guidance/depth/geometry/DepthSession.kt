@@ -131,7 +131,7 @@ class DepthSession internal constructor(
         snapshot: DepthGeometrySnapshot?,
         prepareMs: Long? = null,
         admitWaitMs: Long? = null,
-        run: DepthRun? = null,
+        run: DepthRun<*>? = null,
         observation: GroundObservation? = null,
         fitMs: Long? = null,
         fitCpuUs: Long? = null,

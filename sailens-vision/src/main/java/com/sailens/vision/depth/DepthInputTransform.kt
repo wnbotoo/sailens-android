@@ -93,9 +93,17 @@ data class DepthInputTransform(
 
 /**
  * One depth model output: relative disparity (larger = nearer), row-major [height] × [width], with
- * the transform that produced its input.
+ * the transform that produced its input and the frame's [times] (none known when not given).
  */
-class DisparityMap(val width: Int, val height: Int, val values: FloatArray, val transform: DepthInputTransform) {
+class DisparityMap(
+    override val width: Int,
+    override val height: Int,
+    val values: FloatArray,
+    override val transform: DepthInputTransform,
+    override val times: DepthTimes = DepthTimes.UNKNOWN,
+) : DepthMap {
+    override val kind: DepthKind get() = DepthKind.RELATIVE_DISPARITY
+
     init {
         require(values.size == width * height) { "expected ${width * height} values, got ${values.size}" }
         require(width == transform.modelWidth && height == transform.modelHeight) { "map and transform disagree on the tensor size" }
@@ -125,13 +133,26 @@ class DisparityMap(val width: Int, val height: Int, val values: FloatArray, val 
      * The disparity seen at analysis point (u, v), bilinear between tensor pixel centres; null when
      * the model did not see the point (§9: unknown, never extrapolated) or it falls in padding.
      */
-    fun sampleAt(u: Float, v: Float): Float? = if (transform.covers(u, v)) interpolate(u, v) else null
+    override fun sampleAt(u: Float, v: Float): Float? = if (transform.covers(u, v)) interpolate(u, v) else null
 
     /**
      * [sampleAt] without the box: `NaN` where the model did not see the point. A value the model wrote as `NaN` reads
      * the same, so a caller that tells the two apart uses [sampleAt]. For loops that sample thousands of points.
      */
-    fun sampleOrNaN(u: Float, v: Float): Float = if (transform.covers(u, v)) interpolate(u, v) else Float.NaN
+    override fun sampleOrNaN(u: Float, v: Float): Float = if (transform.covers(u, v)) interpolate(u, v) else Float.NaN
+
+    /** Seen by the model, and the four values [sampleAt] would interpolate there are finite. */
+    override fun isKnownAt(u: Float, v: Float): Boolean {
+        if (!transform.covers(u, v)) return false
+        val cx = (transform.toTensorX(u) - 0.5f).coerceIn(firstContentX.toFloat(), lastContentX.toFloat())
+        val cy = (transform.toTensorY(v) - 0.5f).coerceIn(firstContentY.toFloat(), lastContentY.toFloat())
+        val x0 = cx.toInt()
+        val y0 = cy.toInt()
+        val x1 = minOf(x0 + 1, lastContentX)
+        val y1 = minOf(y0 + 1, lastContentY)
+        return values[y0 * width + x0].isFinite() && values[y0 * width + x1].isFinite() &&
+            values[y1 * width + x0].isFinite() && values[y1 * width + x1].isFinite()
+    }
 
     private fun interpolate(u: Float, v: Float): Float {
         // Pixel-centre coordinates, kept between the first and last pixels whose centres lie in the
