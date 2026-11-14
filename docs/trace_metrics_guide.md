@@ -996,8 +996,9 @@ next record's `skipsSinceLast` (`stopped`, `thermal`, `thermal_cadence`, `yield`
   opened a yield interval after the preprocessing; the model did not run), `failed` (a step threw),
   `non_finite_output` (NaN or infinity in the output), `no_measurement` (a metric map more than 80 %
   unknown: nothing measured, no failure), `depth_time_mismatch` (a map whose view is more than a period
-  from its frame's time; no failure), or `closed` (the session's closing record, always its last). The
-  last two arrived with metric sources; a parser from before them rejects a trace that holds them.
+  from its frame's time, or a metric map with no view time; no failure), or `closed` (the session's
+  closing record, always its last). The two post-inference skips arrived with metric sources; a parser
+  from before them rejects a trace that holds them.
 - `frameSequence`, `frameTimeNanos`, `timeBasis`, `geometryQuality`: the frame and the geometry the
   attempt used.
 - For a published run: `validity` (the ground fit's, lower case: `valid`, `no_ground`, `inverse_output`

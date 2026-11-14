@@ -124,7 +124,8 @@ class DepthSession internal constructor(
      * Settles [attempt] with its record. A [snapshot] is published in the same step, which also ends a failure streak
      * and returns a paused or failing state to running (a stopped lane stays stopped). [skipReason]: an attempt that ran
      * and was skipped after its run (no measurement, a view off its frame); the reason stays the last skip, for the
-     * capability, until something else replaces it. It is no failure and publishes nothing.
+     * capability, until something else replaces it. It publishes nothing, but its completed inference ends a failure
+     * streak and restores running just as a publication does, without changing the old observation or its times.
      *
      * @return false when the session was closed meanwhile and the attempt was settled by the closing record.
      */
@@ -144,6 +145,8 @@ class DepthSession internal constructor(
         if (snapshot != null) {
             published = snapshot
             lastSkip = null
+        }
+        if (snapshot != null || skipReason != null) {
             consecutiveFailures = 0
             if (state != DepthLaneState.RUN_FAILED) {
                 state = DepthLaneState.RUNNING

@@ -385,9 +385,13 @@ class SimulatedPipeline(
         override val needsAccelerator: Boolean get() = false
 
         private var mapped: DepthSourceMapping.Result.Mapped? = null
+        private var measurement: Measurement? = null
+
+        private inner class Measurement(val bucket: Int, val pose: Pose, val map: MetricDepthMap)
 
         override suspend fun initialize() {
             if (model.initFails) throw UnsatisfiedLinkError("simulated depth source initialization failure")
+            measurement = null
             val camera = scenario.camera
             mapped = when (val result = DepthSourceMapping.map(source.width, source.height, camera.bufferWidth, camera.bufferHeight, camera.sensorOrientation, source.toBuffer)) {
                 is DepthSourceMapping.Result.Mapped -> result
@@ -406,6 +410,21 @@ class SimulatedPipeline(
             inferences.incrementAndGet()
             if (source.fails) throw IllegalStateException("simulated metric depth failure")
             val prepared = input.payload as Prepared
+            val content = scenario.frames[prepared.content]
+            val bucket = prepared.index / source.holdFrames
+            val cached = measurement?.takeIf { it.bucket == bucket } ?: measure(prepared, bucket).also { measurement = it }
+            val times = cached.map.times.copy(viewTimeNanos = prepared.timestampNanos + source.viewOffsetNanos)
+            var output = reprojectMetricDepth(scenario.camera, cached.map, cached.pose, content.pose, times)
+            if (source.emptyFrom?.let { prepared.index >= it } == true) {
+                output = MetricDepthMap(output.width, output.height, FloatArray(output.width * output.height) { Float.NaN }, null, source.minConfidence, output.transform, times)
+            }
+            return DepthRun(
+                output, nonFiniteCount = 0, detail = null, preprocessMs = 0, inferenceMs = 0, outputReadMs = 0,
+                runtimeInfo = MlRuntimeInfo("simulated_metric", "none", "none", "kotlin_ground_fit"), shapeLabel = "metric ${output.width}x${output.height}",
+            )
+        }
+
+        private fun measure(prepared: Prepared, bucket: Int): Measurement {
             val content = scenario.frames[prepared.content]
             val map = checkNotNull(mapped)
             val t = map.transform
@@ -429,22 +448,17 @@ class SimulatedPipeline(
             }
             val nothing = source.empty || (source.emptyFrom?.let { prepared.index >= it } ?: false)
             for (y in 0 until h) for (x in 0 until w) if (nothing || source.hole(x, y)) measured[y * w + x] = Float.NaN
-            // One measurement serves the frames of its hold, reprojected exactly into each one's view.
-            val measuredIndex = prepared.index - prepared.index % source.holdFrames
-            val measuredAt = scenario.facts(measuredIndex).frame.sensorTimestampNanos - source.measurementLagNanos
+            // The first delivered frame in a hold owns its measurement, including its noise, holes and confidence.
+            val measuredAt = prepared.timestampNanos - source.measurementLagNanos
             val times = DepthTimes(
                 measurementTimeNanos = measuredAt.takeIf { source.reportsMeasurementTime },
                 viewTimeNanos = prepared.timestampNanos + source.viewOffsetNanos,
-                measurementKey = MeasurementKey(sourceEpoch = 1, measurement = measuredIndex.toLong()),
+                measurementKey = MeasurementKey(sourceEpoch = 1, measurement = prepared.index.toLong()),
             )
-            return DepthRun(
-                MetricDepthMap(w, h, measured, confidence, source.minConfidence, t, times), nonFiniteCount = 0, detail = null,
-                preprocessMs = 0, inferenceMs = 0, outputReadMs = 0,
-                runtimeInfo = MlRuntimeInfo("simulated_metric", "none", "none", "kotlin_ground_fit"), shapeLabel = "metric ${w}x$h",
-            )
+            return Measurement(bucket, content.pose, MetricDepthMap(w, h, measured, confidence, source.minConfidence, t, times))
         }
 
-        override suspend fun release() = Unit
+        override suspend fun release() { measurement = null }
 
         /** A pixel beside a depth edge (a jump of more than 30 %) reads the mean of its own depth and its neighbour's. */
         private fun mixEdges(depth: FloatArray, w: Int, h: Int): FloatArray {

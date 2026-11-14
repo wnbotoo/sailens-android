@@ -104,7 +104,8 @@ fun interface ThermalStatusSource {
  * @param gridWidth the ground fit's label grid (portrait 9:16), the size the experiments measured on.
  * @param maxUnknownFraction a metric map with more of its pixels unknown than this measured nothing (`no_measurement`).
  * @param maxViewOffsetPeriods a map whose view is more than this many periods from its frame's time is skipped
- *   (`depth_time_mismatch`): the frame's facts do not place it. A measurement older than its view is fine.
+ *   (`depth_time_mismatch`), as is a metric map with no view time: the frame's facts do not place it. A measurement
+ *   older than its view is fine.
  */
 data class DepthGeometryConfig(
     val targetFps: Float = 3f,

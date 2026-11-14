@@ -741,7 +741,7 @@ Guidance 此刻对用户处在什么状态，合成为一个值，由 shell 从�
 - `outcome`：`published`（观测成了会话的快照）、`preprocess_unavailable`（原生预处理接不了这一帧；没有兜底）、
   `yield_dropped`（预处理之后更高档位开了让路区间，模型没跑）、`failed`（某一步抛了异常）、`non_finite_output`
   （输出里有 NaN 或无穷）、`no_measurement`（公制图未知超过 80 %：什么也没测到，不算失败）、`depth_time_mismatch`
-  （图的视角时刻离它那一帧的时间超过一个周期；不算失败）、`closed`（会话的收尾记录，一定是它的最后一条）。中间这两个
+  （图的视角时刻离它那一帧超过一个周期，或公制图没有视角时刻；不算失败）、`closed`（会话的收尾记录，一定是它的最后一条）。中间这两个
   随公制来源加入；更早的解析器读到含有它们的 trace 会拒收。
 - `frameSequence`、`frameTimeNanos`、`timeBasis`、`geometryQuality`：这次尝试用的帧和几何。
 - 发布了的运行还有：`validity`（地面拟合的有效性，小写：`valid`、`no_ground`、`inverse_output` 等）、

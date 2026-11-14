@@ -16,8 +16,8 @@ package com.sailens.guidance.sim
  * @param sparse when given, only this share of the pixels (scattered, seeded) is confident; the rest is unknown.
  * @param hole pixels (upright depth-image coordinates) with no measurement at all.
  * @param empty every pixel unknown; [emptyFrom] from that scenario frame on.
- * @param holdFrames one measurement serves this many frames, reprojected exactly into each frame's view: the map shows
- *   the current view, its measurement time and key stay those of the frame it was taken on.
+ * @param holdFrames one measurement serves this many frames. Its cached samples are reprojected into each view;
+ *   holes, low confidence, depth edges and newly visible areas stay unknown. Its measurement time and key stay fixed.
  * @param measurementLagNanos the measurement is this much older than its view, besides any hold.
  * @param viewOffsetNanos the map's view is this far from its frame's time.
  * @param reportsMeasurementTime false: the source cannot say when it measured.

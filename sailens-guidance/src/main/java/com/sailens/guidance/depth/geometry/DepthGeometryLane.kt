@@ -341,9 +341,11 @@ class DepthGeometryLane(
                 return
             }
 
-            // A view more than the allowed offset from its frame is not that frame's: the frame's facts do not place it.
+            // A metric map must name its view; an unknown view or one too far from the frame cannot be placed with it.
             val viewTime = run.map.times.viewTimeNanos
-            if (viewTime != null && abs(viewTime - facts.sensorTimestampNanos) > config.maxViewOffsetPeriods * periodMs * 1_000_000L) {
+            if ((run.map.kind == DepthKind.METRIC_DEPTH && viewTime == null) ||
+                (viewTime != null && abs(viewTime - facts.sensorTimestampNanos) > config.maxViewOffsetPeriods * periodMs * 1_000_000L)
+            ) {
                 commit(attempt, DepthRunTrace.DEPTH_TIME_MISMATCH, snapshot = null, prepareMs = prepareMs, admitWaitMs = admitWaitMs, run = run, skipReason = SKIP_TIME_MISMATCH)
                 return
             }
@@ -426,8 +428,10 @@ class DepthGeometryLane(
             DepthKind.RELATIVE_DISPARITY -> view.frameTimeNanos?.let { viewAt ->
                 viewAt - (times.viewTimeNanos?.let { v -> times.measurementTimeNanos?.let { v - it } } ?: 0L)
             }
-            DepthKind.METRIC_DEPTH -> times.measurementTimeNanos?.let { measured ->
-                view.frameTimeNanos?.let { viewAt -> viewAt - ((times.viewTimeNanos ?: measured) - measured) }
+            DepthKind.METRIC_DEPTH -> times.viewTimeNanos?.let { sourceViewAt ->
+                times.measurementTimeNanos?.let { measured ->
+                    view.frameTimeNanos?.let { viewAt -> viewAt - (sourceViewAt - measured) }
+                }
             }
         }
         val phoneHeight = observation.measuredPhoneHeightM?.let { measured -> PhoneHeightCheck.of(measured, view.phone) }

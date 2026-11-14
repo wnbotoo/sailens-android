@@ -85,7 +85,7 @@ data class DepthRunTrace(
         /** A metric map mostly unknown: it measured nothing. Not a failure. */
         const val NO_MEASUREMENT: String = "no_measurement"
 
-        /** A map whose view is too far from its frame's time to be placed with it. Not a failure. */
+        /** A map whose view is too far from its frame's time, or a metric map with no view time. Not a failure. */
         const val DEPTH_TIME_MISMATCH: String = "depth_time_mismatch"
         const val CLOSED: String = "closed"
 

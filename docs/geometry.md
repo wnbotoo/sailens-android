@@ -397,8 +397,10 @@ without the lane and compare the results, and the user's timeline, line for line
   of more than 10 % are unknown, and nothing is interpolated across them. A map more than 80 % unknown
   measured nothing: the attempt is `no_measurement`, no failure, and does not refresh the last
   observation's time; the capability names it (`stale`, `no_measurement`) once that observation ages
-  out. A map whose view is more than a period from its frame's time is `depth_time_mismatch`; a
-  measurement older than its view (a source that reprojects one measurement into later views) is
+  out. A metric map with no view time, or a map whose view is more than a period from its frame's time,
+  is `depth_time_mismatch`. Both post-inference skips restore running and end a failure streak, without
+  replacing the last observation or refreshing its time. A measurement older than its view (a source
+  that reprojects one measurement into later views) is
   placed at the view and aged from the measurement, under one measurement key. A source that cannot say
   when it measured is never fresh. It does not use the accelerator. Its cells are in metres, heights
   `1/A − Z·q`.
@@ -432,6 +434,9 @@ modules' tests can use it as well; the tests that run it, such as `SyntheticScen
   Z by the same ray cast), on a depth image of its own aspect placed by its reported mapping, with the
   faults such sources have: holes, low confidence, quantization, range scale and offset, mixed edge
   pixels, one measurement held across frames, an old or untimed measurement, a view off its frame.
+  A held measurement caches its depths, holes and confidence; neighbouring known samples of one
+  surface form triangles reprojected with a z-buffer. It never renders the later world: holes, depth
+  edges and newly visible regions stay unknown until another measurement.
 - **Goldens**: `sailens-guidance/src/test/resources/scenarios/<name>.golden.txt`, headed by the
   scenario's description, then one line per frame: decided events (key, priority, parameters),
   tracked obstacles (category / zone / distance), ground recognition, the connectivity figures and
