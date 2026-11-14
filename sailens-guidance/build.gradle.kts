@@ -78,6 +78,8 @@ android {
             test.systemProperty("sailens.replay.depthPc", project.findProperty("depthPcOutputs")?.toString().orEmpty())
             // -PdepthGuardRule=<id>: evaluate another support-switch guard rule on the recorded depth outputs.
             test.systemProperty("sailens.replay.depthRule", project.findProperty("depthGuardRule")?.toString().orEmpty())
+            // -PdepthBaseline=<dir>: compare every replayed fit, field by field, with an earlier run's baseline files.
+            test.systemProperty("sailens.replay.depthBaseline", project.findProperty("depthBaseline")?.toString().orEmpty())
             if (project.hasProperty("replayDepth")) test.outputs.upToDateWhen { false }
             // The paired M5 rehearsal holds up to a million branches of a capture in memory.
             if (project.hasProperty("replayCapture")) test.maxHeapSize = project.findProperty("replayHeap")?.toString() ?: "6g"

@@ -1,5 +1,6 @@
 package com.sailens.guidance.trace.regression
 
+import com.sailens.guidance.depth.geometry.DepthBaseline
 import com.sailens.guidance.evaluation.SealedCaptures
 import com.sailens.guidance.geometry.SupportGuardRule
 import com.sailens.guidance.trace.capture.CaptureSessionReader
@@ -28,6 +29,11 @@ import java.io.File
  * The exact replay fits with the guard rule each capture was recorded with (its manifest's `groundFitRule`; none named
  * is rule 1). `-PdepthGuardRule` evaluates another rule on the same outputs: the PC comparison and the evaluated guard
  * summary then fit the phone's outputs under it from each depth session's first fit ([DepthEvidenceReplay]).
+ *
+ * Every fit the replay makes is also written, field by field ([DepthBaseline]: the observation's raw float bits, its
+ * masks, its time, the guard after it), to `<sessionId>.depth-baseline.txt` beside the report. `-PdepthBaseline=<dir>`
+ * compares each with the copy of the same name in that folder, made by an earlier run with the same options, and fails
+ * on any field that differs: a change to the depth contract is held to that, bit for bit.
  */
 class DepthEvidenceCaptureReplayTest {
 
@@ -40,12 +46,15 @@ class DepthEvidenceCaptureReplayTest {
         val evaluatedRule = System.getProperty("sailens.replay.depthRule").orEmpty().takeIf { it.isNotBlank() }?.let { id ->
             checkNotNull(SupportGuardRule.entries.firstOrNull { it.id == id.toInt() }) { "no guard rule $id" }
         }
+        val frozen = System.getProperty("sailens.replay.depthBaseline").orEmpty().takeIf { it.isNotBlank() }?.let(::File)
         val found = SealedCaptures.forMetrics(File(path))
         found.sealed.forEach { println("skipped sealed capture ${it.path}") }
 
         val failures = mutableListOf<String>()
         val undecided = mutableListOf<String>()
         var replayedAny = false
+        var comparedBaselines = 0
+        val baselineFailures = mutableListOf<String>()
         for (directory in found.open) {
             val session = CaptureSessionReader.read(directory).orThrow()
             if (session.depthEvidence.isEmpty()) continue
@@ -60,7 +69,11 @@ class DepthEvidenceCaptureReplayTest {
                 }
             }
             val stats = manifest.depthEvidence?.stats
-            val reports = DepthEvidenceReplay().replay(
+            val baseline = mutableListOf(
+                "# capture ${manifest.sessionId}: recorded rule ${manifest.depthEvidence?.groundFitRule ?: "none"}, " +
+                    "evaluated ${evaluatedRule?.id ?: "recorded"}, pc ${if (pcDir != null) "yes" else "no"}",
+            )
+            val reports = DepthEvidenceReplay(observer = { fit -> baseline += baselineLine(fit) }).replay(
                 records = session.depthEvidence,
                 output = { CaptureSessionReader.depthOutput(session, it) },
                 recordedRule = manifest.depthEvidence?.groundFitRule,
@@ -102,6 +115,19 @@ class DepthEvidenceCaptureReplayTest {
             }
             File(out, "${manifest.sessionId}.depth.txt").writeText(text)
             println(text)
+            val baselineName = "${manifest.sessionId}$BASELINE_SUFFIX"
+            File(out, baselineName).writeText(baseline.joinToString("\n", postfix = "\n"))
+            frozen?.let { dir ->
+                val file = File(dir, baselineName)
+                if (!file.isFile) {
+                    baselineFailures += "${manifest.sessionId}: no frozen baseline ${file.path}"
+                } else {
+                    val comparison = DepthBaseline.compare(file.readText().replace("\r", "").trimEnd('\n').split('\n'), baseline)
+                    println("baseline ${manifest.sessionId}: $comparison")
+                    if (!comparison.same) baselineFailures += "${manifest.sessionId}: $comparison"
+                    comparedBaselines++
+                }
+            }
             for (r in reports) {
                 when (r.verdict) {
                     DepthEvidenceVerdict.FAIL -> failures += "${manifest.sessionId}/${r.generation}: ${r.verdictReason}"
@@ -111,9 +137,32 @@ class DepthEvidenceCaptureReplayTest {
             }
         }
         assertTrue("no capture with depth evidence under $path", replayedAny)
+        frozen?.let { println("compared $comparedBaselines capture(s) with the frozen baseline in ${it.path}") }
+        // Before the verdicts: whether the fits are the frozen ones is its own question, whatever the bands say.
+        assertTrue("differs from the frozen baseline: $baselineFailures", baselineFailures.isEmpty())
         assertTrue("depth evidence failed: $failures (reports in ${out.path})", failures.isEmpty())
         undecided.forEach { println("cannot judge: $it") }
         // Comparing with a PC is the acceptance: a capture that cannot be judged has not passed it.
         if (pcRoot != null) assertTrue("cannot be judged, so not passed: $undecided (reports in ${out.path})", undecided.isEmpty())
+    }
+
+    /** One fit of the replay, its role and run first, then what [DepthBaseline] freezes and the geometry it was given. */
+    private fun baselineLine(fit: DepthReplayFit): String {
+        val record = fit.record
+        val identity = listOf(
+            "role" to fit.role.name.lowercase(),
+            "generation" to "${record.generation}",
+            "run" to "${record.runId}",
+            "fit" to (record.fitOrdinal?.toString() ?: DepthBaseline.NONE),
+        )
+        val extras = DepthBaseline.geometry(record.geometry.toGeometry()) + listOf(
+            "grid" to "${record.gridWidth}x${record.gridHeight}",
+            "map" to "${record.output.width}x${record.output.height}",
+        )
+        return DepthBaseline.line(identity, fit.observation, fit.fitter, extras).text
+    }
+
+    private companion object {
+        const val BASELINE_SUFFIX = ".depth-baseline.txt"
     }
 }

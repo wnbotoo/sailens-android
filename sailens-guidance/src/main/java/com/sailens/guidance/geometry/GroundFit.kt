@@ -199,6 +199,12 @@ class GroundFitter(
     )
 
     /**
+     * The cells of another level the last valid fit saw, which [sameGuardHistory] compares; null before one. A fit
+     * stores a mask it made for itself and never changes it afterwards, so the caller reads it and does not write it.
+     */
+    internal fun guardLevelCells(): BinaryMask? = lastBelow
+
+    /**
      * Whether [other]'s history can still change a later fit's validity differently from this one's: the hold, and
      * the very cells of another level the last valid fit saw. The coverage history changes only the confidence.
      */
