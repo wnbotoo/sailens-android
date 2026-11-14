@@ -994,8 +994,11 @@ next record's `skipsSinceLast` (`stopped`, `thermal`, `thermal_cadence`, `yield`
 - `outcome`: `published` (the observation became the session's snapshot), `preprocess_unavailable` (the
   native preprocessing could not take the frame; there is no fallback), `yield_dropped` (a higher tier
   opened a yield interval after the preprocessing; the model did not run), `failed` (a step threw),
-  `non_finite_output` (NaN or infinity in the output), or `closed` (the session's closing record, always
-  its last).
+  `non_finite_output` (NaN or infinity in the output), `no_measurement` (a metric map more than 80 %
+  unknown: nothing measured, no failure), `depth_time_mismatch` (a map whose view is more than a period
+  from its frame's time, or a metric map with no view time; no failure), or `closed` (the session's
+  closing record, always its last). The two post-inference skips arrived with metric sources; a parser
+  from before them rejects a trace that holds them.
 - `frameSequence`, `frameTimeNanos`, `timeBasis`, `geometryQuality`: the frame and the geometry the
   attempt used.
 - For a published run: `validity` (the ground fit's, lower case: `valid`, `no_ground`, `inverse_output`
@@ -1010,6 +1013,14 @@ next record's `skipsSinceLast` (`stopped`, `thermal`, `thermal_cadence`, `yield`
   it apart needs scheduling or clock evidence. `fitMs` is whole milliseconds, so a difference under a millisecond or
   two says nothing; the runtime's `accelerator`, `acceleratorSelection` (with the GPU precision and queue priority),
   `preprocessBackend`, `postprocessBackend`; `modelShape`, input and output (`1x3x392x224>1x392x224`).
+- The source: `depthKind` (`relative_disparity`, `metric_depth`) and `scaleBasis` (`assumed_phone_height`,
+  `measured`) once it ran; `unknownFraction`, a metric map's share of pixels not measured. For a
+  published run, `measurementTimeNanos` and `viewTimeNanos` (on the frame's time basis: the age counts
+  from the first, the cells belong to the second; a model's are its frame's), and `measurementEpoch` /
+  `measurementId`, which measurement it holds (a model's are its generation and run id). Metric depth:
+  `metricShiftRatio`, the fit's shift check, and with a valid fit `measuredPhoneHeightM` and
+  `phoneHeightDifference`, the measured height's difference from the setting's, a fraction. A line from
+  before these fields has none of them and parses as before.
 - The closing record: `cancelledRunId` and `cancelledStage` (`prepare`, `admit`, `infer`, `fit`) when an
   attempt was in flight at the stop -- that is its settlement, and nothing more is written for it --
   `failuresTotal`, `finalState`, and the last skips.

@@ -3,6 +3,7 @@ package com.sailens.guidance.depth.geometry
 import com.sailens.guidance.geometry.GroundObservation
 import com.sailens.vision.depth.DepthMap
 import com.sailens.vision.depth.DisparityMap
+import com.sailens.vision.depth.MetricDepthMap
 
 /** The unit of a reading's lengths. */
 enum class DepthUnit {
@@ -34,13 +35,16 @@ class DepthCells internal constructor(
     private val heightAboveGround: FloatArray?,
     private val coverage: FloatArray,
 ) {
-    /** Z along the optical axis at the cell centre: relative `A / (d − t)`, which is Z over the phone height. */
+    /** Z along the optical axis at the cell centre: relative `A / (d − t)`, which is Z over the phone height; metric, Z as measured. */
     fun opticalDepth(x: Int, y: Int): Float = opticalDepth[y * width + x]
 
     /** Whether the fit was valid, so that the cells have heights above its ground. */
     val hasHeights: Boolean get() = heightAboveGround != null
 
-    /** The cell centre's height above the fitted ground, in [unit]: relative `1 − (Z/h)·q`; `NaN` without heights. */
+    /**
+     * The cell centre's height above the fitted ground, in [unit]: relative `1 − (Z/h)·q`; metric `h − Z·q` with the
+     * measured Z and the measured height `h = 1/A`, so no setting is read. `NaN` without heights.
+     */
     fun heightAboveGround(x: Int, y: Int): Float = heightAboveGround?.get(y * width + x) ?: Float.NaN
 
     /** The share of the cell's sample points that are known (`DepthMap.isKnownAt`), 0 to 1. */
@@ -56,10 +60,29 @@ class DepthCells internal constructor(
 
         /**
          * The cells of [observation], fitted on [map] in [view]. Null when there is nothing to say: a relative map's
-         * depths need the fit's A and t, which mean nothing when the fit is not valid.
+         * depths need the fit's A and t, which mean nothing when the fit is not valid. A metric map's depths are its
+         * own, so it has cells whatever the fit; heights only on a valid one.
          */
         fun of(map: DepthMap, observation: GroundObservation, view: DepthViewGeometry): DepthCells? = when (map) {
             is DisparityMap -> if (observation.isValid) relative(map, observation, view) else null
+            is MetricDepthMap -> metric(map, observation, view)
+        }
+
+        private fun metric(map: MetricDepthMap, observation: GroundObservation, view: DepthViewGeometry): DepthCells {
+            val w = view.gridWidth
+            val h = view.gridHeight
+            val depth = FloatArray(w * h)
+            for (y in 0 until h) {
+                val v = view.cellCenterV(y)
+                for (x in 0 until w) depth[y * w + x] = map.depthAt(view.cellCenterU(x), v) ?: Float.NaN
+            }
+            val heights = observation.measuredPhoneHeightM?.takeIf { observation.isValid }?.let { measured ->
+                FloatArray(w * h) { i ->
+                    val z = depth[i]
+                    if (z.isNaN()) Float.NaN else measured - z * view.q(view.cellCenterU(i % w), view.cellCenterV(i / w))
+                }
+            }
+            return DepthCells(DepthUnit.METERS, w, h, depth, heights, coverage(map, view))
         }
 
         private fun relative(map: DisparityMap, observation: GroundObservation, view: DepthViewGeometry): DepthCells {

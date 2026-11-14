@@ -20,6 +20,7 @@ import com.sailens.guidance.depth.geometry.DepthGeometrySwitch
 import com.sailens.guidance.depth.geometry.DepthModelCheckResult
 import com.sailens.guidance.depth.geometry.DepthPreparedInput
 import com.sailens.guidance.depth.geometry.DepthProducer
+import com.sailens.guidance.depth.geometry.DepthSourceUnavailable
 import com.sailens.guidance.depth.geometry.ThermalLevel
 import com.sailens.guidance.geometry.CameraFactsSource
 import com.sailens.guidance.geometry.GroundFitter
@@ -67,8 +68,11 @@ import com.sailens.runtime.accelerator.AcceleratorCoordinator
 import com.sailens.vision.depth.DepthInputTransform
 import com.sailens.vision.depth.DepthMap
 import com.sailens.vision.depth.DepthRun
+import com.sailens.vision.depth.DepthSourceMapping
 import com.sailens.vision.depth.DepthTimes
 import com.sailens.vision.depth.DisparityMap
+import com.sailens.vision.depth.MeasurementKey
+import com.sailens.vision.depth.MetricDepthMap
 import com.sailens.vision.depth.ResizePolicy
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.NonCancellable
@@ -293,13 +297,15 @@ class SimulatedPipeline(
     /** The depth lane's frames, for `StartSceneAnalysisUseCase`'s `depthFrames`; null without [depth]. */
     val depthFrames: ((Long) -> Flow<ImageFrame>)? = depth?.let { { _ -> depthChannel.receiveAsFlow() } }
 
-    /** Every depth runner the lane built, in order: one per session that got past its model check. */
-    val depthRunners: MutableList<SimulatedDepthRunner> = java.util.Collections.synchronizedList(mutableListOf())
+    /** Every depth producer the lane built, in order: one per session that got past its model check. */
+    val depthRunners: MutableList<SimulatedDepthSource> = java.util.Collections.synchronizedList(mutableListOf())
 
     /** The depth lane, wired as `GuidanceModule` wires it; null without [depth]. */
     val depthLane: DepthGeometryLane? = depth?.let { model ->
         DepthGeometryLane(
-            producerFactory = { SimulatedDepthRunner(model).also { depthRunners += it } },
+            producerFactory = {
+                (model.metric?.let { SimulatedMetricDepthProducer(model, it) } ?: SimulatedDepthRunner(model)).also { depthRunners += it }
+            },
             modelCheck = {
                 if (model.checkThrows) throw IllegalStateException("simulated depth model check failure")
                 DepthModelCheckResult.Compatible
@@ -315,14 +321,17 @@ class SimulatedPipeline(
         )
     }
 
+    /** A depth source of the simulator's, counting its runs. */
+    abstract inner class SimulatedDepthSource : DepthProducer {
+        /** Runs that reached the source. */
+        val inferences = AtomicInteger()
+    }
+
     /**
      * The depth model for [depth]: the disparity [renderDisparity] gives each frame's own pose and world, `a/Z + b`,
      * at the model's size and with the letterbox the contract fixes.
      */
-    inner class SimulatedDepthRunner internal constructor(private val model: SimulatedDepthModel) : DepthProducer {
-        /** Runs that reached the model. */
-        val inferences = AtomicInteger()
-
+    inner class SimulatedDepthRunner internal constructor(private val model: SimulatedDepthModel) : SimulatedDepthSource() {
         override val needsAccelerator: Boolean get() = true
 
         override suspend fun initialize() {
@@ -362,6 +371,108 @@ class SimulatedPipeline(
         }
 
         override suspend fun release() = Unit
+    }
+
+    /**
+     * The metric source for [depth] ([SimulatedDepthModel.metric]): Z from [renderMetricDepth] for each frame's own pose
+     * and world on its depth image, turned upright and placed by the mapping it reports, with its faults. It does not
+     * use the accelerator. A mapping that is not a scale per axis and an offset makes it refuse itself at initialization.
+     */
+    inner class SimulatedMetricDepthProducer internal constructor(
+        private val model: SimulatedDepthModel,
+        private val source: SimulatedMetricDepth,
+    ) : SimulatedDepthSource() {
+        override val needsAccelerator: Boolean get() = false
+
+        private var mapped: DepthSourceMapping.Result.Mapped? = null
+        private var measurement: Measurement? = null
+
+        private inner class Measurement(val bucket: Int, val pose: Pose, val map: MetricDepthMap)
+
+        override suspend fun initialize() {
+            if (model.initFails) throw UnsatisfiedLinkError("simulated depth source initialization failure")
+            measurement = null
+            val camera = scenario.camera
+            mapped = when (val result = DepthSourceMapping.map(source.width, source.height, camera.bufferWidth, camera.bufferHeight, camera.sensorOrientation, source.toBuffer)) {
+                is DepthSourceMapping.Result.Mapped -> result
+                is DepthSourceMapping.Result.Refused -> throw DepthSourceUnavailable(DepthSourceUnavailable.MAPPING)
+            }
+        }
+
+        private inner class Prepared(val index: Int, val content: Int, val timestampNanos: Long)
+
+        override suspend fun prepare(frame: ImageFrame): DepthPreparedInput {
+            val index = indexOf(frame)
+            return DepthPreparedInput(checkNotNull(mapped).transform, detail = null, preprocessMs = 0, payload = Prepared(index, contentIndex[index], frame.timestamp))
+        }
+
+        override suspend fun infer(input: DepthPreparedInput): DepthRun<DepthMap> {
+            inferences.incrementAndGet()
+            if (source.fails) throw IllegalStateException("simulated metric depth failure")
+            val prepared = input.payload as Prepared
+            val content = scenario.frames[prepared.content]
+            val bucket = prepared.index / source.holdFrames
+            val cached = measurement?.takeIf { it.bucket == bucket } ?: measure(prepared, bucket).also { measurement = it }
+            val times = cached.map.times.copy(viewTimeNanos = prepared.timestampNanos + source.viewOffsetNanos)
+            var output = reprojectMetricDepth(scenario.camera, cached.map, cached.pose, content.pose, times)
+            if (source.emptyFrom?.let { prepared.index >= it } == true) {
+                output = MetricDepthMap(output.width, output.height, FloatArray(output.width * output.height) { Float.NaN }, null, source.minConfidence, output.transform, times)
+            }
+            return DepthRun(
+                output, nonFiniteCount = 0, detail = null, preprocessMs = 0, inferenceMs = 0, outputReadMs = 0,
+                runtimeInfo = MlRuntimeInfo("simulated_metric", "none", "none", "kotlin_ground_fit"), shapeLabel = "metric ${output.width}x${output.height}",
+            )
+        }
+
+        private fun measure(prepared: Prepared, bucket: Int): Measurement {
+            val content = scenario.frames[prepared.content]
+            val map = checkNotNull(mapped)
+            val t = map.transform
+            val w = map.uprightWidth
+            val h = map.uprightHeight
+            val classes = IntArray(w * h)
+            val depth = renderMetricDepth(
+                scenario.camera, content.pose, content.world, w, h, t.analysisWidth, t.analysisHeight,
+                { x, y -> t.toAnalysisX(x) to t.toAnalysisY(y) }, source.noise, source.seed + prepared.content, classes,
+            )
+            for (i in depth.indices) {
+                var z = depth[i].toDouble() * source.scale + source.offsetM
+                source.quantizeM?.let { step -> z = Math.round(z / step) * step }
+                depth[i] = z.toFloat()
+            }
+            val measured = if (source.mixedEdges) mixEdges(depth, w, h) else depth
+            val random = kotlin.random.Random(source.seed * 31 + prepared.content)
+            val confidence = FloatArray(w * h) { i ->
+                val c = source.confidenceOf(classes[i], measured[i].toDouble())
+                source.sparse?.let { share -> if (random.nextDouble() < share) c else 0f } ?: c
+            }
+            val nothing = source.empty || (source.emptyFrom?.let { prepared.index >= it } ?: false)
+            for (y in 0 until h) for (x in 0 until w) if (nothing || source.hole(x, y)) measured[y * w + x] = Float.NaN
+            // The first delivered frame in a hold owns its measurement, including its noise, holes and confidence.
+            val measuredAt = prepared.timestampNanos - source.measurementLagNanos
+            val times = DepthTimes(
+                measurementTimeNanos = measuredAt.takeIf { source.reportsMeasurementTime },
+                viewTimeNanos = prepared.timestampNanos + source.viewOffsetNanos,
+                measurementKey = MeasurementKey(sourceEpoch = 1, measurement = prepared.index.toLong()),
+            )
+            return Measurement(bucket, content.pose, MetricDepthMap(w, h, measured, confidence, source.minConfidence, t, times))
+        }
+
+        override suspend fun release() { measurement = null }
+
+        /** A pixel beside a depth edge (a jump of more than 30 %) reads the mean of its own depth and its neighbour's. */
+        private fun mixEdges(depth: FloatArray, w: Int, h: Int): FloatArray {
+            val out = depth.copyOf()
+            for (y in 0 until h) for (x in 0 until w) {
+                val i = y * w + x
+                for (n in listOfNotNull(if (x + 1 < w) i + 1 else null, if (y + 1 < h) i + w else null)) {
+                    val a = depth[i]
+                    val b = depth[n]
+                    if (a.isFinite() && b.isFinite() && kotlin.math.abs(a - b) > 0.3f * minOf(a, b)) out[i] = (a + b) / 2
+                }
+            }
+            return out
+        }
     }
 
     /** Starts a session: the pipeline the app's Guidance screen collects. */
@@ -468,7 +579,8 @@ class ScenarioRenders {
 /**
  * The simulator's depth model: its input size (portrait, 9:16 here, so the letterbox is small), whether it outputs
  * depth instead of disparity, whether its static check or its initialization throws, and the device's thermal status
- * the lane sees.
+ * the lane sees. With [metric], the lane's source is that metric source instead of a model ([width], [height] and
+ * [inverted] then mean nothing).
  */
 data class SimulatedDepthModel(
     val width: Int = 126,
@@ -477,6 +589,7 @@ data class SimulatedDepthModel(
     val checkThrows: Boolean = false,
     val initFails: Boolean = false,
     val thermal: ThermalLevel = ThermalLevel.NONE,
+    val metric: SimulatedMetricDepth? = null,
 )
 
 /** A model failing on one frame, as a scenario scripted it. */

@@ -17,6 +17,13 @@ enum class ResizePolicy {
 
     /** Resize to fit inside the tensor, aspect kept, and pad the rest. */
     PAD_KEEP_ASPECT,
+
+    /**
+     * Not a resize: a metric source's own depth image, placed by the mapping it reports (`DepthSourceMapping`) -- a
+     * scale per axis and an offset, covering what it covers. Its "padding" is the part of the depth image outside the
+     * analysis image. [DepthInputTransform.create] does not make these.
+     */
+    SOURCE_MAPPED,
 }
 
 /**
@@ -86,6 +93,7 @@ data class DepthInputTransform(
                         0f, 0f, aw, ah, scale, scale, (mw - aw * scale) / 2, (mh - ah * scale) / 2,
                     )
                 }
+                ResizePolicy.SOURCE_MAPPED -> throw IllegalArgumentException("a source's mapping comes from DepthSourceMapping")
             }
         }
     }

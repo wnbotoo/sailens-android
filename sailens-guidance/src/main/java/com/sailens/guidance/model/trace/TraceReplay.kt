@@ -303,6 +303,16 @@ object TraceReplayParser {
             cancelledStage = entry.optionalString("cancelledStage"),
             failuresTotal = entry.optionalLong("failuresTotal")?.toInt(),
             finalState = entry.optionalString("finalState"),
+            depthKind = entry.optionalString("depthKind"),
+            scaleBasis = entry.optionalString("scaleBasis"),
+            unknownFraction = float("unknownFraction"),
+            measurementTimeNanos = entry.optionalLong("measurementTimeNanos"),
+            viewTimeNanos = entry.optionalLong("viewTimeNanos"),
+            measurementEpoch = entry.optionalLong("measurementEpoch"),
+            measurementId = entry.optionalLong("measurementId"),
+            measuredPhoneHeightM = float("measuredPhoneHeightM"),
+            phoneHeightDifference = float("phoneHeightDifference"),
+            metricShiftRatio = float("metricShiftRatio"),
         )
     }
 

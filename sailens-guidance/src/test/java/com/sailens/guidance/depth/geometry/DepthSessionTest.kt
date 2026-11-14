@@ -151,6 +151,50 @@ class DepthSessionTest {
     }
 
     @Test
+    fun `a completed inference skipped after its output restores running and ends a failure streak without publishing`() {
+        for ((outcome, reason) in listOf(
+            DepthRunTrace.NO_MEASUREMENT to DepthGeometryLane.SKIP_NO_MEASUREMENT,
+            DepthRunTrace.DEPTH_TIME_MISMATCH to DepthGeometryLane.SKIP_TIME_MISMATCH,
+        )) for (paused in listOf(DepthLaneState.PAUSED_THERMAL, DepthLaneState.PAUSED_YIELD, DepthLaneState.PREPROCESS_UNAVAILABLE)) {
+            records.all.clear()
+            val s = session(maxFailures = 2)
+            s.publish(s.attempt(1))
+            val published = s.latest()
+            s.attempt(2)
+            s.failInFlight()
+            s.setState(paused, "previous_issue")
+            assertTrue(s.commit(s.attempt(3), outcome, snapshot = null, skipReason = reason))
+            assertEquals(DepthLaneState.RUNNING, s.latest().state)
+            assertNull(s.latest().stateIssue)
+            assertEquals(published.runId, s.latest().runId)
+            assertEquals(reason, s.latest().lastSkipReason)
+            s.attempt(4)
+            s.failInFlight()
+            assertFalse("$paused / $outcome: the failed attempts were not consecutive", s.stopped)
+            s.seal()
+            assertEquals(listOf(1L, 2L, 3L, 4L, 4L), records.all.map { it.runId })
+            assertEquals(2, records.all.last().failuresTotal)
+            assertEquals("running", records.all.last().finalState)
+        }
+    }
+
+    @Test
+    fun `a post-inference skip cannot reopen a failed or sealed session`() {
+        val s = session(maxFailures = 1)
+        s.attempt()
+        s.failInFlight()
+        s.commit(s.attempt(2), DepthRunTrace.NO_MEASUREMENT, snapshot = null, skipReason = DepthGeometryLane.SKIP_NO_MEASUREMENT)
+        assertEquals(DepthLaneState.RUN_FAILED, s.latest().state)
+        val late = s.attempt(3)
+        s.seal()
+        val recorded = records.all.size
+        assertFalse(s.commit(late, DepthRunTrace.DEPTH_TIME_MISMATCH, snapshot = null, skipReason = DepthGeometryLane.SKIP_TIME_MISMATCH))
+        assertEquals(recorded, records.all.size)
+        assertEquals(DepthLaneState.CLOSED, s.latest().state)
+        assertEquals(3L, records.all.last().cancelledRunId)
+    }
+
+    @Test
     fun `the snapshot is published with its record and read with the session's current state`() {
         val s = session()
         assertNull(s.latest().observation)

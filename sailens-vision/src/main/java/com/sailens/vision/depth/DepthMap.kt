@@ -25,7 +25,8 @@ data class MeasurementKey(val sourceEpoch: Long, val measurement: Long)
  * @param measurementTimeNanos when the depth was measured: its freshness counts from this.
  * @param viewTimeNanos the moment of the camera view the map's pixels belong to: the gravity and intrinsics that place
  *   them are resolved at this time. Later than the measurement when a source reprojects an older measurement into a
- *   newer view; the same when it does not.
+ *   newer view; the same when it does not. A metric source with no view time cannot be placed; the lane skips it.
+ *   An untimed relative map retains the model convention that its view is the input frame.
  * @param measurementKey which measurement; null when the source does not name its measurements because every run is a
  *   new one (a model on the frame's own picture): the lane then keys each run's measurement by the run.
  */

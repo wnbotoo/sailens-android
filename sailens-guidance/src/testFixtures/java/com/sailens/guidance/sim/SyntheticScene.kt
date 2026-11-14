@@ -261,6 +261,67 @@ fun renderDisparity(
     }
 }
 
+/**
+ * What a metric source would measure for [world] seen from [pose]: Z, the camera z-depth in metres, on a [width] ×
+ * [height] depth image whose pixels map to the upright analysis image through [toAnalysis], by the same ray cast as
+ * [renderDisparity]. The sky is +infinity; a pixel off the analysis image is `NaN`. [noise] multiplies each depth by
+ * 1 ± noise, seeded. [classes], when given, receives each pixel's surface class (sky for none).
+ */
+fun renderMetricDepth(
+    camera: SyntheticCamera,
+    pose: Pose,
+    world: World,
+    width: Int,
+    height: Int,
+    analysisWidth: Int,
+    analysisHeight: Int,
+    toAnalysis: (x: Float, y: Float) -> Pair<Float, Float>,
+    noise: Double = 0.0,
+    seed: Int = 7,
+    classes: IntArray? = null,
+): FloatArray {
+    val scale = analysisWidth.toDouble() / camera.mapWidth
+    val focal = camera.focal * scale
+    val cx = camera.cx * scale
+    val cy = camera.cy * scale
+    val o = pose.position
+    val f = pose.forward
+    val r = pose.right
+    val d = pose.down
+    val random = kotlin.random.Random(seed)
+    val hit = Hit()
+    return FloatArray(width * height) { index ->
+        val (u, v) = toAnalysis(index % width + 0.5f, index / width + 0.5f)
+        classes?.set(index, SceneClasses.SKY)
+        if (u < 0 || v < 0 || u >= analysisWidth || v >= analysisHeight) return@FloatArray Float.NaN
+        val xn = (u - cx) / focal
+        val yn = (v - cy) / focal
+        firstHit(o.x, o.y, o.z, f.x + r.x * xn + d.x * yn, f.y + r.y * xn + d.y * yn, f.z + r.z * xn + d.z * yn, world, hit)
+        classes?.set(index, hit.cls)
+        (hit.t * (1 + noise * (2 * random.nextDouble() - 1))).toFloat()
+    }
+}
+
+/**
+ * The first surface along the ray through analysis point (u, v): its camera z-depth and the world height (Y) of the
+ * point it hits, or null for the sky. The truth a metric reading's depths and heights are checked against.
+ */
+fun surfaceAt(camera: SyntheticCamera, pose: Pose, world: World, analysisWidth: Int, u: Float, v: Float): Pair<Double, Double>? {
+    val scale = analysisWidth.toDouble() / camera.mapWidth
+    val focal = camera.focal * scale
+    val xn = (u - camera.cx * scale) / focal
+    val yn = (v - camera.cy * scale) / focal
+    val o = pose.position
+    val f = pose.forward
+    val r = pose.right
+    val d = pose.down
+    val dy = f.y + r.y * xn + d.y * yn
+    val hit = Hit()
+    firstHit(o.x, o.y, o.z, f.x + r.x * xn + d.x * yn, dy, f.z + r.z * xn + d.z * yn, world, hit)
+    if (!hit.t.isFinite()) return null
+    return hit.t to (o.y + dy * hit.t)
+}
+
 /** Slab intersection with an axis-aligned box: the entry distance, or +infinity for a miss. */
 private fun rayBox(ox: Double, oy: Double, oz: Double, dx: Double, dy: Double, dz: Double, b: Box): Double {
     var tMin = 1e-6

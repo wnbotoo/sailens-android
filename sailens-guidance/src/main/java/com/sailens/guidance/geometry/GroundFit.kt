@@ -1,6 +1,7 @@
 package com.sailens.guidance.geometry
 
 import com.sailens.core.mask.BinaryMask
+import com.sailens.vision.depth.DepthKind
 import com.sailens.vision.depth.DepthMap
 import kotlin.math.abs
 import kotlin.math.acos
@@ -38,6 +39,14 @@ enum class GroundFitValidity {
      * Static preflight cannot see this; the output is refused rather than read upside down.
      */
     INVERSE_OUTPUT,
+
+    /**
+     * Metric depth only: the fitted ground does not pass through `1/Z = 0` at the horizon -- its shift `t`, against
+     * the inverse depth it predicts at the run's median, is more than the fitter allows. A source whose depths carry an
+     * offset (a bad calibration, a format read wrong) gives that; the fit is not used. Passing it does not show the
+     * scale is right (a depth wrong by a constant factor still fits with no shift), nor that the plane is the user's.
+     */
+    METRIC_INCONSISTENT,
 }
 
 /**
@@ -64,6 +73,10 @@ data class GroundObservation(
     /** A free plane fit on the inliers leans the way gravity says the ground does. */
     val planeAgreesWithGravity: Boolean,
     val confidence: Float,
+    /** Metric depth, a valid fit: the camera's height above the fitted ground the depths measure, `1/A`. */
+    val measuredPhoneHeightM: Float? = null,
+    /** Metric depth: `|t|` over the inverse depth the fit predicts at its run's median, the shift check's measure. */
+    val metricShiftRatio: Float? = null,
 ) {
     val isValid: Boolean get() = validity == GroundFitValidity.VALID
 
@@ -143,6 +156,9 @@ internal data class GroundGuardState(val holdingSwitch: Boolean, val armed: Bool
  *   plane by less than the threshold, and would bend the fit if it were sampled. The labels still
  *   cover the whole image.
  * @param guardRule which cells below ground the support-switch guard counts as another level.
+ * @param maxMetricShiftRatio metric depth only: beyond this [GroundObservation.metricShiftRatio] the fit is
+ *   [GroundFitValidity.METRIC_INCONSISTENT]. 1.5 %: a range offset of 5 cm on ground 1.2 to 4.4 m away gives 2.3 %,
+ *   one of 2 cm 0.9 %.
  */
 class GroundFitter(
     private val inlierThreshold: Float = 0.04f,
@@ -156,6 +172,7 @@ class GroundFitter(
     private val maxGravityAngleDeg: Float = 10f,
     private val stabilityFrames: Int = 3,
     val guardRule: SupportGuardRule = SupportGuardRule.CURRENT,
+    private val maxMetricShiftRatio: Float = 0.015f,
 ) {
     private val recentCoverage = ArrayDeque<Float>()
 
@@ -188,7 +205,7 @@ class GroundFitter(
      */
     internal fun copy(): GroundFitter = GroundFitter(
         inlierThreshold, structureFactor, minQ, minInlierRatio, sampleFromRow, sampleColumns, sampleRows,
-        iterations, maxGravityAngleDeg, stabilityFrames, guardRule,
+        iterations, maxGravityAngleDeg, stabilityFrames, guardRule, maxMetricShiftRatio,
     ).also {
         it.recentCoverage.addAll(recentCoverage)
         // A fit stores a mask it made for itself and never changes it afterwards.
@@ -357,6 +374,21 @@ class GroundFitter(
         // filling the view has none; the last strip of ground before a drop has too little to
         // pin both A and t.
         if (runQMax / runQMin < 1f + MIN_DEPTH_SPAN) return empty(GroundFitValidity.NO_SUPPORT)
+        // Metric depth is 1/Z itself: the ground's shift must be nothing. Before the guard, so a fit refused here leaves
+        // the history as it found it, as every other refusal does.
+        var shiftRatio: Float? = null
+        if (disparity.kind == DepthKind.METRIC_DEPTH) {
+            var seen = 0
+            var qMedian = runQMin
+            for (k in 0 until end) {
+                if (!isInlier(refit.a, refit.t, nearQ[k], nearD[k])) continue
+                if (seen == runCount / 2) { qMedian = nearQ[k]; break }
+                seen++
+            }
+            val ratio = abs(refit.t) / (refit.a * qMedian + refit.t)
+            shiftRatio = ratio
+            if (!(ratio <= maxMetricShiftRatio)) return empty(GroundFitValidity.METRIC_INCONSISTENT).copy(metricShiftRatio = ratio)
+        }
         var inliers = 0
         for (i in 0 until n) {
             inlier[i] = isInlier(refit.a, refit.t, qs[i], ds[i])
@@ -438,6 +470,8 @@ class GroundFitter(
         return GroundObservation(
             frameTimeNanos, GroundFitValidity.VALID, ground, above, below,
             refit.a, refit.t, inlierRatio, agrees, confidence,
+            measuredPhoneHeightM = if (shiftRatio != null) 1f / refit.a else null,
+            metricShiftRatio = shiftRatio,
         )
     }
 

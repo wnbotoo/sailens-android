@@ -9,13 +9,16 @@ import kotlin.math.abs
  * The `DEPTH_GEOMETRY` capability for one main-pipeline frame (docs/geometry.md §6), from the frame's own
  * session snapshot, first matching row wins:
  * 1. no session (switched off, or the host has no lane), or no depth model: not configured;
- * 2. a model outside the contract: unavailable, `model_unreadable`;
+ * 2. a model outside the contract, or a source that refused itself: unavailable, `model_unreadable`, or the source's
+ *    reason (`mapping`);
  * 3. the native preprocessing failed on the last attempt: `preprocess_unavailable`;
  * 4. initialization failed, or too many runs in a row failed: `init_failed` / `run_failed`;
  * 5. still initializing (including the wait for an earlier session's teardown): `initializing`;
  * 6. paused for heat or for a higher-priority GPU user: `paused_thermal` / `paused_yield`;
  * 7. no observation yet, or the latest is older than [DepthGeometryConfig.maxAgePeriods] periods by measurement
- *    time (or on another time basis): `stale`, with the last skip reason when there is one;
+ *    time (or on another time basis, or with no measurement time): `stale`, with the last skip reason when there is
+ *    one -- a source that keeps measuring nothing says `no_measurement` here, while its last observation ages as it
+ *    would;
  * 8. a fresh observation on degraded geometry: degraded, with the geometry's issues;
  * 9. a fresh observation: available.
  * What the observation found (no ground, inverted output, a support switch) is its content, not a failure
@@ -28,6 +31,7 @@ object DepthGeometryCapability {
         when (snapshot.state) {
             DepthLaneState.NOT_CONFIGURED -> return CapabilityStatus.NotConfigured
             DepthLaneState.MODEL_UNREADABLE -> return unavailable(MODEL_UNREADABLE)
+            DepthLaneState.SOURCE_UNAVAILABLE -> return unavailable(snapshot.stateIssue ?: SOURCE_UNAVAILABLE)
             DepthLaneState.PREPROCESS_UNAVAILABLE -> return unavailable(PREPROCESS_UNAVAILABLE)
             DepthLaneState.INIT_FAILED -> return unavailable(INIT_FAILED)
             DepthLaneState.RUN_FAILED -> return unavailable(RUN_FAILED)
@@ -68,6 +72,7 @@ object DepthGeometryCapability {
     const val INITIALIZING: String = "initializing"
     const val PAUSED_THERMAL: String = "paused_thermal"
     const val PAUSED_YIELD: String = "paused_yield"
+    const val SOURCE_UNAVAILABLE: String = "source_unavailable"
     const val STALE: String = "stale"
     const val NO_RUN_YET: String = "no_run_yet"
 }

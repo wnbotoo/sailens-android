@@ -300,7 +300,8 @@ turned into a ray.
    when it fails) and the stability of ground coverage over the last 3 fits.
 
 **Validity**: `VALID`, `TOO_FEW_SAMPLES`, `DEGENERATE_VIEW` (camera pointing straight down),
-`NO_GROUND`, `NO_SUPPORT`, `SUPPORT_SWITCH` or `INVERSE_OUTPUT`.
+`NO_GROUND`, `NO_SUPPORT`, `SUPPORT_SWITCH`, `INVERSE_OUTPUT` or, for metric depth only,
+`METRIC_INCONSISTENT`.
 
 The transform and the fit are pure JVM code, exercised by the simulator's synthetic disparity
 (`renderDisparity`, `a/Z + b`, through any transform).
@@ -382,6 +383,27 @@ without the lane and compare the results, and the user's timeline, line for line
   observation, view and cells, which are never copied or written. A cell's value is a point observation
   at its centre, and its coverage is what was seen, not what is free. Nothing reads a `DepthReading` to
   decide anything.
+- **Metric depth** (`METRIC_DEPTH`, `MetricDepthMap`: Z along the optical axis in metres, from a source
+  such as an AR depth API or a time-of-flight sensor; none ships, the simulator has one). The fit reads
+  it as `1/Z`, which is a = 1 and b = 0: the same thresholds, labels and guard, `A = 1/h` and `t = 0`.
+  So it measures the phone's height, `1/A`; a `PhoneHeightCheck` sets that beside the setting's for the
+  trace, the debug panel and the reading, and nothing else uses it. A fit whose shift is more than 1.5 %
+  of the inverse depth it predicts at its run's median is `METRIC_INCONSISTENT` (a range offset of 5 cm
+  gives about 2.3 %); a depth wrong by a constant factor passes, and so the check says nothing of the
+  scale. The depth image is placed by the mapping the source reports (`DepthSourceMapping`): it can have
+  another aspect than the camera image and be a crop of it, but once upright it must be a scale per axis
+  and an offset; anything else is refused, and the capability is `Unavailable(mapping)`. What it does
+  not cover, a hole, a pixel below its confidence threshold, and a mixed pixel between two depth jumps
+  of more than 10 % are unknown, and nothing is interpolated across them. A map more than 80 % unknown
+  measured nothing: the attempt is `no_measurement`, no failure, and does not refresh the last
+  observation's time; the capability names it (`stale`, `no_measurement`) once that observation ages
+  out. A metric map with no view time, or a map whose view is more than a period from its frame's time,
+  is `depth_time_mismatch`. Both post-inference skips restore running and end a failure streak, without
+  replacing the last observation or refreshing its time. A measurement older than its view (a source
+  that reprojects one measurement into later views) is
+  placed at the view and aged from the measurement, under one measurement key. A source that cannot say
+  when it measured is never fresh. It does not use the accelerator. Its cells are in metres, heights
+  `1/A − Z·q`.
 
 ## 7. Simulator
 
@@ -407,7 +429,14 @@ modules' tests can use it as well; the tests that run it, such as `SyntheticScen
 - **Depth.** `SimulatedPipeline(depth = SimulatedDepthModel())` adds the depth lane (§6): the real lane
   and ground fit with a depth model that reports `renderDisparity` of each frame's own pose and world,
   on the lane's own threads, unsynchronised with the pipeline. `SimulatedDepthModel` can also output
-  depth instead of disparity, fail its initialization, or report the device hot.
+  depth instead of disparity, fail its initialization, or report the device hot. With
+  `metric = SimulatedMetricDepth(...)` the lane's source is a metric one instead (`renderMetricDepth`,
+  Z by the same ray cast), on a depth image of its own aspect placed by its reported mapping, with the
+  faults such sources have: holes, low confidence, quantization, range scale and offset, mixed edge
+  pixels, one measurement held across frames, an old or untimed measurement, a view off its frame.
+  A held measurement caches its depths, holes and confidence; neighbouring known samples of one
+  surface form triangles reprojected with a z-buffer. It never renders the later world: holes, depth
+  edges and newly visible regions stay unknown until another measurement.
 - **Goldens**: `sailens-guidance/src/test/resources/scenarios/<name>.golden.txt`, headed by the
   scenario's description, then one line per frame: decided events (key, priority, parameters),
   tracked obstacles (category / zone / distance), ground recognition, the connectivity figures and

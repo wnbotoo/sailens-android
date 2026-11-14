@@ -19,7 +19,8 @@ import org.junit.Test
 /**
  * The depth lane changes nothing Guidance decides (docs/geometry.md §6, I1): every scenario, under every configuration
  * the goldens use, run with no lane and with a lane and a depth model (a sound one under every configuration; one that
- * outputs depth, and one whose initialization throws, under the default), gives
+ * outputs depth, one whose initialization throws, and a metric source -- sound, measuring nothing, failing every run --
+ * under the default), gives
  * the same results frame by frame -- the golden line with distances, the events, the obstacles, the baseline, the
  * vision faults, the other capabilities. Only the depth capability and the attached snapshot may differ.
  *
@@ -52,7 +53,14 @@ class DepthLaneInvarianceTest {
 
     // Every model under the default configuration; the others, which change Guidance and not the lane, with the sound one.
     private val sound = SimulatedDepthModel()
-    private val allModels = listOf(sound, SimulatedDepthModel(inverted = true), SimulatedDepthModel(initFails = true))
+    private val allModels = listOf(
+        sound,
+        SimulatedDepthModel(inverted = true),
+        SimulatedDepthModel(initFails = true),
+        SimulatedDepthModel(metric = SimulatedMetricDepth()),
+        SimulatedDepthModel(metric = SimulatedMetricDepth(empty = true)),
+        SimulatedDepthModel(metric = SimulatedMetricDepth(fails = true)),
+    )
     private fun models(configuration: String) = if (configuration == "default") allModels else listOf(sound)
 
     /** Everything Guidance decides or reports for a frame, the depth lane's own fields left out. */
