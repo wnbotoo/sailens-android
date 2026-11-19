@@ -18,7 +18,6 @@ namespace {
 
 using sailens::isValidTensorLayout;
 using sailens::lockTensorBufferForRead;
-using sailens::semanticScoreOffset;
 using sailens::unlockTensorBuffer;
 
 static void setPackedBit(jlong* words, int bitIndex) {
@@ -81,11 +80,27 @@ static bool readContentRegion(JNIEnv* env, jintArray region, int gridWidth, int 
     return true;
 }
 
-template <typename ScoreAt>
+template <typename Score>
+static int bestSemanticClass(const Score* scores, int channels, int channelStride) {
+    int classId = 0;
+    Score bestScore = scores[0];
+    for (int channel = 1; channel < channels; ++channel) {
+        const Score score = scores[channel * channelStride];
+        if (score > bestScore) {
+            bestScore = score;
+            classId = channel;
+        }
+    }
+    return classId;
+}
+
+template <typename Score>
 static void postprocessSemanticScoresCore(
-        ScoreAt scoreAt,
+        const Score* scoreData,
         jint* resultData,
         int gridWidth,
+        int gridHeight,
+        int scoreLayout,
         const ContentRegion& region,
         int channels,
         const jboolean* passableData,
@@ -108,6 +123,8 @@ static void postprocessSemanticScoresCore(
     const int height = region.height;
     const int pixelCount = width * height;
     const int wordCount = (pixelCount + 63) / 64;
+    const bool channelMajor = scoreLayout == sailens::kTensorLayoutNchw;
+    const int planeSize = gridWidth * gridHeight;
 
     std::fill(passableWordData, passableWordData + wordCount, 0);
     std::fill(obstacleWordData, obstacleWordData + wordCount, 0);
@@ -140,17 +157,9 @@ static void postprocessSemanticScoresCore(
         for (int x = 0; x < width; ++x) {
             const int pixelIndex = y * width + x;
             const int sourcePixel = (region.y + y) * gridWidth + (region.x + x);
-            const int base = sourcePixel * channels;
-            int classId = 0;
-            auto bestScore = scoreAt(base);
-
-            for (int channel = 1; channel < channels; ++channel) {
-                const auto value = scoreAt(base + channel);
-                if (value > bestScore) {
-                    bestScore = value;
-                    classId = channel;
-                }
-            }
+            const int classId = channelMajor
+                    ? bestSemanticClass(scoreData + sourcePixel, channels, planeSize)
+                    : bestSemanticClass(scoreData + sourcePixel * channels, channels, 1);
 
             resultData[pixelIndex] = classId;
 
@@ -344,11 +353,11 @@ nativePostprocessScores(
     }
 
     postprocessSemanticScoresCore(
-            [scoreData, pixelCount, channels, scoreLayout](int index) {
-                return scoreData[semanticScoreOffset(index, pixelCount, channels, scoreLayout)];
-            },
+            scoreData,
             resultData,
             width,
+            height,
+            scoreLayout,
             region,
             channels,
             passableData,
@@ -499,12 +508,11 @@ nativePostprocessInt8Scores(
     }
 
     postprocessSemanticScoresCore(
-            [scoreData, pixelCount, channels, scoreLayout](int index) {
-                return static_cast<int>(
-                        scoreData[semanticScoreOffset(index, pixelCount, channels, scoreLayout)]);
-            },
+            scoreData,
             resultData,
             width,
+            height,
+            scoreLayout,
             region,
             channels,
             passableData,
@@ -601,7 +609,6 @@ nativePostprocessScoresFromHandle(
     }
     const jfloat* scoreData = static_cast<const jfloat*>(hostPtr);
 
-    const int pixelCount = width * height;
     const int contentPixelCount = region.width * region.height;
     const int wordCount = (contentPixelCount + 63) / 64;
     const int classCount = env->GetArrayLength(classCounts);
@@ -655,10 +662,7 @@ nativePostprocessScoresFromHandle(
     }
 
     postprocessSemanticScoresCore(
-            [scoreData, pixelCount, channels, scoreLayout](int index) {
-                return scoreData[semanticScoreOffset(index, pixelCount, channels, scoreLayout)];
-            },
-            resultData, width, region, channels,
+            scoreData, resultData, width, height, scoreLayout, region, channels,
             passableData, obstacleData, roadData, trafficLightData, groundTypeData,
             bottomRatio, centerRatio, navigationRegionRatio,
             passableWordData, obstacleWordData,
@@ -741,7 +745,6 @@ nativePostprocessInt8ScoresFromHandle(
     }
     const jbyte* scoreData = static_cast<const jbyte*>(hostPtr);
 
-    const int pixelCount = width * height;
     const int contentPixelCount = region.width * region.height;
     const int wordCount = (contentPixelCount + 63) / 64;
     const int classCount = env->GetArrayLength(classCounts);
@@ -795,11 +798,7 @@ nativePostprocessInt8ScoresFromHandle(
     }
 
     postprocessSemanticScoresCore(
-            [scoreData, pixelCount, channels, scoreLayout](int index) {
-                return static_cast<int>(
-                        scoreData[semanticScoreOffset(index, pixelCount, channels, scoreLayout)]);
-            },
-            resultData, width, region, channels,
+            scoreData, resultData, width, height, scoreLayout, region, channels,
             passableData, obstacleData, roadData, trafficLightData, groundTypeData,
             bottomRatio, centerRatio, navigationRegionRatio,
             passableWordData, obstacleWordData,
