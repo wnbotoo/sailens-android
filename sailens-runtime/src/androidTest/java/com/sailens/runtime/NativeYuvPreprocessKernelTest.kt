@@ -61,6 +61,10 @@ class NativeYuvPreprocessKernelTest {
         val output = FloatArray(48 * 48 * 3)
 
         assertTrue(preprocessor.preprocessFloat(frame, rotationDegrees = 90, outputArray = output))
+        val floatMapping = InputImageMapping(
+            32, 64, 48, 48, InputImageMapping.Axis(.75, 12.0, 12, 36), InputImageMapping.Axis(.75, 0.0, 0, 48), 90,
+        )
+        assertEquals(floatMapping, preprocessor.imageMapping(frame, 90))
 
         val expected = referenceNhwcFloat(frame, rotationDegrees = 90, config = config)
         assertFloatsEqual(expected, output)
@@ -69,6 +73,10 @@ class NativeYuvPreprocessKernelTest {
         // pad colour rather than image content.
         val padValue = (0f - config.mean.first) / config.std.first
         assertEquals("column 0 should be letterbox padding", padValue, output[0], TOLERANCE)
+
+        val quantized = NativeYuvInputPreprocessor(config, ModelInputQuantization(scale = 1f / 255f, zeroPoint = -128))
+        assertTrue(quantized.preprocessInt8(frame, 270, ByteArray(output.size)))
+        assertEquals(floatMapping.copy(rotationDegrees = 270), quantized.imageMapping(frame, 270))
     }
 
     @Test

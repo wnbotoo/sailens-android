@@ -1,5 +1,6 @@
 package com.sailens.guidance.model.perception
 import com.sailens.core.runtime.MlRuntimeInfo
+import com.sailens.runtime.InputImageMapping
 
 data class ObstacleModelOutput(
     val detections: List<ObstacleDetection>,
@@ -8,4 +9,5 @@ data class ObstacleModelOutput(
     val outputReadTimeMs: Long = 0,
     val postprocessTimeMs: Long = 0,
     val runtimeInfo: MlRuntimeInfo = MlRuntimeInfo(),
+    val imageMapping: InputImageMapping? = null,
 )

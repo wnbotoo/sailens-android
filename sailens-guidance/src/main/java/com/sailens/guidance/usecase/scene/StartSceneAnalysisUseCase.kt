@@ -45,6 +45,12 @@ import com.sailens.guidance.usecase.perception.AnalyzeSceneUseCase
 import com.sailens.guidance.usecase.perception.ProcessFrameUseCase
 import com.sailens.guidance.util.Timestamp
 import kotlinx.coroutines.CancellationException
+import com.sailens.core.mask.BinaryMask
+import com.sailens.guidance.safety.CapabilityStatus
+import com.sailens.guidance.world.LocalWorldModelBuilder
+import com.sailens.guidance.world.AnalysisGrant
+import com.sailens.guidance.world.LocalWorldRun
+import com.sailens.guidance.world.WorldPublication
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emitAll
@@ -90,6 +96,7 @@ class StartSceneAnalysisUseCase(
     private val depthLane: DepthGeometryLane? = null,
     private val depthSwitch: DepthGeometrySwitch = DepthGeometrySwitch(),
     private val depthConfig: DepthGeometryConfig = DepthGeometryConfig(),
+    private val localWorldBuilder: LocalWorldModelBuilder? = null,
 ) {
     /**
      * @param releaseFrame hands each frame back to its source once this pipeline is done reading
@@ -111,6 +118,7 @@ class StartSceneAnalysisUseCase(
         releaseFrame: (ImageFrame) -> Unit,
         semanticMaskSnapshot: () -> Boolean,
         depthFrames: ((minIntervalMs: Long) -> Flow<ImageFrame>)? = null,
+        localWorldRun: LocalWorldRun? = null,
     ): Flow<SceneResult> = flow {
         // 会话开始时把设置页选中的挡位落成运行配置；必须在 obstacle provider 初始化之前，
         // 且先于首帧处理（ProcessFrameUseCase 逐帧读取 activeConfig）
@@ -222,16 +230,19 @@ class StartSceneAnalysisUseCase(
 
                 // Where the camera points. Resolved before the frame is processed because the
                 // ground-contact distance reads it; it is a sample lookup and a little maths.
+                val cameraFacts = cameraFactsSource.current()
+                val frameFacts = FrameFacts.of(frame)
                 val geometry = cameraGeometryResolver.resolve(
-                    cameraFactsSource.current(),
-                    FrameFacts.of(frame),
+                    cameraFacts,
+                    frameFacts,
                     orientationSource::gravityNear,
                     phoneGeometry(),
                 )
                 if (recording) regressionRecorder.onGeometry(geometry)
 
                 // 处理帧
-                val perceptionResult = processFrameUseCase(frame, geometry).getOrElse {
+                val buildsWorld = localWorldRun != null && localWorldBuilder != null
+                val perceptionResult = processFrameUseCase(frame, geometry, recordWorldProvenance = buildsWorld).getOrElse {
                     if (recording) regressionRecorder.endFrame(frame, emptyList(), it)
                     traceService.recordError(sessionId, "process_frame", it)
                     logService.error(
@@ -263,7 +274,11 @@ class StartSceneAnalysisUseCase(
                 // 恰恰要在模型"照常给出结果"时告诉用户这些结果不可信。
                 val quality = frameQualityAnalyzer.analyzeDetailed(frame)
                 if (recording) regressionRecorder.onFrameQuality(quality)
-                val sceneSnapshot = analyzeSceneUseCase(perceptionResult).copy(frameQuality = quality.stabilized)
+                var effectivePassable: BinaryMask? = null
+                val borrowEffective: ((BinaryMask) -> Unit)? =
+                    if (buildsWorld) ({ effectivePassable = it }) else null
+                val sceneSnapshot = analyzeSceneUseCase.analyze(perceptionResult, borrowEffective)
+                    .copy(frameQuality = quality.stabilized)
                 val analyzeCompletedAt = Timestamp.now()
 
                 // 决策事件
@@ -289,6 +304,42 @@ class StartSceneAnalysisUseCase(
                     DepthReading.NOT_CONFIGURED
                 } else {
                     DepthReading.of(depthSnapshot, depthStatus, geometry, depthConfig.maxAgePeriods)
+                }
+                val worldPublication = localWorldRun?.let { run ->
+                    var grant: AnalysisGrant? = null
+                    val builder = localWorldBuilder
+                    val effective = effectivePassable
+                    val built = try {
+                        val supplied = run.source?.evidenceFor(frame)?.takeIf { it.belongsTo(frame) }
+                        grant = supplied?.grant
+                        if (builder != null && effective != null) {
+                            val viewMotion = depthReading.times?.viewTimeNanos
+                                ?.takeIf { depthStatus == CapabilityStatus.Available && it > 0 }
+                                ?.let {
+                                    try {
+                                        orientationSource.motionState(it, isStationary = false)
+                                    } catch (cancelled: CancellationException) {
+                                        throw cancelled
+                                    } catch (_: Exception) {
+                                        null
+                                    }
+                                }
+                            builder.build(
+                                run.id, frame, frameFacts, cameraFacts, geometry, supplied?.proof,
+                                perceptionResult, effective, perceptionConfig, baseline, depthReading,
+                                viewMotion, motion, run.scratch,
+                            )
+                        } else null
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (error: Exception) {
+                        runCatching { logService.error("LocalWorld", "Could not build evidence for frame ${frame.sequenceNumber}", error) }
+                        null
+                    }
+                    WorldPublication(
+                        run, frame.sequenceNumber, frame.timestamp, frame.receivedElapsedRealtimeNanos,
+                        geometry.timeBasis, grant, built,
+                    )
                 }
                 val qualification = GuidanceQualification(
                     baseline = baseline,
@@ -521,6 +572,7 @@ class StartSceneAnalysisUseCase(
                         frameReceivedAtMs = receivedElapsedMs(frame),
                         depthGeometry = depthSnapshot,
                         depthReading = depthReading,
+                        worldPublication = worldPublication,
                     ),
                     frameTrace = frameTrace,
                 )

@@ -1,5 +1,13 @@
 package com.sailens.guidance.geometry
 
+import com.sailens.guidance.depth.geometry.DepthCells
+import com.sailens.guidance.depth.geometry.DepthReading
+import com.sailens.guidance.depth.geometry.DepthReadingTimes
+import com.sailens.guidance.depth.geometry.DepthViewGeometry
+import com.sailens.guidance.depth.geometry.ObservationId
+import com.sailens.guidance.depth.geometry.ScaleBasis
+import com.sailens.guidance.safety.BaselineQualification
+import com.sailens.guidance.safety.CapabilityStatus
 import com.sailens.guidance.sim.Box
 import com.sailens.guidance.sim.GroundPatch
 import com.sailens.guidance.sim.Pose
@@ -9,8 +17,11 @@ import com.sailens.guidance.sim.SyntheticCamera
 import com.sailens.guidance.sim.Vec
 import com.sailens.guidance.sim.World
 import com.sailens.guidance.sim.renderDisparity
+import com.sailens.guidance.world.DepthContributionPolicy
+import com.sailens.guidance.world.DepthRejection
 import com.sailens.vision.depth.DepthInputTransform
 import com.sailens.vision.depth.DisparityMap
+import com.sailens.vision.depth.MeasurementKey
 import com.sailens.vision.depth.ResizePolicy
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -382,6 +393,8 @@ class GroundFitterTest {
             assertTrue(where, atEdge.isValid)
             // The level below is the ground now: its scale is a / (h + depth).
             assertEquals(where, (10.0 / (1.3 + depth)).toFloat(), atEdge.disparityScale, 0.02f * 10f / 1.3f)
+            val lastPose = Pose(1.3f, 25f, walkedM = fits.last().first)
+            assertWorldRejectsValidFit(disparity(dropWorld(depth), pose = lastPose), lastPose, atEdge)
         }
     }
 
@@ -410,7 +423,14 @@ class GroundFitterTest {
             val fits = approach(GroundFitter(), dropWorld(1.5), toM = 3.92f) { map, pose -> compressBelowGround(map, pose, kept) }
             val last = fits.last().second.validity
             val where = "a 1.5 m drop read with $kept of its depth difference"
-            if (guarded) assertEquals(where, GroundFitValidity.SUPPORT_SWITCH, last) else assertEquals(where, GroundFitValidity.VALID, last)
+            if (guarded) {
+                assertEquals(where, GroundFitValidity.SUPPORT_SWITCH, last)
+            } else {
+                assertEquals(where, GroundFitValidity.VALID, last)
+                val lastPose = Pose(1.3f, 25f, walkedM = fits.last().first)
+                val map = compressBelowGround(disparity(dropWorld(1.5), pose = lastPose), lastPose, kept)
+                assertWorldRejectsValidFit(map, lastPose, fits.last().second)
+            }
         }
     }
 
@@ -451,5 +471,25 @@ class GroundFitterTest {
         val fits = approach(GroundFitter(), world, toM = 3.92f)
         assertTrue(fits.none { it.second.validity == GroundFitValidity.SUPPORT_SWITCH })
         assertEquals(10f / 2.8f, fits.last().second.disparityScale, 0.02f * 10f / 1.3f)
+        val lastPose = Pose(1.3f, 25f, walkedM = fits.last().first)
+        assertWorldRejectsValidFit(disparity(world, pose = lastPose), lastPose, fits.last().second)
+    }
+
+    private fun assertWorldRejectsValidFit(map: DisparityMap, pose: Pose, observation: GroundObservation) {
+        assertTrue(observation.isValid)
+        val gravity = gravity(pose)
+        val phone = PhoneGeometrySettings(pose.heightM, HeightSource.PRESET)
+        val view = DepthViewGeometry(intrinsics, gravity, gridW, gridH, phone, TimeBasis.CAMERA_REALTIME, GeometryQuality.Ok)
+        val cells = checkNotNull(DepthCells.of(map, observation, view))
+        assertTrue(cells.hasHeights)
+        val frame = CameraGeometry(10L, TimeBasis.CAMERA_REALTIME, intrinsics, gravity, 0L, phone, GeometryQuality.Ok)
+        val key = MeasurementKey(1, 2)
+        val reading = DepthReading(CapabilityStatus.Available, map.kind, ScaleBasis.ASSUMED_PHONE_HEIGHT, ObservationId(1, 3),
+            DepthReadingTimes(9, 9, key, 10, 1, 200), view, observation, cells)
+        val decision = DepthContributionPolicy.assess(reading, frame, BaselineQualification.Qualified, null, null)
+        assertEquals(GroundFitValidity.VALID, decision.fit)
+        assertEquals(key, decision.key)
+        assertEquals(setOf(DepthRejection.SUPPORT_UNPROVEN, DepthRejection.INPUT_UNPROVEN,
+            DepthRejection.TRANSLATION_UNKNOWN, DepthRejection.ROTATION_UNCERTAINTY_UNKNOWN), decision.reasons)
     }
 }

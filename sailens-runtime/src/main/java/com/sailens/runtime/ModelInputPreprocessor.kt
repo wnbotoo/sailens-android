@@ -17,24 +17,27 @@ class ModelInputPreprocessor(
         frame: ImageFrame,
         rotationDegrees: Int,
         outputArray: FloatArray,
-    ): InputPreprocessBackend {
+    ): InputPreprocessBackend = preprocessFloatWithMapping(frame, rotationDegrees, outputArray).backend
+
+    fun preprocessFloatWithMapping(frame: ImageFrame, rotationDegrees: Int, outputArray: FloatArray): PreparedImage {
         val cacheKey = InputPreprocessCache.Key.from(frame, rotationDegrees, config)
         val cache = preprocessCache
-        cache?.awaitOrClaim(cacheKey) { cache.copyFloatInput(cacheKey, outputArray) }?.let { backend ->
-            return backend
+        cache?.awaitOrClaim(cacheKey) { cache.copyFloatWithMapping(cacheKey, outputArray, frame) }?.let {
+            return it
         }
         try {
             if (preferNativeYuvPreprocessing &&
                 nativeProcessor.preprocessFloat(frame, rotationDegrees, outputArray)
             ) {
                 val backend = InputPreprocessBackend.NATIVE_YUV
-                cache?.storeFloatInput(cacheKey, outputArray, backend)
-                return backend
+                val mapping = nativeProcessor.imageMapping(frame, rotationDegrees)
+                cache?.storeFloatInput(cacheKey, outputArray, backend, mapping, frame)
+                return PreparedImage(backend, mapping)
             }
-            fallbackProcessor.preprocess(frame, rotationDegrees, outputArray)
+            val mapping = fallbackProcessor.preprocessWithMapping(frame, rotationDegrees, outputArray)
             val backend = InputPreprocessBackend.OPENCV_FALLBACK
-            cache?.storeFloatInput(cacheKey, outputArray, backend)
-            return backend
+            cache?.storeFloatInput(cacheKey, outputArray, backend, mapping, frame)
+            return PreparedImage(backend, mapping)
         } finally {
             cache?.releaseClaim(cacheKey)
         }
@@ -57,7 +60,9 @@ class ModelInputPreprocessor(
         frame: ImageFrame,
         rotationDegrees: Int,
         outputArray: ByteArray,
-    ): InputPreprocessBackend {
+    ): InputPreprocessBackend = preprocessInt8WithMapping(frame, rotationDegrees, outputArray).backend
+
+    fun preprocessInt8WithMapping(frame: ImageFrame, rotationDegrees: Int, outputArray: ByteArray): PreparedImage {
         val cacheKey = InputPreprocessCache.Key.from(frame, rotationDegrees, config)
         val expectedSize = config.inputWidth * config.inputHeight * 3
         if (fallbackFloatInput.size != expectedSize) {
@@ -65,15 +70,15 @@ class ModelInputPreprocessor(
         }
         val cache = preprocessCache
         cache?.awaitOrClaim(cacheKey) {
-            cache.copyInt8Input(cacheKey, inputQuantization, outputArray)
-                ?: cache.copyFloatInput(cacheKey, fallbackFloatInput)?.let { backend ->
+            cache.copyInt8WithMapping(cacheKey, inputQuantization, outputArray, frame)
+                ?: cache.copyFloatWithMapping(cacheKey, fallbackFloatInput, frame)?.let { prepared ->
                     quantizeFloatInput(fallbackFloatInput, outputArray)
-                    val quantizedBackend = backend.asSharedQuantizedCacheHit()
-                    cache.storeInt8Input(cacheKey, inputQuantization, outputArray, quantizedBackend)
-                    quantizedBackend
+                    val quantizedBackend = prepared.backend.asSharedQuantizedCacheHit()
+                    cache.storeInt8Input(cacheKey, inputQuantization, outputArray, quantizedBackend, prepared.mapping, frame)
+                    PreparedImage(quantizedBackend, prepared.mapping)
                 }
-        }?.let { backend ->
-            return backend
+        }?.let {
+            return it
         }
 
         try {
@@ -81,16 +86,17 @@ class ModelInputPreprocessor(
                 nativeProcessor.preprocessInt8(frame, rotationDegrees, outputArray)
             ) {
                 val backend = InputPreprocessBackend.NATIVE_YUV
-                cache?.storeInt8Input(cacheKey, inputQuantization, outputArray, backend)
-                return backend
+                val mapping = nativeProcessor.imageMapping(frame, rotationDegrees)
+                cache?.storeInt8Input(cacheKey, inputQuantization, outputArray, backend, mapping, frame)
+                return PreparedImage(backend, mapping)
             }
 
-            fallbackProcessor.preprocess(frame, rotationDegrees, fallbackFloatInput)
+            val mapping = fallbackProcessor.preprocessWithMapping(frame, rotationDegrees, fallbackFloatInput)
             quantizeFloatInput(fallbackFloatInput, outputArray)
             val backend = InputPreprocessBackend.OPENCV_FALLBACK
-            cache?.storeFloatInput(cacheKey, fallbackFloatInput, backend)
-            cache?.storeInt8Input(cacheKey, inputQuantization, outputArray, backend)
-            return backend
+            cache?.storeFloatInput(cacheKey, fallbackFloatInput, backend, mapping, frame)
+            cache?.storeInt8Input(cacheKey, inputQuantization, outputArray, backend, mapping, frame)
+            return PreparedImage(backend, mapping)
         } finally {
             cache?.releaseClaim(cacheKey)
         }
@@ -109,14 +115,16 @@ class ModelInputPreprocessor(
         frame: ImageFrame,
         rotationDegrees: Int,
         outputArray: ByteArray,
-    ): InputPreprocessBackend {
+    ): InputPreprocessBackend = preprocessUint8WithMapping(frame, rotationDegrees, outputArray).backend
+
+    fun preprocessUint8WithMapping(frame: ImageFrame, rotationDegrees: Int, outputArray: ByteArray): PreparedImage {
         val expectedSize = config.inputWidth * config.inputHeight * 3
         if (fallbackFloatInput.size != expectedSize) {
             fallbackFloatInput = FloatArray(expectedSize)
         }
-        val backend = preprocessFloat(frame, rotationDegrees, fallbackFloatInput)
+        val prepared = preprocessFloatWithMapping(frame, rotationDegrees, fallbackFloatInput)
         quantizeFloatInputUnsigned(fallbackFloatInput, outputArray)
-        return backend
+        return prepared
     }
 
     fun postprocess(scores: FloatArray, resultMask: IntArray) {

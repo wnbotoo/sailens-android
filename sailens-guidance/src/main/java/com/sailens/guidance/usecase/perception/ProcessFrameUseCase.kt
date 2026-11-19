@@ -11,6 +11,10 @@ import com.sailens.guidance.model.perception.ObstacleDetection
 import com.sailens.guidance.model.perception.DetectedObstacle
 import com.sailens.guidance.model.perception.ObstacleSourceFrame
 import com.sailens.core.frame.ImageFrame
+import com.sailens.guidance.model.perception.PerceptionFrameIdentity
+import com.sailens.guidance.model.perception.PerceptionFrameEvidence
+import com.sailens.runtime.InputImageMapping
+import com.sailens.vision.semantic.SemanticImageMapping
 import com.sailens.core.runtime.MlRuntimeInfo
 import com.sailens.guidance.model.perception.PerceptionResult
 import com.sailens.guidance.model.perception.SegmentationAnalysis
@@ -67,10 +71,13 @@ class ProcessFrameUseCase(
         val obstacleOutputReadTimeMs: Long = 0,
         val obstaclePostprocessTimeMs: Long = 0,
         val runtimeInfo: MlRuntimeInfo = MlRuntimeInfo(),
+        val imageMapping: InputImageMapping? = null,
     )
 
     private data class SemanticAnalysisOutput(
         val analysis: SegmentationAnalysis,
+        val source: PerceptionFrameIdentity?,
+        val imageMapping: SemanticImageMapping?,
         val preprocessTimeMs: Long = 0,
         val inferenceTimeMs: Long = 0,
         val outputReadTimeMs: Long = 0,
@@ -90,6 +97,8 @@ class ProcessFrameUseCase(
         val analysis: SegmentationAnalysis,
         val runtimeInfo: MlRuntimeInfo,
         val maskLease: SegmentationMaskLease?,
+        val source: PerceptionFrameIdentity?,
+        val imageMapping: SemanticImageMapping?,
     )
 
     /**
@@ -106,7 +115,11 @@ class ProcessFrameUseCase(
      * @param geometry the frame's camera geometry, for the ground-contact distance. Null
      *   leaves every distance at today's image-position estimate.
      */
-    suspend operator fun invoke(frame: ImageFrame, geometry: CameraGeometry? = null): Result<PerceptionResult> = coroutineScope {
+    suspend operator fun invoke(
+        frame: ImageFrame,
+        geometry: CameraGeometry? = null,
+        recordWorldProvenance: Boolean = false,
+    ): Result<PerceptionResult> = coroutineScope {
         val startTime = clock()
         // 挡位在会话之间可切换（PerceptionProfileManager.activateSelected），会话内不变
         val config = profileManager.activeConfig
@@ -114,7 +127,8 @@ class ProcessFrameUseCase(
 
         val obstacleRun = selectObstacleRun(config, startTime)
 
-        val semDeferred = async { getSemanticAnalysis(frame) }
+        val identity = if (recordWorldProvenance) PerceptionFrameIdentity(frame.sequenceNumber, frame.timestamp) else null
+        val semDeferred = async { getSemanticAnalysis(frame, identity) }
         // det 以异常报错（sem 用 Result）。在这里收成 Result：单帧 det 失败应当和 sem 失败一样被计为
         // 一帧失败、交给上层按连续失败次数处置，而不是直接冲垮整条 flow。
         val obstacleDeferred = obstacleRun?.let { run ->
@@ -152,10 +166,11 @@ class ProcessFrameUseCase(
                     .map { it.boundingBox },
                 segmentation = semanticOutput.analysis.segmentation,
                 config = config.groundContact,
+                semanticSource = semanticOutput.source,
             )
             val rawObstacles = obstacleExtractor.extractFromDetections(obstacleOutput.detections, depthEstimator(distanceFrame))
             ObstacleTrackingOutput(
-                trackedObstacles = obstacleTracker.update(rawObstacles, completedAt, ObstacleSourceFrame(frame.sequenceNumber, frame.timestamp)),
+                trackedObstacles = obstacleTracker.update(rawObstacles, completedAt, ObstacleSourceFrame(frame.sequenceNumber, frame.timestamp, identity)),
                 runKind = obstacleRun.kind,
                 obstacleDetections = obstacleOutput.detections,
                 obstaclePreprocessTimeMs = obstacleOutput.preprocessTimeMs,
@@ -163,6 +178,7 @@ class ProcessFrameUseCase(
                 obstacleOutputReadTimeMs = obstacleOutput.outputReadTimeMs,
                 obstaclePostprocessTimeMs = obstacleOutput.postprocessTimeMs,
                 runtimeInfo = obstacleOutput.runtimeInfo,
+                imageMapping = obstacleOutput.imageMapping,
             )
         } else if (config.detectionEnabled) {
             // det 本帧未到间隔：用跟踪器运动预测补偿
@@ -184,7 +200,7 @@ class ProcessFrameUseCase(
             )
         }
 
-        Result.success(buildPerceptionResult(frame, semanticOutput, trackingOutput, startTime))
+        Result.success(buildPerceptionResult(frame, identity, semanticOutput, trackingOutput, startTime))
     }
 
     /** 决定本帧 obstacle 槽位是否运行 det（按调度间隔），否则不跑（由 tracker 预测补偿）。 */
@@ -208,6 +224,7 @@ class ProcessFrameUseCase(
 
     private fun buildPerceptionResult(
         frame: ImageFrame,
+        identity: PerceptionFrameIdentity?,
         semanticOutput: SemanticAnalysisOutput,
         trackingOutput: ObstacleTrackingOutput,
         startTime: Long,
@@ -233,10 +250,13 @@ class ProcessFrameUseCase(
             obstaclePostprocessTimeMs = trackingOutput.obstaclePostprocessTimeMs,
             obstacleRuntimeInfo = trackingOutput.runtimeInfo,
             obstacleRunKind = trackingOutput.runKind,
+            frameEvidence = identity?.let {
+                PerceptionFrameEvidence(it, semanticOutput.source, semanticOutput.imageMapping, trackingOutput.imageMapping)
+            },
         )
     }
 
-    private suspend fun getSemanticAnalysis(frame: ImageFrame): Result<SemanticAnalysisOutput> {
+    private suspend fun getSemanticAnalysis(frame: ImageFrame, identity: PerceptionFrameIdentity?): Result<SemanticAnalysisOutput> {
         val reusableCached = cachedSemanticAnalysis?.takeIf { cached ->
             cached.frameWidth == frame.width &&
                 cached.frameHeight == frame.height &&
@@ -249,6 +269,8 @@ class ProcessFrameUseCase(
             return Result.success(
                 SemanticAnalysisOutput(
                     analysis = reusableCached.analysis,
+                    source = reusableCached.source,
+                    imageMapping = reusableCached.imageMapping,
                     runtimeInfo = MlRuntimeInfo.cached(reusableCached.runtimeInfo),
                 )
             )
@@ -279,6 +301,8 @@ class ProcessFrameUseCase(
             analysis = analysis,
             runtimeInfo = segmentationOutput.runtimeInfo,
             maskLease = segmentationOutput.maskLease,
+            source = identity,
+            imageMapping = segmentationOutput.imageMapping,
         )
         // The previous frame's processing has finished and the UI only ever gets a copy, so the
         // replaced analysis's mask has no reader left: its array can carry the next run.
@@ -286,6 +310,8 @@ class ProcessFrameUseCase(
         return Result.success(
             SemanticAnalysisOutput(
                 analysis = analysis,
+                source = identity,
+                imageMapping = segmentationOutput.imageMapping,
                 preprocessTimeMs = segmentationOutput.preprocessTimeMs,
                 inferenceTimeMs = segmentationOutput.modelTimeMs,
                 outputReadTimeMs = segmentationOutput.outputReadTimeMs,

@@ -75,6 +75,8 @@ import com.sailens.vision.depth.MeasurementKey
 import com.sailens.vision.depth.MetricDepthMap
 import com.sailens.vision.depth.ResizePolicy
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
@@ -85,6 +87,7 @@ import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
+import com.sailens.guidance.world.LocalWorldModelBuilder
 import kotlin.math.abs
 import kotlin.random.Random
 
@@ -134,11 +137,14 @@ class SimulatedPipeline(
     depthFitter: () -> GroundFitter = { GroundFitter() },
     /** The lane's depth evidence recorder; none unless a test watches the runs. */
     depthEvidence: DepthEvidenceRecorder = DepthEvidenceRecorder.None,
+    withLocalWorld: Boolean = false,
 ) {
     private val semantics = CityscapesNavigationSemantics
 
     /** The pipeline's monotonic clock; it starts at [Scenario.CLOCK_START_MS]. */
     val clock = SimulatedClock(Scenario.CLOCK_START_MS)
+    private val cameraFacts = scenario.facts(0).camera.toCameraFacts()
+    val world = if (withLocalWorld) SimulatedWorldAnalysis(scenario.camera, cameraFacts) { clock() * 1_000_000L } else null
 
     /** What the device's motion sensors say. */
     val stationary = MutableStateFlow(false)
@@ -191,14 +197,17 @@ class SimulatedPipeline(
             releases.incrementAndGet()
         }
         override suspend fun segment(frame: ImageFrame): Result<SegmentationOutput> {
-            if (depth != null) depthChannel.trySend(frame)
+            if (depth != null && frame.sequenceNumber !in depth.omittedDeliveries) depthChannel.trySend(frame)
             val index = indexOf(frame)
             if (scenario.frames[index].semFails) {
                 failedFrames += frame.sequenceNumber
                 return Result.failure(SimulatedModelFailure("segmentation", frame.sequenceNumber))
             }
             val ids = checkNotNull(classMaps[index]) { "frame ${frame.sequenceNumber} was not rendered" }
-            return Result.success(SegmentationOutput(SegmentationMask(scenario.camera.mapWidth, scenario.camera.mapHeight, ids.copyOf()), 0, 0, 0))
+            return Result.success(SegmentationOutput(
+                SegmentationMask(scenario.camera.mapWidth, scenario.camera.mapHeight, ids.copyOf()), 0, 0, 0,
+                imageMapping = world?.semanticMapping(frame),
+            ))
         }
     }
 
@@ -222,11 +231,12 @@ class SimulatedPipeline(
                 failedFrames += frame.sequenceNumber
                 throw SimulatedModelFailure("detection", frame.sequenceNumber)
             }
-            return ObstacleModelOutput(checkNotNull(detections[index]) { "frame ${frame.sequenceNumber} was not rendered" })
+            return ObstacleModelOutput(
+                checkNotNull(detections[index]) { "frame ${frame.sequenceNumber} was not rendered" },
+                imageMapping = world?.detectionMapping(frame),
+            )
         }
     }
-
-    private val cameraFacts = scenario.facts(0).camera.toCameraFacts()
 
     private val orientation = object : OrientationSource {
         private val noRotation = MotionTracker()
@@ -301,6 +311,7 @@ class SimulatedPipeline(
     val depthRunners: MutableList<SimulatedDepthSource> = java.util.Collections.synchronizedList(mutableListOf())
 
     /** The depth lane, wired as `GuidanceModule` wires it; null without [depth]. */
+    @OptIn(ExperimentalCoroutinesApi::class)
     val depthLane: DepthGeometryLane? = depth?.let { model ->
         DepthGeometryLane(
             producerFactory = {
@@ -317,6 +328,10 @@ class SimulatedPipeline(
             logService = SilentLog,
             fitterFactory = depthFitter,
             elapsedMs = clock,
+            threadCpuNanos = { -1L },
+            // In the world counterfactual, finish a due depth run before advancing the test clock.
+            laneDispatcher = if (withLocalWorld) Dispatchers.Unconfined else Dispatchers.Default.limitedParallelism(1),
+            fitDispatcher = if (withLocalWorld) Dispatchers.Unconfined else Dispatchers.Default.limitedParallelism(1),
             evidence = depthEvidence,
         )
     }
@@ -494,6 +509,7 @@ class SimulatedPipeline(
         isStationary = { stationary.value },
         depthLane = depthLane,
         depthSwitch = DepthGeometrySwitch(initial = depth != null),
+        localWorldBuilder = world?.let { LocalWorldModelBuilder(semantics) },
     )
 
     /** Stops a session (resets every processor and the cooldown) and releases the models. */
@@ -538,7 +554,7 @@ class SimulatedPipeline(
             yuvData = Yuv420FrameData(YuvPlaneData(y, w, 1), chroma, chroma),
             receivedElapsedRealtimeNanos = record.receivedElapsedRealtimeNanos,
             sourceGeometry = FrameSourceGeometry(checkNotNull(record.sensorToBufferTransform), 0, 0, w, h),
-        )
+        ).also { world?.deliver(it) }
     }
 
     private object SilentLog : LogService {
@@ -590,6 +606,7 @@ data class SimulatedDepthModel(
     val initFails: Boolean = false,
     val thermal: ThermalLevel = ThermalLevel.NONE,
     val metric: SimulatedMetricDepth? = null,
+    val omittedDeliveries: LongRange = LongRange.EMPTY,
 )
 
 /** A model failing on one frame, as a scenario scripted it. */

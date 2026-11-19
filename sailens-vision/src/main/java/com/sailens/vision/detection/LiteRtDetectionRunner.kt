@@ -8,6 +8,8 @@ import com.sailens.core.frame.ImageFrame
 import com.sailens.core.log.LogService
 import com.sailens.core.runtime.MlRuntimeInfo
 import com.sailens.runtime.InputPreprocessBackend
+import com.sailens.runtime.InputImageMapping
+import com.sailens.runtime.PreparedImage
 import com.sailens.runtime.InputPreprocessCache
 import com.sailens.runtime.ModelInputDataType
 import com.sailens.runtime.ModelInputPreprocessor
@@ -170,7 +172,7 @@ class LiteRtDetectionRunner(
         val activeInputDataType = inputDataType
 
         val startTime = SystemClock.uptimeMillis()
-        val preprocessBackend = preprocessInput(activeProcessor, frame, activeInputDataType)
+        val prepared = preprocessInput(activeProcessor, frame, activeInputDataType)
         val afterPreprocessTime = SystemClock.uptimeMillis()
 
         writeInput(activeInputBuffer, activeInputDataType)
@@ -215,9 +217,10 @@ class LiteRtDetectionRunner(
                     runtimeInfo = MlRuntimeInfo(
                         accelerator = activeSession.accelerator.name,
                         acceleratorSelection = activeSession.acceleratorSelection,
-                        preprocessBackend = preprocessBackend.traceName,
+                        preprocessBackend = prepared.backend.traceName,
                         postprocessBackend = handleOutput.backend,
                     ),
+                    imageMapping = prepared.alignedWith(handleOutput),
                 )
             }
         }
@@ -261,10 +264,29 @@ class LiteRtDetectionRunner(
             runtimeInfo = MlRuntimeInfo(
                 accelerator = activeSession.accelerator.name,
                 acceleratorSelection = activeSession.acceleratorSelection,
-                preprocessBackend = preprocessBackend.traceName,
+                preprocessBackend = prepared.backend.traceName,
                 postprocessBackend = postProcessOutput.backend,
             ),
+            imageMapping = prepared.alignedWith(postProcessOutput),
         )
+    }
+
+    private fun PreparedImage.alignedWith(decoded: DetectionPostProcessOutput): InputImageMapping? {
+        if (decoded.selectedCompatibilityBox) return null
+        when (backend) {
+            InputPreprocessBackend.NATIVE_YUV,
+            InputPreprocessBackend.SHARED_NATIVE_YUV,
+            InputPreprocessBackend.SHARED_QUANTIZED_NATIVE_YUV -> Unit
+            else -> return null
+        }
+        val input = mapping ?: return null
+        val transform = decoded.transform ?: return null
+        if (!transform.selectedEdgesProven) return null
+        return input.takeIf {
+            it.rotationDegrees in setOf(0, 90, 180, 270) && it.tensorWidth == it.tensorHeight &&
+                it.x.scale == transform.scale.toDouble() && it.y.scale == transform.scale.toDouble() &&
+                it.x.offset == transform.padX.toDouble() && it.y.offset == transform.padY.toDouble()
+        }
     }
 
     fun release() {
@@ -389,21 +411,21 @@ class LiteRtDetectionRunner(
         processor: ModelInputPreprocessor,
         frame: ImageFrame,
         activeInputDataType: ModelInputDataType,
-    ): InputPreprocessBackend {
+    ): PreparedImage {
         return when (activeInputDataType) {
-            ModelInputDataType.FLOAT32 -> processor.preprocessFloat(
+            ModelInputDataType.FLOAT32 -> processor.preprocessFloatWithMapping(
                 frame = frame,
                 rotationDegrees = frame.rotationDegrees,
                 outputArray = cachedFloatInput,
             )
 
-            ModelInputDataType.INT8 -> processor.preprocessInt8(
+            ModelInputDataType.INT8 -> processor.preprocessInt8WithMapping(
                 frame = frame,
                 rotationDegrees = frame.rotationDegrees,
                 outputArray = cachedInt8Input,
             )
 
-            ModelInputDataType.UINT8 -> processor.preprocessUint8(
+            ModelInputDataType.UINT8 -> processor.preprocessUint8WithMapping(
                 frame = frame,
                 rotationDegrees = frame.rotationDegrees,
                 outputArray = cachedInt8Input,

@@ -130,6 +130,7 @@ static bool preprocessYuv(
         float stdG,
         float stdB,
         int resizeFilter,
+        float (&mapping)[7],
         Writer writer) {
     if (sourceWidth <= 0 || sourceHeight <= 0 || targetWidth <= 0 || targetHeight <= 0 ||
         stdR == 0.0f || stdG == 0.0f || stdB == 0.0f) {
@@ -152,6 +153,13 @@ static bool preprocessYuv(
     const int activeEndX = std::clamp(static_cast<int>(std::ceil(padX + resizedWidth)), activeStartX, targetWidth);
     const int activeStartY = std::clamp(static_cast<int>(std::ceil(padY)), 0, targetHeight);
     const int activeEndY = std::clamp(static_cast<int>(std::ceil(padY + resizedHeight)), activeStartY, targetHeight);
+    mapping[0] = scale;
+    mapping[1] = padX;
+    mapping[2] = padY;
+    mapping[3] = static_cast<float>(activeStartX);
+    mapping[4] = static_cast<float>(activeEndX);
+    mapping[5] = static_cast<float>(activeStartY);
+    mapping[6] = static_cast<float>(activeEndY);
     const float padR = (0.0f - meanR) / stdR;
     const float padG = (0.0f - meanG) / stdG;
     const float padB = (0.0f - meanB) / stdB;
@@ -252,8 +260,10 @@ nativePreprocessYuvToFloat(
         jfloat stdG,
         jfloat stdB,
         jint resizeFilter,
-        jfloatArray output) {
+        jfloatArray output,
+        jfloatArray mapping) {
     if (y == nullptr || u == nullptr || v == nullptr || output == nullptr ||
+        mapping == nullptr || env->GetArrayLength(mapping) != 7 ||
         yRowStride <= 0 || yPixelStride <= 0 ||
         uRowStride <= 0 || uPixelStride <= 0 ||
         vRowStride <= 0 || vPixelStride <= 0 ||
@@ -303,6 +313,7 @@ nativePreprocessYuvToFloat(
             128,
     };
 
+    float imageMapping[7];
     const bool success = preprocessYuv(
             yPlane,
             uPlane,
@@ -319,6 +330,7 @@ nativePreprocessYuvToFloat(
             stdG,
             stdB,
             resizeFilter,
+            imageMapping,
             [outputData](int index, float value) {
                 outputData[index] = value;
             });
@@ -327,6 +339,7 @@ nativePreprocessYuvToFloat(
     env->ReleaseByteArrayElements(v, vData, JNI_ABORT);
     env->ReleaseByteArrayElements(u, uData, JNI_ABORT);
     env->ReleaseByteArrayElements(y, yData, JNI_ABORT);
+    if (success) env->SetFloatArrayRegion(mapping, 0, 7, imageMapping);
     return success ? JNI_TRUE : JNI_FALSE;
 }
 
@@ -357,8 +370,10 @@ nativePreprocessYuvToInt8(
         jint resizeFilter,
         jfloat quantScale,
         jint quantZeroPoint,
-        jbyteArray output) {
+        jbyteArray output,
+        jfloatArray mapping) {
     if (y == nullptr || u == nullptr || v == nullptr || output == nullptr ||
+        mapping == nullptr || env->GetArrayLength(mapping) != 7 ||
         yRowStride <= 0 || yPixelStride <= 0 ||
         uRowStride <= 0 || uPixelStride <= 0 ||
         vRowStride <= 0 || vPixelStride <= 0 ||
@@ -410,6 +425,7 @@ nativePreprocessYuvToInt8(
     };
 
     const float inverseQuantScale = 1.0f / quantScale;
+    float imageMapping[7];
     const bool success = preprocessYuv(
             yPlane,
             uPlane,
@@ -426,6 +442,7 @@ nativePreprocessYuvToInt8(
             stdG,
             stdB,
             resizeFilter,
+            imageMapping,
             [outputData, inverseQuantScale, quantZeroPoint](int index, float value) {
                 const int quantized = static_cast<int>(std::lround(value * inverseQuantScale + quantZeroPoint));
                 outputData[index] = static_cast<jbyte>(std::clamp(quantized, -128, 127));
@@ -435,6 +452,7 @@ nativePreprocessYuvToInt8(
     env->ReleaseByteArrayElements(v, vData, JNI_ABORT);
     env->ReleaseByteArrayElements(u, uData, JNI_ABORT);
     env->ReleaseByteArrayElements(y, yData, JNI_ABORT);
+    if (success) env->SetFloatArrayRegion(mapping, 0, 7, imageMapping);
     return success ? JNI_TRUE : JNI_FALSE;
 }
 
@@ -488,10 +506,10 @@ nativeQuantizeFloatToInt8(
 
 const JNINativeMethod kYuvInputPreprocessorMethods[] = {
         {"nativePreprocessYuvToFloat",
-         "([B[B[BIIIIIIIIIIIFFFFFFI[F)Z",
+         "([B[B[BIIIIIIIIIIIFFFFFFI[F[F)Z",
          reinterpret_cast<void*>(nativePreprocessYuvToFloat)},
         {"nativePreprocessYuvToInt8",
-         "([B[B[BIIIIIIIIIIIFFFFFFIFI[B)Z",
+         "([B[B[BIIIIIIIIIIIFFFFFFIFI[B[F)Z",
          reinterpret_cast<void*>(nativePreprocessYuvToInt8)},
         {"nativeQuantizeFloatToInt8",
          "([F[BFI)Z",

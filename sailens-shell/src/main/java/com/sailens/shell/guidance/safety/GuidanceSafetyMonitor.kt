@@ -31,6 +31,7 @@ internal data class GuidanceSafetySnapshot(
     val elapsedMs: Long,
     val cause: SafetyInput,
     val release: PromptHold.Release<HoldCause>? = null,
+    val stopBegan: Boolean = false,
 )
 
 /** The alerts about Guidance itself: what an input to the safety monitor can call for. */
@@ -240,7 +241,7 @@ internal class GuidanceSafetyMonitor(
         if (nextState != state) stateSinceElapsedMs = nowMs
         axes = next
         state = nextState
-        onChange(GuidanceSafetySnapshot(axes, state, stateSinceElapsedMs, nowMs, cause, release))
+        onChange(GuidanceSafetySnapshot(axes, state, stateSinceElapsedMs, nowMs, cause, release, stopBegan = beganStop))
     }
 
     private fun axesAt(nowMs: Long) = GuidanceSafetyAxes(

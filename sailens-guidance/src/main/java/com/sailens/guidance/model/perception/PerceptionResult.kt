@@ -29,4 +29,5 @@ data class PerceptionResult(
     val obstacleRuntimeInfo: MlRuntimeInfo = MlRuntimeInfo(),
     /** 本帧 obstacle 槽位是否实际运行 det（det / none） */
     val obstacleRunKind: ObstacleRunKind = ObstacleRunKind.NONE,
+    val frameEvidence: PerceptionFrameEvidence? = null,
 )

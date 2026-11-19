@@ -1,6 +1,7 @@
 package com.sailens.vision.detection
 
 import com.sailens.core.runtime.MlRuntimeInfo
+import com.sailens.runtime.InputImageMapping
 
 /**
  * One detection inference: what the model saw, plus the timings traces are built from.
@@ -15,4 +16,6 @@ data class DetectionOutput(
     val outputReadTimeMs: Long = 0,
     val postprocessTimeMs: Long = 0,
     val runtimeInfo: MlRuntimeInfo = MlRuntimeInfo(),
+    /** Known input/decoder alignment and declared decoding for every selected box. */
+    val imageMapping: InputImageMapping? = null,
 )

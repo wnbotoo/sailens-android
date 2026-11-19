@@ -61,6 +61,11 @@ internal class SimHaptics(
     private fun line(kind: String, rhythm: GuidanceHaptic? = null, result: String? = null) =
         record(TimelineEntry.Motor(now(), kind, rhythm, result))
 
+    fun occupyProtected(durationMs: Long) {
+        arbiter.claimUnconditionally(durationMs)
+        motorWait.reschedule()
+    }
+
     /** The vibrator: whether it was asked to play. */
     private fun vibrator(haptic: GuidanceHaptic): Boolean = vibrates
 

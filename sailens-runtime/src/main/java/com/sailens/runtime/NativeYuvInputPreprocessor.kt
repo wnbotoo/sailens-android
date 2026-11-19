@@ -7,6 +7,21 @@ internal class NativeYuvInputPreprocessor(
     private val config: ModelTensorConfig,
     private val inputQuantization: ModelInputQuantization,
 ) {
+    private val mapping = FloatArray(7)
+
+    fun imageMapping(frame: ImageFrame, rotationDegrees: Int): InputImageMapping {
+        val sideways = rotationDegrees == 90 || rotationDegrees == 270
+        val scale = mapping[0].toDouble()
+        return InputImageMapping(
+            if (sideways) frame.height else frame.width,
+            if (sideways) frame.width else frame.height,
+            config.inputWidth,
+            config.inputHeight,
+            InputImageMapping.Axis(scale, mapping[1].toDouble(), mapping[3].toInt(), mapping[4].toInt()),
+            InputImageMapping.Axis(scale, mapping[2].toDouble(), mapping[5].toInt(), mapping[6].toInt()),
+            rotationDegrees,
+        )
+    }
     private var nhwcFloatScratch = FloatArray(0)
     private var nhwcInt8Scratch = ByteArray(0)
 
@@ -51,6 +66,7 @@ internal class NativeYuvInputPreprocessor(
                 stdB = config.std.third,
                 resizeFilter = config.resizeFilter.nativeValue,
                 output = nativeOutput,
+                mapping = mapping,
             )
         }.getOrDefault(false)
         if (success && config.inputLayout == ImageTensorLayout.NCHW) {
@@ -107,6 +123,7 @@ internal class NativeYuvInputPreprocessor(
                 quantScale = inputQuantization.scale,
                 quantZeroPoint = inputQuantization.zeroPoint,
                 output = nativeOutput,
+                mapping = mapping,
             )
         }.getOrDefault(false)
         if (success && config.inputLayout == ImageTensorLayout.NCHW) {
@@ -163,6 +180,7 @@ internal class NativeYuvInputPreprocessor(
         stdB: Float,
         resizeFilter: Int,
         output: FloatArray,
+        mapping: FloatArray,
     ): Boolean
 
     private external fun nativePreprocessYuvToInt8(
@@ -190,6 +208,7 @@ internal class NativeYuvInputPreprocessor(
         quantScale: Float,
         quantZeroPoint: Int,
         output: ByteArray,
+        mapping: FloatArray,
     ): Boolean
 
     private val ResizeFilter.nativeValue: Int

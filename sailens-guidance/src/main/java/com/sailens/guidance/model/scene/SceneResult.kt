@@ -6,6 +6,7 @@ import com.sailens.guidance.geometry.CameraGeometry
 import com.sailens.guidance.model.analysis.VisionFaults
 import com.sailens.guidance.motion.MotionState
 import com.sailens.guidance.safety.GuidanceQualification
+import com.sailens.guidance.world.WorldPublication
 import com.sailens.core.mask.BinaryMask
 import com.sailens.guidance.model.perception.ObstacleDetection
 import com.sailens.guidance.model.perception.DetectedObstacle
@@ -41,4 +42,5 @@ data class SceneResult(
      * view and cells. Read by no decision.
      */
     val depthReading: DepthReading = DepthReading.NOT_CONFIGURED,
+    val worldPublication: WorldPublication? = null,
 )

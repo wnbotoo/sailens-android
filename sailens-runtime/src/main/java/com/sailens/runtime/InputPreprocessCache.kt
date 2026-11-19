@@ -1,6 +1,7 @@
 package com.sailens.runtime
 
 import com.sailens.core.frame.ImageFrame
+import java.lang.ref.WeakReference
 
 /**
  * Same-frame sharing of the YUV-to-tensor conversion between models that want the identical input.
@@ -58,16 +59,21 @@ class InputPreprocessCache {
         }
     }
 
-    @Synchronized
     fun copyFloatInput(
         key: Key,
         outputArray: FloatArray,
-    ): InputPreprocessBackend? {
+    ): InputPreprocessBackend? = copyFloatWithMapping(key, outputArray, null)?.backend
+
+    @Synchronized
+    internal fun copyFloatWithMapping(key: Key, outputArray: FloatArray, frame: ImageFrame?): PreparedImage? {
         val entry = floatEntry ?: return null
         if (entry.key != key || entry.values.size != outputArray.size) return null
 
         entry.values.copyInto(outputArray)
-        return entry.backend.asSharedCacheHit()
+        return PreparedImage(
+            entry.backend.asSharedCacheHit(),
+            entry.mapping.takeIf { entry.frame?.get() === frame && frame != null },
+        )
     }
 
     @Synchronized
@@ -75,20 +81,31 @@ class InputPreprocessCache {
         key: Key,
         inputArray: FloatArray,
         backend: InputPreprocessBackend,
+        mapping: InputImageMapping? = null,
+        frame: ImageFrame? = null,
     ) {
         floatEntry = FloatEntry(
             key = key,
             values = inputArray,
             backend = backend,
+            mapping = mapping,
+            frame = frame?.let(::WeakReference),
         )
     }
 
-    @Synchronized
     fun copyInt8Input(
         key: Key,
         quantization: ModelInputQuantization,
         outputArray: ByteArray,
-    ): InputPreprocessBackend? {
+    ): InputPreprocessBackend? = copyInt8WithMapping(key, quantization, outputArray, null)?.backend
+
+    @Synchronized
+    internal fun copyInt8WithMapping(
+        key: Key,
+        quantization: ModelInputQuantization,
+        outputArray: ByteArray,
+        frame: ImageFrame?,
+    ): PreparedImage? {
         val entry = int8Entry ?: return null
         if (
             entry.key != key ||
@@ -99,11 +116,12 @@ class InputPreprocessCache {
         }
 
         entry.values.copyInto(outputArray)
-        return when (entry.backend) {
+        val backend = when (entry.backend) {
             InputPreprocessBackend.SHARED_QUANTIZED_NATIVE_YUV,
             InputPreprocessBackend.SHARED_QUANTIZED_OPENCV_FALLBACK -> entry.backend
             else -> entry.backend.asSharedCacheHit()
         }
+        return PreparedImage(backend, entry.mapping.takeIf { entry.frame?.get() === frame && frame != null })
     }
 
     @Synchronized
@@ -112,12 +130,16 @@ class InputPreprocessCache {
         quantization: ModelInputQuantization,
         inputArray: ByteArray,
         backend: InputPreprocessBackend,
+        mapping: InputImageMapping? = null,
+        frame: ImageFrame? = null,
     ) {
         int8Entry = Int8Entry(
             key = key,
             quantization = quantization,
             values = inputArray,
             backend = backend,
+            mapping = mapping,
+            frame = frame?.let(::WeakReference),
         )
     }
 
@@ -174,6 +196,8 @@ class InputPreprocessCache {
         val key: Key,
         val values: FloatArray,
         val backend: InputPreprocessBackend,
+        val mapping: InputImageMapping?,
+        val frame: WeakReference<ImageFrame>?,
     )
 
     private data class Int8Entry(
@@ -181,5 +205,7 @@ class InputPreprocessCache {
         val quantization: ModelInputQuantization,
         val values: ByteArray,
         val backend: InputPreprocessBackend,
+        val mapping: InputImageMapping?,
+        val frame: WeakReference<ImageFrame>?,
     )
 }

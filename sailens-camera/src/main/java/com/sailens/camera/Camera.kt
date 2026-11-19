@@ -11,7 +11,9 @@ import androidx.camera.core.UseCaseGroup
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.lifecycle.awaitInstance
 import androidx.lifecycle.LifecycleOwner
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.withContext
 
 private const val TAG = "Camera"
 
@@ -30,11 +32,11 @@ public class Camera : CameraCharacteristicsProvider {
         appContext: Context,
         lifecycleOwner: LifecycleOwner,
         useCases: List<UseCase>,
-    ) {
+    ): Unit = withContext(Dispatchers.Main.immediate) {
         val cameraProvider = ProcessCameraProvider.awaitInstance(appContext)
         val cameraSelector = DEFAULT_BACK_CAMERA
         if (!cameraProvider.hasCamera(cameraSelector)) {
-            return
+            return@withContext
         }
         cameraInfo = cameraProvider.getCameraInfo(cameraSelector)
 

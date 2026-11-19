@@ -78,6 +78,8 @@ class NativeGuidanceBindingCoverageTest {
             "nativeExtractConnectivityStats",
             "([JII[FFFFIFFF[I[F)Z",
         ),
+        NativeBinding(NativeWorldGrid::class.java, "fill", "(II[I[J[Z[I)Z"),
+        NativeBinding(NativeWorldGrid::class.java, "classify", "([D[D[DI[DII[I[J[J[Z)I"),
     )
 
     @Test
@@ -100,10 +102,7 @@ class NativeGuidanceBindingCoverageTest {
             .sortedBy { it.key }
 
         assertEquals(
-            "These are the 5 of the migration baseline JNI entry points that belong to Guidance after G3 " +
-                "split the preprocessing kernels into sailens-runtime and the vision kernels into " +
-                "sailens-vision. A changed " +
-                "declaration must be mirrored in the RegisterNatives table in " +
+            "A changed Guidance native declaration must be mirrored in the RegisterNatives table in " +
                 "sailens-guidance/src/main/cpp/sailens_guidance_jni.cpp and in expectedBindings here.",
             expectedBindings.sortedBy { it.key }.map { it.key },
             declared.map { it.key },
@@ -162,6 +161,7 @@ class NativeGuidanceBindingCoverageTest {
                 config = AnalysisConfig(),
                 logService = SilentLogService,
             )
+            NativeWorldGrid::class.java -> NativeWorldGrid
 
             else -> error("No receiver configured for ${owner.name}")
         }

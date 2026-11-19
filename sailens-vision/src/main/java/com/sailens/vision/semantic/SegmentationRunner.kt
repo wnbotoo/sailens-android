@@ -4,7 +4,8 @@ import android.os.SystemClock
 import com.google.ai.edge.litert.Accelerator
 import com.sailens.core.frame.ImageFrame
 import com.sailens.core.runtime.MlRuntimeInfo
-import com.sailens.runtime.InputPreprocessBackend
+import com.sailens.runtime.InputImageMapping
+import com.sailens.runtime.PreparedImage
 import com.sailens.runtime.InputPreprocessCache
 import com.sailens.runtime.ModelInputDataType
 import com.sailens.runtime.ModelInputPreprocessor
@@ -22,6 +23,15 @@ data class SegmentationRunResult<R>(
     val outputReadTimeMs: Long,
     val postprocessTimeMs: Long,
     val runtimeInfo: MlRuntimeInfo,
+    val imageMapping: SemanticImageMapping? = null,
+)
+
+/** The actual tensor input and the score dimensions and crop used by this run. */
+data class SemanticImageMapping(
+    val input: InputImageMapping,
+    val scoreWidth: Int,
+    val scoreHeight: Int,
+    val content: SemanticContentRegion,
 )
 
 /**
@@ -43,6 +53,7 @@ class SegmentationRunner<R>(
     preferNativeYuvPreprocessing: Boolean,
     preprocessCache: InputPreprocessCache? = null,
     private val postprocessor: SemanticPostprocessor<R>,
+    private val scoreGridSpansInput: Boolean = false,
 ) {
     val accelerator: Accelerator get() = session.accelerator
     private val inputBuffer = session.inputBuffers.single()
@@ -100,7 +111,7 @@ class SegmentationRunner<R>(
         val contentMask = contentMaskFor(spec.content)
 
         // 1. 预处理: YUV/RGBA frame -> model input tensor layout
-        val preprocessBackend = preprocessInput(rawFrame)
+        val prepared = preprocessInput(rawFrame)
         val afterPreprocessTime = SystemClock.uptimeMillis()
 
         // 2. 推理
@@ -182,9 +193,10 @@ class SegmentationRunner<R>(
             runtimeInfo = MlRuntimeInfo(
                 accelerator = session.accelerator.name,
                 acceleratorSelection = session.acceleratorSelection,
-                preprocessBackend = preprocessBackend.traceName,
+                preprocessBackend = prepared.backend.traceName,
                 postprocessBackend = outcome.backend,
             ),
+            imageMapping = spec.imageMapping(prepared.mapping, scoreGridSpansInput),
         )
     }
 
@@ -211,18 +223,18 @@ class SegmentationRunner<R>(
         return cachedContentMask
     }
 
-    private fun preprocessInput(rawFrame: ImageFrame): InputPreprocessBackend {
+    private fun preprocessInput(rawFrame: ImageFrame): PreparedImage {
         return when (inputDataType) {
             ModelInputDataType.FLOAT32 -> {
-                inputPreprocessor.preprocessFloat(rawFrame, rawFrame.rotationDegrees, cachedInputFloatArray)
+                inputPreprocessor.preprocessFloatWithMapping(rawFrame, rawFrame.rotationDegrees, cachedInputFloatArray)
             }
 
             ModelInputDataType.INT8 -> {
-                inputPreprocessor.preprocessInt8(rawFrame, rawFrame.rotationDegrees, cachedInputInt8Array)
+                inputPreprocessor.preprocessInt8WithMapping(rawFrame, rawFrame.rotationDegrees, cachedInputInt8Array)
             }
 
             ModelInputDataType.UINT8 -> {
-                inputPreprocessor.preprocessUint8(rawFrame, rawFrame.rotationDegrees, cachedInputInt8Array)
+                inputPreprocessor.preprocessUint8WithMapping(rawFrame, rawFrame.rotationDegrees, cachedInputInt8Array)
             }
 
             ModelInputDataType.AUTO -> error("AUTO input type must be resolved before creating SegmentationRunner")

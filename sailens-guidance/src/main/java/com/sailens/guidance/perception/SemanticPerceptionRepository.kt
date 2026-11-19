@@ -57,6 +57,7 @@ class SemanticPerceptionRepository(
                 outputReadTimeMs = run.outputReadTimeMs,
                 analysisStats = run.value.stats,
                 runtimeInfo = run.runtimeInfo,
+                imageMapping = run.imageMapping,
                 maskLease = run.value.maskLease,
             )
         }

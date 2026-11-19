@@ -5,12 +5,28 @@ import com.sailens.core.geometry.NormalizedRect
 import com.sailens.core.frame.ImageFrame
 import com.sailens.vision.taxonomy.CocoTaxonomy
 import com.sailens.vision.taxonomy.Taxonomy
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 data class DetectionPostProcessOutput(
     val detections: List<Detection>,
     val backend: String,
+    val selectedCompatibilityBox: Boolean = false,
+    val transform: DetectionDecoderTransform? = null,
 )
+
+data class DetectionDecoderTransform(
+    val scale: Float,
+    val padX: Float,
+    val padY: Float,
+    val selectedEdgesProven: Boolean = false,
+) {
+    companion object {
+        const val MAX_NORMALIZED_EDGE_ERROR = 1.0 / 1_048_576.0
+    }
+}
+
+private fun LetterboxGeometry.decoderTransform(edgesProven: Boolean) = DetectionDecoderTransform(scale, padX, padY, edgesProven)
 
 enum class DetectionLayout {
     RAW_TRANSPOSED,
@@ -84,14 +100,11 @@ class DetectionPostProcessor(
         }
 
         if (detectionLayout == DetectionLayout.END_TO_END) {
-            return DetectionPostProcessOutput(
-                detections = postProcessEndToEnd(
-                    frame = frame,
-                    elementCount = rawDetections.size,
-                    scoreAt = { index -> rawDetections[index] },
-                ),
+            return postProcessEndToEnd(
+                frame = frame,
+                elementCount = rawDetections.size,
                 backend = "kotlin_e2e",
-            )
+            ) { index -> rawDetections[index] }
         }
 
         nativePostProcessor.postProcessFloat(
@@ -99,17 +112,10 @@ class DetectionPostProcessor(
             rawDetections = rawDetections,
             attributesPerDetection = rawAttributesPerDetection,
         )?.let { nativeResult ->
-            return DetectionPostProcessOutput(nativeResult, "native_bbox_nms")
+            return DetectionPostProcessOutput(nativeResult.detections, "native_bbox_nms", transform = nativeResult.transform)
         }
 
-        return DetectionPostProcessOutput(
-            detections = postProcessRaw(
-                frame = frame,
-                elementCount = rawDetections.size,
-                scoreAt = { index -> rawDetections[index] },
-            ),
-            backend = "kotlin_bbox_nms",
-        )
+        return postProcessRaw(frame, rawDetections.size, "kotlin_bbox_nms") { index -> rawDetections[index] }
     }
 
     fun postProcessWithBackend(
@@ -126,14 +132,11 @@ class DetectionPostProcessor(
         val zeroPoint = quantization?.zeroPoint ?: 0
 
         if (detectionLayout == DetectionLayout.END_TO_END) {
-            return DetectionPostProcessOutput(
-                detections = postProcessEndToEnd(
-                    frame = frame,
-                    elementCount = rawDetections.size,
-                    scoreAt = { index -> (rawDetections[index].toInt() - zeroPoint) * scale },
-                ),
+            return postProcessEndToEnd(
+                frame = frame,
+                elementCount = rawDetections.size,
                 backend = "kotlin_e2e_int8",
-            )
+            ) { index -> (rawDetections[index].toInt() - zeroPoint) * scale }
         }
 
         nativePostProcessor.postProcessInt8(
@@ -142,17 +145,12 @@ class DetectionPostProcessor(
             attributesPerDetection = rawAttributesPerDetection,
             quantization = quantization,
         )?.let { nativeResult ->
-            return DetectionPostProcessOutput(nativeResult, "native_bbox_nms_int8")
+            return DetectionPostProcessOutput(nativeResult.detections, "native_bbox_nms_int8", transform = nativeResult.transform)
         }
 
-        return DetectionPostProcessOutput(
-            detections = postProcessRaw(
-                frame = frame,
-                elementCount = rawDetections.size,
-                scoreAt = { index -> (rawDetections[index].toInt() - zeroPoint) * scale },
-            ),
-            backend = "kotlin_bbox_nms_int8",
-        )
+        return postProcessRaw(frame, rawDetections.size, "kotlin_bbox_nms_int8") { index ->
+            (rawDetections[index].toInt() - zeroPoint) * scale
+        }
     }
 
     /** Zero-copy realtime path: decode detections straight from the output buffer handle.
@@ -170,7 +168,7 @@ class DetectionPostProcessor(
             frame = frame,
             attributesPerDetection = rawAttributesPerDetection,
         ) ?: return null
-        return DetectionPostProcessOutput(detections, "native_bbox_nms_float_handle")
+        return DetectionPostProcessOutput(detections.detections, "native_bbox_nms_float_handle", transform = detections.transform)
     }
 
     fun postProcessInt8FromHandle(
@@ -187,7 +185,7 @@ class DetectionPostProcessor(
             attributesPerDetection = rawAttributesPerDetection,
             quantization = quantization,
         ) ?: return null
-        return DetectionPostProcessOutput(detections, "native_bbox_nms_int8_handle")
+        return DetectionPostProcessOutput(detections.detections, "native_bbox_nms_int8_handle", transform = detections.transform)
     }
 
     private fun isValidShape(elementCount: Int): Boolean {
@@ -199,10 +197,11 @@ class DetectionPostProcessor(
     private fun postProcessRaw(
         frame: ImageFrame,
         elementCount: Int,
+        backend: String,
         scoreAt: (Int) -> Float,
-    ): List<Detection> {
+    ): DetectionPostProcessOutput {
         val detectionCount = elementCount / attributesPerDetection
-        if (detectionCount == 0 || allowedClassIds.isEmpty()) return emptyList()
+        if (detectionCount == 0 || allowedClassIds.isEmpty()) return DetectionPostProcessOutput(emptyList(), backend)
 
         val geometry = LetterboxGeometry.from(frame, inputSize)
         val candidates = ArrayList<Candidate>(minOf(detectionCount, MAX_NMS_CANDIDATES))
@@ -235,26 +234,27 @@ class DetectionPostProcessor(
                 classId = bestClassId,
                 confidence = bestConfidence,
                 boundingBox = decodedRect.normalizedRect,
+                edgesProven = decodedRect.edgesProven,
             )
         }
-
-        if (candidates.isEmpty()) return emptyList()
 
         candidates.sortByDescending { it.confidence }
         val selected = applyClassAwareNms(
             candidates = candidates.take(MAX_NMS_CANDIDATES),
             maxDetections = maxDetections,
         )
-        return selected.map { candidate -> candidate.toDetection() }
+        return DetectionPostProcessOutput(selected.map { it.toDetection() }, backend,
+            transform = geometry.decoderTransform(selected.all { it.edgesProven }))
     }
 
     private fun postProcessEndToEnd(
         frame: ImageFrame,
         elementCount: Int,
+        backend: String,
         scoreAt: (Int) -> Float,
-    ): List<Detection> {
+    ): DetectionPostProcessOutput {
         val detectionCount = elementCount / END_TO_END_FIXED_ATTRIBUTES
-        if (detectionCount == 0 || allowedClassIds.isEmpty()) return emptyList()
+        if (detectionCount == 0 || allowedClassIds.isEmpty()) return DetectionPostProcessOutput(emptyList(), backend)
 
         val geometry = LetterboxGeometry.from(frame, inputSize)
         val candidates = ArrayList<Candidate>(minOf(detectionCount, MAX_NMS_CANDIDATES))
@@ -280,17 +280,22 @@ class DetectionPostProcessor(
                 classId = classId,
                 confidence = confidence,
                 boundingBox = decodedRect.normalizedRect,
+                compatibility = decodedRect.compatibility,
+                edgesProven = decodedRect.edgesProven,
             )
         }
-
-        if (candidates.isEmpty()) return emptyList()
 
         candidates.sortByDescending { it.confidence }
         val selected = applyClassAwareNms(
             candidates = candidates.take(MAX_NMS_CANDIDATES),
             maxDetections = maxDetections,
         )
-        return selected.map { candidate -> candidate.toDetection() }
+        return DetectionPostProcessOutput(
+            selected.map { it.toDetection() },
+            backend,
+            selectedCompatibilityBox = selected.any { it.compatibility },
+            transform = geometry.decoderTransform(selected.all { it.edgesProven }),
+        )
     }
 
     private fun applyClassAwareNms(
@@ -345,12 +350,20 @@ class DetectionPostProcessor(
         val modelWidth = width * modelPixelScale
         val modelHeight = height * modelPixelScale
 
-        return decodeModelRect(
+        val rect = decodeModelRect(
             geometry = geometry,
             modelLeft = modelCx - modelWidth / 2f,
             modelTop = modelCy - modelHeight / 2f,
             modelRight = modelCx + modelWidth / 2f,
             modelBottom = modelCy + modelHeight / 2f,
+        ) ?: return null
+        val exactX = cx.toDouble() * modelPixelScale
+        val exactY = cy.toDouble() * modelPixelScale
+        val halfWidth = width.toDouble() * modelPixelScale / 2
+        val halfHeight = height.toDouble() * modelPixelScale / 2
+        return DecodedRect(rect, edgesProven =
+            bounded(exactX) && bounded(exactY) && bounded(halfWidth) && bounded(halfHeight) &&
+                provesEdges(rect, geometry, exactX - halfWidth, exactY - halfHeight, exactX + halfWidth, exactY + halfHeight),
         )
     }
 
@@ -369,7 +382,12 @@ class DetectionPostProcessor(
             modelRight = right * modelPixelScale,
             modelBottom = bottom * modelPixelScale,
         )
-        if (decodedXyxy != null) return decodedXyxy
+        if (decodedXyxy != null) {
+            return DecodedRect(decodedXyxy, edgesProven = provesEdges(
+                decodedXyxy, geometry, left.toDouble() * modelPixelScale, top.toDouble() * modelPixelScale,
+                right.toDouble() * modelPixelScale, bottom.toDouble() * modelPixelScale,
+            ))
+        }
 
         return decodeRawRect(
             geometry = geometry,
@@ -378,7 +396,7 @@ class DetectionPostProcessor(
             cy = top,
             width = right,
             height = bottom,
-        )
+        )?.copy(compatibility = true)
     }
 
     private fun decodeModelRect(
@@ -387,7 +405,7 @@ class DetectionPostProcessor(
         modelTop: Float,
         modelRight: Float,
         modelBottom: Float,
-    ): DecodedRect? {
+    ): NormalizedRect? {
         if (modelRight <= modelLeft || modelBottom <= modelTop) return null
 
         val unpaddedLeft = ((modelLeft - geometry.padX) / geometry.scale).coerceIn(0f, geometry.rotatedWidth.toFloat())
@@ -397,14 +415,34 @@ class DetectionPostProcessor(
 
         if (unpaddedRight <= unpaddedLeft || unpaddedBottom <= unpaddedTop) return null
 
-        return DecodedRect(
-            normalizedRect = NormalizedRect(
-                x = (unpaddedLeft / geometry.rotatedWidth).coerceIn(0f, 1f),
-                y = (unpaddedTop / geometry.rotatedHeight).coerceIn(0f, 1f),
-                width = ((unpaddedRight - unpaddedLeft) / geometry.rotatedWidth).coerceIn(0f, 1f),
-                height = ((unpaddedBottom - unpaddedTop) / geometry.rotatedHeight).coerceIn(0f, 1f),
-            ),
+        return NormalizedRect(
+            x = (unpaddedLeft / geometry.rotatedWidth).coerceIn(0f, 1f),
+            y = (unpaddedTop / geometry.rotatedHeight).coerceIn(0f, 1f),
+            width = ((unpaddedRight - unpaddedLeft) / geometry.rotatedWidth).coerceIn(0f, 1f),
+            height = ((unpaddedBottom - unpaddedTop) / geometry.rotatedHeight).coerceIn(0f, 1f),
         )
+    }
+
+    private fun bounded(modelCoordinate: Double) = inputSize in 1..32_768 && abs(modelCoordinate) <= 4.0 * inputSize
+
+    private fun provesEdges(
+        rect: NormalizedRect,
+        geometry: LetterboxGeometry,
+        left: Double,
+        top: Double,
+        right: Double,
+        bottom: Double,
+    ): Boolean {
+        val scale = geometry.scale.toDouble()
+        val spanX = scale * geometry.rotatedWidth
+        val spanY = scale * geometry.rotatedHeight
+        if (spanX < 1.0 || spanY < 1.0 || !bounded(left) || !bounded(top) || !bounded(right) || !bounded(bottom)) return false
+        // Reserve headroom for the Double reconstruction of the bounded model coordinates.
+        val tolerance = DetectionDecoderTransform.MAX_NORMALIZED_EDGE_ERROR - 1e-9
+        return abs(((left - geometry.padX) / spanX).coerceIn(0.0, 1.0) - rect.x) <= tolerance &&
+            abs(((top - geometry.padY) / spanY).coerceIn(0.0, 1.0) - rect.y) <= tolerance &&
+            abs(((right - geometry.padX) / spanX).coerceIn(0.0, 1.0) - (rect.x.toDouble() + rect.width)) <= tolerance &&
+            abs(((bottom - geometry.padY) / spanY).coerceIn(0.0, 1.0) - (rect.y.toDouble() + rect.height)) <= tolerance
     }
 
     private fun Candidate.toDetection(): Detection {
@@ -422,12 +460,16 @@ class DetectionPostProcessor(
 
     private data class DecodedRect(
         val normalizedRect: NormalizedRect,
+        val compatibility: Boolean = false,
+        val edgesProven: Boolean = false,
     )
 
     private class Candidate(
         val classId: Int,
         val confidence: Float,
         val boundingBox: NormalizedRect,
+        val compatibility: Boolean = false,
+        val edgesProven: Boolean = false,
     )
 
     private companion object {

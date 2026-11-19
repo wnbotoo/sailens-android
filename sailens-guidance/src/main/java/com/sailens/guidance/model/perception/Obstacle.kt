@@ -74,7 +74,12 @@ data class ObstacleMeasurement(
     val frameTimestampNanos: Long,
     /** The tracker's time of the update (its `lastSeen`): when processing finished, not when the frame was taken. */
     val processedAt: Long,
+    val frameIdentity: PerceptionFrameIdentity? = null,
 )
 
 /** The frame a batch of detections came from, as the tracker is told it. */
-data class ObstacleSourceFrame(val sequenceNumber: Long, val timestampNanos: Long)
+data class ObstacleSourceFrame(
+    val sequenceNumber: Long,
+    val timestampNanos: Long,
+    val identity: PerceptionFrameIdentity? = null,
+)

@@ -6,6 +6,7 @@ import com.sailens.runtime.TensorQuantization
 import com.sailens.core.frame.ImageFrame
 import com.sailens.core.frame.ImagePixelFormat
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -53,10 +54,24 @@ class NativeDetectionKernelTest {
         assertEquals(2, output.detections.size)
         assertEquals("person", output.detections[0].label)
         assertEquals("car", output.detections[1].label)
+        assertTrue(checkNotNull(output.transform).selectedEdgesProven)
         // The duplicate person box at 0.80 must lose to the 0.94 one, and the 0.10 box is below
         // the confidence threshold.
         assertEquals(0.94f, output.detections[0].confidence, 1e-5f)
         assertEquals(0.88f, output.detections[1].confidence, 1e-5f)
+    }
+
+    @Test
+    fun rawFloatKernelLeavesAnUnprovenLegacyDetectionReadable() {
+        val decoder = DetectionPostProcessor()
+        val raw = FloatArray(ATTRIBUTES)
+        val bottom = 0.5028735399246216f
+        setRawDetection(raw, detectionIndex = 0, detectionCount = 1, cx = .51f, cy = .5f, width = .04f,
+            height = 2 * (bottom - .5f), classId = 0, score = .9f)
+        val output = decoder.postProcessWithBackend(createFrame().copy(height = 16), raw)
+        assertEquals("native_bbox_nms", output.backend)
+        assertEquals("person", output.detections.single().label)
+        assertFalse(checkNotNull(output.transform).selectedEdgesProven)
     }
 
     @Test

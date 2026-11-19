@@ -59,6 +59,7 @@ class DetectorObstacleProvider(
             outputReadTimeMs = output.outputReadTimeMs,
             postprocessTimeMs = output.postprocessTimeMs,
             runtimeInfo = output.runtimeInfo,
+            imageMapping = output.imageMapping,
         )
     }
 
