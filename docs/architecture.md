@@ -900,7 +900,7 @@ After runtime/vision/Guidance native extraction, validate on the same target dev
 - preprocessing cache still reports same-frame reuse;
 - no extra full semantic-tensor read is introduced.
 
-**Measured state.** All lines hold on a OnePlus CPH2747 (SM8850, Android 16), LiteRT 2.1.5 on the
+**LiteRT 2.1.5 baseline.** All lines held on a OnePlus CPH2747 (SM8850, Android 16), on the
 GPU, in a debug build of the `sailens-app` distribution pinned to platform commit `1a99f6e`, with
 the Ultralytics LiteRT w8a32 NCHW exports (`docs/models.md`, "Accelerator result consistency"):
 
@@ -918,6 +918,11 @@ The same debug build with the legacy onnx2tf float16 NHWC exports (2285 frames) 
 too, so the lines do not depend on the model: they hold because of the fixes below. This
 repository ships no weights, so the model-backed equivalence test lives in the distribution.
 
+With LiteRT 2.3.2 and the Flutter v0.7.0 w8a32 NCHW exports, both handle paths ran on SM8850
+(Android 17), with independent output-read time of 0 ms and observed same-frame preprocessing reuse.
+On the same GPU inference output, the distribution's instrumented equivalence check matched the
+semantic mask and statistics and the decoded detections through the handle and array paths.
+
 **Root cause and fix.** The zero-copy pair had three independent bugs, any
 one of which keeps the handle path from ever running (they masked each other, which is why none
 surfaced):
@@ -926,7 +931,7 @@ surfaced):
    RTLD_DEFAULT skips libraries loaded RTLD_LOCAL, `System.loadLibrary` loads RTLD_LOCAL, and none
    of the three native libraries lists `libLiteRt.so` as NEEDED (check with `llvm-readelf -d`).
    Symbols are now looked up on `dlopen("libLiteRt.so", RTLD_NOLOAD)`.
-2. `LiteRtLockTensorBuffer` was declared with its last two parameters swapped; 2.1.5 is
+2. `LiteRtLockTensorBuffer` takes
    `(buffer, void** host_mem_addr, lock_mode)`.
 3. The Kotlin `TensorBuffer` JNI handle points at the C++ `litert::TensorBuffer` wrapper, not the C
    `LiteRtTensorBuffer`. The C handle is now read from the wrapper's first member and checked with
@@ -941,8 +946,8 @@ that only held finished conversions never had the other model's entry yet. It co
 frame: the first caller claims the key and converts, the other waits at most 50 ms and copies
 (`InputPreprocessCache.awaitOrClaim`).
 
-The host check runs the real kernel sources against a fake `libLiteRt.so` with the 2.1.5
-signatures, loaded RTLD_LOCAL; the device check is the table above. Because of the ABI dependency
+The host check runs the real kernel sources against a fake `libLiteRt.so` with the lock and size
+signatures above, loaded RTLD_LOCAL. Because of the ABI dependency
 in 3, a LiteRT upgrade repeats the device check, `ZeroCopyEquivalenceTest` included.
 
 ### 12.4 Session comparison

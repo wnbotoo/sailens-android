@@ -268,6 +268,9 @@ GPU 上算错的那两份。
 
 ## Backend 选择
 
+使用 LiteRT 2.3.2 时，选择 GPU 的 Android 宿主应在运行时同时打包 `litert` 和同版本的
+`litert-gpu` AAR。参考宿主已声明该运行时依赖。
+
 每个模型在 runtime profile 里直接指定 preferred backend，不做 benchmark 自动选择：
 
 ```kotlin

@@ -837,7 +837,7 @@ runtime/vision/Guidance native 拆分后，在同一目标设备验证：
 - preprocessing cache 仍然命中 same-frame reuse；
 - 没有新增完整 semantic tensor 的额外读取。
 
-**实测状态。**以下红线全部成立。条件：OnePlus CPH2747（SM8850，Android 16），LiteRT 2.1.5 GPU，
+**LiteRT 2.1.5 基线。**以下红线在 OnePlus CPH2747（SM8850，Android 16）GPU 上全部成立，
 `sailens-app` 发行版的 debug 包（钉住平台提交 `1a99f6e`），模型是 Ultralytics LiteRT w8a32 NCHW 导出
 （`docs/models.zh-CN.md`"加速器结果一致性"一节）：
 
@@ -854,6 +854,10 @@ runtime/vision/Guidance native 拆分后，在同一目标设备验证：
 同一个 debug 包换成 legacy onnx2tf float16 NHWC 导出（2285 帧），这些红线也全部成立。所以红线与
 模型无关，成立靠的是下面的修复。本仓库不带权重，所以要用真实模型跑的等价性测试放在发行版里。
 
+使用 LiteRT 2.3.2 和 Flutter v0.7.0 的 w8a32 NCHW 导出时，SM8850（Android 17）实测两个
+handle 路径均生效，独立输出读回计时为 0 ms，并观察到同帧预处理复用。发行版的仪器测试用同一次
+GPU 推理结果比对两条路径，语义掩码、统计和检测框解码结果一致。
+
 **根因与修复。**zero-copy 这对红线其实有三个独立的错，任何一个都足以
 让 handle 路径永远不跑（它们互相遮蔽，所以从没暴露）：
 
@@ -861,8 +865,7 @@ runtime/vision/Guidance native 拆分后，在同一目标设备验证：
    RTLD_LOCAL 加载的库，而 `System.loadLibrary` 正是 RTLD_LOCAL，三个 native 库又都没有把
    `libLiteRt.so` 列为 NEEDED（`llvm-readelf -d` 可查）。现改为 `dlopen("libLiteRt.so",
    RTLD_NOLOAD)` 后对该句柄 dlsym。
-2. `LiteRtLockTensorBuffer` 的声明参数顺序错了：2.1.5 是 `(buffer, void** host_mem_addr,
-   lock_mode)`，旧声明把后两个对调了。
+2. `LiteRtLockTensorBuffer` 的参数顺序是 `(buffer, void** host_mem_addr, lock_mode)`。
 3. Kotlin `TensorBuffer` 的 JNI handle 指向 C++ `litert::TensorBuffer` 包装对象，不是 C 的
    `LiteRtTensorBuffer`；现在从包装对象首字段取出 C handle，并在加锁前用
    `LiteRtGetTensorBufferPackedSize` 校验字节数，字节数不符就退回拷贝路径。读首字段是**已知的
@@ -874,8 +877,8 @@ runtime/vision/Guidance native 拆分后，在同一目标设备验证：
 对方的条目。现在改为"同帧只转换一次"：先到的一方认领并转换，另一方至多等 50 ms 后直接复制
 （`InputPreprocessCache.awaitOrClaim`）。
 
-主机验证用真实 kernel 源码 + 带 2.1.5 签名的假 `libLiteRt.so`（以 RTLD_LOCAL 加载）；真机验证就是
-上面那张表。因为第 3 条的 ABI 依赖，升级 LiteRT 时要在真机上重做这项检查，包括
+主机验证用真实 kernel 源码和带上述加锁、字节数接口的假 `libLiteRt.so`（以 RTLD_LOCAL 加载）。
+因为第 3 条的 ABI 依赖，升级 LiteRT 时要在真机上重做这项检查，包括
 `ZeroCopyEquivalenceTest`。
 
 ### 12.4 Session 对比
