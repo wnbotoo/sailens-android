@@ -69,8 +69,7 @@ Key points:
 
 ## 2. Runtime delivery model
 
-Newer LiteRT **no longer packs the NPU runtime into the AAR** (`litert-2.1.5.aar` only carries
-`libLiteRt.so` + the GL accelerator). The runtime comes from the official
+LiteRT 2.3.2 packages the core and GPU in separate Maven AARs. The optional Qualcomm NPU runtime comes from the official
 `litert_npu_runtime_libraries(.zip / _jit.zip)`, wired in as a **dynamic feature module** and
 delivered per device by **Play Feature Delivery**.
 

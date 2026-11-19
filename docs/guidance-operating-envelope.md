@@ -105,8 +105,9 @@ field.
 ### Phones and accelerators
 
 - Android 12 or later, on a 64-bit ARM processor.
-- **Supported: Snapdragon SM8850** (OnePlus CPH2747, Android 16), every model on the GPU through LiteRT 2.1.5. All
-  field recordings were made on it, at about 20 analysed frames a second.
+- **Supported: Snapdragon SM8850** (OnePlus CPH2747), with the models on the LiteRT GPU. The field
+  recordings used Android 16 and LiteRT 2.1.5, at about 20 analysed frames a second. LiteRT 2.3.2 was
+  verified on Android 17 with a fixed indoor scene and replay of recorded camera frames.
 - **Snapdragon SM8450** (Samsung SM-S9010): the field capture's timing was measured on it. On it, as on SM8850, model
   files from one export tool computed wrongly on the GPU without any error.
 - **Not verified: every other phone.**

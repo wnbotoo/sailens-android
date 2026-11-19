@@ -336,6 +336,9 @@ The gap is in the sem postprocess, which waits for the GPU's result.
 
 ## Backend selection
 
+An Android host that selects the GPU packages the version-matched `litert-gpu` AAR at runtime
+alongside `litert` for LiteRT 2.3.2. The reference host declares it as a runtime dependency.
+
 Each model names its preferred backend in the runtime profile; there is no benchmark-based
 auto-selection:
 

@@ -45,7 +45,9 @@ SailensRuntimeProfile (某个模型配置为 acceleratorBackend = NPU)
 
 ## 2. 运行时交付模型(delivery)
 
-新版 LiteRT **不再把 NPU 运行时打进 AAR**(`litert-2.1.5.aar` 只有 `libLiteRt.so` + GL accelerator)。运行时由官方 `litert_npu_runtime_libraries(.zip / _jit.zip)` 提供,作为 **dynamic feature 模块**接入,由 **Play Feature Delivery** 按设备下发。
+LiteRT 2.3.2 把核心库和 GPU 加速库分在两个 Maven AAR 中。可选的 Qualcomm NPU 运行时由官方
+`litert_npu_runtime_libraries(.zip / _jit.zip)` 提供，作为 **dynamic feature 模块**接入，
+由 **Play Feature Delivery** 按设备下发。
 
 两套 `.so`,别混:
 | 库 | 作用 | 在哪个包 |

@@ -29,7 +29,7 @@
 //
 // 3. The handle. The Kotlin TensorBuffer's JNI handle is a pointer to the C++ litert::TensorBuffer
 //    wrapper, not to the C LiteRtTensorBuffer. The wrapper is a BaseHandle<LiteRtTensorBuffer>
-//    (litert/cc/internal/litert_handle.h, v2.1.5): no virtual functions, and its first member is
+//    (litert/cc/internal/litert_handle.h, v2.3.2): no virtual functions, and its first member is
 //    a std::unique_ptr<LiteRtTensorBufferT, std::function<...>>. The C handle is read from the
 //    first word of that object.
 //
@@ -41,7 +41,7 @@
 //    change would crash rather than fall back. What the check does catch is a *different*
 //    buffer (wrong tensor, wrong element type): its byte count will not match.
 //
-// Pinned to LiteRT 2.1.5 (gradle/libs.versions.toml); LiteRtVersionPinTest fails when that
+// Pinned to LiteRT 2.3.2 (gradle/libs.versions.toml); LiteRtVersionPinTest fails when that
 // changes. Upgrading LiteRT means re-checking 2 and 3 on a device (architecture.md §12.3).
 //
 // This header is owned by sailens-runtime and included by the vision and Guidance CMake builds.

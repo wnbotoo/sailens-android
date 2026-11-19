@@ -192,6 +192,7 @@ dependencies {
     implementation(libs.koin.androidx.compose)
     // Required for LiteRT's downloadLibrary() to install the on-demand Qualcomm NPU runtime module.
     implementation(libs.google.litert)
+    runtimeOnly(libs.google.litert.gpu)
     implementation(libs.google.play.feature.delivery)
     implementation(libs.google.play.feature.delivery.ktx)
     if (enableLitertNpuRuntime) {

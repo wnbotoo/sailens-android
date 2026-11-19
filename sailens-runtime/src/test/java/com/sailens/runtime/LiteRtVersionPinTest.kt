@@ -6,8 +6,8 @@ import java.io.File
 
 /**
  * The zero-copy path reads LiteRT's C++ TensorBuffer wrapper by layout (litert_zero_copy.h,
- * note 3) and calls LiteRtLockTensorBuffer by its 2.1.5 signature. Neither is a published
- * contract, so a LiteRT upgrade must not slip through unverified.
+ * note 3) and resolves LiteRtLockTensorBuffer at runtime. The wrapper layout and the Kotlin JNI
+ * handle accessor depend on the LiteRT release, so each upgrade needs device verification.
  *
  * If this fails because you upgraded LiteRT: re-check the wrapper layout and the C signatures
  * against the new release, re-run the §12.3 device gate (handle path active, output identical to
@@ -32,6 +32,6 @@ class LiteRtVersionPinTest {
     }
 
     private companion object {
-        const val VERIFIED_LITERT_VERSION = "2.1.5"
+        const val VERIFIED_LITERT_VERSION = "2.3.2"
     }
 }

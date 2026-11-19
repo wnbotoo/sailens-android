@@ -99,7 +99,7 @@ class SegmentationRunner<R>(
     private fun extractOutputBufferHandle(): Long = runCatching {
         val cls = Class.forName("com.google.ai.edge.litert.JniHandle")
         val method = cls.getDeclaredMethod(
-            "getHandle\$third_party_odml_litert_litert_kotlin_litert_kotlin_api"
+            "getHandle\$third_party_odml_litert_litert_kotlin_litert_api_for_maven"
         )
         method.isAccessible = true
         method.invoke(outputBuffer) as Long
