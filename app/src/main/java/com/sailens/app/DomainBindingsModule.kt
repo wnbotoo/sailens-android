@@ -35,6 +35,7 @@ import com.sailens.describe.DescribeSceneUseCase
 import com.sailens.vlm.LiteRtVlmEngine
 import com.sailens.vlm.SceneDescriber
 import com.sailens.guidance.usecase.scene.StartSceneAnalysisUseCase
+import com.sailens.guidance.world.LocalWorldModelBuilder
 import com.sailens.guidance.usecase.scene.StopSceneAnalysisUseCase
 import com.sailens.guidance.usecase.trace.BuildTraceReplayReportUseCase
 import com.sailens.guidance.usecase.trace.EvaluateTraceReplayBudgetUseCase
@@ -79,6 +80,7 @@ val domainBindingsModule = module {
     single { CrossValidator(config = get()) }
     // 有跨帧去抖状态，必须和其他 stabilizer 一样由 Start/Stop 对称 reset。
     single { FrameQualityAnalyzer() }
+    single { LocalWorldModelBuilder(semantics = get()) }
     // 同上：有跨帧滞回状态，由 Start/Stop 对称 reset。进入/退出按时长判定，必须用单调时钟。
     single {
         GroundRecognitionAnalyzer(
@@ -165,6 +167,7 @@ val domainBindingsModule = module {
             depthLane = get(),
             depthSwitch = get(),
             depthConfig = get(),
+            localWorldBuilder = get(),
         )
     }
     // One coordinator for every accelerator user this host composes (docs/architecture.md §6.9): the depth

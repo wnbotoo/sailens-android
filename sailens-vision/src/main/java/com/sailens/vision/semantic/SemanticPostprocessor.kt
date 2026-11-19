@@ -1,6 +1,7 @@
 package com.sailens.vision.semantic
 
 import com.sailens.runtime.ImageTensorLayout
+import com.sailens.runtime.InputImageMapping
 
 /**
  * Where one frame's semantic scores can be read from.
@@ -44,6 +45,9 @@ data class SemanticScoreSpec(
     val layout: ImageTensorLayout,
     val content: SemanticContentRegion = SemanticContentRegion(0, 0, width, height),
 )
+
+internal fun SemanticScoreSpec.imageMapping(input: InputImageMapping?, scoreGridSpansInput: Boolean): SemanticImageMapping? =
+    if (input != null && scoreGridSpansInput) SemanticImageMapping(input, width, height, content) else null
 
 /** A rectangle of the score grid, in grid pixels. */
 data class SemanticContentRegion(

@@ -50,6 +50,11 @@ import kotlin.coroutines.CoroutineContext
 import com.sailens.shell.safetynotice.SAFETY_NOTICE_VERSION
 import com.sailens.shell.safetynotice.SafetyNoticeGate
 import com.sailens.shell.safetynotice.SafetyNoticeStore
+import com.sailens.guidance.world.LocalWorldOwner
+import com.sailens.guidance.world.LocalWorldRun
+import com.sailens.shell.guidance.screen.observeResult
+import com.sailens.shell.guidance.screen.observeSafety
+import kotlinx.coroutines.flow.onCompletion
 
 private const val TAG = "SceneAnalysisViewModel"
 
@@ -59,6 +64,7 @@ internal typealias AnalysisPipeline = suspend (
     releaseFrame: (ImageFrame) -> Unit,
     semanticMaskSnapshot: () -> Boolean,
     depthFrames: ((minIntervalMs: Long) -> Flow<ImageFrame>)?,
+    localWorldRun: LocalWorldRun?,
 ) -> Flow<SceneResult>
 
 /**
@@ -109,6 +115,8 @@ internal class ViewModelMirror(
     private val observer: MirrorObserver,
     seams: MirrorSeams,
     safetyNoticeStore: SafetyNoticeStore = ConfirmedSafetyNotice,
+    private val openWorld: (() -> LocalWorldOwner)? = null,
+    private val eventsForDelivery: ((SceneResult, List<SceneEvent>) -> List<SceneEvent>)? = null,
 ) {
     // SceneAnalysisViewModel.kt:119-128 (the diagnostics store's fields keep their defaults: diagnostics off)
     val uiState = MutableStateFlow(
@@ -128,6 +136,8 @@ internal class ViewModelMirror(
 
     // SceneAnalysisViewModel.kt:139
     private val runs = GuidanceRunSequencer(viewModelScope) { resetProcessors() }
+    private var worldOwner: LocalWorldOwner? = null
+    val localWorldReader get() = worldOwner?.reader
     private var stallWatchJob: Job? = null
 
     // SceneAnalysisViewModel.kt:147-193
@@ -184,6 +194,7 @@ internal class ViewModelMirror(
             recordState = record::recordSafetyState,
             recordAlert = record::recordGuidanceAlert,
             publishState = { state, hold -> uiState.update { it.copy(safetyState = state, promptHold = hold) } },
+            observeWorldSafety = { worldOwner?.observeSafety(it) },
             timed = { uiState.value.showDiagnostics },
             logger = logger,
             clock = clock,
@@ -378,6 +389,9 @@ internal class ViewModelMirror(
     // SceneAnalysisViewModel.kt:444-510
     private fun startSceneAnalysis() {
         frameCount = 0
+        closeWorldOwner()
+        val world = openWorld?.invoke()
+        worldOwner = world
         val run = observer.runRequested()
         runs.start {
             observer.blockStarted(run, coroutineContext.job)
@@ -401,16 +415,25 @@ internal class ViewModelMirror(
                 {},
                 { false },
                 { minIntervalMs -> depthFrames(minIntervalMs) },
+                world?.run,
             ).onStart {
                 uiState.flowStarted { alerts.onFlowStarted() }
                 logger.info(TAG, "Scene analysis started")
             }.catch { e ->
-                alerts.onFlowFailed(e)
+                if (worldOwner === world) {
+                    closeWorldOwner()
+                    alerts.onFlowFailed(e)
+                }
+            }.onCompletion {
+                world?.close()
+                if (worldOwner === world) worldOwner = null
             }.collectLatest { result ->
                 observer.resultArrived(run, result)
                 // :452-469
                 frameCount++
-                alerts.onResult(result.qualification.baseline, result.sequenceNumber, result.frameReceivedAtMs)
+                world.observeResult(result) {
+                    alerts.onResult(result.qualification.baseline, result.sequenceNumber, result.frameReceivedAtMs)
+                }
                 val holdOrdinary = alerts.holdsOrdinaryPrompts
                 latestSceneResult = result
                 val events = result.events
@@ -421,7 +444,8 @@ internal class ViewModelMirror(
                     )
                 }
                 // :484
-                guidanceOutput.onFrame(events, result.sequenceNumber, result.visionFaults, holdOrdinary)
+                val offered = eventsForDelivery?.invoke(result, events) ?: events
+                guidanceOutput.onFrame(offered, result.sequenceNumber, result.visionFaults, holdOrdinary)
                 observer.resultHandled(run, result.sequenceNumber)
             }
         }
@@ -463,6 +487,7 @@ internal class ViewModelMirror(
 
     // SceneAnalysisViewModel.kt:573-586 (the overlay's render is not mirrored)
     private fun stopSceneAnalysis() {
+        closeWorldOwner()
         stopStallWatch()
         guidanceOutput.stop {
             observer.stopIssued(runs.stop())
@@ -479,6 +504,7 @@ internal class ViewModelMirror(
      */
     fun onCleared() {
         viewModelScope.cancel()
+        closeWorldOwner()
         alerts.onStopped()
         alerts.endOfSession()
         stopStallWatch()
@@ -486,6 +512,11 @@ internal class ViewModelMirror(
         haptics.cancel()
         releaseSceneAnalysisResources()
         engineLease.close()
+    }
+
+    private fun closeWorldOwner() {
+        worldOwner?.close()
+        worldOwner = null
     }
 
     // SceneAnalysisViewModel.kt:661-691 (the release runs in the release scope itself, not in Dispatchers.IO)

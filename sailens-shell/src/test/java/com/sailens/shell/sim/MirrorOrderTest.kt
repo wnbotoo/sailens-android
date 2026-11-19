@@ -156,7 +156,7 @@ class MirrorOrderTest {
         mirror = ViewModelMirror(
             frames = { emptyFlow() },
             depthFrames = { emptyFlow() },
-            analysis = { _, _, _, _ ->
+            analysis = { _, _, _, _, _ ->
                 calls += "analysis"
                 flow {
                     for (item in upstream) {

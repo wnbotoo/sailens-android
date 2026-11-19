@@ -1,5 +1,6 @@
 package com.sailens.guidance.model.perception
 import com.sailens.core.runtime.MlRuntimeInfo
+import com.sailens.vision.semantic.SemanticImageMapping
 
 /**
  * 语义分割模型输出
@@ -18,6 +19,7 @@ data class SegmentationOutput(
     val analysisStats: SegmentationAnalysisStats? = null,
     val runtimeInfo: MlRuntimeInfo = MlRuntimeInfo(),
     val maskLease: SegmentationMaskLease? = null,
+    val imageMapping: SemanticImageMapping? = null,
 )
 
 /**

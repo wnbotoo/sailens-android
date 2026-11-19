@@ -20,8 +20,8 @@ class NativeConnectivityStatsExtractor(
     private val intOutputs = IntArray(INT_OUTPUT_COUNT)
     private val floatOutputs = FloatArray(FLOAT_OUTPUT_COUNT)
 
-    // Reused across frames so packing the passable mask into JNI-friendly words costs no per-frame
-    // allocation. Single-threaded: extract() runs synchronously on the perception dispatcher.
+    // The JNI transfer is reused. The mask owns its packed snapshot until it is changed.
+    // extract() runs synchronously on the perception dispatcher.
     private var packedBitsBuffer = LongArray(0)
 
     override fun extract(passableMask: BinaryMask): ConnectivityStats? {

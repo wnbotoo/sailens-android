@@ -18,6 +18,9 @@ import com.sailens.guidance.model.perception.SegmentationMask
 import com.sailens.guidance.model.perception.SegmentationOutput
 import com.sailens.guidance.repository.ObstacleProvider
 import com.sailens.guidance.repository.PerceptionRepository
+import com.sailens.guidance.world.CurrentCellQuery
+import com.sailens.guidance.world.LocalWorldReader
+import com.sailens.guidance.world.UnavailableReason
 import com.sailens.output.SpeechEngineState
 import com.sailens.output.SpeechManager
 import com.sailens.output.SpeechOwner
@@ -162,6 +165,24 @@ class DescribeGuidanceCoordinationTest {
         assertFalse("nothing Describe queued may still be waiting", voice.real.hasQueuedSpeech)
         assertFalse(koin.get<SceneDescriptionCoordinator>().state.value.isDescribing)
         assertTrue("Guidance keeps its voice", speech.isReady)
+    }
+
+    @Test
+    fun standardHostWorldReaderHasNoGrantDuringRealGuidanceDecisions() {
+        val guidance = viewModel<SceneAnalysisViewModel>()
+        var reader: LocalWorldReader? = null
+        instrumentation.runOnMainSync {
+            guidance.toggleAnalysis()
+            if (guidance.isSafetyNoticeShown.value) guidance.confirmSafetyNotice()
+            reader = checkNotNull(guidance.localWorldReader)
+            assertEquals(CurrentCellQuery.Unavailable(UnavailableReason.NO_ANALYSIS_GRANT), reader.currentCell(30, 20))
+        }
+        awaitTrue("Guidance to deliver its first result", 10_000) { guidance.uiState.value.frameDisplayWidth != null }
+        instrumentation.runOnMainSync {
+            assertEquals(CurrentCellQuery.Unavailable(UnavailableReason.NO_ANALYSIS_GRANT), reader?.currentCell(30, 20))
+            guidance.toggleAnalysis()
+            assertEquals(CurrentCellQuery.Unavailable(UnavailableReason.INACTIVE), reader?.currentCell(30, 20))
+        }
     }
 
     @Test

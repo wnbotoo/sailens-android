@@ -20,4 +20,6 @@ data class SemanticModelConfig(
     val acceleratorSelectionMode: ModelAcceleratorSelectionMode = ModelAcceleratorSelectionMode.EXPLICIT,
     // Vision models run on the GPU; ModelCatalog has no NPU asset for them.
     val acceleratorBackend: ModelAcceleratorBackend = ModelAcceleratorBackend.GPU,
+    /** The selected model places its score grid across the full input on both axes, with no crop or offset. */
+    val scoreGridSpansInput: Boolean = false,
 )

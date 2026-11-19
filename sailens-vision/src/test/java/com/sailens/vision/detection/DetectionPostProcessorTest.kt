@@ -3,8 +3,10 @@ package com.sailens.vision.detection
 import com.sailens.core.frame.ImageFrame
 import com.sailens.core.frame.ImagePixelFormat
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlin.math.abs
 
 class DetectionPostProcessorTest {
 
@@ -80,6 +82,58 @@ class DetectionPostProcessorTest {
         assertEquals(2, output.detections.size)
         assertEquals("person", output.detections[0].label)
         assertEquals("car", output.detections[1].label)
+    }
+
+    @Test
+    fun `only a selected compatibility candidate invalidates the declared box geometry`() {
+        val decoder = DetectionPostProcessor(
+            detectionLayout = DetectionLayout.END_TO_END,
+            coordinateSpace = DetectionCoordinateSpace.MODEL_PIXELS,
+            allowedClassIds = obstacleClassIds,
+        )
+        val fallback = floatArrayOf(270f, 135f, 390f, 139f, .90f, 0f)
+        val selected = decoder.postProcessWithBackend(createFrame(), fallback)
+        assertEquals(1, selected.detections.size)
+        assertTrue(selected.selectedCompatibilityBox)
+        assertEquals(DetectionDecoderTransform(.5f, 0f, 140f, selectedEdgesProven = true), selected.transform)
+
+        val direct = floatArrayOf(75f, 140f, 465f, 205f, .98f, 0f)
+        val suppressed = decoder.postProcessWithBackend(createFrame(), fallback + direct)
+        assertEquals(1, suppressed.detections.size)
+        assertFalse(suppressed.selectedCompatibilityBox)
+        assertEquals(decoder.postProcess(createFrame(), direct), suppressed.detections)
+    }
+
+    @Test
+    fun `a selected rounded box can remain a legacy detection without proving its edges`() {
+        val decoder = DetectionPostProcessor(detectionLayout = DetectionLayout.END_TO_END)
+        val bottom = 0.5028735399246216f
+        val encoded = floatArrayOf(.49f, .5f, .53f, bottom, .9f, 0f)
+        val frame = createFrame()
+        val thin = decoder.postProcessWithBackend(frame.copy(height = 16), encoded)
+        assertFalse(thin.selectedCompatibilityBox)
+        val box = thin.detections.single().boundingBox
+        val exactBottom = (bottom.toDouble() * 640 - 316) / 8
+        val reportedBottom = box.y.toDouble() + box.height
+        assertTrue(abs(exactBottom - reportedBottom) > DetectionDecoderTransform.MAX_NORMALIZED_EDGE_ERROR)
+        assertEquals(DetectionDecoderTransform(.5f, 0f, 316f, selectedEdgesProven = false), thin.transform)
+        val normal = decoder.postProcessWithBackend(frame, encoded)
+        assertEquals(DetectionDecoderTransform(.5f, 0f, 140f, selectedEdgesProven = true), normal.transform)
+        assertEquals(thin.detections.single().label, normal.detections.single().label)
+    }
+
+    @Test
+    fun `raw centre and extent are covered by the same edge proof`() {
+        val decoder = DetectionPostProcessor()
+        val frame = createFrame()
+        val raw = FloatArray(84)
+        val bottom = 0.5028735399246216f
+        setRawDetection(raw, 0, detectionCount = 1, cx = .51f, cy = .5f, width = .04f,
+            height = 2 * (bottom - .5f), classId = 0, score = .9f)
+        val denied = decoder.postProcessWithBackend(frame.copy(height = 16), raw)
+        assertEquals(1, denied.detections.size)
+        assertFalse(checkNotNull(denied.transform).selectedEdgesProven)
+        assertTrue(checkNotNull(decoder.postProcessWithBackend(frame, raw).transform).selectedEdgesProven)
     }
 
     @Test

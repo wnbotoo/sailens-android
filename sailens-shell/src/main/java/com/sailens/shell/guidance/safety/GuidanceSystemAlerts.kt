@@ -91,6 +91,7 @@ internal class GuidanceSystemAlerts(
     wallClock: () -> Long = System::currentTimeMillis,
     nanoClock: () -> Long = System::nanoTime,
     wrapMonitor: (SafetyMonitor) -> SafetyMonitor = { it },
+    observeWorldSafety: (GuidanceSafetySnapshot) -> Unit = {},
 ) {
     private val stallDetector = GuidanceStallDetector()
 
@@ -123,6 +124,7 @@ internal class GuidanceSystemAlerts(
         wallClock = wallClock,
         nanoClock = nanoClock,
         wrapMonitor = wrapMonitor,
+        observeWorldSafety = observeWorldSafety,
     )
 
     /**

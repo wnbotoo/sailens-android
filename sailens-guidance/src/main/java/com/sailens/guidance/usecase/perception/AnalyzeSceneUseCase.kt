@@ -1,6 +1,7 @@
 package com.sailens.guidance.usecase.perception
 
 import com.sailens.guidance.model.analysis.SceneSnapshot
+import com.sailens.core.mask.BinaryMask
 import com.sailens.guidance.model.perception.PerceptionResult
 import com.sailens.guidance.processor.analysis.ConnectivityAnalysisProcessor
 import com.sailens.guidance.processor.analysis.CrossValidator
@@ -22,7 +23,12 @@ class AnalyzeSceneUseCase(
     private val obstacleOcclusionAnalyzer: ObstacleOcclusionAnalyzer,
     private val groundRecognitionAnalyzer: GroundRecognitionAnalyzer,
 ) {
-    operator fun invoke(perceptionResult: PerceptionResult): SceneSnapshot {
+    operator fun invoke(perceptionResult: PerceptionResult): SceneSnapshot = analyze(perceptionResult, null)
+
+    internal fun analyze(
+        perceptionResult: PerceptionResult,
+        borrowEffectiveMask: ((BinaryMask) -> Unit)?,
+    ): SceneSnapshot {
         val analysis = perceptionResult.analysis
 
         // 1. 把跟踪障碍物 bbox 接地带从可行走区抠掉（det/sem 交叉验证，保守只减不增），
@@ -32,6 +38,7 @@ class AnalyzeSceneUseCase(
             passableMask = analysis.passableMask,
             obstacles = perceptionResult.obstacles,
         )
+        borrowEffectiveMask?.invoke(occlusion.effectivePassableMask)
 
         // 2.  独立分析
         val connectivity = connectivityChecker.analyze(occlusion.effectivePassableMask)

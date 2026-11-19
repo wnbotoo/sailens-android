@@ -12,6 +12,17 @@ import com.sailens.vision.depth.DepthTimes
 import com.sailens.vision.depth.DisparityMap
 import com.sailens.vision.depth.MetricDepthMap
 import com.sailens.vision.depth.ResizePolicy
+import com.sailens.vision.depth.MeasurementKey
+import com.sailens.guidance.depth.geometry.DepthCells
+import com.sailens.guidance.depth.geometry.DepthReading
+import com.sailens.guidance.depth.geometry.DepthReadingTimes
+import com.sailens.guidance.depth.geometry.DepthViewGeometry
+import com.sailens.guidance.depth.geometry.ObservationId
+import com.sailens.guidance.depth.geometry.scaleBasisOf
+import com.sailens.guidance.safety.BaselineQualification
+import com.sailens.guidance.safety.CapabilityStatus
+import com.sailens.guidance.world.DepthContributionPolicy
+import com.sailens.guidance.world.DepthRejection
 import kotlin.math.cos
 import kotlin.math.pow
 import kotlin.math.sin
@@ -56,13 +67,20 @@ class GroundFitterRefitSafetyTest {
     private fun fit(fitter: GroundFitter, map: DepthMap, pose: Pose) =
         fitter.fit(map, intrinsics, gravity(pose), 90, 160)
 
+    private fun coverageHistoryBits(fitter: GroundFitter): List<Int> {
+        val field = GroundFitter::class.java.getDeclaredField("recentCoverage")
+        field.isAccessible = true
+        return (field.get(fitter) as Iterable<*>).map { (it as Float).toRawBits() }
+    }
+
     @Test
     fun `recovering a dominant refit does not advance a held drop's release`() {
         for (depth in listOf(0.4, 0.8)) {
             val fitter = GroundFitter(guardRule = SupportGuardRule.LABEL_THRESHOLD)
             for (remaining in listOf(5.0, 4.0, 3.2, 2.5, 2.0, 1.6, 1.2, 0.9)) {
                 val pose = Pose(1.3f, 12f, (5.0 - remaining).toFloat())
-                val observation = fit(fitter, map(drop(depth), pose, false, -0.08, 8), pose)
+                val disparity = map(drop(depth), pose, false, -0.08, 8)
+                val observation = fit(fitter, disparity, pose)
                 // The lower floor fills the near view; faint false below-ground labels on it must not make a
                 // refit alternative release the hold at this point in the approach.
                 if (remaining == 0.9) {
@@ -71,6 +89,7 @@ class GroundFitterRefitSafetyTest {
                     assertEquals(0, observation.groundMask.countTrue())
                     assertEquals(0, observation.aboveGroundMask.countTrue())
                     assertEquals(0, observation.belowGroundMask.countTrue())
+                    assertConsumerRejects(disparity, observation, pose)
                 }
             }
         }
@@ -81,20 +100,39 @@ class GroundFitterRefitSafetyTest {
         val pose = Pose(1.3f, 12f)
         val distorted = map(flat, pose, true, -0.10, 4)
         val refused = fit(GroundFitter(), distorted, pose)
-        assertFalse(refused.isValid)
+        assertEquals(GroundFitValidity.NO_SUPPORT, refused.validity)
         assertEquals(0, refused.groundMask.countTrue())
         assertEquals(0, refused.aboveGroundMask.countTrue())
         assertEquals(0, refused.belowGroundMask.countTrue())
+        assertConsumerRejects(distorted, refused, pose)
 
         val fitter = GroundFitter()
         val beforePose = Pose(1.3f, 25f)
-        val beforeMap = map(drop(1.5), beforePose, true, 0.0, 8)
+        val steppedGround = drop(1.5)
+        val beforeMap = map(steppedGround, beforePose, true, 0.0, 8)
         assertTrue(fit(fitter, beforeMap, beforePose).isValid)
         assertTrue(fitter.guardState().armed)
+        val coverageBefore = coverageHistoryBits(fitter)
+        assertTrue(coverageBefore.isNotEmpty())
         val copy = fitter.copy()
-        assertFalse(fit(fitter, distorted, pose).isValid)
+        assertEquals(coverageBefore, coverageHistoryBits(copy))
+        assertEquals(refused, fit(fitter, distorted, pose))
         assertTrue(fitter.sameGuardHistory(copy))
-        assertEquals(fit(copy, beforeMap, beforePose), fit(fitter, beforeMap, beforePose))
+        assertEquals("coverage history after refusal", coverageBefore, coverageHistoryBits(fitter))
+        assertEquals(coverageBefore, coverageHistoryBits(copy))
+
+        val walkedPose = Pose(1.3f, 25f, 0.5f)
+        val walkedMap = map(steppedGround, walkedPose, true, 0.0, 8)
+        val expected = fit(copy, walkedMap, walkedPose)
+        val actual = fit(fitter, walkedMap, walkedPose)
+        assertTrue(expected.isValid)
+        assertTrue(actual.isValid)
+        assertEquals(
+            "confidence after a different frame",
+            expected.confidence.toRawBits(),
+            actual.confidence.toRawBits(),
+        )
+        assertEquals(expected, actual)
     }
 
     @Test
@@ -114,5 +152,23 @@ class GroundFitterRefitSafetyTest {
         assertTrue(fitter.guardState().holdingSwitch)
         assertTrue(fit(copy, map(flat, pose, true, 0.0, 8), pose).isValid)
         assertTrue(fitter.guardState().holdingSwitch)
+    }
+
+    private fun assertConsumerRejects(map: DepthMap, observation: GroundObservation, pose: Pose) {
+        val phone = PhoneGeometrySettings(pose.heightM, HeightSource.PRESET)
+        val view = DepthViewGeometry(intrinsics, gravity(pose), 90, 160, phone, TimeBasis.CAMERA_REALTIME, GeometryQuality.Ok)
+        val cells = DepthCells.of(map, observation, view)
+        if (map is MetricDepthMap) {
+            checkNotNull(cells)
+            assertFalse(cells.hasHeights)
+        }
+        val frame = CameraGeometry(10L, TimeBasis.CAMERA_REALTIME, intrinsics, gravity(pose), 0L, phone, GeometryQuality.Ok)
+        val key = MeasurementKey(1, 2)
+        val reading = DepthReading(CapabilityStatus.Available, map.kind, scaleBasisOf(map.kind), ObservationId(1, 3),
+            DepthReadingTimes(9, 9, key, 10, 1, 200), view, observation, cells)
+        val diagnostic = DepthContributionPolicy.assess(reading, frame, BaselineQualification.Qualified, null, null)
+        assertEquals(setOf(DepthRejection.FIT_INVALID), diagnostic.reasons)
+        assertEquals(observation.validity, diagnostic.fit)
+        assertEquals(key, diagnostic.key)
     }
 }

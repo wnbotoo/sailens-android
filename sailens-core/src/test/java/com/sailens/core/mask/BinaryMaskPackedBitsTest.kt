@@ -36,4 +36,21 @@ class BinaryMaskPackedBitsTest {
             }
         }
     }
+
+    @Test
+    fun `packed readers cannot overwrite the mask and mutations discard the previous words`() {
+        val mask = BinaryMask(73, 2)
+        mask.set(0, 0, true)
+        mask.set(70, 1, true)
+        val connectivity = mask.copyPackedBitsInto(LongArray(3))
+        connectivity.fill(-1L)
+        val builder = LongArray(3)
+        assertArrayEquals(reference(mask), mask.copyPackedBitsInto(builder))
+
+        mask.set(0, 0, false)
+        mask.set(72, 0, true)
+        assertArrayEquals(reference(mask), mask.copyPackedBitsInto(builder))
+        mask.clear()
+        assertArrayEquals(LongArray(3), mask.copyPackedBitsInto(builder))
+    }
 }

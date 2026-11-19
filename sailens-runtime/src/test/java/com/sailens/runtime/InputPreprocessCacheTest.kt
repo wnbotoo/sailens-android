@@ -112,6 +112,24 @@ class InputPreprocessCacheTest {
         assertNull(cache.copyFloatInput(cacheKey(sequenceNumber = 10), FloatArray(3)))
     }
 
+    @Test
+    fun `both cached tensor types retain mapping only for the same delivery`() {
+        val cache = InputPreprocessCache()
+        val frame = ImageFrame(1, 1, byteArrayOf(), ImagePixelFormat.RGBA_8888, 1000, 0, 9)
+        val otherDelivery = frame.copy()
+        val key = cacheKey(sequenceNumber = 9)
+        val quant = ModelInputQuantization(1f / 255f, -128)
+        val axis = InputImageMapping.Axis(1.0, 0.0, 0, 1)
+        val mapping = InputImageMapping(1, 1, 1, 1, axis, axis, 0)
+        cache.storeFloatInput(key, FloatArray(3), InputPreprocessBackend.NATIVE_YUV, mapping, frame)
+        cache.storeInt8Input(key, quant, ByteArray(3), InputPreprocessBackend.SHARED_QUANTIZED_NATIVE_YUV, mapping, frame)
+
+        assertEquals(mapping, cache.copyFloatWithMapping(key, FloatArray(3), frame)?.mapping)
+        assertEquals(mapping, cache.copyInt8WithMapping(key, quant, ByteArray(3), frame)?.mapping)
+        assertNull(cache.copyFloatWithMapping(key, FloatArray(3), otherDelivery)?.mapping)
+        assertNull(cache.copyInt8WithMapping(key, quant, ByteArray(3), otherDelivery)?.mapping)
+    }
+
     private fun cacheKey(sequenceNumber: Long): InputPreprocessCache.Key {
         val config = ModelTensorConfig(
             inputWidth = 1,

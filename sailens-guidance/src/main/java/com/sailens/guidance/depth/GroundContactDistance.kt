@@ -11,6 +11,7 @@ import com.sailens.guidance.model.common.DistanceLevel
 import com.sailens.guidance.model.common.GroundType
 import com.sailens.guidance.model.common.ObstacleCategory
 import com.sailens.guidance.model.perception.SegmentationMask
+import com.sailens.guidance.model.perception.PerceptionFrameIdentity
 import com.sailens.guidance.semantics.NavigationSemantics
 import kotlinx.serialization.Serializable
 import kotlin.math.asin
@@ -92,6 +93,12 @@ data class GroundContactEstimate(
     val lowerM: Float? = null,
     val pointM: Float? = null,
     val upperM: Float? = null,
+    val groundProbe: GroundProbeObservation? = null,
+)
+
+data class GroundProbeObservation internal constructor(
+    internal val semanticSource: PerceptionFrameIdentity,
+    internal val box: NormalizedRect,
 )
 
 /**
@@ -125,6 +132,7 @@ data class DistanceFrame(
     /** The semantic class map of the frame (camera frame only), for the ground check. */
     val segmentation: SegmentationMask? = null,
     val config: GroundContactDistanceConfig = GroundContactDistanceConfig(),
+    val semanticSource: PerceptionFrameIdentity? = null,
 ) {
     companion object {
         val NONE = DistanceFrame(geometry = null)
@@ -210,7 +218,9 @@ class GroundContactDistanceEstimator(semantics: NavigationSemantics) {
         val segmentation = frame.segmentation
         if (segmentation != null && !groundBelow(box, segmentation, config)) return result(ContactValidity.GROUND_UNSEEN)
         if (!plausible(box, category, h, tolerance, geometry, config)) return result(ContactValidity.IMPLAUSIBLE_BOX)
-        return result(ContactValidity.VALID)
+        val source = frame.semanticSource
+        val valid = result(ContactValidity.VALID)
+        return if (segmentation != null && source != null) valid.copy(groundProbe = GroundProbeObservation(source, box)) else valid
     }
 
     /**

@@ -154,6 +154,7 @@ class LiteRtSemanticSegmenter<R>(
                 preferNativeYuvPreprocessing = modelConfig.preferNativeYuvPreprocessing,
                 preprocessCache = preprocessCache,
                 postprocessor = postprocessor,
+                scoreGridSpansInput = modelConfig.scoreGridSpansInput,
             )
         } catch (error: CancellationException) {
             session.close()

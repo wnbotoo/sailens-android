@@ -38,6 +38,7 @@ struct Candidate {
     int classId;
     float confidence;
     Rect rect;
+    bool edgesProven;
 };
 
 static LetterboxGeometry createGeometry(int frameWidth, int frameHeight, int rotationDegrees, int inputSize) {
@@ -105,6 +106,31 @@ static bool decodeModelRect(
             std::clamp((unpaddedBottom - unpaddedTop) / geometry.rotatedHeight, 0.0f, 1.0f),
     };
     return outRect.width > 0.0f && outRect.height > 0.0f;
+}
+
+static bool boundedModelCoordinate(double coordinate, int inputSize) {
+    return inputSize > 0 && inputSize <= 32768 && std::abs(coordinate) <= 4.0 * inputSize;
+}
+
+static bool provesEdges(const Rect& rect, const LetterboxGeometry& geometry, int inputSize,
+                        double x, double y, double halfWidth, double halfHeight) {
+    if (!boundedModelCoordinate(x, inputSize) || !boundedModelCoordinate(y, inputSize) ||
+        !boundedModelCoordinate(halfWidth, inputSize) || !boundedModelCoordinate(halfHeight, inputSize)) {
+        return false;
+    }
+    const double spanX = static_cast<double>(geometry.scale) * geometry.rotatedWidth;
+    const double spanY = static_cast<double>(geometry.scale) * geometry.rotatedHeight;
+    if (spanX < 1.0 || spanY < 1.0) return false;
+    // The decoder's normalized edge error budget includes the final origin-plus-extent rounding.
+    constexpr double tolerance = 1.0 / 1048576.0 - 1e-9;
+    const auto agrees = [inputSize](double edge, float pad, double span, double reported) {
+        return boundedModelCoordinate(edge, inputSize) &&
+               std::abs(std::clamp((edge - pad) / span, 0.0, 1.0) - reported) <= tolerance;
+    };
+    return agrees(x - halfWidth, geometry.padX, spanX, rect.x) &&
+           agrees(y - halfHeight, geometry.padY, spanY, rect.y) &&
+           agrees(x + halfWidth, geometry.padX, spanX, static_cast<double>(rect.x) + rect.width) &&
+           agrees(y + halfHeight, geometry.padY, spanY, static_cast<double>(rect.y) + rect.height);
 }
 
 static void sortByConfidence(std::vector<Candidate>& candidates) {
@@ -205,10 +231,14 @@ static std::vector<Candidate> decodeRawDetections(
             continue;
         }
 
-        const float cx = scoreAt(detectionIndex) * modelPixelScale;
-        const float cy = scoreAt(detectionCount + detectionIndex) * modelPixelScale;
-        const float width = scoreAt(detectionCount * 2 + detectionIndex) * modelPixelScale;
-        const float height = scoreAt(detectionCount * 3 + detectionIndex) * modelPixelScale;
+        const float rawX = scoreAt(detectionIndex);
+        const float rawY = scoreAt(detectionCount + detectionIndex);
+        const float rawWidth = scoreAt(detectionCount * 2 + detectionIndex);
+        const float rawHeight = scoreAt(detectionCount * 3 + detectionIndex);
+        const float cx = rawX * modelPixelScale;
+        const float cy = rawY * modelPixelScale;
+        const float width = rawWidth * modelPixelScale;
+        const float height = rawHeight * modelPixelScale;
 
         Rect rect{};
         if (!decodeModelRect(
@@ -222,7 +252,11 @@ static std::vector<Candidate> decodeRawDetections(
             continue;
         }
 
-        candidates.push_back({bestClassId, bestConfidence, rect});
+        const bool edgesProven = provesEdges(
+                rect, geometry, inputSize, static_cast<double>(rawX) * modelPixelScale,
+                static_cast<double>(rawY) * modelPixelScale, static_cast<double>(rawWidth) * modelPixelScale * 0.5,
+                static_cast<double>(rawHeight) * modelPixelScale * 0.5);
+        candidates.push_back({bestClassId, bestConfidence, rect, edgesProven});
     }
 
     sortByConfidence(candidates);
@@ -232,16 +266,24 @@ static std::vector<Candidate> decodeRawDetections(
     return applyClassAwareNms(candidates, maxDetections, kNmsIouThreshold);
 }
 
-static jfloatArray toJniArray(JNIEnv* env, const std::vector<Candidate>& detections) {
+static jfloatArray toJniArray(JNIEnv* env, const std::vector<Candidate>& detections,
+                              const LetterboxGeometry& geometry) {
     constexpr int valuesPerDetection = 6;
-    const int outputSize = static_cast<int>(detections.size()) * valuesPerDetection;
+    const int outputSize = 4 + static_cast<int>(detections.size()) * valuesPerDetection;
     jfloatArray output = env->NewFloatArray(outputSize);
-    if (output == nullptr || outputSize == 0) {
+    if (output == nullptr) {
         return output;
     }
 
     std::vector<float> flat;
     flat.reserve(outputSize);
+    flat.push_back(geometry.scale);
+    flat.push_back(geometry.padX);
+    flat.push_back(geometry.padY);
+    const bool edgesProven = std::all_of(detections.begin(), detections.end(), [](const Candidate& detection) {
+        return detection.edgesProven;
+    });
+    flat.push_back(edgesProven ? 1.0f : 0.0f);
     for (const Candidate& detection : detections) {
         flat.push_back(static_cast<float>(detection.classId));
         flat.push_back(detection.confidence);
@@ -341,7 +383,7 @@ nativePostProcessRawFloat(
             allowedIds);
 
     env->ReleaseFloatArrayElements(rawDetections, raw, JNI_ABORT);
-    return toJniArray(env, detections);
+    return toJniArray(env, detections, geometry);
 }
 
 jfloatArray JNICALL
@@ -400,7 +442,7 @@ nativePostProcessRawInt8(
             allowedIds);
 
     env->ReleaseByteArrayElements(rawDetections, raw, JNI_ABORT);
-    return toJniArray(env, detections);
+    return toJniArray(env, detections, geometry);
 }
 
 jboolean JNICALL
@@ -518,7 +560,7 @@ nativePostProcessRawFloatFromHandle(
             allowedIds);
 
     unlockTensorBuffer(tensorBufferHandle);
-    return toJniArray(env, detections);
+    return toJniArray(env, detections, geometry);
 }
 
 // Zero-copy INT8 obstacle postprocess: reads the raw detection tensor directly from the native
@@ -584,7 +626,7 @@ nativePostProcessRawInt8FromHandle(
             allowedIds);
 
     unlockTensorBuffer(tensorBufferHandle);
-    return toJniArray(env, detections);
+    return toJniArray(env, detections, geometry);
 }
 
 // ---------------------------------------------------------------------------

@@ -7,5 +7,10 @@
     native <methods>;
 }
 
+# Registration also needs this class in hosts whose composition never reaches the world kernel.
+-keep,includedescriptorclasses class com.sailens.guidance.kernel.NativeWorldGrid {
+    native <methods>;
+}
+
 # NativeGuidanceLibrary owns System.loadLibrary + the availability flag; keep it intact.
 -keep class com.sailens.guidance.kernel.NativeGuidanceLibrary { *; }

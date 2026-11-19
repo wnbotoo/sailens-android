@@ -44,6 +44,7 @@ internal class GuidanceSafetyObservation(
     private val wallClock: () -> Long = System::currentTimeMillis,
     private val nanoClock: () -> Long = System::nanoTime,
     wrapMonitor: (SafetyMonitor) -> SafetyMonitor = { it },
+    private val observeWorldSafety: (GuidanceSafetySnapshot) -> Unit = {},
 ) {
     private val cost = ObservationCost()
 
@@ -139,6 +140,7 @@ internal class GuidanceSafetyObservation(
      * hold beginning or its cause going even when the state stays the same stop; not of a result counted.
      */
     private fun changed(snapshot: GuidanceSafetySnapshot) {
+        contained { observeWorldSafety(snapshot) }
         contained { recordState(snapshot.toTrace(at = wallClock())) }
         val next = snapshot.state to snapshot.axes.holdView
         if (next != published) {

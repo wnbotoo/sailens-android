@@ -9,6 +9,7 @@
 
 #include "litert_zero_copy.h"
 #include "tensor_layout.h"
+#include "world_grid.h"
 
 constexpr const char* kLogTag = "SailensGuidanceJni";
 
@@ -1193,6 +1194,11 @@ nativeExtractConnectivityStats(
 // rawElementCount is the flattened tensor size (attributesPerDetection * detectionCount); it cannot
 // be derived from the handle, so the caller passes it.
 
+const JNINativeMethod kWorldGridMethods[] = {
+        {"fill", "(II[I[J[Z[I)Z", reinterpret_cast<void*>(sailens::fillWorldPassableTable)},
+        {"classify", "([D[D[DI[DII[I[J[J[Z)I", reinterpret_cast<void*>(sailens::classifyWorldGrid)},
+};
+
 const JNINativeMethod kSemanticScorePostprocessorMethods[] = {
         {"nativePostprocessScores",
          "([F[IIIII[Z[Z[Z[Z[IFFF[J[J[I[I[I[I)Z",
@@ -1232,6 +1238,9 @@ const NativeClassBinding kNativeClassBindings[] = {
         {"com/sailens/guidance/kernel/NativeConnectivityStatsExtractor",
          kConnectivityStatsExtractorMethods,
          methodCountOf(kConnectivityStatsExtractorMethods)},
+        {"com/sailens/guidance/kernel/NativeWorldGrid",
+         kWorldGridMethods,
+         methodCountOf(kWorldGridMethods)},
 };
 
 bool registerClassNatives(JNIEnv* env, const NativeClassBinding& binding) {

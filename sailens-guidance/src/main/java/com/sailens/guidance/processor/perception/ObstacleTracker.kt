@@ -64,7 +64,7 @@ class ObstacleTracker(
      *   ([DetectedObstacle.measurement]); tracking does not read it.
      */
     fun update(detections: List<RawObstacle>, timestamp: Long, frame: ObstacleSourceFrame? = null): List<DetectedObstacle> {
-        val measurement = frame?.let { ObstacleMeasurement(it.sequenceNumber, it.timestampNanos, timestamp) }
+        val measurement = frame?.let { ObstacleMeasurement(it.sequenceNumber, it.timestampNanos, timestamp, it.identity) }
         // 1. 计算 IoU 匹配
         val matches = matchDetections(detections)
 

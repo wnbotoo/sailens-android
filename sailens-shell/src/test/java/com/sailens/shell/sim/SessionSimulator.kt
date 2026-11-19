@@ -1,5 +1,10 @@
 package com.sailens.shell.sim
 
+import com.sailens.guidance.geometry.HeightSource
+import com.sailens.guidance.geometry.PhoneGeometrySettings
+import com.sailens.guidance.sim.SimulatedWorldAnalysis
+import com.sailens.guidance.world.LocalWorldReader
+
 import com.sailens.core.log.LogService
 import com.sailens.guidance.config.AnalysisConfig
 import com.sailens.guidance.config.DetFirstConfig
@@ -10,9 +15,11 @@ import com.sailens.guidance.model.trace.GuidanceAlertTrace
 import com.sailens.guidance.model.trace.PromptOutcomeTrace
 import com.sailens.guidance.model.trace.SafetyStateTrace
 import com.sailens.guidance.safety.BaselineQualification
+import com.sailens.guidance.safety.CapabilityStatus
 import com.sailens.guidance.sim.FrameDelivery
 import com.sailens.guidance.sim.SimulatedDepthModel
 import com.sailens.guidance.sim.SimulatedPipeline
+import com.sailens.vision.depth.MeasurementKey
 import com.sailens.guidance.usecase.decision.AcceptedPromptUseCase
 import com.sailens.guidance.usecase.decision.ConfirmDeliveredEventUseCase
 import com.sailens.guidance.usecase.decision.ReportCutPromptUseCase
@@ -53,6 +60,9 @@ internal class SessionRun(
     val cards: List<CardSample> = emptyList(),
     /** Depth runs that reached the simulated model, over every session of the script; 0 without a lane. */
     val depthInferences: Int = 0,
+    /** Available, fitted readings that reached the real world policy. */
+    val rejectedAvailableDepth: Map<Long, MeasurementKey> = emptyMap(),
+    val worldDepthStatus: Map<Long, CapabilityStatus> = emptyMap(),
     /** The status card's content each time the session settled, from its start. */
     val screens: List<ScreenSample> = emptyList(),
 ) {
@@ -81,6 +91,8 @@ internal object SessionSimulator {
         reverseCompletion: Boolean = false,
         handshakeTimeoutMs: Long = 30_000,
         depth: SimulatedDepthModel? = null,
+        queuedRiskExpiryMs: Long? = null,
+        observeWorld: ((Long, LocalWorldReader) -> Unit)? = null,
     ): SessionRun {
         val frames = script.scenario.frames
         val director = Director(
@@ -95,6 +107,11 @@ internal object SessionSimulator {
             semanticInit = gates[ScriptAction.SEM]?.gate,
             detectionInit = gates[ScriptAction.DET]?.gate,
             depth = depth,
+            withLocalWorld = observeWorld != null,
+            phoneGeometry = {
+                if (observeWorld == null) PhoneGeometrySettings.DEFAULT else
+                    PhoneGeometrySettings(script.scenario.frames.first().pose.heightM, HeightSource.PRESET)
+            },
         )
         if (script.scenario.alignClockToFrames) pipeline.clock.advanceBy(script.scenario.stepMs - script.firstFrameAtMs)
         val clock = SessionClock(advancePipeline = pipeline.clock::advanceBy, pipelineNow = pipeline.clock)
@@ -116,6 +133,9 @@ internal object SessionSimulator {
             record = { timeline.add { _ -> it } },
             now = now,
         )
+        if (queuedRiskExpiryMs != null) {
+            director.schedule(1_200L, EventKind.SCRIPT) { haptics.occupyProtected(200L) }
+        }
         val description = SimDescription(now = pipeline.clock, record = timeline::description)
         val screenReader = SimScreenReader(timeline::screenReader)
         // ShellModule.kt:84-95: the last lease closing stops what is said, then releases the engine. The description
@@ -171,9 +191,14 @@ internal object SessionSimulator {
 
         val cards = mutableListOf<CardSample>()
         var screen: () -> SceneAnalysisUiState = { error("no screen yet") }
+        var worldReader: () -> LocalWorldReader? = { null }
+        val rejectedAvailableDepth = mutableMapOf<Long, MeasurementKey>()
+        val worldDepthStatus = mutableMapOf<Long, CapabilityStatus>()
         val observer = object : MirrorObserver by director.observer {
             override fun resultArrived(run: Int, result: SceneResult) {
                 director.observer.resultArrived(run, result)
+                pipeline.world?.rejectedAvailableFit(result)?.let { rejectedAvailableDepth[result.sequenceNumber] = it }
+                if (pipeline.world != null) worldDepthStatus[result.sequenceNumber] = result.depthReading.status
                 timeline.frame(result.sequenceNumber, result.qualification.baseline, result.events, result.obstacles.map { it.category }, result.frameReceivedAtMs)
             }
 
@@ -181,6 +206,7 @@ internal object SessionSimulator {
                 director.observer.resultHandled(run, sequenceNumber)
                 val ui = screen()
                 cards += CardSample(sequenceNumber, ui.activeStatusEvent?.id?.toString(), held = ui.promptHold != null)
+                if (observeWorld != null) worldReader()?.let { observeWorld(sequenceNumber, it) }
             }
         }
 
@@ -190,8 +216,8 @@ internal object SessionSimulator {
         val mirror = ViewModelMirror(
             frames = director::frames,
             depthFrames = { minIntervalMs -> pipeline.depthFrames?.invoke(minIntervalMs) ?: emptyFlow() },
-            analysis = { frameFlow, releaseFrame, semanticMaskSnapshot, depthFrames ->
-                pipeline.start(frameFlow, releaseFrame, semanticMaskSnapshot, depthFrames)
+            analysis = { frameFlow, releaseFrame, semanticMaskSnapshot, depthFrames, localWorldRun ->
+                pipeline.start(frameFlow, releaseFrame, semanticMaskSnapshot, depthFrames, localWorldRun)
             },
             resetProcessors = {
                 director.log += "reset"
@@ -216,15 +242,24 @@ internal object SessionSimulator {
             context = context,
             observer = observer,
             seams = RealSeams,
+            openWorld = pipeline.world?.let { it::openOwner },
+            eventsForDelivery = queuedRiskExpiryMs?.let { expiry ->
+                { result, events ->
+                    if (result.sequenceNumber == 3L) events.map { event ->
+                        event.copy(expiresAt = event.timestamp + expiry)
+                    } else events
+                }
+            },
         )
         screen = { mirror.uiState.value }
+        worldReader = { mirror.localWorldReader }
         val screens = mutableListOf<ScreenSample>()
         director.settled = { screens += ScreenSample(now(), mirror.uiState.value.statusCardContent(), lastTraced) }
 
         for (action in script.actions) {
             director.schedule(action.atMs, EventKind.SCRIPT) {
                 timeline.script(action.label)
-                perform(action, mirror, director, gates, speech, settings, screenReaderActive, description, origin)
+                perform(action, mirror, director, gates, speech, settings, screenReaderActive, description, origin, pipeline.world)
             }
         }
         val delivered = mutableListOf<Int>()
@@ -251,6 +286,8 @@ internal object SessionSimulator {
             script, entries, lines, log.lines, director.log.toList(), delivered, mirror.uiState.value,
             director.ledger.mapValues { it.value.toString() }, cards.toList(),
             depthInferences = synchronized(pipeline.depthRunners) { pipeline.depthRunners.sumOf { it.inferences.get() } },
+            rejectedAvailableDepth = rejectedAvailableDepth.toMap(),
+            worldDepthStatus = worldDepthStatus.toMap(),
             screens = screens.toList(),
         )
     }
@@ -265,6 +302,7 @@ internal object SessionSimulator {
         screenReaderActive: MutableStateFlow<Boolean>,
         description: SimDescription,
         origin: Long,
+        world: SimulatedWorldAnalysis?,
     ) {
         when (action) {
             is ScriptAction.Start -> {
@@ -276,12 +314,16 @@ internal object SessionSimulator {
                 mirror.toggleAnalysis()
             }
             is ScriptAction.Background -> {
+                world?.stopAnalysis { director.cameraPaused = true }
                 // LiveAnalysisScreen: ON_STOP hands the screen's resolved sentence to the view model.
                 mirror.onGuidanceInterrupted("notice_guidance_interrupted")
                 director.cameraPaused = true
             }
             is ScriptAction.Foreground -> mirror.acknowledgeInterruption()
-            is ScriptAction.CameraResume -> director.cameraPaused = false
+            is ScriptAction.CameraResume -> {
+                director.cameraPaused = false
+                world?.reopenAnalysis()
+            }
             is ScriptAction.ReleaseInit -> director.release(gates.getValue(action.gate))
             is ScriptAction.FailInit -> director.fail(gates.getValue(action.gate), ScriptedInitFailure(action.message))
             is ScriptAction.Engine -> speech.engine(action.state, action.ready)

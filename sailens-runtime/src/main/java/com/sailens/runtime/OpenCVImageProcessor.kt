@@ -33,6 +33,14 @@ class OpenCVImageProcessor(
      * 预处理：ImageFrame -> RGB Mat -> Rotate -> Letterbox Resize -> Normalize -> FloatArray
      */
     override fun preprocess(frame: ImageFrame, rotationDegrees: Int, outputArray: FloatArray) {
+        preprocessWithMapping(frame, rotationDegrees, outputArray)
+    }
+
+    internal fun preprocessWithMapping(
+        frame: ImageFrame,
+        rotationDegrees: Int,
+        outputArray: FloatArray,
+    ): InputImageMapping {
         val rgbaBytes = frame.toRgbaBytes()
 
         // 1. RGBA bytes -> Mat
@@ -100,6 +108,12 @@ class OpenCVImageProcessor(
                 )
             }
         }
+        return InputImageMapping(
+            srcWidth, srcHeight, targetWidth, targetHeight,
+            InputImageMapping.Axis(newWidth.toDouble() / srcWidth, offsetX.toDouble(), offsetX, offsetX + newWidth),
+            InputImageMapping.Axis(newHeight.toDouble() / srcHeight, offsetY.toDouble(), offsetY, offsetY + newHeight),
+            rotationDegrees,
+        )
     }
 
     /**

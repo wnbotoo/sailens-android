@@ -41,6 +41,8 @@ import com.sailens.shell.guidance.settings.GuidanceFeedbackSettings
 import com.sailens.shell.guidance.overlay.SceneOverlayConfig
 import com.sailens.shell.guidance.overlay.SceneOverlayMode
 import com.sailens.shell.guidance.safety.GuidanceSystemAlerts
+import com.sailens.guidance.world.LocalWorldOwner
+import com.sailens.guidance.world.LocalWorldReader
 import com.sailens.shell.guidance.safety.OutputFacts
 import com.sailens.shell.guidance.settings.GuidanceSettingsStore
 import com.sailens.shell.safetynotice.SafetyNoticeGate
@@ -61,6 +63,7 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.cancel
@@ -137,6 +140,8 @@ class SceneAnalysisViewModel(
 
     /** The processors are reset only after a stopped run's last frame is done; see [GuidanceRunSequencer]. */
     private val runs = GuidanceRunSequencer(viewModelScope) { stopSceneAnalysisUseCase() }
+    private var worldOwner: LocalWorldOwner? = null
+    val localWorldReader: LocalWorldReader? get() = worldOwner?.reader
     private var stallWatchJob: Job? = null
 
     /**
@@ -186,6 +191,7 @@ class SceneAnalysisViewModel(
         recordState = traceService::recordSafetyState,
         recordAlert = traceService::recordGuidanceAlert,
         publishState = { state, hold -> _uiState.update { it.copy(safetyState = state, promptHold = hold) } },
+        observeWorldSafety = { worldOwner?.observeSafety(it) },
         timed = { _uiState.value.showDiagnostics },
         logger = logger,
         clock = clock,
@@ -443,6 +449,9 @@ class SceneAnalysisViewModel(
 
     private fun startSceneAnalysis() {
         frameCount = 0
+        closeWorldOwner()
+        val owner = LocalWorldOwner.withoutAnalysisGrant(SystemClock::elapsedRealtimeNanos)
+        worldOwner = owner
         runs.start {
             // Wait for ongoing resource release to complete (with timeout protection)
             var waitTime = 0L
@@ -466,15 +475,24 @@ class SceneAnalysisViewModel(
                 semanticMaskSnapshot = { rendersSemanticClassMask() },
                 // The depth lane's own sampled subscription; it runs only when the debug switch is on.
                 depthFrames = { minIntervalMs -> frameSource.frames(minIntervalMs) },
+                localWorldRun = owner.run,
             ).onStart {
                 _uiState.flowStarted { alerts.onFlowStarted() }
                 logger.info(TAG, "Scene analysis started")
             }.catch { e ->
-                alerts.onFlowFailed(e)
+                if (worldOwner === owner) {
+                    closeWorldOwner()
+                    alerts.onFlowFailed(e)
+                }
+            }.onCompletion {
+                owner.close()
+                if (worldOwner === owner) worldOwner = null
             }.collectLatest { result ->
                 frameCount++
                 // Before the frame's prompts are delivered: they, and the card, go by the hold this result leaves.
-                alerts.onResult(result.qualification.baseline, result.sequenceNumber, result.frameReceivedAtMs)
+                owner.observeResult(result) {
+                    alerts.onResult(result.qualification.baseline, result.sequenceNumber, result.frameReceivedAtMs)
+                }
                 val holdOrdinary = alerts.holdsOrdinaryPrompts
                 latestSceneResult = result
                 val overlayMode = _uiState.value.overlayMode
@@ -571,6 +589,7 @@ class SceneAnalysisViewModel(
     }
 
     private fun stopSceneAnalysis() {
+        closeWorldOwner()
         stopStallWatch()
         // Stopped on purpose: no recovery is said for what was still faulty.
         guidanceOutput.stop {
@@ -586,6 +605,7 @@ class SceneAnalysisViewModel(
     }
 
     override fun onCleared() {
+        closeWorldOwner()
         alerts.onStopped()
         alerts.endOfSession()
         stopStallWatch()
@@ -598,6 +618,11 @@ class SceneAnalysisViewModel(
         // stops and releases it once nobody holds one, and not while another screen still speaks.
         engineLease.close()
         super.onCleared()
+    }
+
+    private fun closeWorldOwner() {
+        worldOwner?.close()
+        worldOwner = null
     }
 
     private fun scheduleOverlayRender(

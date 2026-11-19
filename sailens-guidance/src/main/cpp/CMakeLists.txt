@@ -10,7 +10,12 @@ add_library(
         sailens_guidance
         SHARED
         sailens_guidance_jni.cpp
+        world_grid.cpp
 )
+
+# The grid widens every interval endpoint explicitly. Preserve NaNs and operation boundaries.
+set_source_files_properties(world_grid.cpp PROPERTIES COMPILE_FLAGS
+        "-fno-fast-math -ffp-contract=off -fvisibility=hidden")
 
 # NDK r28 automatically handles 16KB page size for arm64-v8a and x86_64
 # The following configuration is kept for explicit documentation

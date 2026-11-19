@@ -20,12 +20,13 @@ internal class NativeDetectionPostProcessor(
      */
     private val allowedClassIds: IntArray,
 ) {
+    data class Batch(val detections: List<Detection>, val transform: DetectionDecoderTransform?)
 
     fun postProcessFloat(
         frame: ImageFrame,
         rawDetections: FloatArray,
         attributesPerDetection: Int,
-    ): List<Detection>? {
+    ): Batch? {
         if (!NativeVisionLibrary.isAvailable || rawDetections.isEmpty()) return null
 
         val flatResult = runCatching {
@@ -53,7 +54,7 @@ internal class NativeDetectionPostProcessor(
         rawDetections: ByteArray,
         attributesPerDetection: Int,
         quantization: TensorQuantization?,
-    ): List<Detection>? {
+    ): Batch? {
         if (!NativeVisionLibrary.isAvailable || rawDetections.isEmpty()) return null
 
         val flatResult = runCatching {
@@ -85,7 +86,7 @@ internal class NativeDetectionPostProcessor(
         rawElementCount: Int,
         frame: ImageFrame,
         attributesPerDetection: Int,
-    ): List<Detection>? {
+    ): Batch? {
         if (!NativeVisionLibrary.isAvailable || tensorBufferHandle == 0L || rawElementCount <= 0) return null
 
         val flatResult = runCatching {
@@ -119,7 +120,7 @@ internal class NativeDetectionPostProcessor(
         frame: ImageFrame,
         attributesPerDetection: Int,
         quantization: TensorQuantization?,
-    ): List<Detection>? {
+    ): Batch? {
         if (!NativeVisionLibrary.isAvailable || tensorBufferHandle == 0L || rawElementCount <= 0) return null
 
         val flatResult = runCatching {
@@ -145,11 +146,13 @@ internal class NativeDetectionPostProcessor(
         return decodeNativeResult(flatResult)
     }
 
-    private fun decodeNativeResult(flatResult: FloatArray): List<Detection> {
-        if (flatResult.isEmpty()) return emptyList()
+    private fun decodeNativeResult(flatResult: FloatArray): Batch {
+        if (flatResult.size < TRANSFORM_SIZE || (flatResult.size - TRANSFORM_SIZE) % VALUES_PER_DETECTION != 0) {
+            return Batch(emptyList(), null)
+        }
 
-        val detections = ArrayList<Detection>(flatResult.size / VALUES_PER_DETECTION)
-        var index = 0
+        val detections = ArrayList<Detection>((flatResult.size - TRANSFORM_SIZE) / VALUES_PER_DETECTION)
+        var index = TRANSFORM_SIZE
         while (index + VALUES_PER_DETECTION <= flatResult.size) {
             val classId = flatResult[index].toInt()
             detections += Detection(
@@ -165,7 +168,7 @@ internal class NativeDetectionPostProcessor(
             )
             index += VALUES_PER_DETECTION
         }
-        return detections
+        return Batch(detections, DetectionDecoderTransform(flatResult[0], flatResult[1], flatResult[2], flatResult[3] == 1f))
     }
 
     private external fun nativePostProcessRawFloat(
@@ -227,6 +230,7 @@ internal class NativeDetectionPostProcessor(
     ): FloatArray?
 
     private companion object {
+        const val TRANSFORM_SIZE = 4
         const val VALUES_PER_DETECTION = 6
     }
 }

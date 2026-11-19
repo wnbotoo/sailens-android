@@ -1,7 +1,10 @@
 package com.sailens.vision.semantic
 
+import com.sailens.runtime.ImageTensorLayout
+import com.sailens.runtime.InputImageMapping
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 /**
@@ -9,6 +12,18 @@ import org.junit.Test
  * native preprocess produces for the shipped 960x540 analysis stream and a 640x640 model.
  */
 class SemanticContentRegionTest {
+
+    @Test
+    fun `the score tensor shape alone grants no image mapping`() {
+        val crop = SemanticContentRegion(0, 35, 160, 90)
+        val spec = SemanticScoreSpec(160, 160, 19, ImageTensorLayout.NHWC, crop)
+        val input = InputImageMapping(960, 540, 640, 640,
+            InputImageMapping.Axis(2.0 / 3, 0.0, 0, 640), InputImageMapping.Axis(2.0 / 3, 140.0, 140, 500), 0)
+        assertNull(spec.imageMapping(input, SemanticModelConfig().scoreGridSpansInput))
+        val declared = SemanticModelConfig(scoreGridSpansInput = true)
+        assertEquals(SemanticImageMapping(input, 160, 160, crop), spec.imageMapping(input, declared.scoreGridSpansInput))
+        assertNull(spec.imageMapping(null, declared.scoreGridSpansInput))
+    }
 
     @Test
     fun `a portrait frame occupies the centre 360 columns`() {
