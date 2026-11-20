@@ -13,10 +13,18 @@ import com.sailens.runtime.InputImageMapping
  */
 sealed interface SemanticScores {
     /** Raw `LiteRtTensorBuffer*` for a FLOAT32 output tensor. Never zero. */
-    data class FloatHandle(val tensorBufferHandle: Long, val outputAccessNanos: LongArray? = null) : SemanticScores
+    data class FloatHandle(
+        val tensorBufferHandle: Long,
+        val outputAccessNanos: LongArray? = null,
+        val timing: SemanticScoreTiming? = null,
+    ) : SemanticScores
 
     /** Raw `LiteRtTensorBuffer*` for an INT8 output tensor. Never zero. */
-    data class Int8Handle(val tensorBufferHandle: Long, val outputAccessNanos: LongArray? = null) : SemanticScores
+    data class Int8Handle(
+        val tensorBufferHandle: Long,
+        val outputAccessNanos: LongArray? = null,
+        val timing: SemanticScoreTiming? = null,
+    ) : SemanticScores
 
     /** A FLOAT32 tensor already copied out of LiteRT. */
     @JvmInline

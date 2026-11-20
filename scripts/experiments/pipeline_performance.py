@@ -77,6 +77,8 @@ def measure(metadata, frames, warmup_seconds, window_seconds=None):
     dims = Counter()
     backends = defaultdict(Counter)
     jni_copy_counts = defaultdict(Counter)
+    score_pixel_samples = Counter()
+    score_sampled_frames = 0
 
     def within(timestamp):
         return timestamp is not None and begin <= timestamp < end
@@ -181,7 +183,21 @@ def measure(metadata, frames, warmup_seconds, window_seconds=None):
                     output_access += duration
                 sample(f"{label}.outputAccess", output_access)
                 duration = run["postprocessFinishedNanos"] - run["inferenceReturnedNanos"]
-                sample(f"{label}.postprocess", duration - output_access)
+                postprocess = duration - output_access
+                sample(f"{label}.postprocess", postprocess)
+                if detail := run.get("semanticScorePhases"):
+                    phases = ("arraysGet", "fusedKernel", "arraysRelease", "kotlinPrepare", "kotlinAssemble")
+                    for phase in phases:
+                        sample(f"{label}.score.{phase}", detail[f"{phase}Nanos"])
+                    sample(f"{label}.score.other", postprocess - sum(detail[f"{phase}Nanos"] for phase in phases))
+                    sampled = detail.get("sampledPixels", 0)
+                    kind = "sampledKernel" if sampled else "unsampledKernel"
+                    sample(f"{label}.score.{kind}", detail["fusedKernelNanos"])
+                    if sampled:
+                        score_sampled_frames += 1
+                        score_pixel_samples["pixels"] += sampled
+                        for phase in ("argmax", "maskWrites", "statistics", "clockFloor"):
+                            score_pixel_samples[phase] += detail[f"sampled{phase[0].upper() + phase[1:]}Nanos"]
 
     dequeued = counters["dequeued"]
     decided = counters["decided_from_input"]
@@ -205,6 +221,14 @@ def measure(metadata, frames, warmup_seconds, window_seconds=None):
         "analysis_frame_dimensions": dims,
         "backends": dict(backends),
         "jni_copy_counts": dict(jni_copy_counts),
+        "semantic_score_pixel_sampling": {
+            "frames": score_sampled_frames,
+            "pixels": score_pixel_samples["pixels"],
+            "nanos_per_sampled_pixel": {
+                key: round(ns / score_pixel_samples["pixels"], 2)
+                for key, ns in score_pixel_samples.items() if key != "pixels"
+            },
+        },
         "timing_ms": {key: stats_ns(samples) for key, samples in sorted(timings.items())},
     }
 

@@ -2,6 +2,7 @@ package com.sailens.vision
 
 import android.os.SystemClock
 import com.sailens.runtime.InputPreprocessTiming
+import com.sailens.vision.semantic.SemanticScoreTiming
 
 /**
  * Checkpoints for one profiled model call. Written by the runner and read after its coroutine
@@ -28,6 +29,8 @@ class ModelRunTiming(val queuedNanos: Long) {
     var postprocessFinishedNanos: Long? = null
         internal set
     var postprocessBackend: String? = null
+        internal set
+    var semanticScoreTiming: SemanticScoreTiming? = null
         internal set
 
     val outputLockNanos: Long get() = nativeOutputAccess[0]

@@ -85,3 +85,12 @@ the latest adopted detector measurement, including tracker-only frames.
 Sem and det can overlap. A model's input write, LiteRT call, output access and remaining
 postprocessing durations are distinct. A zero-copy read lock can include waiting for the
 accelerator and mapping the output. The end of output postprocessing counts one new model result.
+
+On the semantic handle path, `sem.score` reports Kotlin scratch preparation, JNI array
+acquisition, the fused kernel, JNI array release, and Kotlin assembly of the masks and
+statistics. LiteRT lock and unlock keep their own clocks. Every eighth camera frame ID enables
+pixel sampling with a rotating offset and a stride of 257 content pixels. That sample estimates
+argmax, class map and packed-mask writes, and the intervening lookups and statistics, with a
+back-to-back clock measurement subtracted from each sampled interval. These per-pixel estimates
+help rank work inside the fused loop. Use the full kernel duration to compare runs, and compare
+sampled and unsampled kernel durations to check the cost of sampling.

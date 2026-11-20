@@ -13,6 +13,7 @@ import com.sailens.runtime.ModelTensorConfig
 import com.sailens.vision.semantic.SemanticContentRegion
 import com.sailens.vision.semantic.SemanticScoreSpec
 import com.sailens.vision.semantic.SemanticScores
+import com.sailens.vision.semantic.SemanticScoreTiming
 import com.sailens.vision.semantic.cropClassMap
 import com.sailens.guidance.config.AnalysisConfig
 import com.sailens.guidance.model.perception.SegmentationMask
@@ -191,6 +192,14 @@ class NavigationScoreKernelTest {
                             input.writeInt8(croppedScoreFixture(layout))
                             model.run(listOf(input), listOf(output))
                             assertCroppedScores(SemanticScores.Int8Handle(handleOf(output)), layout, "native_score_int8")
+                            val sampled = SemanticScoreTiming(sampleOffset = 0)
+                            assertCroppedScores(
+                                SemanticScores.Int8Handle(handleOf(output), LongArray(2), sampled),
+                                layout,
+                                "native_score_int8",
+                            )
+                            assertTrue(checkNotNull(sampled.fusedKernelNanos) > 0)
+                            assertEquals(1L, sampled.sampledPixels)
                         }
                     }
                 }

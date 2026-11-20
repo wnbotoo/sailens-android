@@ -141,15 +141,18 @@ class SegmentationRunner<R>(
         //    output). If the postprocessor declines for any reason (native lib unavailable, dlsym
         //    failure, lock failure, validation error), copy the tensor out and offer it again,
         //    then fall back to generic argmax.
+        val scoreTiming = timing?.takeIf { outputBufferHandle != 0L }?.let {
+            SemanticScoreTiming.forFrame(rawFrame.sequenceNumber).also { phases -> it.semanticScoreTiming = phases }
+        }
         val handleOutcome: SemanticPostprocessOutcome<R>? = when {
             outputBufferHandle == 0L -> null
             outputElementType == TfliteTensorElementType.FLOAT32 -> postprocessor.postprocessScores(
-                scores = SemanticScores.FloatHandle(outputBufferHandle, timing?.nativeOutputAccess),
+                scores = SemanticScores.FloatHandle(outputBufferHandle, timing?.nativeOutputAccess, scoreTiming),
                 spec = spec,
                 reusableClassMap = contentMask,
             )
             outputElementType == TfliteTensorElementType.INT8 -> postprocessor.postprocessScores(
-                scores = SemanticScores.Int8Handle(outputBufferHandle, timing?.nativeOutputAccess),
+                scores = SemanticScores.Int8Handle(outputBufferHandle, timing?.nativeOutputAccess, scoreTiming),
                 spec = spec,
                 reusableClassMap = contentMask,
             )

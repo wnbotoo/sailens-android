@@ -42,6 +42,18 @@ class PipelinePerformanceTest(unittest.TestCase):
             "outputLockNanos": 4_000_000,
             "outputUnlockNanos": 100_000,
             "postprocessFinishedNanos": 1_035_000_000,
+            "semanticScorePhases": {
+                "arraysGetNanos": 100_000,
+                "fusedKernelNanos": 4_800_000,
+                "arraysReleaseNanos": 200_000,
+                "kotlinPrepareNanos": 100_000,
+                "kotlinAssembleNanos": 200_000,
+                "sampledPixels": 20,
+                "sampledArgmaxNanos": 1_200,
+                "sampledMaskWritesNanos": 100,
+                "sampledStatisticsNanos": 300,
+                "sampledClockFloorNanos": 400,
+            },
         }
         first["det"] = {
             "preprocessStartedNanos": 1_002_000_000,
@@ -89,6 +101,20 @@ class PipelinePerformanceTest(unittest.TestCase):
         self.assertNotIn("det.kotlinHwcToNchw", timing)
         self.assertEqual(report["jni_copy_counts"]["sem.output"], {"copy": 1})
         self.assertEqual(report["jni_copy_counts"]["sem.u"], {"direct": 1})
+        self.assertEqual(timing["sem.score.fusedKernel"]["p95"], 4.8)
+        self.assertEqual(timing["sem.score.other"]["p95"], 0.5)
+        self.assertEqual(timing["sem.score.sampledKernel"]["n"], 1)
+        self.assertNotIn("sem.score.unsampledKernel", timing)
+        self.assertEqual(report["semantic_score_pixel_sampling"], {
+            "frames": 1,
+            "pixels": 20,
+            "nanos_per_sampled_pixel": {
+                "argmax": 60.0,
+                "maskWrites": 5.0,
+                "statistics": 15.0,
+                "clockFloor": 20.0,
+            },
+        })
 
     def test_rejects_missing_timing_rows_before_computing_drops(self):
         rows = [

@@ -1,10 +1,12 @@
 #include <jni.h>
 
 #include <android/log.h>
+#include <time.h>
 
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <type_traits>
 #include <vector>
 
 #include "litert_zero_copy.h"
@@ -93,7 +95,72 @@ static int bestSemanticClass(const Score* scores, int channels, int channelStrid
     return classId;
 }
 
-template <typename Score>
+static jlong elapsedNanos() {
+    timespec time{};
+    clock_gettime(CLOCK_BOOTTIME, &time);
+    return static_cast<jlong>(time.tv_sec) * 1'000'000'000 + time.tv_nsec;
+}
+
+struct SemanticPixelSamples {
+    static constexpr int kStride = 257;
+    int nextPixel = -1;
+    jlong count = 0;
+    jlong argmaxNanos = 0;
+    jlong maskNanos = 0;
+    jlong statsNanos = 0;
+    jlong clockNanos = 0;
+
+    void add(jlong floor, jlong argmax, jlong classMap, jlong passable, jlong obstacle,
+             int packedWrites, jlong total) {
+        const auto adjusted = [floor](jlong nanos) { return std::max<jlong>(0, nanos - floor); };
+        argmaxNanos += adjusted(argmax);
+        maskNanos += adjusted(classMap) + adjusted(passable) + adjusted(obstacle);
+        const jlong stats = total - argmax - classMap - passable - obstacle;
+        statsNanos += std::max<jlong>(0, stats - floor * (1 + packedWrites));
+        clockNanos += floor;
+        ++count;
+        nextPixel += kStride;
+    }
+};
+
+class SemanticScoreTiming {
+public:
+    SemanticScoreTiming(JNIEnv* env, jlongArray destination) {
+        if (destination == nullptr || env->GetArrayLength(destination) < kCount) return;
+        destination_ = destination;
+        jlong offset = -1;
+        env->GetLongArrayRegion(destination_, 0, 1, &offset);
+        if (0 <= offset && offset < SemanticPixelSamples::kStride) {
+            pixels_.nextPixel = static_cast<int>(offset);
+        }
+    }
+
+    jlong now() const {
+        return destination_ == nullptr ? 0 : elapsedNanos();
+    }
+
+    template <typename Run>
+    void kernel(Run run) {
+        if (pixels_.nextPixel >= 0) run(std::true_type{}, &pixels_);
+        else run(std::false_type{}, nullptr);
+    }
+
+    void record(JNIEnv* env, jlong arraysGet, jlong fusedKernel, jlong arraysRelease) const {
+        if (destination_ == nullptr) return;
+        const jlong values[kCount] = {
+                arraysGet, fusedKernel, arraysRelease, pixels_.count, pixels_.argmaxNanos,
+                pixels_.maskNanos, pixels_.statsNanos, pixels_.clockNanos,
+        };
+        env->SetLongArrayRegion(destination_, 0, kCount, values);
+    }
+
+private:
+    static constexpr int kCount = 8;
+    jlongArray destination_ = nullptr;
+    SemanticPixelSamples pixels_;
+};
+
+template <typename Score, bool SamplePixels = false>
 static void postprocessSemanticScoresCore(
         const Score* scoreData,
         jint* resultData,
@@ -116,7 +183,8 @@ static void postprocessSemanticScoresCore(
         int classCount,
         jint* groundTypeCountData,
         int groundTypeCount,
-        jint* outputData) {
+        jint* outputData,
+        SemanticPixelSamples* pixelSamples = nullptr) {
     // Outputs are content-sized; scores are read from the full grid.
     const int width = region.width;
     const int height = region.height;
@@ -155,12 +223,17 @@ static void postprocessSemanticScoresCore(
 
         for (int x = 0; x < width; ++x) {
             const int pixelIndex = y * width + x;
+            const bool sample = SamplePixels && pixelIndex == pixelSamples->nextPixel;
+            const jlong clockStarted = sample ? elapsedNanos() : 0;
+            const jlong started = sample ? elapsedNanos() : 0;
             const int sourcePixel = (region.y + y) * gridWidth + (region.x + x);
             const int classId = channelMajor
                     ? bestSemanticClass(scoreData + sourcePixel, channels, planeSize)
                     : bestSemanticClass(scoreData + sourcePixel * channels, channels, 1);
+            const jlong argmaxDone = sample ? elapsedNanos() : 0;
 
             resultData[pixelIndex] = classId;
+            const jlong classMapDone = sample ? elapsedNanos() : 0;
 
             const bool validClass = classId >= 0 && classId < classCount;
             const bool isPassable = validClass && passableData[classId] == JNI_TRUE;
@@ -172,12 +245,18 @@ static void postprocessSemanticScoresCore(
             if (validClass) {
                 classCountData[classId]++;
             }
+            jlong passableNanos = 0;
             if (isPassable) {
+                const jlong before = sample ? elapsedNanos() : 0;
                 setPackedBit(passableWordData, pixelIndex);
+                if (sample) passableNanos = elapsedNanos() - before;
                 outputData[kOutPassablePixelCount]++;
             }
+            jlong obstacleNanos = 0;
             if (isObstacle) {
+                const jlong before = sample ? elapsedNanos() : 0;
                 setPackedBit(obstacleWordData, pixelIndex);
+                if (sample) obstacleNanos = elapsedNanos() - before;
                 outputData[kOutObstaclePixelCount]++;
             }
             if (isRoad) {
@@ -218,6 +297,12 @@ static void postprocessSemanticScoresCore(
                     }
                     currentRunStart = -1;
                 }
+            }
+            if (sample) {
+                const jlong done = elapsedNanos();
+                pixelSamples->add(
+                        started - clockStarted, argmaxDone - started, classMapDone - argmaxDone,
+                        passableNanos, obstacleNanos, isPassable + isObstacle, done - started);
             }
         }
 
@@ -574,7 +659,8 @@ nativePostprocessScoresFromHandle(
         jintArray groundTypeCounts,
         jintArray intOutputs,
         jintArray contentRegion,
-        jlongArray outputAccessNanos) {
+        jlongArray outputAccessNanos,
+        jlongArray scoreTimingNanos) {
     if (!sailens::liteRtZeroCopyAvailable()) return JNI_FALSE;
     if (tensorBufferHandle == 0 ||
         resultMask == nullptr ||
@@ -631,6 +717,8 @@ nativePostprocessScoresFromHandle(
         return JNI_FALSE;
     }
 
+    SemanticScoreTiming timings(env, scoreTimingNanos);
+    const jlong gettingArrays = timings.now();
     jint*     resultData        = env->GetIntArrayElements(resultMask, nullptr);
     jboolean* passableData      = env->GetBooleanArrayElements(passableLookup, nullptr);
     jboolean* obstacleData      = env->GetBooleanArrayElements(obstacleLookup, nullptr);
@@ -642,6 +730,7 @@ nativePostprocessScoresFromHandle(
     jint*     classCountData    = env->GetIntArrayElements(classCounts, nullptr);
     jint*     groundTypeCountData = env->GetIntArrayElements(groundTypeCounts, nullptr);
     jint*     outputData        = env->GetIntArrayElements(intOutputs, nullptr);
+    const jlong gotArrays = timings.now();
 
     if (resultData == nullptr || passableData == nullptr || obstacleData == nullptr ||
         roadData == nullptr || trafficLightData == nullptr || groundTypeData == nullptr ||
@@ -662,16 +751,21 @@ nativePostprocessScoresFromHandle(
         return JNI_FALSE;
     }
 
-    postprocessSemanticScoresCore(
-            scoreData, resultData, width, height, scoreLayout, region, channels,
-            passableData, obstacleData, roadData, trafficLightData, groundTypeData,
-            bottomRatio, centerRatio, navigationRegionRatio,
-            passableWordData, obstacleWordData,
-            classCountData, classCount, groundTypeCountData, groundTypeCount,
-            outputData);
+    const jlong kernelStarted = timings.now();
+    timings.kernel([&](auto sample, SemanticPixelSamples* pixels) {
+        postprocessSemanticScoresCore<jfloat, decltype(sample)::value>(
+                scoreData, resultData, width, height, scoreLayout, region, channels,
+                passableData, obstacleData, roadData, trafficLightData, groundTypeData,
+                bottomRatio, centerRatio, navigationRegionRatio,
+                passableWordData, obstacleWordData,
+                classCountData, classCount, groundTypeCountData, groundTypeCount,
+                outputData, pixels);
+    });
+    const jlong kernelFinished = timings.now();
 
     access.unlock(tensorBufferHandle);
 
+    const jlong releasingArrays = timings.now();
     env->ReleaseIntArrayElements(resultMask, resultData, 0);
     env->ReleaseBooleanArrayElements(passableLookup, passableData, JNI_ABORT);
     env->ReleaseBooleanArrayElements(obstacleLookup, obstacleData, JNI_ABORT);
@@ -683,6 +777,7 @@ nativePostprocessScoresFromHandle(
     env->ReleaseIntArrayElements(classCounts, classCountData, 0);
     env->ReleaseIntArrayElements(groundTypeCounts, groundTypeCountData, 0);
     env->ReleaseIntArrayElements(intOutputs, outputData, 0);
+    timings.record(env, gotArrays - gettingArrays, kernelFinished - kernelStarted, timings.now() - releasingArrays);
     return JNI_TRUE;
 }
 
@@ -714,7 +809,8 @@ nativePostprocessInt8ScoresFromHandle(
         jintArray groundTypeCounts,
         jintArray intOutputs,
         jintArray contentRegion,
-        jlongArray outputAccessNanos) {
+        jlongArray outputAccessNanos,
+        jlongArray scoreTimingNanos) {
     if (!sailens::liteRtZeroCopyAvailable()) return JNI_FALSE;
     if (tensorBufferHandle == 0 ||
         resultMask == nullptr ||
@@ -769,6 +865,8 @@ nativePostprocessInt8ScoresFromHandle(
         return JNI_FALSE;
     }
 
+    SemanticScoreTiming timings(env, scoreTimingNanos);
+    const jlong gettingArrays = timings.now();
     jint*     resultData        = env->GetIntArrayElements(resultMask, nullptr);
     jboolean* passableData      = env->GetBooleanArrayElements(passableLookup, nullptr);
     jboolean* obstacleData      = env->GetBooleanArrayElements(obstacleLookup, nullptr);
@@ -780,6 +878,7 @@ nativePostprocessInt8ScoresFromHandle(
     jint*     classCountData    = env->GetIntArrayElements(classCounts, nullptr);
     jint*     groundTypeCountData = env->GetIntArrayElements(groundTypeCounts, nullptr);
     jint*     outputData        = env->GetIntArrayElements(intOutputs, nullptr);
+    const jlong gotArrays = timings.now();
 
     if (resultData == nullptr || passableData == nullptr || obstacleData == nullptr ||
         roadData == nullptr || trafficLightData == nullptr || groundTypeData == nullptr ||
@@ -800,16 +899,21 @@ nativePostprocessInt8ScoresFromHandle(
         return JNI_FALSE;
     }
 
-    postprocessSemanticScoresCore(
-            scoreData, resultData, width, height, scoreLayout, region, channels,
-            passableData, obstacleData, roadData, trafficLightData, groundTypeData,
-            bottomRatio, centerRatio, navigationRegionRatio,
-            passableWordData, obstacleWordData,
-            classCountData, classCount, groundTypeCountData, groundTypeCount,
-            outputData);
+    const jlong kernelStarted = timings.now();
+    timings.kernel([&](auto sample, SemanticPixelSamples* pixels) {
+        postprocessSemanticScoresCore<jbyte, decltype(sample)::value>(
+                scoreData, resultData, width, height, scoreLayout, region, channels,
+                passableData, obstacleData, roadData, trafficLightData, groundTypeData,
+                bottomRatio, centerRatio, navigationRegionRatio,
+                passableWordData, obstacleWordData,
+                classCountData, classCount, groundTypeCountData, groundTypeCount,
+                outputData, pixels);
+    });
+    const jlong kernelFinished = timings.now();
 
     access.unlock(tensorBufferHandle);
 
+    const jlong releasingArrays = timings.now();
     env->ReleaseIntArrayElements(resultMask, resultData, 0);
     env->ReleaseBooleanArrayElements(passableLookup, passableData, JNI_ABORT);
     env->ReleaseBooleanArrayElements(obstacleLookup, obstacleData, JNI_ABORT);
@@ -821,6 +925,7 @@ nativePostprocessInt8ScoresFromHandle(
     env->ReleaseIntArrayElements(classCounts, classCountData, 0);
     env->ReleaseIntArrayElements(groundTypeCounts, groundTypeCountData, 0);
     env->ReleaseIntArrayElements(intOutputs, outputData, 0);
+    timings.record(env, gotArrays - gettingArrays, kernelFinished - kernelStarted, timings.now() - releasingArrays);
     return JNI_TRUE;
 }
 
@@ -1209,10 +1314,10 @@ const JNINativeMethod kSemanticScorePostprocessorMethods[] = {
          "([B[IIIII[Z[Z[Z[Z[IFFF[J[J[I[I[I[I)Z",
          reinterpret_cast<void*>(nativePostprocessInt8Scores)},
         {"nativePostprocessScoresFromHandle",
-         "(J[IIIII[Z[Z[Z[Z[IFFF[J[J[I[I[I[I[J)Z",
+         "(J[IIIII[Z[Z[Z[Z[IFFF[J[J[I[I[I[I[J[J)Z",
          reinterpret_cast<void*>(nativePostprocessScoresFromHandle)},
         {"nativePostprocessInt8ScoresFromHandle",
-         "(J[IIIII[Z[Z[Z[Z[IFFF[J[J[I[I[I[I[J)Z",
+         "(J[IIIII[Z[Z[Z[Z[IFFF[J[J[I[I[I[I[J[J)Z",
          reinterpret_cast<void*>(nativePostprocessInt8ScoresFromHandle)},
 };
 

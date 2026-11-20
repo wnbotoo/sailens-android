@@ -66,12 +66,12 @@ class NativeGuidanceBindingCoverageTest {
         NativeBinding(
             NavigationScorePostprocessor::class.java,
             "nativePostprocessScoresFromHandle",
-            "(J[IIIII[Z[Z[Z[Z[IFFF[J[J[I[I[I[I[J)Z",
+            "(J[IIIII[Z[Z[Z[Z[IFFF[J[J[I[I[I[I[J[J)Z",
         ),
         NativeBinding(
             NavigationScorePostprocessor::class.java,
             "nativePostprocessInt8ScoresFromHandle",
-            "(J[IIIII[Z[Z[Z[Z[IFFF[J[J[I[I[I[I[J)Z",
+            "(J[IIIII[Z[Z[Z[Z[IFFF[J[J[I[I[I[I[J[J)Z",
         ),
         NativeBinding(
             NativeConnectivityStatsExtractor::class.java,

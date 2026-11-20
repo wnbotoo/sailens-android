@@ -70,4 +70,22 @@ private fun ModelRunTiming.toJson(): JSONObject = JSONObject().apply {
     put("outputUnlockNanos", outputUnlockNanos)
     put("postprocessFinishedNanos", postprocessFinishedNanos)
     put("postprocessBackend", postprocessBackend)
+    semanticScoreTiming?.let { timing ->
+        timing.fusedKernelNanos?.let { kernel ->
+            put("semanticScorePhases", JSONObject().apply {
+                put("arraysGetNanos", timing.arraysGetNanos)
+                put("fusedKernelNanos", kernel)
+                put("arraysReleaseNanos", timing.arraysReleaseNanos)
+                put("kotlinPrepareNanos", timing.kotlinPrepareNanos)
+                put("kotlinAssembleNanos", timing.kotlinAssembleNanos)
+                if (timing.sampledPixels > 0) {
+                    put("sampledPixels", timing.sampledPixels)
+                    put("sampledArgmaxNanos", timing.sampledArgmaxNanos)
+                    put("sampledMaskWritesNanos", timing.sampledMaskWritesNanos)
+                    put("sampledStatisticsNanos", timing.sampledStatisticsNanos)
+                    put("sampledClockFloorNanos", timing.sampledClockFloorNanos)
+                }
+            })
+        }
+    }
 }
