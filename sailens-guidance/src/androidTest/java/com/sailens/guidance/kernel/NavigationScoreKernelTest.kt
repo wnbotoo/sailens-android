@@ -221,13 +221,19 @@ class NavigationScoreKernelTest {
                 model.createInputBuffers().single().use { input ->
                     model.createOutputBuffers().single().use { output ->
                         for (layout in ImageTensorLayout.entries) {
-                            val scores = syntheticScores(layout)
-                            setArgmaxEdgeCases(scores, layout, wide)
-                            input.writeFloat(scores)
-                            model.run(listOf(input), listOf(output))
-                            val expected = referenceArgmax(scores, layout)
-                            for (content in listOf(wide, narrow)) {
-                                assertFloatHandleKernel(handleOf(output), layout, content, expected)
+                            for (nonFiniteColumn in listOf(null, wide.x + 2, wide.x + wide.width - 1)) {
+                                val scores = syntheticScores(layout)
+                                setArgmaxEdgeCases(scores, layout, wide, nonFiniteColumn)
+                                input.writeFloat(scores)
+                                model.run(listOf(input), listOf(output))
+                                val expected = referenceArgmax(scores, layout)
+                                for (content in listOf(wide, narrow)) {
+                                    val containsNonFinite = nonFiniteColumn != null &&
+                                        nonFiniteColumn in content.x until content.x + content.width
+                                    assertFloatHandleKernel(
+                                        handleOf(output), layout, content, expected.takeUnless { containsNonFinite },
+                                    )
+                                }
                             }
                         }
                     }
@@ -302,46 +308,64 @@ class NavigationScoreKernelTest {
     // Fixtures
     // ---------------------------------------------------------------------------------------
 
-    private fun setArgmaxEdgeCases(scores: FloatArray, layout: ImageTensorLayout, content: SemanticContentRegion) {
+    private fun setArgmaxEdgeCases(
+        scores: FloatArray,
+        layout: ImageTensorLayout,
+        content: SemanticContentRegion,
+        nonFiniteColumn: Int?,
+    ) {
         fun setPixel(x: Int, score: (Int) -> Float) {
             val pixel = content.y * WIDTH + x
             for (channel in 0 until CLASS_COUNT) {
                 scores[scoreIndex(pixel, channel, WIDTH * HEIGHT, layout)] = score(channel)
             }
         }
-        // A tie between two non-zero classes in the first vector and in the scalar tail.
+        // A tie between two non-zero classes in the first vector and at the end of the row.
         for (x in listOf(content.x, content.x + content.width - 1)) {
             setPixel(x) { if (it == 1 || it == 8) 2f else -1f }
         }
         setPixel(content.x + 1) { if (it == 0) -0f else 0f }
-        setPixel(content.x + 2) { if (it == 0) Float.NaN else Float.POSITIVE_INFINITY }
-        setPixel(content.x + 3) { if (it == 1) Float.NaN else it.toFloat() }
+        if (nonFiniteColumn != null) {
+            setPixel(nonFiniteColumn) { if (it == 0) Float.NaN else Float.POSITIVE_INFINITY }
+        }
     }
 
     private fun assertFloatHandleKernel(
         handle: Long,
         layout: ImageTensorLayout,
         content: SemanticContentRegion,
-        expectedClassMap: IntArray,
+        expectedClassMap: IntArray?,
     ) {
         val spec = SemanticScoreSpec(WIDTH, HEIGHT, CLASS_COUNT, layout, content)
-        val cropped = IntArray(content.pixelCount)
-        cropClassMap(expectedClassMap, WIDTH, content, cropped)
-        val expectedMask = SegmentationMask(content.width, content.height, cropped)
-        val expectedStats = KotlinSegmentationStatsExtractor(analysisConfig, navigationSemantics).extract(expectedMask)
-        val postprocessor = NavigationScorePostprocessor(analysisConfig, navigationSemantics, SilentLogService)
-        for (requestNeon in listOf(false, true)) {
+        fun run(requestNeon: Boolean): NavigationSemanticResult {
+            val postprocessor = NavigationScorePostprocessor(analysisConfig, navigationSemantics, SilentLogService)
             val timing = SemanticScoreTiming(useNeonArgmax = requestNeon)
             val outcome = checkNotNull(postprocessor.postprocessScores(
                 SemanticScores.FloatHandle(handle, LongArray(2), timing), spec, IntArray(content.pixelCount),
             ))
-            outcome.value.maskLease.use {
-                val neon = requestNeon && layout == ImageTensorLayout.NCHW && content.width >= 4
-                assertEquals(if (neon) "neon" else "scalar", timing.argmaxImplementation)
-                assertEquals("native_score", outcome.backend)
-                assertEquals(0L, timing.sampledPixels)
-                assertEquals(expectedMask, outcome.value.mask)
-                assertEquals(expectedStats, outcome.value.stats)
+            val neon = requestNeon && expectedClassMap != null && layout == ImageTensorLayout.NCHW && content.width >= 4
+            assertEquals(if (neon) "neon" else "scalar", timing.argmaxImplementation)
+            assertEquals("native_score", outcome.backend)
+            assertEquals(0L, timing.sampledPixels)
+            return outcome.value
+        }
+
+        val baseline = run(requestNeon = false)
+        baseline.maskLease.use {
+            // For non-finite scores, preserve the result of the existing fast-math scalar kernel.
+            if (expectedClassMap != null) {
+                val cropped = IntArray(content.pixelCount)
+                cropClassMap(expectedClassMap, WIDTH, content, cropped)
+                val expectedMask = SegmentationMask(content.width, content.height, cropped)
+                val expectedStats =
+                    KotlinSegmentationStatsExtractor(analysisConfig, navigationSemantics).extract(expectedMask)
+                assertArrayEquals(cropped, baseline.mask.classMap)
+                assertEquals(expectedStats, baseline.stats)
+            }
+            val candidate = run(requestNeon = true)
+            candidate.maskLease.use {
+                assertArrayEquals(baseline.mask.classMap, candidate.mask.classMap)
+                assertEquals(baseline.stats, candidate.stats)
             }
         }
     }
