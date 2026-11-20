@@ -29,6 +29,7 @@ class PipelineFrameTiming internal constructor(
     internal var detectionRun: ModelRunTiming? = null
     internal var semanticSource: PipelineSourceFrame? = null
     internal var detectionSource: PipelineSourceFrame? = null
+    internal var preferredPreprocessReserved: Boolean = false
 
     internal fun source(): PipelineSourceFrame = PipelineSourceFrame(
         frameId, cameraTimestampNanos, receivedNanos, cameraClock,

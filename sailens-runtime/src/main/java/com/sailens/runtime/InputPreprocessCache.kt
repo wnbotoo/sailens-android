@@ -22,27 +22,62 @@ class InputPreprocessCache {
     /** The key someone is converting right now, and who. */
     private var claimedKey: Key? = null
     private var claimOwner: Thread? = null
+    private var reservedProducer: PreferredProducer? = null
+
+    /** Same cache instance and identical resolved float preprocessing for one frame. */
+    data class SharedFloatInput(
+        private val cache: InputPreprocessCache,
+        private val key: Key,
+        private val preferNativeYuv: Boolean,
+    ) {
+        fun reserveProducer(): PreferredProducer? = cache.reserveProducer(key)
+    }
+
+    class PreferredProducer internal constructor(
+        private val cache: InputPreprocessCache,
+        internal val key: Key,
+    ) : AutoCloseable {
+        override fun close() = cache.releaseReservation(this)
+    }
+
+    @Synchronized
+    private fun reserveProducer(key: Key): PreferredProducer? {
+        if (reservedProducer != null || claimedKey != null) return null
+        return PreferredProducer(this, key).also { reservedProducer = it }
+    }
+
+    private fun releaseReservation(producer: PreferredProducer) = synchronized(this) {
+        if (reservedProducer === producer) {
+            reservedProducer = null
+            (this as Object).notifyAll()
+        }
+    }
 
     /**
      * Returns what [tryCopy] finds for [key] -- waiting up to [waitMs] if another caller is
-     * converting that key right now -- or null, in which case the caller converts it itself and
-     * must call [releaseClaim] afterwards (in a `finally`), whether or not it stored a result.
+     * converting or has a reservation for that key -- or null, in which case the caller converts
+     * it itself and must call [releaseClaim] in a `finally`, whether or not it stored a result.
      */
     fun <T : Any> awaitOrClaim(
         key: Key,
         waitMs: Long = DEFAULT_WAIT_MS,
         timing: InputPreprocessTiming? = null,
+        preferredProducer: PreferredProducer? = null,
         tryCopy: () -> T?,
     ): T? {
         val entering = timing?.now() ?: 0L
         return synchronized(this) {
             timing?.waitedSince(entering)
+            if (preferredProducer != null && preferredProducer.key == key) {
+                // The owner is here. Handoff to the ordinary claim happens under the same lock.
+                releaseReservation(preferredProducer)
+            }
             tryCopy()?.let { return it }
-            if (claimedKey == key && claimOwner !== Thread.currentThread()) {
+            if (reservedProducer?.key == key || (claimedKey == key && claimOwner !== Thread.currentThread())) {
                 val deadline = System.nanoTime() + waitMs * 1_000_000L
                 val waiting = timing?.now() ?: 0L
                 try {
-                    while (claimedKey == key) {
+                    while (claimedKey == key || reservedProducer?.key == key) {
                         val remainingMs = (deadline - System.nanoTime()) / 1_000_000L
                         if (remainingMs <= 0) break
                         (this as Object).wait(remainingMs)

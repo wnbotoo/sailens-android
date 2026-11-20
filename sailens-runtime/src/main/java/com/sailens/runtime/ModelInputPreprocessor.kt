@@ -13,6 +13,12 @@ class ModelInputPreprocessor(
     private val nativeProcessor = NativeYuvInputPreprocessor(config, inputQuantization)
     private var fallbackFloatInput = FloatArray(0)
 
+    fun sharedFloatInput(frame: ImageFrame): InputPreprocessCache.SharedFloatInput? = preprocessCache?.let {
+        InputPreprocessCache.SharedFloatInput(
+            it, InputPreprocessCache.Key.from(frame, frame.rotationDegrees, config), preferNativeYuvPreprocessing,
+        )
+    }
+
     fun preprocessFloat(
         frame: ImageFrame,
         rotationDegrees: Int,
@@ -24,10 +30,11 @@ class ModelInputPreprocessor(
         rotationDegrees: Int,
         outputArray: FloatArray,
         timing: InputPreprocessTiming? = null,
+        preferredProducer: InputPreprocessCache.PreferredProducer? = null,
     ): PreparedImage {
         val cacheKey = InputPreprocessCache.Key.from(frame, rotationDegrees, config)
         val cache = preprocessCache
-        cache?.awaitOrClaim(cacheKey, timing = timing) {
+        cache?.awaitOrClaim(cacheKey, timing = timing, preferredProducer = preferredProducer) {
             cache.copyFloatWithMapping(cacheKey, outputArray, frame, timing)
         }?.let {
             return it

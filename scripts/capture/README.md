@@ -56,6 +56,14 @@ Use `com.sailens.reference` for the platform reference host. Remove the marker a
 process to turn timing off. The `CameraX negotiated` log reports the bound sizes for analysis and
 preview. The trace report shows the buffer dimensions delivered to Guidance.
 
+Use `race` for the existing order and `sem-first` for the preferred producer, with the same
+APK and model files. Alternate arms in `race, sem-first, sem-first, race` order under the same
+camera setup and thermal conditions. Restart the process for each arm and use equal steady
+windows after warm-up with `--seconds`. Pass all traces to the report in run order. The trace records the arm,
+the number of reservations, and which preprocessing backend each model actually used.
+Reservations apply to uncapped semantic runs with identical resolved float inputs in the same
+cache. Detection uses the existing bounded wait and can still compute on timeout.
+
 Each timing record follows one dequeued camera frame and can include completed model calls even
 when that frame produced no decision. Rates use completion events in the elapsed-realtime window.
 Loss uses the half-open interval of camera frame IDs bracketed by dequeued frames in the

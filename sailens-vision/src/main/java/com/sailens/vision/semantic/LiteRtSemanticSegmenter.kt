@@ -80,7 +80,14 @@ class LiteRtSemanticSegmenter<R>(
         }
     }
 
-    suspend fun segment(frame: ImageFrame, timing: ModelRunTiming? = null): Result<SegmentationRunResult<R>> {
+    fun sharedFloatInput(frame: ImageFrame): InputPreprocessCache.SharedFloatInput? =
+        runner?.sharedFloatInput(frame)
+
+    suspend fun segment(
+        frame: ImageFrame,
+        timing: ModelRunTiming? = null,
+        preferredProducer: InputPreprocessCache.PreferredProducer? = null,
+    ): Result<SegmentationRunResult<R>> {
         if (!_isInitialized) {
             return Result.failure(IllegalStateException("Segmenter not initialized"))
         }
@@ -91,7 +98,7 @@ class LiteRtSemanticSegmenter<R>(
                     return@withContext Result.failure(CancellationException("Coroutine cancelled"))
                 }
 
-                val output = runner?.run(frame, timing)
+                val output = runner?.run(frame, timing, preferredProducer)
                 if (output != null) {
                     Result.success(output)
                 } else {

@@ -31,6 +31,7 @@ internal fun encodePipelineTiming(timing: PipelineFrameTiming, seq: Long): JSONO
     put("det", timing.detectionRun?.toJson())
     put("semSource", timing.semanticSource?.toJson())
     put("detSource", timing.detectionSource?.toJson())
+    if (timing.preferredPreprocessReserved) put("preferredPreprocessReserved", true)
 }
 
 private fun PipelineSourceFrame.toJson(): JSONObject = JSONObject().apply {

@@ -37,9 +37,13 @@ import com.sailens.guidance.processor.perception.SegmentationAnalyzer
 import com.sailens.guidance.repository.DepthRepository
 import com.sailens.guidance.repository.ObstacleProvider
 import com.sailens.guidance.repository.PerceptionRepository
+import com.sailens.runtime.InputPreprocessCache
+import com.sailens.runtime.ModelTensorConfig
+import com.sailens.vision.ModelRunTiming
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -223,6 +227,58 @@ class ProcessFrameUseCaseTest {
         assertEquals("detector exploded", result.exceptionOrNull()?.message)
     }
 
+    @Test
+    fun `the experiment reserves only a matching scheduled pair and releases on semantic failure`() = runBlocking {
+        val frame = createFrame(sequenceNumber = 1)
+        val config = ModelTensorConfig(
+            inputWidth = 4,
+            inputHeight = 4,
+            outputWidth = 4,
+            outputHeight = 4,
+            outputChannels = 3,
+            mean = Triple(0f, 0f, 0f),
+            std = Triple(1f, 1f, 1f),
+        )
+        val cache = InputPreprocessCache()
+        val key = InputPreprocessCache.Key.from(frame, frame.rotationDegrees, config)
+        val share = InputPreprocessCache.SharedFloatInput(cache, key, preferNativeYuv = true)
+        val different = InputPreprocessCache.SharedFloatInput(cache, key.copy(targetWidth = 8), preferNativeYuv = true)
+        var reserved = false
+        val semantic = object : PerceptionRepository by FakePerceptionRepository() {
+            override fun sharedFloatInput(frame: ImageFrame) = share
+            override suspend fun segment(
+                frame: ImageFrame,
+                timing: ModelRunTiming?,
+                preferredProducer: InputPreprocessCache.PreferredProducer?,
+            ): Result<SegmentationOutput> {
+                reserved = preferredProducer != null
+                return Result.failure(IllegalStateException("before preprocessing"))
+            }
+        }
+
+        suspend fun verify(probe: Boolean, semanticFps: Int, input: InputPreprocessCache.SharedFloatInput, expected: Boolean) {
+            val detector = object : ObstacleProvider by FakeObstacleProvider() {
+                override fun sharedFloatInput(frame: ImageFrame) = input
+            }
+            val useCase = createUseCase(
+                profile = PerceptionProfile.DEFAULT,
+                clock = FakeClock(),
+                realtimeObstacleProvider = detector,
+                perceptionRepository = semantic,
+                semanticTargetFps = semanticFps,
+                preferSemanticPreprocess = probe,
+            )
+            assertTrue(useCase(frame).isFailure)
+            assertEquals(expected, reserved)
+            share.reserveProducer().use { assertNotNull(it) }
+        }
+
+        verify(probe = false, semanticFps = 0, input = share, expected = false)
+        verify(probe = true, semanticFps = 0, input = share, expected = true)
+        verify(probe = true, semanticFps = 0, input = different, expected = false)
+        verify(probe = true, semanticFps = 10, input = share, expected = false)
+    }
+
     private class ThrowingObstacleProvider : ObstacleProvider {
         override val isInitialized: Boolean = true
         override suspend fun initialize() = Unit
@@ -375,6 +431,7 @@ class ProcessFrameUseCaseTest {
                 DistanceEstimate.today(distanceLevel)
         },
         groundContact: GroundContactDistanceConfig = GroundContactDistanceConfig(),
+        preferSemanticPreprocess: Boolean = false,
     ): ProcessFrameUseCase {
         val config = PerceptionConfig(
             profile = profile,
@@ -398,6 +455,7 @@ class ProcessFrameUseCaseTest {
             obstacleExtractor = ObstacleExtractor(config, navigationSemantics),
             obstacleTracker = ObstacleTracker(config),
             clock = { clock.nowMs },
+            preferSemanticPreprocess = preferSemanticPreprocess,
         )
     }
 

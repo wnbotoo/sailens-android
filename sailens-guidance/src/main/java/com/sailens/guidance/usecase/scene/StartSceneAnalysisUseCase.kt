@@ -27,6 +27,7 @@ import com.sailens.guidance.model.trace.PipelineFrameTiming
 import com.sailens.guidance.model.trace.SessionTraceAccumulator
 import com.sailens.guidance.model.trace.SessionTraceMetadata
 import com.sailens.core.frame.ImageFrame
+import com.sailens.core.frame.PipelineTimingMode
 import com.sailens.guidance.model.scene.SceneDebugInfo
 import com.sailens.guidance.model.perception.SegmentationMask
 import com.sailens.guidance.model.scene.SceneResult
@@ -100,7 +101,7 @@ class StartSceneAnalysisUseCase(
     private val depthSwitch: DepthGeometrySwitch = DepthGeometrySwitch(),
     private val depthConfig: DepthGeometryConfig = DepthGeometryConfig(),
     private val localWorldBuilder: LocalWorldModelBuilder? = null,
-    private val measureFrameTiming: Boolean = false,
+    private val pipelineTimingMode: PipelineTimingMode? = null,
 ) {
     /**
      * @param releaseFrame hands each frame back to its source once this pipeline is done reading
@@ -176,7 +177,7 @@ class StartSceneAnalysisUseCase(
                     startedAt = sessionStartedAt,
                     pipelineMode = perceptionConfig.profile.name.lowercase(),
                     targetHardwareProfile = perceptionConfig.targetHardwareProfile,
-                    pipelineTimingMode = "race".takeIf { measureFrameTiming },
+                    pipelineTimingMode = pipelineTimingMode?.traceName,
                 )
             )
             traceSessionStarted = true
@@ -230,7 +231,7 @@ class StartSceneAnalysisUseCase(
             frameFlow
             .mapNotNullReleasing(
                 release = releaseFrame,
-                timingSessionId = sessionId.takeIf { traceSessionStarted && measureFrameTiming },
+                timingSessionId = sessionId.takeIf { traceSessionStarted && pipelineTimingMode != null },
                 recordTiming = traceService::recordPipelineTiming,
             ) { frame, timing ->
                 val pipelineStart = Timestamp.now()

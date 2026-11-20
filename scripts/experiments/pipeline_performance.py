@@ -14,21 +14,23 @@ NANOS_PER_SECOND = 1_000_000_000
 def load_trace(path):
     with path.open(encoding="utf-8-sig") as stream:
         rows = [json.loads(line) for line in stream if line.strip()]
-    if not rows or rows[0]["type"] != "session_start" or rows[-1]["type"] != "session_summary":
+    starts = [row for row in rows if row["type"] == "session_start"]
+    ends = [index for index, row in enumerate(rows) if row["type"] == "session_summary"]
+    if len(starts) != 1 or len(ends) != 1 or rows[0] is not starts[0]:
         raise ValueError("expected one complete session")
-    start, end = rows[0], rows[-1]
+    start, end = rows[0], rows[ends[0]]
+    if end["sessionId"] != start["sessionId"]:
+        raise ValueError("session summary belongs to another session")
     if not start.get("pipelineTimingMode"):
         raise ValueError("pipeline timing was disabled")
-    frames = [row for row in rows[1:-1] if row["type"] == "pipeline_timing"]
+    frames = [row for row in rows[1:ends[0]] if row["type"] == "pipeline_timing"]
     if len(frames) != end.get("pipelineTimingCount") or any(
         frame["seq"] != seq or frame["sessionId"] != start["sessionId"]
         for seq, frame in enumerate(frames, 1)
     ):
         raise ValueError("pipeline timing records are missing or belong to another session")
-    if end["sessionId"] != start["sessionId"] or any(
-        row["type"] in ("session_start", "session_summary") for row in rows[1:-1]
-    ):
-        raise ValueError("expected one session per trace file")
+    if any(row["type"] == "pipeline_timing" for row in rows[ends[0] + 1:]):
+        raise ValueError("pipeline timing continued after the session summary")
     return start, frames
 
 
@@ -42,7 +44,7 @@ def stats_ns(samples):
     }
 
 
-def measure(metadata, frames, warmup_seconds):
+def measure(metadata, frames, warmup_seconds, window_seconds=None):
     if any("offeredNanos" not in frame or "receivedNanos" not in frame for frame in frames):
         raise ValueError("expected the uncapped live camera stream with ingress timing")
     if any(
@@ -56,6 +58,13 @@ def measure(metadata, frames, warmup_seconds):
     steady = [frame for frame in frames if frame["receivedNanos"] >= cutoff]
     if len(steady) < 2:
         raise ValueError("need at least two frame receipts after warm-up")
+    if window_seconds is not None:
+        deadline = steady[0]["receivedNanos"] + int(window_seconds * NANOS_PER_SECOND)
+        if steady[-1]["receivedNanos"] < deadline:
+            raise ValueError("the session does not cover the requested window after warm-up")
+        # Include the receipt at or just after the deadline as the exclusive right anchor.
+        right = next(index for index, frame in enumerate(steady) if frame["receivedNanos"] >= deadline)
+        steady = steady[:right + 1]
 
     first, last = steady[0], steady[-1]
     begin, end = first["receivedNanos"], last["receivedNanos"]
@@ -95,6 +104,7 @@ def measure(metadata, frames, warmup_seconds):
             counters[f"{label}_results_in_window"] += within(run.get("postprocessFinishedNanos"))
 
     for frame in cohort:
+        counters["preferred_preprocess_reserved"] += frame.get("preferredPreprocessReserved", False)
         dims[f"{frame['width']}x{frame['height']}"] += 1
         between("cameraReceiptToCopy", frame, "receivedNanos", "copyStartedNanos")
         between("cameraCopy", frame, "copyStartedNanos", "copyFinishedNanos")
@@ -183,14 +193,17 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("trace", nargs="+", type=Path)
     parser.add_argument("--warmup", type=float, default=15.0, help="discard this many seconds of receipts first")
+    parser.add_argument("--seconds", type=float, help="require and measure a window of this length after warm-up")
     args = parser.parse_args()
     if not isfinite(args.warmup) or args.warmup < 0:
         parser.error("--warmup must be finite and non-negative")
+    if args.seconds is not None and (not isfinite(args.seconds) or args.seconds < 1):
+        parser.error("--seconds must be finite and at least 1")
     reports = []
     for path in args.trace:
         try:
             metadata, frames = load_trace(path)
-            reports.append({"trace": path.name, **measure(metadata, frames, args.warmup)})
+            reports.append({"trace": path.name, **measure(metadata, frames, args.warmup, args.seconds)})
         except (OSError, ValueError, KeyError, TypeError) as error:
             parser.error(f"{path}: {error}")
     print(json.dumps(reports, indent=2))

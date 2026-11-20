@@ -14,6 +14,7 @@ import com.sailens.core.frame.ImageFrame
 import com.sailens.guidance.model.perception.PerceptionFrameIdentity
 import com.sailens.guidance.model.perception.PerceptionFrameEvidence
 import com.sailens.runtime.InputImageMapping
+import com.sailens.runtime.InputPreprocessCache
 import com.sailens.vision.semantic.SemanticImageMapping
 import com.sailens.vision.ModelRunTiming
 import com.sailens.core.runtime.MlRuntimeInfo
@@ -56,6 +57,7 @@ class ProcessFrameUseCase(
     private val obstacleTracker: ObstacleTracker,
     private val clock: () -> Long = Timestamp::now,
     private val regressionRecorder: RegressionRecorder = RegressionRecorder.None,
+    private val preferSemanticPreprocess: Boolean = false,
 ) {
     private val scheduler = PerceptionScheduler { profileManager.activeConfig }
     private var cachedSemanticAnalysis: CachedSemanticAnalysis? = null
@@ -133,10 +135,16 @@ class ProcessFrameUseCase(
         requireConfiguredObstacleProvidersReady(config)
 
         val obstacleRun = selectObstacleRun(config, startTime)
+        val preferredProducer = reserveSemanticProducer(frame, config, obstacleRun)
+        timing?.preferredPreprocessReserved = preferredProducer != null
 
         val identity = if (recordWorldProvenance) PerceptionFrameIdentity(frame.sequenceNumber, frame.timestamp) else null
         val semanticQueuedNanos = timing?.now()
-        val semDeferred = async { getSemanticAnalysis(frame, identity, timing, semanticQueuedNanos) }
+        val semDeferred = async { getSemanticAnalysis(frame, identity, timing, semanticQueuedNanos, preferredProducer) }
+        if (preferredProducer != null) {
+            // The reservation may never reach preprocessing if the session is cancelled or the runner fails.
+            semDeferred.invokeOnCompletion { preferredProducer.close() }
+        }
         // det 以异常报错（sem 用 Result）。在这里收成 Result：单帧 det 失败应当和 sem 失败一样被计为
         // 一帧失败、交给上层按连续失败次数处置，而不是直接冲垮整条 flow。
         val obstacleDeferred = obstacleRun?.let { run ->
@@ -216,6 +224,17 @@ class ProcessFrameUseCase(
         Result.success(buildPerceptionResult(frame, identity, semanticOutput, trackingOutput, startTime))
     }
 
+    private fun reserveSemanticProducer(
+        frame: ImageFrame,
+        config: PerceptionConfig,
+        obstacleRun: ObstacleRun?,
+    ): InputPreprocessCache.PreferredProducer? {
+        if (!preferSemanticPreprocess || obstacleRun == null || config.semanticTargetFps > 0) return null
+        val semanticInput = perceptionRepository.sharedFloatInput(frame) ?: return null
+        if (semanticInput != obstacleRun.provider.sharedFloatInput(frame)) return null
+        return semanticInput.reserveProducer()
+    }
+
     /** 决定本帧 obstacle 槽位是否运行 det（按调度间隔），否则不跑（由 tracker 预测补偿）。 */
     private fun selectObstacleRun(config: PerceptionConfig, nowMs: Long): ObstacleRun? {
         if (!config.detectionEnabled) return null
@@ -274,6 +293,7 @@ class ProcessFrameUseCase(
         identity: PerceptionFrameIdentity?,
         timing: PipelineFrameTiming?,
         queuedNanos: Long?,
+        preferredProducer: InputPreprocessCache.PreferredProducer?,
     ): Result<SemanticAnalysisOutput> {
         val reusableCached = cachedSemanticAnalysis?.takeIf { cached ->
             cached.frameWidth == frame.width &&
@@ -297,7 +317,7 @@ class ProcessFrameUseCase(
 
         val runTiming = queuedNanos?.let(::ModelRunTiming)
         timing?.semanticRun = runTiming
-        val segmentationOutput = perceptionRepository.segment(frame, runTiming).getOrElse {
+        val segmentationOutput = perceptionRepository.segment(frame, runTiming, preferredProducer).getOrElse {
             if (regressionRecorder.isRecording) regressionRecorder.onSemantic(frame, ran = true, output = null, failure = it)
             return Result.failure(it)
         }

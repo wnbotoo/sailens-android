@@ -47,8 +47,15 @@ class SemanticPerceptionRepository(
 
     override suspend fun segment(frame: ImageFrame): Result<SegmentationOutput> = segment(frame, null)
 
-    override suspend fun segment(frame: ImageFrame, timing: ModelRunTiming?): Result<SegmentationOutput> =
-        segmenter.segment(frame, timing).map { run ->
+    override fun sharedFloatInput(frame: ImageFrame): InputPreprocessCache.SharedFloatInput? =
+        segmenter.sharedFloatInput(frame)
+
+    override suspend fun segment(
+        frame: ImageFrame,
+        timing: ModelRunTiming?,
+        preferredProducer: InputPreprocessCache.PreferredProducer?,
+    ): Result<SegmentationOutput> =
+        segmenter.segment(frame, timing, preferredProducer).map { run ->
             SegmentationOutput(
                 mask = run.value.mask,
                 preprocessTimeMs = run.preprocessTimeMs,

@@ -1,6 +1,7 @@
 package com.sailens.app
 
 import com.sailens.core.frame.PipelineTimingConfig
+import com.sailens.core.frame.PipelineTimingMode
 
 import com.sailens.shell.guidance.settings.PhoneGeometryStore
 import com.sailens.BuildConfig
@@ -116,6 +117,7 @@ val domainBindingsModule = module {
             // NTP 校时/手动改时间跳变，回跳会让过期轨迹迟迟不清、持续播报
             clock = regressionRecorder().recordingClock(RegressionClocks.PERCEPTION) { android.os.SystemClock.elapsedRealtime() },
             regressionRecorder = regressionRecorder(),
+            preferSemanticPreprocess = getOrNull<PipelineTimingConfig>()?.mode == PipelineTimingMode.SEM_FIRST,
         )
     }
     factory {
@@ -170,7 +172,7 @@ val domainBindingsModule = module {
             depthSwitch = get(),
             depthConfig = get(),
             localWorldBuilder = get(),
-            measureFrameTiming = getOrNull<PipelineTimingConfig>()?.enabled == true,
+            pipelineTimingMode = getOrNull<PipelineTimingConfig>()?.mode,
         )
     }
     // One coordinator for every accelerator user this host composes (docs/architecture.md §6.9): the depth

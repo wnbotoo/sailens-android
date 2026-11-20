@@ -53,6 +53,9 @@ class DetectorObstacleProvider(
 
     override suspend fun detect(frame: ImageFrame): ObstacleModelOutput = detect(frame, null)
 
+    override fun sharedFloatInput(frame: ImageFrame): InputPreprocessCache.SharedFloatInput? =
+        runner.sharedFloatInput(frame)
+
     override suspend fun detect(frame: ImageFrame, timing: ModelRunTiming?): ObstacleModelOutput {
         val output = runner.detect(frame, timing)
         return ObstacleModelOutput(

@@ -107,7 +107,16 @@ class SegmentationRunner<R>(
         method.invoke(outputBuffer) as Long
     }.getOrDefault(0L)
 
-    fun run(rawFrame: ImageFrame, timing: ModelRunTiming? = null): SegmentationRunResult<R> {
+    internal fun sharedFloatInput(frame: ImageFrame): InputPreprocessCache.SharedFloatInput? {
+        if (inputDataType != ModelInputDataType.FLOAT32) return null
+        return inputPreprocessor.sharedFloatInput(frame)
+    }
+
+    fun run(
+        rawFrame: ImageFrame,
+        timing: ModelRunTiming? = null,
+        preferredProducer: InputPreprocessCache.PreferredProducer? = null,
+    ): SegmentationRunResult<R> {
         timing?.startRunner()
         val startTime = SystemClock.uptimeMillis()
         val spec = specFor(rawFrame)
@@ -115,7 +124,7 @@ class SegmentationRunner<R>(
 
         // 1. 预处理: YUV/RGBA frame -> model input tensor layout
         timing?.preprocessStartedNanos = timing?.now()
-        val prepared = preprocessInput(rawFrame, timing?.input)
+        val prepared = preprocessInput(rawFrame, timing?.input, preferredProducer)
         timing?.finishPreprocess(prepared.backend.traceName)
         val afterPreprocessTime = SystemClock.uptimeMillis()
 
@@ -233,10 +242,16 @@ class SegmentationRunner<R>(
         return cachedContentMask
     }
 
-    private fun preprocessInput(rawFrame: ImageFrame, timing: InputPreprocessTiming?): PreparedImage {
+    private fun preprocessInput(
+        rawFrame: ImageFrame,
+        timing: InputPreprocessTiming?,
+        preferredProducer: InputPreprocessCache.PreferredProducer?,
+    ): PreparedImage {
         return when (inputDataType) {
             ModelInputDataType.FLOAT32 -> {
-                inputPreprocessor.preprocessFloatWithMapping(rawFrame, rawFrame.rotationDegrees, cachedInputFloatArray, timing)
+                inputPreprocessor.preprocessFloatWithMapping(
+                    rawFrame, rawFrame.rotationDegrees, cachedInputFloatArray, timing, preferredProducer,
+                )
             }
 
             ModelInputDataType.INT8 -> {

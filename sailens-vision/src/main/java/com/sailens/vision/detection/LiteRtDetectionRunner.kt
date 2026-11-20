@@ -154,6 +154,11 @@ class LiteRtDetectionRunner(
         method.invoke(buffer) as Long
     }.getOrDefault(0L)
 
+    fun sharedFloatInput(frame: ImageFrame): InputPreprocessCache.SharedFloatInput? {
+        if (inputDataType != ModelInputDataType.FLOAT32) return null
+        return processor?.sharedFloatInput(frame)
+    }
+
     suspend fun detect(frame: ImageFrame, timing: ModelRunTiming? = null): DetectionOutput {
         if (!_isInitialized) return DetectionOutput(emptyList())
 
