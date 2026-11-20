@@ -17,6 +17,7 @@ public enum class PipelineTimingMode(
     public val preferSemanticPreprocess: Boolean,
 ) {
     RACE("race", false),
+    RACE_UNSAMPLED("race-unsampled", false),
     SEM_FIRST("sem-first", true),
     SEM_SCALAR("sem-scalar", true),
     SEM_SIMD("sem-simd", true),

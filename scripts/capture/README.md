@@ -107,3 +107,9 @@ use the preferred semantic producer and the same argmax selection. `sem-nchw` wr
 NEAREST FLOAT32 NCHW tensors in the native YUV preprocessor, so no Kotlin transpose follows
 that native call. Check the producer's `nativeOutputLayout` counts and compare total
 preprocessing time as well as `nativeNearestBody` and `kotlinHwcToNchw`.
+
+To compare the existing processing path with the combined candidate, use
+`race-unsampled, sem-nchw, sem-nchw, race-unsampled`. The control keeps the original
+cache race, scalar argmax and Kotlin transpose. Both arms collect whole-stage timing
+with pixel sampling disabled. Check producer reservations, argmax selection and
+native output layouts in each arm.
