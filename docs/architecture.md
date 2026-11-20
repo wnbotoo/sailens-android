@@ -837,9 +837,7 @@ temporarily deferred.
 ### 12.2 Native verification has three layers
 
 The current code has 13 JNI entry points: 9 array-based kernels and 4 LiteRT TensorBuffer-handle
-paths. A cannot manufacture valid LiteRT handles without a real compiled model, so "invoke every JNI
-entry in A" is not a feasible step-1 exit condition. Verification is split by what can actually be
-proven:
+paths. Verification covers binding, kernel output, and handle integration.
 
 Layers A and B are instrumentation tests on a physical arm64 device, not JVM unit tests: the project
 builds arm64-v8a only, so an x86 emulator cannot load these libraries. They are therefore not part of
@@ -879,11 +877,13 @@ pre-existing product divergence, not a refactor artefact; it is recorded in
 
 **C. Handle integration — model-backed**
 
+- in A, a weight-free INT8 reshape graph runs on LiteRT CPU and supplies a real output handle.
+  The semantic kernel checks the cropped class map and statistics against independent expected
+  values for NCHW and NHWC;
 - in B, real packaged float models exercise the two float handle hot paths:
   native_score and native_bbox_nms_float_handle;
 - preserve their performance red lines in §12.3;
-- the two int8 handle paths are an explicit known coverage gap until an edition supplies suitable
-  int8 model fixtures. Do not add third-party model weights to A merely to satisfy this refactor.
+- model-backed INT8 detection handle coverage depends on an edition supplying a suitable fixture.
 
 If B later claims/supports int8 handle execution as a product path, model-backed integration coverage
 for those paths becomes a release gate for that edition.

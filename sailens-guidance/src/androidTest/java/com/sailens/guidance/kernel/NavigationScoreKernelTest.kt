@@ -1,11 +1,18 @@
 package com.sailens.guidance.kernel
 
+import android.util.Base64
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
+import com.google.ai.edge.litert.Accelerator
+import com.google.ai.edge.litert.CompiledModel
+import com.google.ai.edge.litert.TensorBuffer
 import com.sailens.guidance.semantics.CityscapesNavigationSemantics
 import com.sailens.vision.taxonomy.CityscapesTaxonomy
 import com.sailens.runtime.ImageTensorLayout
 import com.sailens.runtime.ModelTensorConfig
 import com.sailens.vision.semantic.SemanticContentRegion
+import com.sailens.vision.semantic.SemanticScoreSpec
+import com.sailens.vision.semantic.SemanticScores
 import com.sailens.vision.semantic.cropClassMap
 import com.sailens.guidance.config.AnalysisConfig
 import com.sailens.guidance.model.perception.SegmentationMask
@@ -18,12 +25,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.io.File
 import kotlin.random.Random
 
 /**
- * Layer B of the native verification plan (docs/architecture.md §12.2), semantic kernels:
- * `nativePostprocessScores` and `nativePostprocessInt8Scores`. The generic argmax kernel moved to
- * sailens-vision in G3 and is covered there.
+ * Fused semantic score kernel verification (docs/architecture.md §12.2).
  *
  * The fused score kernel does have a production Kotlin twin: [KotlinSegmentationStatsExtractor]
  * is the fallback the pipeline uses when `SegmentationOutput.analysisStats` is null, and it
@@ -31,8 +37,7 @@ import kotlin.random.Random
  * argmax mask. So this compares the one-pass native kernel against argmax-then-Kotlin-stats,
  * field by field, which is the differential test §12.2 asks for.
  *
- * The two handle variants of these kernels cannot run here: LiteRT 2.1.5 has no API for building
- * a TensorBuffer without a compiled model, so they are layer C, covered in B with real weights.
+ * The INT8 handle test gets a real output buffer by compiling a synthetic reshape graph.
  *
  * Needs a physical arm64 device: `./gradlew.bat :sailens-guidance:connectedDebugAndroidTest`.
  */
@@ -161,6 +166,41 @@ class NavigationScoreKernelTest {
     }
 
     @Test
+    fun nchwFloatArrayMatchesTheExpectedCroppedMaskAndStats() {
+        val scores = croppedScoreFixture(ImageTensorLayout.NCHW)
+        val floats = FloatArray(scores.size) { scores[it] * 0.5f }
+        assertCroppedScores(SemanticScores.FloatValues(floats), ImageTensorLayout.NCHW, "native_score")
+    }
+
+    @Test
+    fun nchwSignedInt8ArrayMatchesTheExpectedCroppedMaskAndStats() {
+        val scores = croppedScoreFixture(ImageTensorLayout.NCHW)
+        assertCroppedScores(SemanticScores.Int8Values(scores), ImageTensorLayout.NCHW, "native_score_int8")
+    }
+
+    @Test
+    fun signedInt8LiteRtOutputHandleMatchesTheExpectedCropInBothLayouts() {
+        val cache = InstrumentationRegistry.getInstrumentation().targetContext.cacheDir
+        val fixture = File.createTempFile("semantic-int8-", ".tflite", cache)
+        try {
+            fixture.writeBytes(Base64.decode(INT8_RESHAPE_GRAPH, Base64.DEFAULT))
+            CompiledModel.create(fixture.absolutePath, CompiledModel.Options(Accelerator.CPU)).use { model ->
+                model.createInputBuffers().single().use { input ->
+                    model.createOutputBuffers().single().use { output ->
+                        for (layout in ImageTensorLayout.entries) {
+                            input.writeInt8(croppedScoreFixture(layout))
+                            model.run(listOf(input), listOf(output))
+                            assertCroppedScores(SemanticScores.Int8Handle(handleOf(output)), layout, "native_score_int8")
+                        }
+                    }
+                }
+            }
+        } finally {
+            fixture.delete()
+        }
+    }
+
+    @Test
     fun fusedScoreKernelRejectsAMismatchedScoreCount() {
         val postprocessor = NavigationScorePostprocessor(
             config = analysisConfig,
@@ -223,6 +263,53 @@ class NavigationScoreKernelTest {
     // ---------------------------------------------------------------------------------------
     // Fixtures
     // ---------------------------------------------------------------------------------------
+
+    private fun croppedScoreFixture(layout: ImageTensorLayout): ByteArray {
+        val pixelCount = CROP_GRID_WIDTH * CROP_GRID_HEIGHT
+        val scores = ByteArray(pixelCount * CLASS_COUNT) { Byte.MIN_VALUE }
+        fun set(x: Int, y: Int, channel: Int, score: Byte) {
+            val pixel = y * CROP_GRID_WIDTH + x
+            scores[scoreIndex(pixel, channel, pixelCount, layout)] = score
+        }
+
+        set(0, 1, CityscapesTaxonomy.CAR, Byte.MAX_VALUE)
+        set(1, 1, CityscapesTaxonomy.SIDEWALK, -127)
+        set(1, 1, CityscapesTaxonomy.TERRAIN, -127)
+        set(2, 1, CityscapesTaxonomy.CAR, Byte.MAX_VALUE)
+        // Every channel at (3, 1) has Byte.MIN_VALUE. The first class wins the tie.
+        set(1, 2, CityscapesTaxonomy.PERSON, 0)
+        set(1, 2, CityscapesTaxonomy.SKY, -1)
+        set(2, 2, CityscapesTaxonomy.TRAFFIC_LIGHT, Byte.MAX_VALUE)
+        set(2, 2, CityscapesTaxonomy.PERSON, Byte.MAX_VALUE)
+        set(3, 2, CityscapesTaxonomy.TERRAIN, -63)
+        return scores
+    }
+
+    private fun assertCroppedScores(scores: SemanticScores, layout: ImageTensorLayout, backend: String) {
+        val content = SemanticContentRegion(x = 1, y = 1, width = 3, height = 2)
+        val spec = SemanticScoreSpec(CROP_GRID_WIDTH, CROP_GRID_HEIGHT, CLASS_COUNT, layout, content)
+        val expectedClassMap = intArrayOf(
+            CityscapesTaxonomy.SIDEWALK, CityscapesTaxonomy.CAR, CityscapesTaxonomy.ROAD,
+            CityscapesTaxonomy.PERSON, CityscapesTaxonomy.TRAFFIC_LIGHT, CityscapesTaxonomy.TERRAIN,
+        )
+        val expectedMask = SegmentationMask(content.width, content.height, expectedClassMap)
+        val expectedStats = KotlinSegmentationStatsExtractor(analysisConfig, navigationSemantics).extract(expectedMask)
+        val postprocessor = NavigationScorePostprocessor(analysisConfig, navigationSemantics, SilentLogService)
+        val result = checkNotNull(postprocessor.postprocessScores(scores, spec, IntArray(content.pixelCount))) {
+            "Native kernel declined ${scores.javaClass.simpleName} in $layout"
+        }
+        result.value.maskLease.use {
+            assertEquals(backend, result.backend)
+            assertEquals(expectedMask, result.value.mask)
+            assertEquals(expectedStats, result.value.stats)
+        }
+    }
+
+    private fun handleOf(buffer: TensorBuffer): Long {
+        val getter = Class.forName("com.google.ai.edge.litert.JniHandle")
+            .getDeclaredMethod("getHandle\$third_party_odml_litert_litert_kotlin_litert_api_for_maven")
+        return getter.invoke(buffer) as Long
+    }
 
     private fun tensorConfig(layout: ImageTensorLayout) = ModelTensorConfig(
         inputWidth = WIDTH,
@@ -306,5 +393,18 @@ class NavigationScoreKernelTest {
         const val HEIGHT = 32
         const val CLASS_COUNT = 19
         const val SEED = 20260920
+        const val CROP_GRID_WIDTH = 5
+        const val CROP_GRID_HEIGHT = 4
+
+        // TFLite v3, one RESHAPE from INT8 [1,19,4,5] to [380]. Both tensors use scale 1
+        // and zero point 0. The graph has no weights and preserves every packed byte.
+        const val INT8_RESHAPE_GRAPH =
+            "HAAAAFRGTDMAAAAAAAAOABQAEAAMAAgAAAAEAA4AAAAQAAAAFAAAABgAAAADAAAAAQAAABgAAAABAAAA" +
+                "OAAAAAEAAAAYAAAABAAEAAQAAAAMAAwACwAAAAAABAAMAAAAFgAAAAAAABYMABQAEAAMAAgABAAMAAAA" +
+                "HAAAACAAAAAkAAAABAAAAAIAAACUAAAAaAAAAAEAAAAkAAAAAQAAAAEAAAABAAAAAAAAAAAADgAUAAAA" +
+                "EAAMAAsABAAOAAAAKAAAAAAAABEIAAAADAAAAAEAAAABAAAAAQAAAAAAAAAAAAYACAAEAAYAAAAEAAAA" +
+                "AQAAAHwBAADm////VAAAAAAAAAkEAAAAAQAAAHwBAAAAAA4AEAAMAAsAAAAAAAQADgAAACwAAAAAAAAJ" +
+                "BAAAAAQAAAABAAAAEwAAAAQAAAAFAAAADAAMAAAAAAAIAAQADAAAAAgAAAAQAAAAAQAAAAAAAAAAAAAA" +
+                "AQAAAAAAgD8="
     }
 }
