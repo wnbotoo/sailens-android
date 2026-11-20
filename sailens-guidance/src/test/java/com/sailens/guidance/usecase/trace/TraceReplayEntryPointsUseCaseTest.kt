@@ -39,7 +39,7 @@ class TraceReplayEntryPointsUseCaseTest {
     }
 
     @Test
-    fun `load latest trace replay report uses newest stored session`() {
+    fun `load latest trace replay report opens the newest profiled session`() {
         val newestSession = TraceSessionDescriptor(
             sessionId = "session-newest",
             fileName = "trace_session-newest.jsonl",
@@ -53,11 +53,12 @@ class TraceReplayEntryPointsUseCaseTest {
         val sessionLines = mapOf(
             newestSession.sessionId to listOf(
                 """
-                {"type":"session_start","sessionId":"session-newest","startedAt":1000,"pipelineMode":"semantic_only","targetHardwareProfile":"snapdragon_8_gen_3_plus"}
+                {"type":"session_start","sessionId":"session-newest","startedAt":1000,"pipelineMode":"semantic_only","targetHardwareProfile":"snapdragon_8_gen_3_plus","pipelineTimingMode":"sem-nchw"}
                 """.trimIndent(),
                 """
                 {"type":"frame","sessionId":"session-newest","sequenceNumber":1,"frameTimestamp":1100,"frameWidth":640,"frameHeight":360,"droppedFramesSinceLast":0,"processFrameMs":20,"inferenceMs":12,"analyzeSceneMs":4,"decideEventsMs":3,"totalPipelineMs":29,"obstacleCount":1,"eventCount":1,"isBlocked":false,"isNarrowing":false,"isRoadDangerous":false,"navigationPassableRatio":0.58,"blockageConfidence":0.15,"verticalReachRatio":0.66,"floodReachRatio":0.48,"widthRetentionP25":0.60,"messageKeys":["event_obstacle_center"]}
                 """.trimIndent(),
+                """{"type":"pipeline_timing","sessionId":"session-newest","seq":1,"frameId":1}""",
             )
         )
         val replayService = FakeTraceReplayService(
