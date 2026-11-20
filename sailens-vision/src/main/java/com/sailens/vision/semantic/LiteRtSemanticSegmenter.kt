@@ -1,5 +1,7 @@
 package com.sailens.vision.semantic
 
+import com.sailens.vision.ModelRunTiming
+
 import android.content.Context
 import com.google.ai.edge.litert.Accelerator
 import com.sailens.core.frame.ImageFrame
@@ -40,11 +42,14 @@ class LiteRtSemanticSegmenter<R>(
     private val modelSourceResolver: ModelSourceResolver,
     private val preprocessCache: InputPreprocessCache? = null,
     private val logService: LogService,
+    private val directFloatNchw: Boolean = false,
 ) {
 
     @OptIn(ExperimentalCoroutinesApi::class)
     private val singleThreadDispatcher = Dispatchers.IO.limitedParallelism(1)
 
+    // Producer selection reads the runner's input specification outside the model dispatcher.
+    @Volatile
     private var runner: SegmentationRunner<R>? = null
 
     @Volatile
@@ -57,9 +62,7 @@ class LiteRtSemanticSegmenter<R>(
         if (_isInitialized) return
 
         withContext(singleThreadDispatcher) {
-            runner?.cleanup()
-            runner = null
-            _isInitialized = false
+            cleanupRunner()
 
             try {
                 val initializedRunner = createRunner()
@@ -78,7 +81,14 @@ class LiteRtSemanticSegmenter<R>(
         }
     }
 
-    suspend fun segment(frame: ImageFrame): Result<SegmentationRunResult<R>> {
+    fun sharedFloatInput(frame: ImageFrame): InputPreprocessCache.SharedFloatInput? =
+        runner?.sharedFloatInput(frame)
+
+    suspend fun segment(
+        frame: ImageFrame,
+        timing: ModelRunTiming? = null,
+        preferredProducer: InputPreprocessCache.PreferredProducer? = null,
+    ): Result<SegmentationRunResult<R>> {
         if (!_isInitialized) {
             return Result.failure(IllegalStateException("Segmenter not initialized"))
         }
@@ -89,7 +99,7 @@ class LiteRtSemanticSegmenter<R>(
                     return@withContext Result.failure(CancellationException("Coroutine cancelled"))
                 }
 
-                val output = runner?.run(frame)
+                val output = runner?.run(frame, timing, preferredProducer)
                 if (output != null) {
                     Result.success(output)
                 } else {
@@ -105,10 +115,15 @@ class LiteRtSemanticSegmenter<R>(
 
     suspend fun release() {
         withContext(singleThreadDispatcher) {
-            runner?.cleanup()
-            runner = null
-            _isInitialized = false
+            cleanupRunner()
         }
+    }
+
+    private fun cleanupRunner() {
+        val releasedRunner = runner
+        runner = null
+        _isInitialized = false
+        releasedRunner?.cleanup()
     }
 
     private fun createRunner(): SegmentationRunner<R> {
@@ -155,6 +170,7 @@ class LiteRtSemanticSegmenter<R>(
                 preprocessCache = preprocessCache,
                 postprocessor = postprocessor,
                 scoreGridSpansInput = modelConfig.scoreGridSpansInput,
+                directFloatNchw = directFloatNchw,
             )
         } catch (error: CancellationException) {
             session.close()

@@ -22,32 +22,76 @@ class InputPreprocessCache {
     /** The key someone is converting right now, and who. */
     private var claimedKey: Key? = null
     private var claimOwner: Thread? = null
+    private var reservedProducer: PreferredProducer? = null
+
+    /** Same cache instance and identical resolved float preprocessing for one frame. */
+    data class SharedFloatInput(
+        private val cache: InputPreprocessCache,
+        private val key: Key,
+        private val preferNativeYuv: Boolean,
+    ) {
+        fun reserveProducer(): PreferredProducer? = cache.reserveProducer(key)
+    }
+
+    class PreferredProducer internal constructor(
+        private val cache: InputPreprocessCache,
+        internal val key: Key,
+    ) : AutoCloseable {
+        override fun close() = cache.releaseReservation(this)
+    }
+
+    @Synchronized
+    private fun reserveProducer(key: Key): PreferredProducer? {
+        if (reservedProducer != null || claimedKey != null) return null
+        return PreferredProducer(this, key).also { reservedProducer = it }
+    }
+
+    private fun releaseReservation(producer: PreferredProducer) = synchronized(this) {
+        if (reservedProducer === producer) {
+            reservedProducer = null
+            (this as Object).notifyAll()
+        }
+    }
 
     /**
      * Returns what [tryCopy] finds for [key] -- waiting up to [waitMs] if another caller is
-     * converting that key right now -- or null, in which case the caller converts it itself and
-     * must call [releaseClaim] afterwards (in a `finally`), whether or not it stored a result.
+     * converting or has a reservation for that key -- or null, in which case the caller converts
+     * it itself and must call [releaseClaim] in a `finally`, whether or not it stored a result.
      */
     fun <T : Any> awaitOrClaim(
         key: Key,
         waitMs: Long = DEFAULT_WAIT_MS,
+        timing: InputPreprocessTiming? = null,
+        preferredProducer: PreferredProducer? = null,
         tryCopy: () -> T?,
-    ): T? = synchronized(this) {
-        tryCopy()?.let { return it }
-        if (claimedKey == key && claimOwner !== Thread.currentThread()) {
-            val deadline = System.nanoTime() + waitMs * 1_000_000L
-            while (claimedKey == key) {
-                val remainingMs = (deadline - System.nanoTime()) / 1_000_000L
-                if (remainingMs <= 0) break
-                (this as Object).wait(remainingMs)
+    ): T? {
+        val entering = timing?.now() ?: 0L
+        return synchronized(this) {
+            timing?.waitedSince(entering)
+            if (preferredProducer != null && preferredProducer.key == key) {
+                // The owner is here. Handoff to the ordinary claim happens under the same lock.
+                releaseReservation(preferredProducer)
             }
-            // Either the producer stored it, or it gave up / took too long and this caller
-            // converts on its own without claiming.
-            return tryCopy()
+            tryCopy()?.let { return it }
+            if (reservedProducer?.key == key || (claimedKey == key && claimOwner !== Thread.currentThread())) {
+                val deadline = System.nanoTime() + waitMs * 1_000_000L
+                val waiting = timing?.now() ?: 0L
+                try {
+                    while (claimedKey == key || reservedProducer?.key == key) {
+                        val remainingNanos = deadline - System.nanoTime()
+                        if (remainingNanos <= 0L) break
+                        (this as Object).wait(remainingNanos / 1_000_000L, (remainingNanos % 1_000_000L).toInt())
+                    }
+                } finally {
+                    timing?.awaitedProducerSince(waiting)
+                }
+                // The producer stored it, gave up, or ran out of time.
+                return tryCopy()
+            }
+            claimedKey = key
+            claimOwner = Thread.currentThread()
+            null
         }
-        claimedKey = key
-        claimOwner = Thread.currentThread()
-        null
     }
 
     /** Ends the calling thread's claim on [key], waking anyone waiting for it. */
@@ -65,11 +109,18 @@ class InputPreprocessCache {
     ): InputPreprocessBackend? = copyFloatWithMapping(key, outputArray, null)?.backend
 
     @Synchronized
-    internal fun copyFloatWithMapping(key: Key, outputArray: FloatArray, frame: ImageFrame?): PreparedImage? {
+    internal fun copyFloatWithMapping(
+        key: Key,
+        outputArray: FloatArray,
+        frame: ImageFrame?,
+        timing: InputPreprocessTiming? = null,
+    ): PreparedImage? {
         val entry = floatEntry ?: return null
         if (entry.key != key || entry.values.size != outputArray.size) return null
 
+        val copying = timing?.now() ?: 0L
         entry.values.copyInto(outputArray)
+        timing?.copiedSince(copying)
         return PreparedImage(
             entry.backend.asSharedCacheHit(),
             entry.mapping.takeIf { entry.frame?.get() === frame && frame != null },
@@ -105,6 +156,7 @@ class InputPreprocessCache {
         quantization: ModelInputQuantization,
         outputArray: ByteArray,
         frame: ImageFrame?,
+        timing: InputPreprocessTiming? = null,
     ): PreparedImage? {
         val entry = int8Entry ?: return null
         if (
@@ -115,7 +167,9 @@ class InputPreprocessCache {
             return null
         }
 
+        val copying = timing?.now() ?: 0L
         entry.values.copyInto(outputArray)
+        timing?.copiedSince(copying)
         val backend = when (entry.backend) {
             InputPreprocessBackend.SHARED_QUANTIZED_NATIVE_YUV,
             InputPreprocessBackend.SHARED_QUANTIZED_OPENCV_FALLBACK -> entry.backend

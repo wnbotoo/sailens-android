@@ -86,6 +86,7 @@ internal class NativeDetectionPostProcessor(
         rawElementCount: Int,
         frame: ImageFrame,
         attributesPerDetection: Int,
+        outputAccessNanos: LongArray? = null,
     ): Batch? {
         if (!NativeVisionLibrary.isAvailable || tensorBufferHandle == 0L || rawElementCount <= 0) return null
 
@@ -102,6 +103,7 @@ internal class NativeDetectionPostProcessor(
                 confidenceThreshold = confidenceThreshold,
                 maxDetections = maxDetections,
                 allowedClassIds = allowedClassIds,
+                outputAccessNanos = outputAccessNanos,
             )
         }.getOrElse {
             return null
@@ -120,6 +122,7 @@ internal class NativeDetectionPostProcessor(
         frame: ImageFrame,
         attributesPerDetection: Int,
         quantization: TensorQuantization?,
+        outputAccessNanos: LongArray? = null,
     ): Batch? {
         if (!NativeVisionLibrary.isAvailable || tensorBufferHandle == 0L || rawElementCount <= 0) return null
 
@@ -138,6 +141,7 @@ internal class NativeDetectionPostProcessor(
                 confidenceThreshold = confidenceThreshold,
                 maxDetections = maxDetections,
                 allowedClassIds = allowedClassIds,
+                outputAccessNanos = outputAccessNanos,
             )
         }.getOrElse {
             return null
@@ -211,6 +215,7 @@ internal class NativeDetectionPostProcessor(
         confidenceThreshold: Float,
         maxDetections: Int,
         allowedClassIds: IntArray,
+        outputAccessNanos: LongArray?,
     ): FloatArray?
 
     private external fun nativePostProcessRawInt8FromHandle(
@@ -227,6 +232,7 @@ internal class NativeDetectionPostProcessor(
         confidenceThreshold: Float,
         maxDetections: Int,
         allowedClassIds: IntArray,
+        outputAccessNanos: LongArray?,
     ): FloatArray?
 
     private companion object {

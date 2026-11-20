@@ -29,6 +29,7 @@ import com.sailens.guidance.model.perception.SegmentationAnalysisStats
 import com.sailens.guidance.model.perception.SegmentationMask
 import com.sailens.guidance.model.perception.SegmentationMaskPool
 import com.sailens.guidance.model.perception.SegmentationOutput
+import com.sailens.guidance.model.trace.PipelineFrameTiming
 import com.sailens.guidance.processor.perception.ObstacleExtractor
 import com.sailens.guidance.processor.perception.ObstacleTracker
 import com.sailens.guidance.processor.perception.PerceptionProfileManager
@@ -37,9 +38,13 @@ import com.sailens.guidance.processor.perception.SegmentationAnalyzer
 import com.sailens.guidance.repository.DepthRepository
 import com.sailens.guidance.repository.ObstacleProvider
 import com.sailens.guidance.repository.PerceptionRepository
+import com.sailens.runtime.InputPreprocessCache
+import com.sailens.runtime.ModelTensorConfig
+import com.sailens.vision.ModelRunTiming
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -223,6 +228,68 @@ class ProcessFrameUseCaseTest {
         assertEquals("detector exploded", result.exceptionOrNull()?.message)
     }
 
+    @Test
+    fun `semantic priority reserves matching inputs with or without profiling and releases on failure`() = runBlocking {
+        val frame = createFrame(sequenceNumber = 1)
+        val config = ModelTensorConfig(
+            inputWidth = 4,
+            inputHeight = 4,
+            outputWidth = 4,
+            outputHeight = 4,
+            outputChannels = 3,
+            mean = Triple(0f, 0f, 0f),
+            std = Triple(1f, 1f, 1f),
+        )
+        val cache = InputPreprocessCache()
+        val key = InputPreprocessCache.Key.from(frame, frame.rotationDegrees, config)
+        val share = InputPreprocessCache.SharedFloatInput(cache, key, preferNativeYuv = true)
+        val different = InputPreprocessCache.SharedFloatInput(cache, key.copy(targetWidth = 8), preferNativeYuv = true)
+        var reserved = false
+        val semantic = object : PerceptionRepository by FakePerceptionRepository() {
+            override fun sharedFloatInput(frame: ImageFrame) = share
+            override suspend fun segment(
+                frame: ImageFrame,
+                timing: ModelRunTiming?,
+                preferredProducer: InputPreprocessCache.PreferredProducer?,
+            ): Result<SegmentationOutput> {
+                reserved = preferredProducer != null
+                return Result.failure(IllegalStateException("before preprocessing"))
+            }
+        }
+
+        suspend fun verify(
+            preferSemantic: Boolean,
+            semanticFps: Int,
+            input: InputPreprocessCache.SharedFloatInput,
+            expected: Boolean,
+            measure: Boolean,
+        ) {
+            val detector = object : ObstacleProvider by FakeObstacleProvider() {
+                override fun sharedFloatInput(frame: ImageFrame) = input
+            }
+            val useCase = createUseCase(
+                profile = PerceptionProfile.DEFAULT,
+                clock = FakeClock(),
+                realtimeObstacleProvider = detector,
+                perceptionRepository = semantic,
+                semanticTargetFps = semanticFps,
+                preferSemanticPreprocess = preferSemantic,
+            )
+            val timing = if (measure) PipelineFrameTiming("test", frame, dequeuedNanos = 0L) else null
+            assertTrue(useCase(frame, timing = timing).isFailure)
+            assertEquals(expected, reserved)
+            timing?.let { assertEquals(expected, it.preferredPreprocessReserved) }
+            share.reserveProducer().use { assertNotNull(it) }
+        }
+
+        for (measure in listOf(false, true)) {
+            verify(preferSemantic = false, semanticFps = 0, input = share, expected = false, measure = measure)
+            verify(preferSemantic = true, semanticFps = 0, input = share, expected = true, measure = measure)
+            verify(preferSemantic = true, semanticFps = 0, input = different, expected = false, measure = measure)
+            verify(preferSemantic = true, semanticFps = 10, input = share, expected = false, measure = measure)
+        }
+    }
+
     private class ThrowingObstacleProvider : ObstacleProvider {
         override val isInitialized: Boolean = true
         override suspend fun initialize() = Unit
@@ -375,6 +442,7 @@ class ProcessFrameUseCaseTest {
                 DistanceEstimate.today(distanceLevel)
         },
         groundContact: GroundContactDistanceConfig = GroundContactDistanceConfig(),
+        preferSemanticPreprocess: Boolean = false,
     ): ProcessFrameUseCase {
         val config = PerceptionConfig(
             profile = profile,
@@ -398,6 +466,7 @@ class ProcessFrameUseCaseTest {
             obstacleExtractor = ObstacleExtractor(config, navigationSemantics),
             obstacleTracker = ObstacleTracker(config),
             clock = { clock.nowMs },
+            preferSemanticPreprocess = preferSemanticPreprocess,
         )
     }
 

@@ -1,5 +1,8 @@
 package com.sailens.guidance.trace
 
+import com.sailens.core.frame.ImageFrame
+import com.sailens.core.frame.ImagePixelFormat
+
 import com.sailens.core.log.LogService
 import com.sailens.guidance.config.TraceRuntimeConfig
 import com.sailens.guidance.model.trace.GuidanceAlertChannels
@@ -8,11 +11,13 @@ import com.sailens.guidance.model.trace.GuidanceAlertResults
 import com.sailens.guidance.model.trace.GuidanceAlertSources
 import com.sailens.guidance.model.trace.GuidanceAlertTrace
 import com.sailens.guidance.model.trace.HoldReleaseTrace
+import com.sailens.guidance.model.trace.PipelineFrameTiming
 import com.sailens.guidance.model.trace.SafetyStateTrace
 import com.sailens.guidance.model.trace.SafetyTraceNames
 import com.sailens.guidance.model.trace.SessionTraceMetadata
 import com.sailens.guidance.model.trace.SessionTraceSummary
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -105,6 +110,30 @@ class SafetyTraceLedgerTest {
     }
 
     private fun drain(queue: CountedTraceQueue<TraceQueueEntry>) = generateSequence { queue.pollCounted() }.map(::describe).toList()
+
+    @Test
+    fun `pipeline timing counts partial frames and stays within its opted-in session`() {
+        val queue = CountedTraceQueue<TraceQueueEntry>()
+        val ledger = newLedger(queue)
+        val frame = ImageFrame(8, 8, byteArrayOf(), ImagePixelFormat.YUV_420_888, 10, 0, 33)
+        val timing = PipelineFrameTiming("profiled", frame, dequeuedNanos = 24)
+        ledger.attach(metadata("control"))
+        assertFalse(ledger.recordPipelineTiming(PipelineFrameTiming("control", frame, 24)))
+        ledger.close("control")
+        ledger.attach(metadata("profiled").copy(pipelineTimingMode = "race"))
+        assertTrue(ledger.recordPipelineTiming(timing))
+        ledger.close("profiled")
+        assertFalse(ledger.recordPipelineTiming(timing))
+
+        val entries = generateSequence { queue.pollCounted() }.toList()
+        val record = entries.filterIsInstance<TraceQueueEntry.PipelineTiming>().single()
+        assertEquals(1L, record.seq)
+        assertEquals(33L, record.timing.frameId)
+        assertNull(record.timing.decidedNanos)
+        val summaries = entries.filterIsInstance<TraceQueueEntry.SessionSummary>().map { it.summary }
+        assertNull(summaries[0].pipelineTimingCount)
+        assertEquals(1L, summaries[1].pipelineTimingCount)
+    }
 
     @Test
     fun `an alert before the session opens or after it closes is in no trace, and each session numbers its own`() {

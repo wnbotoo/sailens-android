@@ -1,5 +1,7 @@
 package com.sailens.guidance.usecase.scene
 
+import android.os.SystemClock
+
 import com.sailens.guidance.config.PerceptionConfig
 import com.sailens.guidance.config.PipelinePerformanceBudget
 import com.sailens.guidance.model.common.ObstacleRunKind
@@ -21,9 +23,11 @@ import com.sailens.guidance.geometry.withObstacleDistances
 import com.sailens.guidance.motion.NoOrientationSource
 import com.sailens.guidance.motion.OrientationSource
 import com.sailens.guidance.model.trace.FrameTrace
+import com.sailens.guidance.model.trace.PipelineFrameTiming
 import com.sailens.guidance.model.trace.SessionTraceAccumulator
 import com.sailens.guidance.model.trace.SessionTraceMetadata
 import com.sailens.core.frame.ImageFrame
+import com.sailens.core.frame.PipelineTimingConfig
 import com.sailens.guidance.model.scene.SceneDebugInfo
 import com.sailens.guidance.model.perception.SegmentationMask
 import com.sailens.guidance.model.scene.SceneResult
@@ -97,6 +101,7 @@ class StartSceneAnalysisUseCase(
     private val depthSwitch: DepthGeometrySwitch = DepthGeometrySwitch(),
     private val depthConfig: DepthGeometryConfig = DepthGeometryConfig(),
     private val localWorldBuilder: LocalWorldModelBuilder? = null,
+    private val pipelineTiming: PipelineTimingConfig? = null,
 ) {
     /**
      * @param releaseFrame hands each frame back to its source once this pipeline is done reading
@@ -172,6 +177,7 @@ class StartSceneAnalysisUseCase(
                     startedAt = sessionStartedAt,
                     pipelineMode = perceptionConfig.profile.name.lowercase(),
                     targetHardwareProfile = perceptionConfig.targetHardwareProfile,
+                    pipelineTimingMode = pipelineTiming?.traceName,
                 )
             )
             traceSessionStarted = true
@@ -223,7 +229,12 @@ class StartSceneAnalysisUseCase(
 
         emitAll(
             frameFlow
-            .mapNotNullReleasing(releaseFrame) { frame ->
+            .mapNotNullReleasing(
+                release = releaseFrame,
+                timingSessionId = sessionId.takeIf { traceSessionStarted },
+                timingConfig = pipelineTiming,
+                recordTiming = traceService::recordPipelineTiming,
+            ) { frame, timing ->
                 val pipelineStart = Timestamp.now()
                 val recording = regressionRecorder.isRecording
                 if (recording) regressionRecorder.beginFrame(frame)
@@ -231,6 +242,7 @@ class StartSceneAnalysisUseCase(
                 // Where the camera points. Resolved before the frame is processed because the
                 // ground-contact distance reads it; it is a sample lookup and a little maths.
                 val cameraFacts = cameraFactsSource.current()
+                timing?.cameraClock = cameraFacts?.clock
                 val frameFacts = FrameFacts.of(frame)
                 val geometry = cameraGeometryResolver.resolve(
                     cameraFacts,
@@ -242,7 +254,8 @@ class StartSceneAnalysisUseCase(
 
                 // 处理帧
                 val buildsWorld = localWorldRun != null && localWorldBuilder != null
-                val perceptionResult = processFrameUseCase(frame, geometry, recordWorldProvenance = buildsWorld).getOrElse {
+                timing?.let { it.perceptionStartedNanos = it.now() }
+                val perceptionResult = processFrameUseCase(frame, geometry, recordWorldProvenance = buildsWorld, timing = timing).getOrElse {
                     if (recording) regressionRecorder.endFrame(frame, emptyList(), it)
                     traceService.recordError(sessionId, "process_frame", it)
                     logService.error(
@@ -258,6 +271,7 @@ class StartSceneAnalysisUseCase(
                     }
                     return@mapNotNullReleasing null
                 }
+                timing?.let { it.perceptionFinishedNanos = it.now() }
                 consecutiveFrameFailures = 0
                 val processFrameCompletedAt = Timestamp.now()
 
@@ -282,7 +296,9 @@ class StartSceneAnalysisUseCase(
                 val analyzeCompletedAt = Timestamp.now()
 
                 // 决策事件
+                timing?.let { it.decisionStartedNanos = it.now() }
                 val events = decideEventsUseCase(sceneSnapshot)
+                timing?.let { it.decidedNanos = it.now() }
                 // The baseline the decision above was made with, for the result, the trace and the capture. Recorded
                 // before the frame ends, as an output of it.
                 val baseline = decideEventsUseCase.qualification(sceneSnapshot)
@@ -668,12 +684,24 @@ internal class SegmentationMaskSnapshots {
  */
 private fun <R : Any> Flow<ImageFrame>.mapNotNullReleasing(
     release: (ImageFrame) -> Unit,
-    process: suspend (ImageFrame) -> R?,
+    timingSessionId: String?,
+    timingConfig: PipelineTimingConfig?,
+    recordTiming: (PipelineFrameTiming) -> Unit,
+    process: suspend (ImageFrame, PipelineFrameTiming?) -> R?,
 ): Flow<R> = transform { frame ->
+    val timing = if (timingSessionId != null && timingConfig?.enabled == true) {
+        PipelineFrameTiming(timingSessionId, frame, SystemClock.elapsedRealtimeNanos(), timingConfig.sampleSemanticPixels)
+    } else {
+        null
+    }
     val result = try {
-        process(frame)
+        process(frame, timing)
     } finally {
         release(frame)
+        if (timing != null) {
+            timing.releasedNanos = timing.now()
+            runCatching { recordTiming(timing) }
+        }
     }
     if (result != null) emit(result)
 }

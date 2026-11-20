@@ -4,6 +4,7 @@ import com.sailens.guidance.motion.AndroidOrientationSource
 import com.sailens.guidance.motion.OrientationSource
 import android.content.Context
 import com.sailens.core.log.LogService
+import com.sailens.guidance.config.GuidanceOptimizationConfig
 import com.sailens.guidance.config.PerceptionConfig
 import com.sailens.guidance.config.TraceRuntimeConfig
 import com.sailens.guidance.depth.DefaultDepthRepository
@@ -77,6 +78,7 @@ val guidanceModule = module {
             config = get(),
             navigationSemantics = get(),
             logService = get(),
+            useNeonArgmax = getOrNull<GuidanceOptimizationConfig>()?.useNeonArgmax == true,
         )
     }
 
@@ -104,6 +106,7 @@ val guidanceModule = module {
             modelSourceResolver = get(),
             scorePostprocessor = get<NavigationScorePostprocessor>(),
             preprocessCache = get(),
+            directFloatNchw = getOrNull<GuidanceOptimizationConfig>()?.directFloatNchw == true,
             logService = get(),
         )
     }
@@ -115,6 +118,7 @@ val guidanceModule = module {
             modelConfig = get(),
             modelSourceResolver = get(),
             preprocessCache = get(),
+            directFloatNchw = getOrNull<GuidanceOptimizationConfig>()?.directFloatNchw == true,
             logService = get(),
         )
     }
@@ -183,6 +187,7 @@ private fun createPerceptionRepository(
     modelSourceResolver: ModelSourceResolver,
     scorePostprocessor: NavigationScorePostprocessor,
     preprocessCache: InputPreprocessCache,
+    directFloatNchw: Boolean,
     logService: LogService,
 ): PerceptionRepository = when (providerType) {
     SemanticProviderType.SEGMENTATION_MODEL -> SemanticPerceptionRepository(
@@ -191,6 +196,7 @@ private fun createPerceptionRepository(
         modelConfig = modelConfig,
         modelSourceResolver = modelSourceResolver,
         preprocessCache = preprocessCache,
+        directFloatNchw = directFloatNchw,
         logService = logService,
     )
 }
@@ -202,6 +208,7 @@ private fun createObstacleProvider(
     modelConfig: DetectionModelConfig,
     modelSourceResolver: ModelSourceResolver,
     preprocessCache: InputPreprocessCache,
+    directFloatNchw: Boolean,
     logService: LogService,
 ): ObstacleProvider = when (providerType) {
     ObstacleProviderType.NONE -> DisabledObstacleProvider()
@@ -211,6 +218,7 @@ private fun createObstacleProvider(
         modelConfig = modelConfig,
         modelSourceResolver = modelSourceResolver,
         preprocessCache = preprocessCache,
+        directFloatNchw = directFloatNchw,
         logService = logService,
     )
 }

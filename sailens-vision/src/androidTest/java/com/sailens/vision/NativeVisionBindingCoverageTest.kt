@@ -70,12 +70,12 @@ class NativeVisionBindingCoverageTest {
         NativeBinding(
             NativeDetectionPostProcessor::class.java,
             "nativePostProcessRawFloatFromHandle",
-            "(JIIIIIFIFI[I)[F",
+            "(JIIIIIFIFI[I[J)[F",
         ),
         NativeBinding(
             NativeDetectionPostProcessor::class.java,
             "nativePostProcessRawInt8FromHandle",
-            "(JIIIIIFIFIFI[I)[F",
+            "(JIIIIIFIFIFI[I[J)[F",
         ),
     )
 

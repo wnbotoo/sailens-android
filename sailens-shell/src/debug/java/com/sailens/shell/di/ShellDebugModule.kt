@@ -1,5 +1,6 @@
 package com.sailens.shell.di
 
+
 import com.sailens.shell.groundcontact.GroundContactViewModel
 import com.sailens.guidance.config.AnalysisConfig
 import com.sailens.guidance.config.PerceptionConfig
@@ -57,6 +58,13 @@ import java.util.concurrent.Executors
  * only in the debug variant.
  */
 val shellDebugModule: Module = module {
+    single {
+        val marker = androidContext().filesDir.resolve("pipeline-timing")
+        val mode = runCatching { marker.takeIf { it.isFile }?.readText()?.trim() }.getOrNull()
+        PipelineExperiment.fromMarker(mode)
+    }
+    single { get<PipelineExperiment>().timing }
+    single { get<PipelineExperiment>().optimizations }
     viewModel {
         TraceReplayViewModel(
             logger = get(),

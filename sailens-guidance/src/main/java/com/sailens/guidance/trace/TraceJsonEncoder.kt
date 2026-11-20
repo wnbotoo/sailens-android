@@ -21,6 +21,7 @@ internal object TraceJsonEncoder {
         if (metadata.safetyTrace) put("safetyTrace", true)
         if (metadata.holdTrace) put("holdTrace", true)
         if (metadata.depthTrace) put("depthTrace", true)
+        metadata.pipelineTimingMode?.let { put("pipelineTimingMode", it) }
     }
 
     fun encodeDepthRun(record: DepthRunTrace): JSONObject = JSONObject().apply {
@@ -329,6 +330,7 @@ internal object TraceJsonEncoder {
         summary.guidanceAlertCount?.let { put("guidanceAlertCount", it) }
         summary.safetyStateCount?.let { put("safetyStateCount", it) }
         summary.depthRunCount?.let { put("depthRunCount", it) }
+        summary.pipelineTimingCount?.let { put("pipelineTimingCount", it) }
     }
 
     fun encodeError(sessionId: String, stage: String, throwable: Throwable): JSONObject = JSONObject().apply {

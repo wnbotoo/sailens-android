@@ -6,6 +6,7 @@ import com.sailens.vision.semantic.SemanticPostprocessor
 import com.sailens.vision.semantic.SemanticContentRegion
 import com.sailens.vision.semantic.SemanticScoreSpec
 import com.sailens.vision.semantic.SemanticScores
+import com.sailens.vision.semantic.SemanticScoreTiming
 import com.sailens.runtime.nativeValue
 import com.sailens.guidance.config.AnalysisConfig
 import com.sailens.guidance.config.widthFractionOfLongSide
@@ -49,6 +50,7 @@ class NavigationScorePostprocessor(
     navigationSemantics: NavigationSemantics,
     private val logService: LogService,
     private val maskPool: SegmentationMaskPool = SegmentationMaskPool(),
+    private val useNeonArgmax: Boolean = false,
 ) : SemanticPostprocessor<NavigationSemanticResult> {
     private val lookup = SemanticClassLookup.from(navigationSemantics)
     private var hasLoggedBackend = false
@@ -152,9 +154,11 @@ class NavigationScorePostprocessor(
 
     private fun postprocessPrepared(
         content: SemanticContentRegion,
+        timing: SemanticScoreTiming? = null,
         nativeCall: (SemanticScratch) -> Boolean,
     ): SemanticPostprocessResult? {
         if (!NativeGuidanceLibrary.isAvailable) return null
+        val preparing = timing?.now() ?: 0L
         val width = content.width
         val height = content.height
         val pixelCount = content.pixelCount
@@ -188,6 +192,7 @@ class NavigationScorePostprocessor(
             intOutputs = intOutputs,
             contentRegion = intArrayOf(content.x, content.y, content.width, content.height),
         )
+        timing?.preparedSince(preparing)
         val nativeSuccess = runCatching {
             nativeCall(scratch)
         }.getOrDefault(false)
@@ -203,6 +208,7 @@ class NavigationScorePostprocessor(
             hasLoggedBackend = true
         }
 
+        val assembling = timing?.now() ?: 0L
         return SemanticPostprocessResult(
             maskLease = maskLease,
             stats = buildStats(
@@ -214,7 +220,7 @@ class NavigationScorePostprocessor(
                 groundTypeCounts = groundTypeCounts,
                 intOutputs = intOutputs,
             ),
-        )
+        ).also { timing?.assembledSince(assembling) }
     }
 
     private data class SemanticScratch(
@@ -239,12 +245,15 @@ class NavigationScorePostprocessor(
         channels: Int,
         scoreLayout: ImageTensorLayout,
         content: SemanticContentRegion = SemanticContentRegion(0, 0, width, height),
+        outputAccessNanos: LongArray? = null,
+        timing: SemanticScoreTiming? = null,
     ): SemanticPostprocessResult? {
         if (tensorBufferHandle == 0L) return null
         if (width <= 0 || height <= 0 || channels <= 0) return null
         if (!content.fitsIn(width, height)) return null
         return postprocessPrepared(
             content = content,
+            timing = timing,
         ) { scratch ->
             nativePostprocessScoresFromHandle(
                  tensorBufferHandle = tensorBufferHandle,
@@ -265,9 +274,13 @@ class NavigationScorePostprocessor(
                  obstacleWords = scratch.obstacleWords,
                  classCounts = scratch.classCounts,
                  groundTypeCounts = scratch.groundTypeCounts,
-                 intOutputs = scratch.intOutputs,
+                intOutputs = scratch.intOutputs,
                 contentRegion = scratch.contentRegion,
-            )
+                requestNeon = useNeonArgmax,
+                sampleOffset = timing?.sampleOffset ?: -1,
+                outputAccessNanos = outputAccessNanos,
+                scoreTimingNanos = timing?.nativeNanos,
+            ) >= 0
         }
     }
 
@@ -280,12 +293,15 @@ class NavigationScorePostprocessor(
         channels: Int,
         scoreLayout: ImageTensorLayout,
         content: SemanticContentRegion = SemanticContentRegion(0, 0, width, height),
+        outputAccessNanos: LongArray? = null,
+        timing: SemanticScoreTiming? = null,
     ): SemanticPostprocessResult? {
         if (tensorBufferHandle == 0L) return null
         if (width <= 0 || height <= 0 || channels <= 0) return null
         if (!content.fitsIn(width, height)) return null
         return postprocessPrepared(
             content = content,
+            timing = timing,
         ) { scratch ->
             nativePostprocessInt8ScoresFromHandle(
                 tensorBufferHandle = tensorBufferHandle,
@@ -308,6 +324,9 @@ class NavigationScorePostprocessor(
                 groundTypeCounts = scratch.groundTypeCounts,
                 intOutputs = scratch.intOutputs,
                 contentRegion = scratch.contentRegion,
+                sampleOffset = timing?.sampleOffset ?: -1,
+                outputAccessNanos = outputAccessNanos,
+                scoreTimingNanos = timing?.nativeNanos,
             )
         }
     }
@@ -336,6 +355,8 @@ class NavigationScorePostprocessor(
                 channels = spec.channels,
                 scoreLayout = spec.layout,
                 content = spec.content,
+                outputAccessNanos = scores.outputAccessNanos,
+                timing = scores.timing,
             )
             is SemanticScores.Int8Handle -> postprocessInt8ScoresFromHandle(
                 tensorBufferHandle = scores.tensorBufferHandle,
@@ -344,6 +365,8 @@ class NavigationScorePostprocessor(
                 channels = spec.channels,
                 scoreLayout = spec.layout,
                 content = spec.content,
+                outputAccessNanos = scores.outputAccessNanos,
+                timing = scores.timing,
             )
             is SemanticScores.FloatValues -> postprocessScores(
                 scores = scores.values,
@@ -535,6 +558,7 @@ class NavigationScorePostprocessor(
         contentRegion: IntArray,
     ): Boolean
 
+    // The native return is the kernel that completed the frame. A negative value indicates failure.
     private external fun nativePostprocessScoresFromHandle(
         tensorBufferHandle: Long,
         resultMask: IntArray,
@@ -556,7 +580,11 @@ class NavigationScorePostprocessor(
         groundTypeCounts: IntArray,
         intOutputs: IntArray,
         contentRegion: IntArray,
-    ): Boolean
+        requestNeon: Boolean,
+        sampleOffset: Int,
+        outputAccessNanos: LongArray?,
+        scoreTimingNanos: LongArray?,
+    ): Int
 
     private external fun nativePostprocessInt8ScoresFromHandle(
         tensorBufferHandle: Long,
@@ -579,6 +607,9 @@ class NavigationScorePostprocessor(
         groundTypeCounts: IntArray,
         intOutputs: IntArray,
         contentRegion: IntArray,
+        sampleOffset: Int,
+        outputAccessNanos: LongArray?,
+        scoreTimingNanos: LongArray?,
     ): Boolean
 
     private fun SemanticContentRegion.fitsIn(gridWidth: Int, gridHeight: Int): Boolean =

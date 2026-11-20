@@ -29,6 +29,7 @@ data class SessionTraceMetadata(
      * trace service. False in a trace written before these were.
      */
     val depthTrace: Boolean = false,
+    val pipelineTimingMode: String? = null,
 )
 
 data class FrameTrace(
@@ -634,6 +635,7 @@ data class SessionTraceSummary(
      * trace service; null in older traces.
      */
     val depthRunCount: Long? = null,
+    val pipelineTimingCount: Long? = null,
 )
 
 class SessionTraceAccumulator(

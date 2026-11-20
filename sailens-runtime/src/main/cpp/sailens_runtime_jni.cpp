@@ -1,15 +1,22 @@
 #include <jni.h>
 
 #include <android/log.h>
+#include <time.h>
 
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <limits>
+#include <type_traits>
 #include <vector>
+
+#include "tensor_layout.h"
 
 constexpr const char* kLogTag = "SailensRuntimeJni";
 
 namespace {
+
+constexpr int kRgbChannels = 3;
 
 struct YuvPlane {
     const jbyte* data;
@@ -113,7 +120,7 @@ static RgbPixel sampleYuvAsRgbNearest(
     return yuvToRgb(yValue, uValue, vValue);
 }
 
-template <typename Writer>
+template <bool Planar = false, typename Writer>
 static bool preprocessYuv(
         const YuvPlane& yPlane,
         const YuvPlane& uPlane,
@@ -160,29 +167,30 @@ static bool preprocessYuv(
     mapping[4] = static_cast<float>(activeEndX);
     mapping[5] = static_cast<float>(activeStartY);
     mapping[6] = static_cast<float>(activeEndY);
-    const float padR = (0.0f - meanR) / stdR;
-    const float padG = (0.0f - meanG) / stdG;
-    const float padB = (0.0f - meanB) / stdB;
+    const RgbPixel pad{(0.0f - meanR) / stdR, (0.0f - meanG) / stdG, (0.0f - meanB) / stdB};
     const bool useNearestResize = resizeFilter == 0;
 
-    auto writePadPixel = [&writer, padR, padG, padB](int& outIndex) {
-        writer(outIndex++, padR);
-        writer(outIndex++, padG);
-        writer(outIndex++, padB);
+    constexpr int pixelStride = Planar ? 1 : kRgbChannels;
+    const int channelStride = Planar ? targetWidth * targetHeight : 1;
+    const auto writePixel = [&writer, channelStride](int& outIndex, const RgbPixel& rgb) {
+        writer(outIndex, rgb.r);
+        writer(outIndex + channelStride, rgb.g);
+        writer(outIndex + 2 * channelStride, rgb.b);
+        outIndex += pixelStride;
     };
 
     for (int y = 0; y < targetHeight; ++y) {
-        int outIndex = y * targetWidth * 3;
+        int outIndex = y * targetWidth * pixelStride;
 
         if (y < activeStartY || y >= activeEndY) {
             for (int x = 0; x < targetWidth; ++x) {
-                writePadPixel(outIndex);
+                writePixel(outIndex, pad);
             }
             continue;
         }
 
         for (int x = 0; x < activeStartX; ++x) {
-            writePadPixel(outIndex);
+            writePixel(outIndex, pad);
         }
 
         const float rotatedY = (static_cast<float>(y) - padY + 0.5f) / scale - 0.5f;
@@ -211,13 +219,15 @@ static bool preprocessYuv(
             const RgbPixel pixel = useNearestResize
                     ? sampleYuvAsRgbNearest(yPlane, uPlane, vPlane, sourceX, sourceY)
                     : sampleYuvAsRgb(yPlane, uPlane, vPlane, sourceX, sourceY);
-            writer(outIndex++, (pixel.r / 255.0f - meanR) / stdR);
-            writer(outIndex++, (pixel.g / 255.0f - meanG) / stdG);
-            writer(outIndex++, (pixel.b / 255.0f - meanB) / stdB);
+            writePixel(outIndex, {
+                    (pixel.r / 255.0f - meanR) / stdR,
+                    (pixel.g / 255.0f - meanG) / stdG,
+                    (pixel.b / 255.0f - meanB) / stdB,
+            });
         }
 
         for (int x = activeEndX; x < targetWidth; ++x) {
-            writePadPixel(outIndex);
+            writePixel(outIndex, pad);
         }
     }
 
@@ -234,6 +244,37 @@ static bool preprocessYuv(
 // signature does not match. That is what lets Kotlin classes move packages
 // without a rename silently surviving until the method is first called.
 // ---------------------------------------------------------------------------
+
+class YuvPreprocessTiming {
+public:
+    YuvPreprocessTiming(JNIEnv* env, jlongArray destination)
+        : destination_(destination != nullptr && env->GetArrayLength(destination) >= kSampleSize
+                      ? destination : nullptr) {}
+
+    jlong now() const {
+        if (destination_ == nullptr) return 0;
+        timespec time{};
+        clock_gettime(CLOCK_BOOTTIME, &time);
+        return static_cast<jlong>(time.tv_sec) * 1'000'000'000 + time.tv_nsec;
+    }
+
+    jboolean* isCopy(int index) {
+        return destination_ == nullptr ? nullptr : &copied_[index];
+    }
+
+    void record(JNIEnv* env, jlong getNanos, jlong releaseNanos, jlong bodyNanos) const {
+        if (destination_ == nullptr) return;
+        // The flags follow the acquisitions in Y, U, V, output order.
+        const jlong copyMask = copied_[0] | (copied_[1] << 1) | (copied_[2] << 2) | (copied_[3] << 3);
+        const jlong sample[] = {getNanos, releaseNanos, bodyNanos, copyMask};
+        env->SetLongArrayRegion(destination_, 0, kSampleSize, sample);
+    }
+
+private:
+    static constexpr jsize kSampleSize = 4;
+    jlongArray destination_;
+    jboolean copied_[4]{};
+};
 
 jboolean JNICALL
 nativePreprocessYuvToFloat(
@@ -260,8 +301,10 @@ nativePreprocessYuvToFloat(
         jfloat stdG,
         jfloat stdB,
         jint resizeFilter,
+        jint outputLayout,
         jfloatArray output,
-        jfloatArray mapping) {
+        jfloatArray mapping,
+        jlongArray timingNanos) {
     if (y == nullptr || u == nullptr || v == nullptr || output == nullptr ||
         mapping == nullptr || env->GetArrayLength(mapping) != 7 ||
         yRowStride <= 0 || yPixelStride <= 0 ||
@@ -269,14 +312,23 @@ nativePreprocessYuvToFloat(
         vRowStride <= 0 || vPixelStride <= 0 ||
         sourceWidth <= 0 || sourceHeight <= 0 ||
         targetWidth <= 0 || targetHeight <= 0 ||
-        env->GetArrayLength(output) != targetWidth * targetHeight * 3) {
+        !sailens::isValidTensorLayout(outputLayout) ||
+        (outputLayout == sailens::kTensorLayoutNchw && resizeFilter != 0)) {
+        return JNI_FALSE;
+    }
+    const jlong targetPixels = static_cast<jlong>(targetWidth) * targetHeight;
+    if (targetPixels > std::numeric_limits<jsize>::max() / kRgbChannels ||
+        env->GetArrayLength(output) != targetPixels * kRgbChannels) {
         return JNI_FALSE;
     }
 
-    jbyte* yData = env->GetByteArrayElements(y, nullptr);
-    jbyte* uData = env->GetByteArrayElements(u, nullptr);
-    jbyte* vData = env->GetByteArrayElements(v, nullptr);
-    jfloat* outputData = env->GetFloatArrayElements(output, nullptr);
+    YuvPreprocessTiming timing(env, timingNanos);
+    const jlong getting = timing.now();
+    jbyte* yData = env->GetByteArrayElements(y, timing.isCopy(0));
+    jbyte* uData = env->GetByteArrayElements(u, timing.isCopy(1));
+    jbyte* vData = env->GetByteArrayElements(v, timing.isCopy(2));
+    jfloat* outputData = env->GetFloatArrayElements(output, timing.isCopy(3));
+    const jlong getNanos = timing.now() - getting;
     if (yData == nullptr || uData == nullptr || vData == nullptr || outputData == nullptr) {
         if (yData != nullptr) env->ReleaseByteArrayElements(y, yData, JNI_ABORT);
         if (uData != nullptr) env->ReleaseByteArrayElements(u, uData, JNI_ABORT);
@@ -314,32 +366,27 @@ nativePreprocessYuvToFloat(
     };
 
     float imageMapping[7];
-    const bool success = preprocessYuv(
-            yPlane,
-            uPlane,
-            vPlane,
-            sourceWidth,
-            sourceHeight,
-            rotationDegrees,
-            targetWidth,
-            targetHeight,
-            meanR,
-            meanG,
-            meanB,
-            stdR,
-            stdG,
-            stdB,
-            resizeFilter,
-            imageMapping,
-            [outputData](int index, float value) {
-                outputData[index] = value;
-            });
+    const jlong bodyStarted = timing.now();
+    const auto preprocess = [&](auto planar) {
+        return preprocessYuv<decltype(planar)::value>(
+                yPlane, uPlane, vPlane, sourceWidth, sourceHeight, rotationDegrees,
+                targetWidth, targetHeight, meanR, meanG, meanB, stdR, stdG, stdB,
+                resizeFilter, imageMapping,
+                [outputData](int index, float value) { outputData[index] = value; });
+    };
+    const bool success = outputLayout == sailens::kTensorLayoutNchw
+            ? preprocess(std::true_type{})
+            : preprocess(std::false_type{});
 
+    const jlong releasing = timing.now();
     env->ReleaseFloatArrayElements(output, outputData, success ? 0 : JNI_ABORT);
     env->ReleaseByteArrayElements(v, vData, JNI_ABORT);
     env->ReleaseByteArrayElements(u, uData, JNI_ABORT);
     env->ReleaseByteArrayElements(y, yData, JNI_ABORT);
-    if (success) env->SetFloatArrayRegion(mapping, 0, 7, imageMapping);
+    if (success) {
+        timing.record(env, getNanos, timing.now() - releasing, releasing - bodyStarted);
+        env->SetFloatArrayRegion(mapping, 0, 7, imageMapping);
+    }
     return success ? JNI_TRUE : JNI_FALSE;
 }
 
@@ -371,7 +418,8 @@ nativePreprocessYuvToInt8(
         jfloat quantScale,
         jint quantZeroPoint,
         jbyteArray output,
-        jfloatArray mapping) {
+        jfloatArray mapping,
+        jlongArray timingNanos) {
     if (y == nullptr || u == nullptr || v == nullptr || output == nullptr ||
         mapping == nullptr || env->GetArrayLength(mapping) != 7 ||
         yRowStride <= 0 || yPixelStride <= 0 ||
@@ -384,10 +432,13 @@ nativePreprocessYuvToInt8(
         return JNI_FALSE;
     }
 
-    jbyte* yData = env->GetByteArrayElements(y, nullptr);
-    jbyte* uData = env->GetByteArrayElements(u, nullptr);
-    jbyte* vData = env->GetByteArrayElements(v, nullptr);
-    jbyte* outputData = env->GetByteArrayElements(output, nullptr);
+    YuvPreprocessTiming timing(env, timingNanos);
+    const jlong getting = timing.now();
+    jbyte* yData = env->GetByteArrayElements(y, timing.isCopy(0));
+    jbyte* uData = env->GetByteArrayElements(u, timing.isCopy(1));
+    jbyte* vData = env->GetByteArrayElements(v, timing.isCopy(2));
+    jbyte* outputData = env->GetByteArrayElements(output, timing.isCopy(3));
+    const jlong getNanos = timing.now() - getting;
     if (yData == nullptr || uData == nullptr || vData == nullptr || outputData == nullptr) {
         if (yData != nullptr) env->ReleaseByteArrayElements(y, yData, JNI_ABORT);
         if (uData != nullptr) env->ReleaseByteArrayElements(u, uData, JNI_ABORT);
@@ -426,6 +477,7 @@ nativePreprocessYuvToInt8(
 
     const float inverseQuantScale = 1.0f / quantScale;
     float imageMapping[7];
+    const jlong bodyStarted = timing.now();
     const bool success = preprocessYuv(
             yPlane,
             uPlane,
@@ -448,11 +500,15 @@ nativePreprocessYuvToInt8(
                 outputData[index] = static_cast<jbyte>(std::clamp(quantized, -128, 127));
             });
 
+    const jlong releasing = timing.now();
     env->ReleaseByteArrayElements(output, outputData, success ? 0 : JNI_ABORT);
     env->ReleaseByteArrayElements(v, vData, JNI_ABORT);
     env->ReleaseByteArrayElements(u, uData, JNI_ABORT);
     env->ReleaseByteArrayElements(y, yData, JNI_ABORT);
-    if (success) env->SetFloatArrayRegion(mapping, 0, 7, imageMapping);
+    if (success) {
+        timing.record(env, getNanos, timing.now() - releasing, releasing - bodyStarted);
+        env->SetFloatArrayRegion(mapping, 0, 7, imageMapping);
+    }
     return success ? JNI_TRUE : JNI_FALSE;
 }
 
@@ -506,10 +562,10 @@ nativeQuantizeFloatToInt8(
 
 const JNINativeMethod kYuvInputPreprocessorMethods[] = {
         {"nativePreprocessYuvToFloat",
-         "([B[B[BIIIIIIIIIIIFFFFFFI[F[F)Z",
+         "([B[B[BIIIIIIIIIIIFFFFFFII[F[F[J)Z",
          reinterpret_cast<void*>(nativePreprocessYuvToFloat)},
         {"nativePreprocessYuvToInt8",
-         "([B[B[BIIIIIIIIIIIFFFFFFIFI[B[F)Z",
+         "([B[B[BIIIIIIIIIIIFFFFFFIFI[B[F[J)Z",
          reinterpret_cast<void*>(nativePreprocessYuvToInt8)},
         {"nativeQuantizeFloatToInt8",
          "([F[BFI)Z",

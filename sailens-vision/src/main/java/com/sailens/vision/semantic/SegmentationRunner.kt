@@ -7,6 +7,7 @@ import com.sailens.core.runtime.MlRuntimeInfo
 import com.sailens.runtime.InputImageMapping
 import com.sailens.runtime.PreparedImage
 import com.sailens.runtime.InputPreprocessCache
+import com.sailens.runtime.InputPreprocessTiming
 import com.sailens.runtime.ModelInputDataType
 import com.sailens.runtime.ModelInputPreprocessor
 import com.sailens.runtime.ModelInputQuantization
@@ -14,6 +15,7 @@ import com.sailens.runtime.ModelTensorConfig
 import com.sailens.runtime.TensorQuantization
 import com.sailens.runtime.TfliteTensorElementType
 import com.sailens.runtime.session.LiteRtSession
+import com.sailens.vision.ModelRunTiming
 
 /** One semantic inference: the postprocessed value plus the timings traces are built from. */
 data class SegmentationRunResult<R>(
@@ -54,6 +56,7 @@ class SegmentationRunner<R>(
     preprocessCache: InputPreprocessCache? = null,
     private val postprocessor: SemanticPostprocessor<R>,
     private val scoreGridSpansInput: Boolean = false,
+    directFloatNchw: Boolean = false,
 ) {
     val accelerator: Accelerator get() = session.accelerator
     private val inputBuffer = session.inputBuffers.single()
@@ -85,6 +88,7 @@ class SegmentationRunner<R>(
         inputQuantization = inputQuantization,
         preferNativeYuvPreprocessing = preferNativeYuvPreprocessing,
         preprocessCache = preprocessCache,
+        directFloatNchw = directFloatNchw,
     )
     private val argmaxPostprocessor = ArgmaxPostprocessor(
         config = config,
@@ -105,18 +109,32 @@ class SegmentationRunner<R>(
         method.invoke(outputBuffer) as Long
     }.getOrDefault(0L)
 
-    fun run(rawFrame: ImageFrame): SegmentationRunResult<R> {
+    internal fun sharedFloatInput(frame: ImageFrame): InputPreprocessCache.SharedFloatInput? {
+        if (inputDataType != ModelInputDataType.FLOAT32) return null
+        return inputPreprocessor.sharedFloatInput(frame)
+    }
+
+    fun run(
+        rawFrame: ImageFrame,
+        timing: ModelRunTiming? = null,
+        preferredProducer: InputPreprocessCache.PreferredProducer? = null,
+    ): SegmentationRunResult<R> {
+        timing?.startRunner()
         val startTime = SystemClock.uptimeMillis()
         val spec = specFor(rawFrame)
         val contentMask = contentMaskFor(spec.content)
 
         // 1. 预处理: YUV/RGBA frame -> model input tensor layout
-        val prepared = preprocessInput(rawFrame)
+        timing?.preprocessStartedNanos = timing?.now()
+        val prepared = preprocessInput(rawFrame, timing?.input, preferredProducer)
+        timing?.finishPreprocess(prepared.backend.traceName)
         val afterPreprocessTime = SystemClock.uptimeMillis()
 
         // 2. 推理
         writeInput()
+        timing?.inferenceStartedNanos = timing?.now()
         session.run()
+        timing?.inferenceReturnedNanos = timing?.now()
         val afterModelTime = SystemClock.uptimeMillis()
 
         // 3. Postprocess: offer the still-in-LiteRT tensor first (avoids the 30 MB readFloat()
@@ -125,15 +143,20 @@ class SegmentationRunner<R>(
         //    output). If the postprocessor declines for any reason (native lib unavailable, dlsym
         //    failure, lock failure, validation error), copy the tensor out and offer it again,
         //    then fall back to generic argmax.
+        val scoreTiming = timing?.takeIf { outputBufferHandle != 0L }?.let {
+            SemanticScoreTiming.forFrame(rawFrame.sequenceNumber, it.sampleSemanticPixels).also { phases ->
+                it.semanticScoreTiming = phases
+            }
+        }
         val handleOutcome: SemanticPostprocessOutcome<R>? = when {
             outputBufferHandle == 0L -> null
             outputElementType == TfliteTensorElementType.FLOAT32 -> postprocessor.postprocessScores(
-                scores = SemanticScores.FloatHandle(outputBufferHandle),
+                scores = SemanticScores.FloatHandle(outputBufferHandle, timing?.nativeOutputAccess, scoreTiming),
                 spec = spec,
                 reusableClassMap = contentMask,
             )
             outputElementType == TfliteTensorElementType.INT8 -> postprocessor.postprocessScores(
-                scores = SemanticScores.Int8Handle(outputBufferHandle),
+                scores = SemanticScores.Int8Handle(outputBufferHandle, timing?.nativeOutputAccess, scoreTiming),
                 spec = spec,
                 reusableClassMap = contentMask,
             )
@@ -149,7 +172,9 @@ class SegmentationRunner<R>(
             outputScores = null
             afterOutputReadTime = afterModelTime
         } else {
+            val reading = timing?.now() ?: 0L
             outputScores = readOutputScores()
+            timing?.let { it.outputCopyNanos = it.now() - reading }
             afterOutputReadTime = SystemClock.uptimeMillis()
         }
 
@@ -182,6 +207,7 @@ class SegmentationRunner<R>(
                 backend = backend,
             )
         }
+        timing?.finishPostprocess(outcome.backend)
         val afterPostprocessTime = SystemClock.uptimeMillis()
 
         return SegmentationRunResult(
@@ -223,18 +249,24 @@ class SegmentationRunner<R>(
         return cachedContentMask
     }
 
-    private fun preprocessInput(rawFrame: ImageFrame): PreparedImage {
+    private fun preprocessInput(
+        rawFrame: ImageFrame,
+        timing: InputPreprocessTiming?,
+        preferredProducer: InputPreprocessCache.PreferredProducer?,
+    ): PreparedImage {
         return when (inputDataType) {
             ModelInputDataType.FLOAT32 -> {
-                inputPreprocessor.preprocessFloatWithMapping(rawFrame, rawFrame.rotationDegrees, cachedInputFloatArray)
+                inputPreprocessor.preprocessFloatWithMapping(
+                    rawFrame, rawFrame.rotationDegrees, cachedInputFloatArray, timing, preferredProducer,
+                )
             }
 
             ModelInputDataType.INT8 -> {
-                inputPreprocessor.preprocessInt8WithMapping(rawFrame, rawFrame.rotationDegrees, cachedInputInt8Array)
+                inputPreprocessor.preprocessInt8WithMapping(rawFrame, rawFrame.rotationDegrees, cachedInputInt8Array, timing)
             }
 
             ModelInputDataType.UINT8 -> {
-                inputPreprocessor.preprocessUint8WithMapping(rawFrame, rawFrame.rotationDegrees, cachedInputInt8Array)
+                inputPreprocessor.preprocessUint8WithMapping(rawFrame, rawFrame.rotationDegrees, cachedInputInt8Array, timing)
             }
 
             ModelInputDataType.AUTO -> error("AUTO input type must be resolved before creating SegmentationRunner")

@@ -4,15 +4,19 @@ import android.graphics.Rect
 import android.media.Image
 import androidx.camera.core.ImageInfo
 import androidx.camera.core.ImageProxy
+import com.sailens.core.frame.FrameIngressTiming
 import com.sailens.core.frame.FrameSourceGeometry
 import com.sailens.core.frame.ImageFrame
 import com.sailens.core.frame.ImagePixelFormat
 import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -208,6 +212,40 @@ class ImageFrameAnalyzerDemandTest {
         val frame = analyzer.currentFrame(maxAgeMs = 10_000)
         assertNotNull(frame)
         assertNull(frame?.sourceGeometry)
+    }
+
+    @Test
+    fun `ingress timing follows the lent frame and separates copying from publication`() = runBlocking {
+        var clockNanos = 1_000L
+        val converter = object : ImageFrameConverter {
+            override fun convert(image: ImageProxy, sequenceNumber: Long, planes: PlaneAllocator): ImageFrame {
+                clockNanos += 25L
+                return CountingConverter(AtomicInteger()).convert(image, sequenceNumber, planes)
+            }
+        }
+        val timed = ImageFrameAnalyzer(
+            frameConverter = converter,
+            elapsedRealtimeMs = { now },
+            elapsedRealtimeNanos = { clockNanos++ },
+            sourceGeometryOf = {
+                clockNanos += 5L
+                null
+            },
+            measureFrameTiming = true,
+        )
+        val next = async(start = CoroutineStart.UNDISPATCHED) {
+            timed.frames.first { frame ->
+                timed.releaseFrame(frame)
+                true
+            }
+        }
+        timed.analyze(FakeImageProxy())
+        val frame = next.await()
+
+        assertEquals(0L, frame.sequenceNumber)
+        assertEquals(1_000L, frame.receivedElapsedRealtimeNanos)
+        assertEquals(FrameIngressTiming(1_001, 1_027, 1_033), frame.ingressTiming)
+        assertNull(timed.currentFrame(maxAgeMs = 10_000)?.ingressTiming)
     }
 
     private fun awaitTrue(what: String, deadlineMs: Long = 2_000, condition: () -> Boolean) {

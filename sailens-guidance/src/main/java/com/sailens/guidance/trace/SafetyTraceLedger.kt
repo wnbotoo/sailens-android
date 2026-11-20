@@ -2,6 +2,7 @@ package com.sailens.guidance.trace
 
 import com.sailens.guidance.model.trace.DepthRunTrace
 import com.sailens.guidance.model.trace.GuidanceAlertTrace
+import com.sailens.guidance.model.trace.PipelineFrameTiming
 import com.sailens.guidance.model.trace.SafetyStateTrace
 import com.sailens.guidance.model.trace.SafetyTraceNames
 import com.sailens.guidance.model.trace.SessionTraceMetadata
@@ -48,7 +49,16 @@ internal class SafetyTraceLedger(
     private var alerts = 0L
     private var states = 0L
     private var depthRuns = 0L
+    private var pipelineFrames: Long? = null
     private var latestState: SafetyStateTrace? = null
+
+    fun recordPipelineTiming(timing: PipelineFrameTiming): Boolean = synchronized(lock) {
+        if (timing.sessionId != sessionId) return false
+        val seq = (pipelineFrames ?: return false) + 1
+        pipelineFrames = seq
+        queue.offerCounted(TraceQueueEntry.PipelineTiming(timing, seq))
+        true
+    }
 
     /**
      * Queues a depth-lane record with its session's next `seq`, but only when the trace session it names is the
@@ -104,6 +114,7 @@ internal class SafetyTraceLedger(
         alerts = 0
         states = 0
         depthRuns = 0
+        pipelineFrames = metadata.pipelineTimingMode?.let { 0L }
         latestState?.let { kept ->
             states++
             queue.offerCounted(
@@ -134,6 +145,7 @@ internal class SafetyTraceLedger(
                     guidanceAlertCount = alerts,
                     safetyStateCount = states,
                     depthRunCount = depthRuns,
+                    pipelineTimingCount = pipelineFrames,
                 ),
             ),
         )

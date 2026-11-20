@@ -14,11 +14,15 @@ import com.sailens.core.frame.ImageFrame
 import com.sailens.guidance.model.perception.PerceptionFrameIdentity
 import com.sailens.guidance.model.perception.PerceptionFrameEvidence
 import com.sailens.runtime.InputImageMapping
+import com.sailens.runtime.InputPreprocessCache
 import com.sailens.vision.semantic.SemanticImageMapping
+import com.sailens.vision.ModelRunTiming
 import com.sailens.core.runtime.MlRuntimeInfo
 import com.sailens.guidance.model.perception.PerceptionResult
 import com.sailens.guidance.model.perception.SegmentationAnalysis
 import com.sailens.guidance.model.perception.SegmentationMaskLease
+import com.sailens.guidance.model.trace.PipelineFrameTiming
+import com.sailens.guidance.model.trace.PipelineSourceFrame
 import com.sailens.guidance.processor.perception.ObstacleExtractor
 import com.sailens.guidance.processor.perception.ObstacleTracker
 import com.sailens.guidance.processor.perception.PerceptionProfileManager
@@ -53,9 +57,11 @@ class ProcessFrameUseCase(
     private val obstacleTracker: ObstacleTracker,
     private val clock: () -> Long = Timestamp::now,
     private val regressionRecorder: RegressionRecorder = RegressionRecorder.None,
+    private val preferSemanticPreprocess: Boolean = false,
 ) {
     private val scheduler = PerceptionScheduler { profileManager.activeConfig }
     private var cachedSemanticAnalysis: CachedSemanticAnalysis? = null
+    private var lastDetectionTimingSource: PipelineSourceFrame? = null
 
     private data class ObstacleRun(
         val provider: ObstacleProvider,
@@ -99,6 +105,7 @@ class ProcessFrameUseCase(
         val maskLease: SegmentationMaskLease?,
         val source: PerceptionFrameIdentity?,
         val imageMapping: SemanticImageMapping?,
+        val timingSource: PipelineSourceFrame?,
     )
 
     /**
@@ -109,6 +116,7 @@ class ProcessFrameUseCase(
     fun reset() {
         scheduler.reset()
         cachedSemanticAnalysis = null
+        lastDetectionTimingSource = null
     }
 
     /**
@@ -119,6 +127,7 @@ class ProcessFrameUseCase(
         frame: ImageFrame,
         geometry: CameraGeometry? = null,
         recordWorldProvenance: Boolean = false,
+        timing: PipelineFrameTiming? = null,
     ): Result<PerceptionResult> = coroutineScope {
         val startTime = clock()
         // 挡位在会话之间可切换（PerceptionProfileManager.activateSelected），会话内不变
@@ -126,15 +135,24 @@ class ProcessFrameUseCase(
         requireConfiguredObstacleProvidersReady(config)
 
         val obstacleRun = selectObstacleRun(config, startTime)
+        val preferredProducer = reserveSemanticProducer(frame, config, obstacleRun)
+        timing?.preferredPreprocessReserved = preferredProducer != null
 
         val identity = if (recordWorldProvenance) PerceptionFrameIdentity(frame.sequenceNumber, frame.timestamp) else null
-        val semDeferred = async { getSemanticAnalysis(frame, identity) }
+        val semanticQueuedNanos = timing?.now()
+        val semDeferred = async { getSemanticAnalysis(frame, identity, timing, semanticQueuedNanos, preferredProducer) }
+        if (preferredProducer != null) {
+            // The reservation may never reach preprocessing if the session is cancelled or the runner fails.
+            semDeferred.invokeOnCompletion { preferredProducer.close() }
+        }
         // det 以异常报错（sem 用 Result）。在这里收成 Result：单帧 det 失败应当和 sem 失败一样被计为
         // 一帧失败、交给上层按连续失败次数处置，而不是直接冲垮整条 flow。
         val obstacleDeferred = obstacleRun?.let { run ->
+            val runTiming = timing?.let { ModelRunTiming(it.now()) }
+            timing?.detectionRun = runTiming
             async {
                 try {
-                    Result.success(run.provider.detect(frame))
+                    Result.success(run.provider.detect(frame, runTiming))
                 } catch (error: CancellationException) {
                     throw error
                 } catch (error: Exception) {
@@ -169,6 +187,8 @@ class ProcessFrameUseCase(
                 semanticSource = semanticOutput.source,
             )
             val rawObstacles = obstacleExtractor.extractFromDetections(obstacleOutput.detections, depthEstimator(distanceFrame))
+            lastDetectionTimingSource = timing?.source()
+            timing?.detectionSource = lastDetectionTimingSource
             ObstacleTrackingOutput(
                 trackedObstacles = obstacleTracker.update(rawObstacles, completedAt, ObstacleSourceFrame(frame.sequenceNumber, frame.timestamp, identity)),
                 runKind = obstacleRun.kind,
@@ -181,6 +201,7 @@ class ProcessFrameUseCase(
                 imageMapping = obstacleOutput.imageMapping,
             )
         } else if (config.detectionEnabled) {
+            timing?.detectionSource = lastDetectionTimingSource
             // det 本帧未到间隔：用跟踪器运动预测补偿
             ObstacleTrackingOutput(
                 trackedObstacles = obstacleTracker.predict(clock()),
@@ -201,6 +222,17 @@ class ProcessFrameUseCase(
         }
 
         Result.success(buildPerceptionResult(frame, identity, semanticOutput, trackingOutput, startTime))
+    }
+
+    private fun reserveSemanticProducer(
+        frame: ImageFrame,
+        config: PerceptionConfig,
+        obstacleRun: ObstacleRun?,
+    ): InputPreprocessCache.PreferredProducer? {
+        if (!preferSemanticPreprocess || obstacleRun == null || config.semanticTargetFps > 0) return null
+        val semanticInput = perceptionRepository.sharedFloatInput(frame) ?: return null
+        if (semanticInput != obstacleRun.provider.sharedFloatInput(frame)) return null
+        return semanticInput.reserveProducer()
     }
 
     /** 决定本帧 obstacle 槽位是否运行 det（按调度间隔），否则不跑（由 tracker 预测补偿）。 */
@@ -256,7 +288,13 @@ class ProcessFrameUseCase(
         )
     }
 
-    private suspend fun getSemanticAnalysis(frame: ImageFrame, identity: PerceptionFrameIdentity?): Result<SemanticAnalysisOutput> {
+    private suspend fun getSemanticAnalysis(
+        frame: ImageFrame,
+        identity: PerceptionFrameIdentity?,
+        timing: PipelineFrameTiming?,
+        queuedNanos: Long?,
+        preferredProducer: InputPreprocessCache.PreferredProducer?,
+    ): Result<SemanticAnalysisOutput> {
         val reusableCached = cachedSemanticAnalysis?.takeIf { cached ->
             cached.frameWidth == frame.width &&
                 cached.frameHeight == frame.height &&
@@ -265,6 +303,7 @@ class ProcessFrameUseCase(
 
         // sem 是导航底线：无可复用缓存时必须运行，否则按 semanticTargetFps 间隔运行
         if (reusableCached != null && !scheduler.shouldRunSemantic(clock())) {
+            timing?.semanticSource = reusableCached.timingSource
             if (regressionRecorder.isRecording) regressionRecorder.onSemantic(frame, ran = false, output = null, failure = null)
             return Result.success(
                 SemanticAnalysisOutput(
@@ -276,7 +315,13 @@ class ProcessFrameUseCase(
             )
         }
 
-        val segmentationOutput = perceptionRepository.segment(frame).getOrElse {
+        val runTiming = if (queuedNanos != null && timing != null) {
+            ModelRunTiming(queuedNanos, timing.sampleSemanticPixels)
+        } else {
+            null
+        }
+        timing?.semanticRun = runTiming
+        val segmentationOutput = perceptionRepository.segment(frame, runTiming, preferredProducer).getOrElse {
             if (regressionRecorder.isRecording) regressionRecorder.onSemantic(frame, ran = true, output = null, failure = it)
             return Result.failure(it)
         }
@@ -294,6 +339,8 @@ class ProcessFrameUseCase(
             throw error
         }
         val replaced = cachedSemanticAnalysis
+        val timingSource = timing?.source()
+        timing?.semanticSource = timingSource
         cachedSemanticAnalysis = CachedSemanticAnalysis(
             frameWidth = frame.width,
             frameHeight = frame.height,
@@ -303,6 +350,7 @@ class ProcessFrameUseCase(
             maskLease = segmentationOutput.maskLease,
             source = identity,
             imageMapping = segmentationOutput.imageMapping,
+            timingSource = timingSource,
         )
         // The previous frame's processing has finished and the UI only ever gets a copy, so the
         // replaced analysis's mask has no reader left: its array can carry the next run.

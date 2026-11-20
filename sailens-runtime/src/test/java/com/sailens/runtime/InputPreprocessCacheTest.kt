@@ -7,6 +7,9 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 class InputPreprocessCacheTest {
     @Test
@@ -43,6 +46,27 @@ class InputPreprocessCacheTest {
 
         assertEquals(InputPreprocessBackend.SHARED_QUANTIZED_NATIVE_YUV, backend)
         assertArrayEquals(byteArrayOf(-128, 0, 127), output)
+    }
+
+    @Test
+    fun `a timed hit separates monitor entry from copying and preserves the values`() {
+        val cache = InputPreprocessCache()
+        val key = cacheKey(sequenceNumber = 11)
+        val values = floatArrayOf(0.25f, 0.5f, 0.75f)
+        val output = FloatArray(values.size)
+        var nanos = 0L
+        val timing = InputPreprocessTiming { nanos.also { nanos += 10 } }
+        cache.storeFloatInput(key, values, InputPreprocessBackend.NATIVE_YUV)
+
+        val hit = cache.awaitOrClaim(key, timing = timing) {
+            cache.copyFloatWithMapping(key, output, null, timing)
+        }
+
+        assertEquals(InputPreprocessBackend.SHARED_NATIVE_YUV, hit?.backend)
+        assertEquals(10L, timing.cacheWaitNanos)
+        assertEquals(0L, timing.cacheAwaitNanos)
+        assertEquals(10L, timing.cacheCopyNanos)
+        assertArrayEquals(values, output, 0f)
     }
 
     @Test
@@ -92,14 +116,85 @@ class InputPreprocessCacheTest {
         stuck.start()
         claimed.await()
 
+        val timing = InputPreprocessTiming(System::nanoTime)
         val started = System.nanoTime()
-        val hit = cache.awaitOrClaim(key, waitMs = 30) { cache.copyFloatInput(key, FloatArray(3)) }
+        val hit = cache.awaitOrClaim(key, waitMs = 30, timing = timing) { cache.copyFloatInput(key, FloatArray(3)) }
         val waitedMs = (System.nanoTime() - started) / 1_000_000
 
         done.countDown()
         stuck.join()
         assertNull(hit)
         assertTrue("waited $waitedMs ms", waitedMs in 25..500)
+        assertTrue(timing.cacheAwaitNanos > 0L)
+        assertTrue(timing.cacheWaitNanos >= timing.cacheAwaitNanos)
+        assertEquals(0L, timing.cacheCopyNanos)
+    }
+
+    @Test
+    fun `reserving the float input changes the producer when detection reaches the cache first`() {
+        val executor = Executors.newSingleThreadExecutor()
+        try {
+            for (preferSemantic in listOf(false, true)) {
+                val cache = InputPreprocessCache()
+                val key = cacheKey(sequenceNumber = 25)
+                val share = InputPreprocessCache.SharedFloatInput(cache, key, preferNativeYuv = true)
+                val preferred = if (preferSemantic) checkNotNull(share.reserveProducer()) else null
+                val tensor = floatArrayOf(0.25f, 0.5f, 0.75f)
+                val detInput = FloatArray(tensor.size)
+                val semInput = FloatArray(tensor.size)
+                val detLookedUp = CountDownLatch(1)
+                val detectorProduced = executor.submit<Boolean> {
+                    val hit = cache.awaitOrClaim(key, waitMs = 2_000) {
+                        detLookedUp.countDown()
+                        cache.copyFloatInput(key, detInput)
+                    }
+                    if (hit != null) return@submit false
+                    try {
+                        tensor.copyInto(detInput)
+                        cache.storeFloatInput(key, detInput, InputPreprocessBackend.NATIVE_YUV)
+                        true
+                    } finally {
+                        cache.releaseClaim(key)
+                    }
+                }
+                assertTrue(detLookedUp.await(2, TimeUnit.SECONDS))
+                preferred.use {
+                    val hit = cache.awaitOrClaim(key, waitMs = 2_000, preferredProducer = preferred) {
+                        cache.copyFloatInput(key, semInput)
+                    }
+                    assertEquals(preferSemantic, hit == null)
+                    if (hit == null) {
+                        try {
+                            tensor.copyInto(semInput)
+                            cache.storeFloatInput(key, semInput, InputPreprocessBackend.NATIVE_YUV)
+                        } finally {
+                            cache.releaseClaim(key)
+                        }
+                    }
+                }
+                assertEquals(!preferSemantic, detectorProduced.get(2, TimeUnit.SECONDS))
+                assertArrayEquals(tensor, semInput, 0f)
+                assertArrayEquals(tensor, detInput, 0f)
+            }
+        } finally {
+            executor.shutdownNow()
+        }
+    }
+
+    @Test
+    fun `a reservation still allows fallback after the wait budget expires`() {
+        val cache = InputPreprocessCache()
+        val key = cacheKey(sequenceNumber = 26)
+        val share = InputPreprocessCache.SharedFloatInput(cache, key, preferNativeYuv = true)
+        checkNotNull(share.reserveProducer()).use {
+            assertNull(cache.awaitOrClaim(key, waitMs = 0) { cache.copyFloatInput(key, FloatArray(3)) })
+            cache.storeFloatInput(key, floatArrayOf(1f, 2f, 3f), InputPreprocessBackend.NATIVE_YUV)
+            cache.releaseClaim(key)
+            val output = FloatArray(3)
+            val hit = cache.awaitOrClaim(key, preferredProducer = it) { cache.copyFloatInput(key, output) }
+            assertEquals(InputPreprocessBackend.SHARED_NATIVE_YUV, hit)
+            assertArrayEquals(floatArrayOf(1f, 2f, 3f), output, 0f)
+        }
     }
 
     @Test

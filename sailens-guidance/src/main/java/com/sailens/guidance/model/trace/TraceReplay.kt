@@ -242,6 +242,7 @@ object TraceReplayParser {
                 GUIDANCE_ALERT_TYPE -> guidanceAlerts += parseGuidanceAlert(entry, index)
                 SAFETY_STATE_TYPE -> safetyStates += parseSafetyState(entry, index)
                 DEPTH_RUN_TYPE -> depthRuns += parseDepthRun(entry, index)
+                PIPELINE_TIMING_TYPE -> Unit
                 SESSION_SUMMARY_TYPE -> summary = parseSummary(entry, index)
                 ERROR_TYPE -> errors += parseError(entry, index)
                 else -> throw IllegalArgumentException("Unsupported trace entry type '$type' at line ${index + 1}")
@@ -333,6 +334,7 @@ object TraceReplayParser {
         safetyTrace = entry.optionalBoolean("safetyTrace") ?: false,
         holdTrace = entry.optionalBoolean("holdTrace") ?: false,
         depthTrace = entry.optionalBoolean("depthTrace") ?: false,
+        pipelineTimingMode = entry.optionalString("pipelineTimingMode"),
     )
 
     private fun parseFrame(entry: JsonObject, lineIndex: Int) = FrameTrace(
@@ -601,6 +603,7 @@ object TraceReplayParser {
         guidanceAlertCount = entry.optionalLong("guidanceAlertCount"),
         safetyStateCount = entry.optionalLong("safetyStateCount"),
         depthRunCount = entry.optionalLong("depthRunCount"),
+        pipelineTimingCount = entry.optionalLong("pipelineTimingCount"),
     )
 
     private fun parseError(entry: JsonObject, lineIndex: Int) = TraceReplayError(
@@ -679,6 +682,7 @@ object TraceReplayParser {
     private const val GUIDANCE_ALERT_TYPE = "guidance_alert"
     private const val SAFETY_STATE_TYPE = "safety_state"
     private const val DEPTH_RUN_TYPE = "depth_run"
+    private const val PIPELINE_TIMING_TYPE = "pipeline_timing"
     private const val SESSION_SUMMARY_TYPE = "session_summary"
     private const val ERROR_TYPE = "error"
 }

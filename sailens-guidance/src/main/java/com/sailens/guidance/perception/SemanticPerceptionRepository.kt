@@ -11,6 +11,7 @@ import com.sailens.runtime.InputPreprocessCache
 import com.sailens.runtime.ModelSourceResolver
 import com.sailens.vision.semantic.LiteRtSemanticSegmenter
 import com.sailens.vision.semantic.SemanticModelConfig
+import com.sailens.vision.ModelRunTiming
 
 /**
  * The navigation side of semantic segmentation.
@@ -26,6 +27,7 @@ class SemanticPerceptionRepository(
     modelSourceResolver: ModelSourceResolver,
     preprocessCache: InputPreprocessCache? = null,
     logService: LogService,
+    directFloatNchw: Boolean = false,
 ) : PerceptionRepository {
 
     private val segmenter = LiteRtSemanticSegmenter<NavigationSemanticResult>(
@@ -35,6 +37,7 @@ class SemanticPerceptionRepository(
         modelSourceResolver = modelSourceResolver,
         preprocessCache = preprocessCache,
         logService = logService,
+        directFloatNchw = directFloatNchw,
     )
 
     override val isInitialized: Boolean
@@ -44,8 +47,17 @@ class SemanticPerceptionRepository(
         segmenter.initialize()
     }
 
-    override suspend fun segment(frame: ImageFrame): Result<SegmentationOutput> =
-        segmenter.segment(frame).map { run ->
+    override suspend fun segment(frame: ImageFrame): Result<SegmentationOutput> = segment(frame, null)
+
+    override fun sharedFloatInput(frame: ImageFrame): InputPreprocessCache.SharedFloatInput? =
+        segmenter.sharedFloatInput(frame)
+
+    override suspend fun segment(
+        frame: ImageFrame,
+        timing: ModelRunTiming?,
+        preferredProducer: InputPreprocessCache.PreferredProducer?,
+    ): Result<SegmentationOutput> =
+        segmenter.segment(frame, timing, preferredProducer).map { run ->
             SegmentationOutput(
                 mask = run.value.mask,
                 preprocessTimeMs = run.preprocessTimeMs,

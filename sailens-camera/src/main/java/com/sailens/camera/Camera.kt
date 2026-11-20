@@ -6,6 +6,8 @@ import android.util.Log
 import androidx.camera.core.CameraControl
 import androidx.camera.core.CameraInfo
 import androidx.camera.core.CameraSelector.DEFAULT_BACK_CAMERA
+import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.Preview
 import androidx.camera.core.UseCase
 import androidx.camera.core.UseCaseGroup
 import androidx.camera.lifecycle.ProcessCameraProvider
@@ -17,7 +19,7 @@ import kotlinx.coroutines.withContext
 
 private const val TAG = "Camera"
 
-public class Camera : CameraCharacteristicsProvider {
+public class Camera(private val measureFrameTiming: Boolean = false) : CameraCharacteristicsProvider {
     private var cameraControl: CameraControl? = null
     private var cameraInfo: CameraInfo? = null
 
@@ -57,6 +59,16 @@ public class Camera : CameraCharacteristicsProvider {
         }.onFailure { Log.w(TAG, "Could not read camera characteristics", it) }.getOrNull()
 
         try {
+            if (measureFrameTiming) {
+                for (useCase in useCases) {
+                    val (name, size) = when (useCase) {
+                        is ImageAnalysis -> "analysis" to useCase.resolutionInfo?.resolution
+                        is Preview -> "preview" to useCase.resolutionInfo?.resolution
+                        else -> continue
+                    }
+                    Log.i(TAG, "CameraX negotiated $name=${size ?: "unknown"}")
+                }
+            }
             awaitCancellation()
         } finally {
             cameraProvider.unbindAll()

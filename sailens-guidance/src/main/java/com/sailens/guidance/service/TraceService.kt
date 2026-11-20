@@ -2,6 +2,7 @@ package com.sailens.guidance.service
 
 import com.sailens.guidance.model.trace.DepthRunTrace
 import com.sailens.guidance.model.trace.FrameTrace
+import com.sailens.guidance.model.trace.PipelineFrameTiming
 import com.sailens.guidance.model.trace.GuidanceAlertTrace
 import com.sailens.guidance.model.trace.PromptOutcomeTrace
 import com.sailens.guidance.model.trace.SafetyStateTrace
@@ -11,6 +12,7 @@ import com.sailens.guidance.model.trace.SessionTraceSummary
 interface TraceService {
     fun startSession(metadata: SessionTraceMetadata)
     fun recordFrame(frameTrace: FrameTrace)
+    fun recordPipelineTiming(timing: PipelineFrameTiming) {}
     fun recordOverlayRender(
         renderedAt: Long,
         renderMs: Long,

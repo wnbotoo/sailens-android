@@ -6,7 +6,15 @@ import com.sailens.core.frame.ImagePixelFormat
 internal class NativeYuvInputPreprocessor(
     private val config: ModelTensorConfig,
     private val inputQuantization: ModelInputQuantization,
+    directFloatNchw: Boolean = false,
 ) {
+    private val floatOutputLayout = if (
+        directFloatNchw && config.inputLayout == ImageTensorLayout.NCHW && config.resizeFilter == ResizeFilter.NEAREST
+    ) {
+        ImageTensorLayout.NCHW
+    } else {
+        ImageTensorLayout.NHWC
+    }
     private val mapping = FloatArray(7)
 
     fun imageMapping(frame: ImageFrame, rotationDegrees: Int): InputImageMapping {
@@ -29,17 +37,18 @@ internal class NativeYuvInputPreprocessor(
         frame: ImageFrame,
         rotationDegrees: Int,
         outputArray: FloatArray,
+        timing: InputPreprocessTiming? = null,
     ): Boolean {
         val yuv = frame.takeYuvDataOrNull() ?: return false
         if (!NativeRuntimeLibrary.isAvailable) return false
         val expectedSize = config.inputWidth * config.inputHeight * CHANNELS_RGB
         if (outputArray.size != expectedSize) return false
 
-        val nativeOutput = when (config.inputLayout) {
-            ImageTensorLayout.NHWC -> outputArray
-            ImageTensorLayout.NCHW -> nhwcFloatScratch.withMinSize(expectedSize).also {
-                nhwcFloatScratch = it
-            }
+        val transpose = config.inputLayout != floatOutputLayout
+        val nativeOutput = if (transpose) {
+            nhwcFloatScratch.withMinSize(expectedSize).also { nhwcFloatScratch = it }
+        } else {
+            outputArray
         }
 
         val success = runCatching {
@@ -65,17 +74,21 @@ internal class NativeYuvInputPreprocessor(
                 stdG = config.std.second,
                 stdB = config.std.third,
                 resizeFilter = config.resizeFilter.nativeValue,
+                outputLayout = floatOutputLayout.nativeValue,
                 output = nativeOutput,
                 mapping = mapping,
+                timingNanos = timing?.beginNativeYuv(config.resizeFilter, floatOutputLayout),
             )
         }.getOrDefault(false)
-        if (success && config.inputLayout == ImageTensorLayout.NCHW) {
+        if (success && transpose) {
+            val transposing = timing?.now() ?: 0L
             nativeOutput.copyHwcToNchw(
                 output = outputArray,
                 width = config.inputWidth,
                 height = config.inputHeight,
                 channels = CHANNELS_RGB,
             )
+            timing?.transposedSince(transposing)
         }
         return success
     }
@@ -84,6 +97,7 @@ internal class NativeYuvInputPreprocessor(
         frame: ImageFrame,
         rotationDegrees: Int,
         outputArray: ByteArray,
+        timing: InputPreprocessTiming? = null,
     ): Boolean {
         val yuv = frame.takeYuvDataOrNull() ?: return false
         if (!NativeRuntimeLibrary.isAvailable) return false
@@ -124,15 +138,18 @@ internal class NativeYuvInputPreprocessor(
                 quantZeroPoint = inputQuantization.zeroPoint,
                 output = nativeOutput,
                 mapping = mapping,
+                timingNanos = timing?.beginNativeYuv(config.resizeFilter),
             )
         }.getOrDefault(false)
         if (success && config.inputLayout == ImageTensorLayout.NCHW) {
+            val transposing = timing?.now() ?: 0L
             nativeOutput.copyHwcToNchw(
                 output = outputArray,
                 width = config.inputWidth,
                 height = config.inputHeight,
                 channels = CHANNELS_RGB,
             )
+            timing?.transposedSince(transposing)
         }
         return success
     }
@@ -179,8 +196,10 @@ internal class NativeYuvInputPreprocessor(
         stdG: Float,
         stdB: Float,
         resizeFilter: Int,
+        outputLayout: Int,
         output: FloatArray,
         mapping: FloatArray,
+        timingNanos: LongArray?,
     ): Boolean
 
     private external fun nativePreprocessYuvToInt8(
@@ -209,6 +228,7 @@ internal class NativeYuvInputPreprocessor(
         quantZeroPoint: Int,
         output: ByteArray,
         mapping: FloatArray,
+        timingNanos: LongArray?,
     ): Boolean
 
     private val ResizeFilter.nativeValue: Int

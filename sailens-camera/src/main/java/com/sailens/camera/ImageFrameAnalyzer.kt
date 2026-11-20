@@ -5,6 +5,7 @@ import android.graphics.PixelFormat
 import android.os.SystemClock
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
+import com.sailens.core.frame.FrameIngressTiming
 import com.sailens.core.frame.FrameSourceGeometry
 import com.sailens.core.frame.ImageFrame
 import com.sailens.core.frame.ImagePixelFormat
@@ -25,6 +26,7 @@ public class ImageFrameAnalyzer(
     private val elapsedRealtimeMs: () -> Long = SystemClock::elapsedRealtime,
     private val elapsedRealtimeNanos: () -> Long = SystemClock::elapsedRealtimeNanos,
     private val sourceGeometryOf: (ImageProxy) -> FrameSourceGeometry? = ::readSourceGeometry,
+    private val measureFrameTiming: Boolean = false,
 ) : ImageAnalysis.Analyzer, FrameSource, FrameSnapshotProvider {
     private var nextSequenceNumber = 0L
     private val emittedFrames = AtomicLong(0L)
@@ -69,11 +71,14 @@ public class ImageFrameAnalyzer(
             }
             val buffers = pool.acquire()
             try {
-                val frame = frameConverter.convert(
+                val copyStarted = if (measureFrameTiming) elapsedRealtimeNanos() else 0L
+                val converted = frameConverter.convert(
                     image = proxy,
                     sequenceNumber = nextSequenceNumber++,
                     planes = buffers,
-                ).copy(
+                )
+                val copyFinished = if (measureFrameTiming) elapsedRealtimeNanos() else 0L
+                val frame = converted.copy(
                     receivedElapsedRealtimeNanos = receivedNanos,
                     sourceGeometry = sourceGeometryOf(proxy),
                 )
@@ -83,9 +88,14 @@ public class ImageFrameAnalyzer(
                     // emission to count either way.
                     return
                 }
+                val ingress = if (measureFrameTiming) {
+                    FrameIngressTiming(copyStarted, copyFinished, elapsedRealtimeNanos())
+                } else {
+                    null
+                }
                 var sent = false
                 for (subscription in due) {
-                    if (subscription.offer(frame, buffers)) sent = true
+                    if (subscription.offer(frame, buffers, ingress)) sent = true
                 }
                 if (sent) emittedFrames.incrementAndGet() else droppedFrames.incrementAndGet()
             } finally {
@@ -185,9 +195,9 @@ public class ImageFrameAnalyzer(
          * Each subscriber gets its own [ImageFrame] object over the shared arrays, so giving one
          * back is unambiguous even when several subscribers hold the same frame.
          */
-        fun offer(frame: ImageFrame, buffers: FrameBuffers): Boolean {
+        fun offer(frame: ImageFrame, buffers: FrameBuffers, timing: FrameIngressTiming?): Boolean {
             buffers.retain()
-            val lent = Lent(frame.copy(), buffers)
+            val lent = Lent(frame.copy(ingressTiming = timing), buffers)
             if (mailbox.trySend(lent).isSuccess) return true
             lent.release()
             return false

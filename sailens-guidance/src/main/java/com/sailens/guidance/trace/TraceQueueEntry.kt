@@ -2,6 +2,7 @@ package com.sailens.guidance.trace
 
 import com.sailens.guidance.model.trace.DepthRunTrace
 import com.sailens.guidance.model.trace.FrameTrace
+import com.sailens.guidance.model.trace.PipelineFrameTiming
 import com.sailens.guidance.model.trace.GuidanceAlertTrace
 import com.sailens.guidance.model.trace.PromptOutcomeTrace
 import com.sailens.guidance.model.trace.SafetyStateTrace
@@ -23,6 +24,10 @@ internal sealed interface TraceQueueEntry {
         val frameTrace: FrameTrace,
     ) : TraceQueueEntry {
         override fun encode(): JSONObject = TraceJsonEncoder.encodeFrame(frameTrace)
+    }
+
+    data class PipelineTiming(val timing: PipelineFrameTiming, val seq: Long) : TraceQueueEntry {
+        override fun encode(): JSONObject = encodePipelineTiming(timing, seq)
     }
 
     data class OverlayRender(

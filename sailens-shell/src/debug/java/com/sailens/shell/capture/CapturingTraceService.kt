@@ -3,6 +3,7 @@ package com.sailens.shell.capture
 import com.sailens.guidance.model.trace.DepthRunTrace
 import com.sailens.guidance.model.trace.FrameTrace
 import com.sailens.guidance.model.trace.GuidanceAlertTrace
+import com.sailens.guidance.model.trace.PipelineFrameTiming
 import com.sailens.guidance.model.trace.PromptOutcomeTrace
 import com.sailens.guidance.model.trace.SafetyStateTrace
 import com.sailens.guidance.model.trace.SessionTraceMetadata
@@ -37,6 +38,7 @@ internal class CapturingTraceService(
 
     // Explicit so the delegation of the other calls is visible in review.
     override fun recordFrame(frameTrace: FrameTrace) = base.recordFrame(frameTrace)
+    override fun recordPipelineTiming(timing: PipelineFrameTiming) = base.recordPipelineTiming(timing)
     override fun recordGuidanceAlert(alert: GuidanceAlertTrace) = base.recordGuidanceAlert(alert)
     override fun recordSafetyState(state: SafetyStateTrace) = base.recordSafetyState(state)
     override fun recordDepthRun(record: DepthRunTrace): Boolean = base.recordDepthRun(record)

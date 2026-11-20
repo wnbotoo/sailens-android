@@ -10,9 +10,11 @@ import com.sailens.guidance.semantics.CityscapesNavigationSemantics
 import com.sailens.vision.taxonomy.CityscapesTaxonomy
 import com.sailens.runtime.ImageTensorLayout
 import com.sailens.runtime.ModelTensorConfig
+import com.sailens.runtime.nativeValue
 import com.sailens.vision.semantic.SemanticContentRegion
 import com.sailens.vision.semantic.SemanticScoreSpec
 import com.sailens.vision.semantic.SemanticScores
+import com.sailens.vision.semantic.SemanticScoreTiming
 import com.sailens.vision.semantic.cropClassMap
 import com.sailens.guidance.config.AnalysisConfig
 import com.sailens.guidance.model.perception.SegmentationMask
@@ -37,7 +39,7 @@ import kotlin.random.Random
  * argmax mask. So this compares the one-pass native kernel against argmax-then-Kotlin-stats,
  * field by field, which is the differential test §12.2 asks for.
  *
- * The INT8 handle test gets a real output buffer by compiling a synthetic reshape graph.
+ * The handle tests get real output buffers by compiling synthetic reshape graphs.
  *
  * Needs a physical arm64 device: `./gradlew.bat :sailens-guidance:connectedDebugAndroidTest`.
  */
@@ -191,6 +193,67 @@ class NavigationScoreKernelTest {
                             input.writeInt8(croppedScoreFixture(layout))
                             model.run(listOf(input), listOf(output))
                             assertCroppedScores(SemanticScores.Int8Handle(handleOf(output)), layout, "native_score_int8")
+                            val sampled = SemanticScoreTiming(sampleOffset = 0)
+                            assertCroppedScores(
+                                SemanticScores.Int8Handle(handleOf(output), LongArray(2), sampled),
+                                layout,
+                                "native_score_int8",
+                            )
+                            assertTrue(checkNotNull(sampled.fusedKernelNanos) > 0)
+                            assertEquals(1L, sampled.sampledPixels)
+                        }
+                    }
+                }
+            }
+        } finally {
+            fixture.delete()
+        }
+    }
+
+    @Test
+    fun neonFloatHandleMatchesScalarOverACroppedTensorIncludingTiesAndTail() {
+        val cache = InstrumentationRegistry.getInstrumentation().targetContext.cacheDir
+        val fixture = File.createTempFile("semantic-float-", ".tflite", cache)
+        val wide = SemanticContentRegion(x = 3, y = 2, width = 33, height = HEIGHT - 4)
+        val narrow = wide.copy(width = 3)
+        data class ScoreOverride(val x: Int, val channel: Int, val value: Float)
+        val cases = listOf(
+            null,
+            ScoreOverride(wide.x + 2, 0, Float.NaN),
+            ScoreOverride(wide.x + wide.width - 1, 8, Float.POSITIVE_INFINITY),
+            ScoreOverride(wide.x + 2, 8, Float.NEGATIVE_INFINITY),
+            ScoreOverride(wide.x + 2, 8, Float.NaN),
+            ScoreOverride(wide.x - 1, 8, Float.NaN),
+            ScoreOverride(wide.x + wide.width, 8, Float.POSITIVE_INFINITY),
+        )
+        try {
+            fixture.writeBytes(Base64.decode(FLOAT_RESHAPE_GRAPH, Base64.DEFAULT))
+            CompiledModel.create(fixture.absolutePath, CompiledModel.Options(Accelerator.CPU)).use { model ->
+                model.createInputBuffers().single().use { input ->
+                    model.createOutputBuffers().single().use { output ->
+                        for (layout in ImageTensorLayout.entries) {
+                            for (nonFinite in cases) {
+                                val scores = syntheticScores(layout)
+                                setTiedScores(scores, layout, wide)
+                                if (nonFinite != null) {
+                                    val pixel = wide.y * WIDTH + nonFinite.x
+                                    scores[scoreIndex(pixel, nonFinite.channel, WIDTH * HEIGHT, layout)] = nonFinite.value
+                                }
+                                input.writeFloat(scores)
+                                model.run(listOf(input), listOf(output))
+                                val expected = referenceArgmax(scores, layout)
+                                val handle = handleOf(output)
+                                if (layout == ImageTensorLayout.NCHW && nonFinite == null) {
+                                    assertUntimedFloatKernelSelection(handle, wide)
+                                }
+                                for (content in listOf(wide, narrow)) {
+                                    val containsNonFinite = nonFinite != null &&
+                                        nonFinite.x in content.x until content.x + content.width
+                                    assertFloatHandleKernel(
+                                        handle, layout, content, expected.takeUnless { containsNonFinite },
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -263,6 +326,97 @@ class NavigationScoreKernelTest {
     // ---------------------------------------------------------------------------------------
     // Fixtures
     // ---------------------------------------------------------------------------------------
+
+    private fun setTiedScores(
+        scores: FloatArray,
+        layout: ImageTensorLayout,
+        content: SemanticContentRegion,
+    ) {
+        fun setPixel(x: Int, score: (Int) -> Float) {
+            val pixel = content.y * WIDTH + x
+            for (channel in 0 until CLASS_COUNT) {
+                scores[scoreIndex(pixel, channel, WIDTH * HEIGHT, layout)] = score(channel)
+            }
+        }
+        // A tie between two non-zero classes in the first vector and at the end of the row.
+        for (x in listOf(content.x, content.x + content.width - 1)) {
+            setPixel(x) { if (it == 1 || it == 8) 2f else -1f }
+        }
+        setPixel(content.x + 1) { if (it == 0) -0f else 0f }
+    }
+
+    private fun assertFloatHandleKernel(
+        handle: Long,
+        layout: ImageTensorLayout,
+        content: SemanticContentRegion,
+        expectedClassMap: IntArray?,
+    ) {
+        val spec = SemanticScoreSpec(WIDTH, HEIGHT, CLASS_COUNT, layout, content)
+        fun run(requestNeon: Boolean, measure: Boolean): NavigationSemanticResult {
+            val postprocessor = NavigationScorePostprocessor(
+                analysisConfig, navigationSemantics, SilentLogService, useNeonArgmax = requestNeon,
+            )
+            val timing = if (measure) SemanticScoreTiming(sampleOffset = 0) else null
+            val outcome = checkNotNull(postprocessor.postprocessScores(
+                SemanticScores.FloatHandle(handle, timing?.let { LongArray(2) }, timing),
+                spec,
+                IntArray(content.pixelCount),
+            ))
+            assertEquals("native_score", outcome.backend)
+            if (timing != null) {
+                val neon = requestNeon && expectedClassMap != null &&
+                    layout == ImageTensorLayout.NCHW && content.width >= 4
+                assertEquals(if (neon) "neon" else "scalar", timing.argmaxImplementation)
+                if (neon) assertEquals(0L, timing.sampledPixels)
+                else assertTrue(timing.sampledPixels > 0L)
+            }
+            return outcome.value
+        }
+
+        val baseline = run(requestNeon = false, measure = false)
+        baseline.maskLease.use {
+            // For non-finite scores, preserve the result of the existing fast-math scalar kernel.
+            if (expectedClassMap != null) {
+                val cropped = IntArray(content.pixelCount)
+                cropClassMap(expectedClassMap, WIDTH, content, cropped)
+                val expectedMask = SegmentationMask(content.width, content.height, cropped)
+                val expectedStats =
+                    KotlinSegmentationStatsExtractor(analysisConfig, navigationSemantics).extract(expectedMask)
+                assertArrayEquals(cropped, baseline.mask.classMap)
+                assertEquals(expectedStats, baseline.stats)
+            }
+            for ((requestNeon, measure) in listOf(false to true, true to false, true to true)) {
+                val candidate = run(requestNeon, measure)
+                candidate.maskLease.use {
+                    assertArrayEquals(baseline.mask.classMap, candidate.mask.classMap)
+                    assertEquals(baseline.stats, candidate.stats)
+                }
+            }
+        }
+    }
+
+    private fun assertUntimedFloatKernelSelection(handle: Long, content: SemanticContentRegion) {
+        val postprocessor = NavigationScorePostprocessor(analysisConfig, navigationSemantics, SilentLogService)
+        val native = NavigationScorePostprocessor::class.java.declaredMethods
+            .single { it.name == "nativePostprocessScoresFromHandle" }
+            .apply { isAccessible = true }
+        val lookup = BooleanArray(CLASS_COUNT)
+        val words = (content.pixelCount + 63) / 64
+        for ((requestNeon, expected) in listOf(false to 0, true to 1)) {
+            // Both instrumentation arrays are null. The JNI return identifies the kernel that ran.
+            val kernel = native.invoke(
+                postprocessor,
+                handle, IntArray(content.pixelCount),
+                WIDTH, HEIGHT, CLASS_COUNT, ImageTensorLayout.NCHW.nativeValue,
+                lookup, lookup, lookup, lookup, IntArray(CLASS_COUNT) { -1 },
+                0.3f, 0.3f, 0.3f,
+                LongArray(words), LongArray(words), IntArray(CLASS_COUNT), IntArray(1), IntArray(13),
+                intArrayOf(content.x, content.y, content.width, content.height),
+                requestNeon, -1, null, null,
+            )
+            assertEquals(expected, kernel)
+        }
+    }
 
     private fun croppedScoreFixture(layout: ImageTensorLayout): ByteArray {
         val pixelCount = CROP_GRID_WIDTH * CROP_GRID_HEIGHT
@@ -395,6 +549,14 @@ class NavigationScoreKernelTest {
         const val SEED = 20260920
         const val CROP_GRID_WIDTH = 5
         const val CROP_GRID_HEIGHT = 4
+
+        // TFLite v3, one FLOAT32 RESHAPE from [1,19,32,40] to [24320], with no weights.
+        const val FLOAT_RESHAPE_GRAPH =
+            "GAAAAFRGTDMAAA4AFAAQAAwACAAAAAQADgAAABAAAAA8AAAAGAAAAAMAAAABAAAACAAAAAQABAAE" +
+                "AAAAAQAAABAAAAAMAAwABwAAAAAACAAMAAAAAAAAFhYAAAABAAAAEAAAAAwAFAAQAAwACAAEAAwA" +
+                "AAAQAAAASAAAAEwAAABQAAAAAQAAABQAAAAAAA4AFAAAABAADAALAAQADgAAABAAAAAAAAARGAAA" +
+                "ABwAAADC////BAAAAAEAAAAAXwAAAQAAAAEAAAABAAAAAAAAAAIAAAAgAAAABAAAAO7///8EAAAA" +
+                "AQAAAABfAAAAAAYACAAEAAYAAAAEAAAABAAAAAEAAAATAAAAIAAAACgAAAA="
 
         // TFLite v3, one RESHAPE from INT8 [1,19,4,5] to [380]. Both tensors use scale 1
         // and zero point 0. The graph has no weights and preserves every packed byte.

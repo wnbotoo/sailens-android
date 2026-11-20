@@ -8,10 +8,17 @@ class ModelInputPreprocessor(
     private val inputQuantization: ModelInputQuantization,
     private val preferNativeYuvPreprocessing: Boolean,
     private val preprocessCache: InputPreprocessCache? = null,
+    directFloatNchw: Boolean = false,
 ) : AutoCloseable {
     private val fallbackProcessor = OpenCVImageProcessor(config)
-    private val nativeProcessor = NativeYuvInputPreprocessor(config, inputQuantization)
+    private val nativeProcessor = NativeYuvInputPreprocessor(config, inputQuantization, directFloatNchw)
     private var fallbackFloatInput = FloatArray(0)
+
+    fun sharedFloatInput(frame: ImageFrame): InputPreprocessCache.SharedFloatInput? = preprocessCache?.let {
+        InputPreprocessCache.SharedFloatInput(
+            it, InputPreprocessCache.Key.from(frame, frame.rotationDegrees, config), preferNativeYuvPreprocessing,
+        )
+    }
 
     fun preprocessFloat(
         frame: ImageFrame,
@@ -19,15 +26,23 @@ class ModelInputPreprocessor(
         outputArray: FloatArray,
     ): InputPreprocessBackend = preprocessFloatWithMapping(frame, rotationDegrees, outputArray).backend
 
-    fun preprocessFloatWithMapping(frame: ImageFrame, rotationDegrees: Int, outputArray: FloatArray): PreparedImage {
+    fun preprocessFloatWithMapping(
+        frame: ImageFrame,
+        rotationDegrees: Int,
+        outputArray: FloatArray,
+        timing: InputPreprocessTiming? = null,
+        preferredProducer: InputPreprocessCache.PreferredProducer? = null,
+    ): PreparedImage {
         val cacheKey = InputPreprocessCache.Key.from(frame, rotationDegrees, config)
         val cache = preprocessCache
-        cache?.awaitOrClaim(cacheKey) { cache.copyFloatWithMapping(cacheKey, outputArray, frame) }?.let {
+        cache?.awaitOrClaim(cacheKey, timing = timing, preferredProducer = preferredProducer) {
+            cache.copyFloatWithMapping(cacheKey, outputArray, frame, timing)
+        }?.let {
             return it
         }
         try {
             if (preferNativeYuvPreprocessing &&
-                nativeProcessor.preprocessFloat(frame, rotationDegrees, outputArray)
+                nativeProcessor.preprocessFloat(frame, rotationDegrees, outputArray, timing)
             ) {
                 val backend = InputPreprocessBackend.NATIVE_YUV
                 val mapping = nativeProcessor.imageMapping(frame, rotationDegrees)
@@ -62,16 +77,21 @@ class ModelInputPreprocessor(
         outputArray: ByteArray,
     ): InputPreprocessBackend = preprocessInt8WithMapping(frame, rotationDegrees, outputArray).backend
 
-    fun preprocessInt8WithMapping(frame: ImageFrame, rotationDegrees: Int, outputArray: ByteArray): PreparedImage {
+    fun preprocessInt8WithMapping(
+        frame: ImageFrame,
+        rotationDegrees: Int,
+        outputArray: ByteArray,
+        timing: InputPreprocessTiming? = null,
+    ): PreparedImage {
         val cacheKey = InputPreprocessCache.Key.from(frame, rotationDegrees, config)
         val expectedSize = config.inputWidth * config.inputHeight * 3
         if (fallbackFloatInput.size != expectedSize) {
             fallbackFloatInput = FloatArray(expectedSize)
         }
         val cache = preprocessCache
-        cache?.awaitOrClaim(cacheKey) {
-            cache.copyInt8WithMapping(cacheKey, inputQuantization, outputArray, frame)
-                ?: cache.copyFloatWithMapping(cacheKey, fallbackFloatInput, frame)?.let { prepared ->
+        cache?.awaitOrClaim(cacheKey, timing = timing) {
+            cache.copyInt8WithMapping(cacheKey, inputQuantization, outputArray, frame, timing)
+                ?: cache.copyFloatWithMapping(cacheKey, fallbackFloatInput, frame, timing)?.let { prepared ->
                     quantizeFloatInput(fallbackFloatInput, outputArray)
                     val quantizedBackend = prepared.backend.asSharedQuantizedCacheHit()
                     cache.storeInt8Input(cacheKey, inputQuantization, outputArray, quantizedBackend, prepared.mapping, frame)
@@ -83,7 +103,7 @@ class ModelInputPreprocessor(
 
         try {
             if (preferNativeYuvPreprocessing &&
-                nativeProcessor.preprocessInt8(frame, rotationDegrees, outputArray)
+                nativeProcessor.preprocessInt8(frame, rotationDegrees, outputArray, timing)
             ) {
                 val backend = InputPreprocessBackend.NATIVE_YUV
                 val mapping = nativeProcessor.imageMapping(frame, rotationDegrees)
@@ -117,12 +137,17 @@ class ModelInputPreprocessor(
         outputArray: ByteArray,
     ): InputPreprocessBackend = preprocessUint8WithMapping(frame, rotationDegrees, outputArray).backend
 
-    fun preprocessUint8WithMapping(frame: ImageFrame, rotationDegrees: Int, outputArray: ByteArray): PreparedImage {
+    fun preprocessUint8WithMapping(
+        frame: ImageFrame,
+        rotationDegrees: Int,
+        outputArray: ByteArray,
+        timing: InputPreprocessTiming? = null,
+    ): PreparedImage {
         val expectedSize = config.inputWidth * config.inputHeight * 3
         if (fallbackFloatInput.size != expectedSize) {
             fallbackFloatInput = FloatArray(expectedSize)
         }
-        val prepared = preprocessFloatWithMapping(frame, rotationDegrees, fallbackFloatInput)
+        val prepared = preprocessFloatWithMapping(frame, rotationDegrees, fallbackFloatInput, timing)
         quantizeFloatInputUnsigned(fallbackFloatInput, outputArray)
         return prepared
     }

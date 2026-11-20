@@ -160,12 +160,14 @@ class DetectionPostProcessor(
         frame: ImageFrame,
         tensorBufferHandle: Long,
         rawElementCount: Int,
+        outputAccessNanos: LongArray? = null,
     ): DetectionPostProcessOutput? {
         if (detectionLayout != DetectionLayout.RAW_TRANSPOSED) return null
         val detections = nativePostProcessor.postProcessFloatFromHandle(
             tensorBufferHandle = tensorBufferHandle,
             rawElementCount = rawElementCount,
             frame = frame,
+            outputAccessNanos = outputAccessNanos,
             attributesPerDetection = rawAttributesPerDetection,
         ) ?: return null
         return DetectionPostProcessOutput(detections.detections, "native_bbox_nms_float_handle", transform = detections.transform)
@@ -176,12 +178,14 @@ class DetectionPostProcessor(
         tensorBufferHandle: Long,
         rawElementCount: Int,
         quantization: TensorQuantization?,
+        outputAccessNanos: LongArray? = null,
     ): DetectionPostProcessOutput? {
         if (detectionLayout != DetectionLayout.RAW_TRANSPOSED) return null
         val detections = nativePostProcessor.postProcessInt8FromHandle(
             tensorBufferHandle = tensorBufferHandle,
             rawElementCount = rawElementCount,
             frame = frame,
+            outputAccessNanos = outputAccessNanos,
             attributesPerDetection = rawAttributesPerDetection,
             quantization = quantization,
         ) ?: return null

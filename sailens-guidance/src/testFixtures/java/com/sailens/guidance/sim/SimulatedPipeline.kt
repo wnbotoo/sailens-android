@@ -64,6 +64,7 @@ import com.sailens.guidance.usecase.perception.ProcessFrameUseCase
 import com.sailens.guidance.usecase.scene.StartSceneAnalysisUseCase
 import com.sailens.guidance.usecase.scene.StopSceneAnalysisUseCase
 import com.sailens.core.runtime.MlRuntimeInfo
+import com.sailens.runtime.InputPreprocessCache
 import com.sailens.runtime.accelerator.AcceleratorCoordinator
 import com.sailens.vision.depth.DepthInputTransform
 import com.sailens.vision.depth.DepthMap
@@ -138,6 +139,7 @@ class SimulatedPipeline(
     /** The lane's depth evidence recorder; none unless a test watches the runs. */
     depthEvidence: DepthEvidenceRecorder = DepthEvidenceRecorder.None,
     withLocalWorld: Boolean = false,
+    preprocessCache: InputPreprocessCache? = null,
 ) {
     private val semantics = CityscapesNavigationSemantics
 
@@ -527,6 +529,7 @@ class SimulatedPipeline(
         groundRecognitionAnalyzer = groundRecognitionAnalyzer,
         cooldownManager = cooldownManager,
         logService = SilentLog,
+        preprocessCache = preprocessCache,
     )
 
     /**

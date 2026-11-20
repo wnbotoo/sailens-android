@@ -1,5 +1,8 @@
 package com.sailens.app
 
+import com.sailens.core.frame.PipelineTimingConfig
+import com.sailens.guidance.config.GuidanceOptimizationConfig
+
 import com.sailens.shell.guidance.settings.PhoneGeometryStore
 import com.sailens.BuildConfig
 import com.sailens.guidance.config.AnalysisConfig
@@ -114,6 +117,7 @@ val domainBindingsModule = module {
             // NTP 校时/手动改时间跳变，回跳会让过期轨迹迟迟不清、持续播报
             clock = regressionRecorder().recordingClock(RegressionClocks.PERCEPTION) { android.os.SystemClock.elapsedRealtime() },
             regressionRecorder = regressionRecorder(),
+            preferSemanticPreprocess = getOrNull<GuidanceOptimizationConfig>()?.preferSemanticPreprocess == true,
         )
     }
     factory {
@@ -168,6 +172,7 @@ val domainBindingsModule = module {
             depthSwitch = get(),
             depthConfig = get(),
             localWorldBuilder = get(),
+            pipelineTiming = getOrNull<PipelineTimingConfig>(),
         )
     }
     // One coordinator for every accelerator user this host composes (docs/architecture.md §6.9): the depth
@@ -188,6 +193,7 @@ val domainBindingsModule = module {
             groundRecognitionAnalyzer = get(),
             cooldownManager = get(),
             logService = get(),
+            preprocessCache = get(),
         )
     }
     // Which VLM engine an edition ships is an edition decision (architecture.md §6.11), so the

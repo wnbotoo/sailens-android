@@ -2,6 +2,8 @@
 #define SAILENS_LITERT_ZERO_COPY_H
 
 #include <dlfcn.h>
+#include <jni.h>
+#include <time.h>
 
 #include <atomic>
 #include <cstddef>
@@ -147,6 +149,51 @@ inline void unlockTensorBuffer(long long kotlinHandle) {
     LiteRtTensorBufferHandle buffer = unwrapKotlinTensorBuffer(kotlinHandle);
     if (api != nullptr && buffer != nullptr) api->unlock(buffer);
 }
+
+/**
+ * Times only access to the LiteRT buffer. A read lock can include GPU completion or transfer
+ * before a host pointer is available. The caller still owns the lock/unlock pair.
+ */
+class LiteRtOutputAccessTiming {
+public:
+    LiteRtOutputAccessTiming(JNIEnv* env, jlongArray destination)
+        : env_(env), destination_(destination) {}
+
+    ~LiteRtOutputAccessTiming() {
+        if (destination_ != nullptr && env_->GetArrayLength(destination_) >= 2) {
+            env_->SetLongArrayRegion(destination_, 0, 2, durations_);
+        }
+    }
+
+    void* lock(jlong handle, size_t expectedBytes) {
+        if (destination_ == nullptr) return lockTensorBufferForRead(handle, expectedBytes);
+        const jlong started = elapsedRealtimeNanos();
+        void* result = lockTensorBufferForRead(handle, expectedBytes);
+        durations_[0] = elapsedRealtimeNanos() - started;
+        return result;
+    }
+
+    void unlock(jlong handle) {
+        if (destination_ == nullptr) {
+            unlockTensorBuffer(handle);
+            return;
+        }
+        const jlong started = elapsedRealtimeNanos();
+        unlockTensorBuffer(handle);
+        durations_[1] = elapsedRealtimeNanos() - started;
+    }
+
+private:
+    static jlong elapsedRealtimeNanos() {
+        timespec now{};
+        clock_gettime(CLOCK_BOOTTIME, &now);
+        return static_cast<jlong>(now.tv_sec) * 1'000'000'000 + now.tv_nsec;
+    }
+
+    JNIEnv* env_;
+    jlongArray destination_;
+    jlong durations_[2]{-1, -1};
+};
 
 }  // namespace sailens
 

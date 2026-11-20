@@ -5,6 +5,7 @@ import android.os.SystemClock
 import com.sailens.guidance.config.TraceRuntimeConfig
 import com.sailens.guidance.model.trace.DepthRunTrace
 import com.sailens.guidance.model.trace.FrameTrace
+import com.sailens.guidance.model.trace.PipelineFrameTiming
 import com.sailens.guidance.model.trace.GuidanceAlertTrace
 import com.sailens.guidance.model.trace.PromptOutcomeTrace
 import com.sailens.guidance.model.trace.SafetyStateTrace
@@ -81,6 +82,10 @@ class FileTraceService internal constructor(
     override fun recordFrame(frameTrace: FrameTrace) {
         if (frameTrace.sessionId != activeSessionId) return
         enqueue(TraceQueueEntry.Frame(frameTrace))
+    }
+
+    override fun recordPipelineTiming(timing: PipelineFrameTiming) {
+        if (ledger.recordPipelineTiming(timing)) trim()
     }
 
     override fun recordOverlayRender(
