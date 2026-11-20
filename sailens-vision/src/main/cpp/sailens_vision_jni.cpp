@@ -15,9 +15,8 @@ constexpr const char* kLogTag = "SailensVisionJni";
 namespace {
 
 using sailens::isValidTensorLayout;
-using sailens::lockTensorBufferForRead;
+using sailens::LiteRtOutputAccessTiming;
 using sailens::semanticScoreOffset;
-using sailens::unlockTensorBuffer;
 
 struct Rect {
     float x;
@@ -519,7 +518,8 @@ nativePostProcessRawFloatFromHandle(
         jint attributesPerDetection,
         jfloat confidenceThreshold,
         jint maxDetections,
-        jintArray allowedClassIds) {
+        jintArray allowedClassIds,
+        jlongArray outputAccessNanos) {
     if (!sailens::liteRtZeroCopyAvailable()) {
         return nullptr;
     }
@@ -538,7 +538,8 @@ nativePostProcessRawFloatFromHandle(
         return nullptr;
     }
 
-    void* hostPtr = lockTensorBufferForRead(
+    LiteRtOutputAccessTiming access(env, outputAccessNanos);
+    void* hostPtr = access.lock(
             tensorBufferHandle, static_cast<size_t>(rawElementCount) * sizeof(jfloat));
     if (hostPtr == nullptr) {
         return nullptr;
@@ -559,7 +560,7 @@ nativePostProcessRawFloatFromHandle(
             maxDetections,
             allowedIds);
 
-    unlockTensorBuffer(tensorBufferHandle);
+    access.unlock(tensorBufferHandle);
     return toJniArray(env, detections, geometry);
 }
 
@@ -584,7 +585,8 @@ nativePostProcessRawInt8FromHandle(
         jint quantZeroPoint,
         jfloat confidenceThreshold,
         jint maxDetections,
-        jintArray allowedClassIds) {
+        jintArray allowedClassIds,
+        jlongArray outputAccessNanos) {
     if (!sailens::liteRtZeroCopyAvailable()) {
         return nullptr;
     }
@@ -604,7 +606,8 @@ nativePostProcessRawInt8FromHandle(
         return nullptr;
     }
 
-    void* hostPtr = lockTensorBufferForRead(
+    LiteRtOutputAccessTiming access(env, outputAccessNanos);
+    void* hostPtr = access.lock(
             tensorBufferHandle, static_cast<size_t>(rawElementCount) * sizeof(jbyte));
     if (hostPtr == nullptr) {
         return nullptr;
@@ -625,7 +628,7 @@ nativePostProcessRawInt8FromHandle(
             maxDetections,
             allowedIds);
 
-    unlockTensorBuffer(tensorBufferHandle);
+    access.unlock(tensorBufferHandle);
     return toJniArray(env, detections, geometry);
 }
 
@@ -653,10 +656,10 @@ const JNINativeMethod kDetectionPostProcessorMethods[] = {
          "([BIIIIFIFIFI[I)[F",
          reinterpret_cast<void*>(nativePostProcessRawInt8)},
         {"nativePostProcessRawFloatFromHandle",
-         "(JIIIIIFIFI[I)[F",
+         "(JIIIIIFIFI[I[J)[F",
          reinterpret_cast<void*>(nativePostProcessRawFloatFromHandle)},
         {"nativePostProcessRawInt8FromHandle",
-         "(JIIIIIFIFIFI[I)[F",
+         "(JIIIIIFIFIFI[I[J)[F",
          reinterpret_cast<void*>(nativePostProcessRawInt8FromHandle)},
 };
 

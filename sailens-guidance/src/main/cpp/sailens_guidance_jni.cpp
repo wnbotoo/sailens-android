@@ -17,8 +17,7 @@ constexpr const char* kLogTag = "SailensGuidanceJni";
 namespace {
 
 using sailens::isValidTensorLayout;
-using sailens::lockTensorBufferForRead;
-using sailens::unlockTensorBuffer;
+using sailens::LiteRtOutputAccessTiming;
 
 static void setPackedBit(jlong* words, int bitIndex) {
     const int wordIndex = bitIndex >> 6;
@@ -574,7 +573,8 @@ nativePostprocessScoresFromHandle(
         jintArray classCounts,
         jintArray groundTypeCounts,
         jintArray intOutputs,
-        jintArray contentRegion) {
+        jintArray contentRegion,
+        jlongArray outputAccessNanos) {
     if (!sailens::liteRtZeroCopyAvailable()) return JNI_FALSE;
     if (tensorBufferHandle == 0 ||
         resultMask == nullptr ||
@@ -601,7 +601,8 @@ nativePostprocessScoresFromHandle(
 
     // Lock the LiteRT tensor buffer to obtain a CPU-accessible float pointer.
     // kLiteRtTensorBufferLockModeRead = 0; works for CPU, GPU, and NPU outputs.
-    void* hostPtr = lockTensorBufferForRead(
+    LiteRtOutputAccessTiming access(env, outputAccessNanos);
+    void* hostPtr = access.lock(
             tensorBufferHandle,
             static_cast<size_t>(width) * static_cast<size_t>(height) * static_cast<size_t>(channels) * sizeof(jfloat));
     if (hostPtr == nullptr) {
@@ -626,7 +627,7 @@ nativePostprocessScoresFromHandle(
         classCount <= 0 ||
         channels > classCount ||
         groundTypeCount <= 0) {
-        unlockTensorBuffer(tensorBufferHandle);
+        access.unlock(tensorBufferHandle);
         return JNI_FALSE;
     }
 
@@ -657,7 +658,7 @@ nativePostprocessScoresFromHandle(
         if (classCountData)     env->ReleaseIntArrayElements(classCounts, classCountData, JNI_ABORT);
         if (groundTypeCountData) env->ReleaseIntArrayElements(groundTypeCounts, groundTypeCountData, JNI_ABORT);
         if (outputData)         env->ReleaseIntArrayElements(intOutputs, outputData, JNI_ABORT);
-        unlockTensorBuffer(tensorBufferHandle);
+        access.unlock(tensorBufferHandle);
         return JNI_FALSE;
     }
 
@@ -669,7 +670,7 @@ nativePostprocessScoresFromHandle(
             classCountData, classCount, groundTypeCountData, groundTypeCount,
             outputData);
 
-    unlockTensorBuffer(tensorBufferHandle);
+    access.unlock(tensorBufferHandle);
 
     env->ReleaseIntArrayElements(resultMask, resultData, 0);
     env->ReleaseBooleanArrayElements(passableLookup, passableData, JNI_ABORT);
@@ -712,7 +713,8 @@ nativePostprocessInt8ScoresFromHandle(
         jintArray classCounts,
         jintArray groundTypeCounts,
         jintArray intOutputs,
-        jintArray contentRegion) {
+        jintArray contentRegion,
+        jlongArray outputAccessNanos) {
     if (!sailens::liteRtZeroCopyAvailable()) return JNI_FALSE;
     if (tensorBufferHandle == 0 ||
         resultMask == nullptr ||
@@ -737,7 +739,8 @@ nativePostprocessInt8ScoresFromHandle(
         return JNI_FALSE;
     }
 
-    void* hostPtr = lockTensorBufferForRead(
+    LiteRtOutputAccessTiming access(env, outputAccessNanos);
+    void* hostPtr = access.lock(
             tensorBufferHandle,
             static_cast<size_t>(width) * static_cast<size_t>(height) * static_cast<size_t>(channels) * sizeof(jbyte));
     if (hostPtr == nullptr) {
@@ -762,7 +765,7 @@ nativePostprocessInt8ScoresFromHandle(
         classCount <= 0 ||
         channels > classCount ||
         groundTypeCount <= 0) {
-        unlockTensorBuffer(tensorBufferHandle);
+        access.unlock(tensorBufferHandle);
         return JNI_FALSE;
     }
 
@@ -793,7 +796,7 @@ nativePostprocessInt8ScoresFromHandle(
         if (classCountData)     env->ReleaseIntArrayElements(classCounts, classCountData, JNI_ABORT);
         if (groundTypeCountData) env->ReleaseIntArrayElements(groundTypeCounts, groundTypeCountData, JNI_ABORT);
         if (outputData)         env->ReleaseIntArrayElements(intOutputs, outputData, JNI_ABORT);
-        unlockTensorBuffer(tensorBufferHandle);
+        access.unlock(tensorBufferHandle);
         return JNI_FALSE;
     }
 
@@ -805,7 +808,7 @@ nativePostprocessInt8ScoresFromHandle(
             classCountData, classCount, groundTypeCountData, groundTypeCount,
             outputData);
 
-    unlockTensorBuffer(tensorBufferHandle);
+    access.unlock(tensorBufferHandle);
 
     env->ReleaseIntArrayElements(resultMask, resultData, 0);
     env->ReleaseBooleanArrayElements(passableLookup, passableData, JNI_ABORT);
@@ -1206,10 +1209,10 @@ const JNINativeMethod kSemanticScorePostprocessorMethods[] = {
          "([B[IIIII[Z[Z[Z[Z[IFFF[J[J[I[I[I[I)Z",
          reinterpret_cast<void*>(nativePostprocessInt8Scores)},
         {"nativePostprocessScoresFromHandle",
-         "(J[IIIII[Z[Z[Z[Z[IFFF[J[J[I[I[I[I)Z",
+         "(J[IIIII[Z[Z[Z[Z[IFFF[J[J[I[I[I[I[J)Z",
          reinterpret_cast<void*>(nativePostprocessScoresFromHandle)},
         {"nativePostprocessInt8ScoresFromHandle",
-         "(J[IIIII[Z[Z[Z[Z[IFFF[J[J[I[I[I[I)Z",
+         "(J[IIIII[Z[Z[Z[Z[IFFF[J[J[I[I[I[I[J)Z",
          reinterpret_cast<void*>(nativePostprocessInt8ScoresFromHandle)},
 };
 

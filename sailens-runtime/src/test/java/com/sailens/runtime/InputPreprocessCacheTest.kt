@@ -46,6 +46,26 @@ class InputPreprocessCacheTest {
     }
 
     @Test
+    fun `a timed hit separates monitor entry from copying and preserves the values`() {
+        val cache = InputPreprocessCache()
+        val key = cacheKey(sequenceNumber = 11)
+        val values = floatArrayOf(0.25f, 0.5f, 0.75f)
+        val output = FloatArray(values.size)
+        var nanos = 0L
+        val timing = InputPreprocessTiming { nanos.also { nanos += 10 } }
+        cache.storeFloatInput(key, values, InputPreprocessBackend.NATIVE_YUV)
+
+        val hit = cache.awaitOrClaim(key, timing = timing) {
+            cache.copyFloatWithMapping(key, output, null, timing)
+        }
+
+        assertEquals(InputPreprocessBackend.SHARED_NATIVE_YUV, hit?.backend)
+        assertEquals(10L, timing.cacheWaitNanos)
+        assertEquals(10L, timing.cacheCopyNanos)
+        assertArrayEquals(values, output, 0f)
+    }
+
+    @Test
     fun `a concurrent consumer of the same frame waits for the producer instead of converting again`() {
         val cache = InputPreprocessCache()
         val key = cacheKey(sequenceNumber = 21)

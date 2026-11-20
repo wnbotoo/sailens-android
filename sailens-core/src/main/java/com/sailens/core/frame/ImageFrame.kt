@@ -49,6 +49,7 @@ public data class Yuv420FrameData(
  *   source does not record it. It is a separate field so that [timestamp] keeps its meaning.
  * @param sourceGeometry how this frame's buffer relates to the camera sensor, as the capture
  *   source reported it; null when the source does not provide it.
+ * @param ingressTiming capture checkpoints supplied by a source with pipeline timing enabled.
  */
 public data class ImageFrame(
     val width: Int,
@@ -61,6 +62,7 @@ public data class ImageFrame(
     val yuvData: Yuv420FrameData? = null,
     val receivedElapsedRealtimeNanos: Long = 0L,
     val sourceGeometry: FrameSourceGeometry? = null,
+    val ingressTiming: FrameIngressTiming? = null,
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -74,7 +76,8 @@ public data class ImageFrame(
             pixelBytes.contentEquals(other.pixelBytes) &&
             yuvData == other.yuvData &&
             receivedElapsedRealtimeNanos == other.receivedElapsedRealtimeNanos &&
-            sourceGeometry == other.sourceGeometry
+            sourceGeometry == other.sourceGeometry &&
+            ingressTiming == other.ingressTiming
     }
 
     override fun hashCode(): Int {
@@ -88,6 +91,7 @@ public data class ImageFrame(
         result = 31 * result + (yuvData?.hashCode() ?: 0)
         result = 31 * result + receivedElapsedRealtimeNanos.hashCode()
         result = 31 * result + (sourceGeometry?.hashCode() ?: 0)
+        result = 31 * result + (ingressTiming?.hashCode() ?: 0)
         return result
     }
 }

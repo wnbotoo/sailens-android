@@ -1,5 +1,7 @@
 package com.sailens.vision.semantic
 
+import com.sailens.vision.ModelRunTiming
+
 import android.content.Context
 import com.google.ai.edge.litert.Accelerator
 import com.sailens.core.frame.ImageFrame
@@ -78,7 +80,7 @@ class LiteRtSemanticSegmenter<R>(
         }
     }
 
-    suspend fun segment(frame: ImageFrame): Result<SegmentationRunResult<R>> {
+    suspend fun segment(frame: ImageFrame, timing: ModelRunTiming? = null): Result<SegmentationRunResult<R>> {
         if (!_isInitialized) {
             return Result.failure(IllegalStateException("Segmenter not initialized"))
         }
@@ -89,7 +91,7 @@ class LiteRtSemanticSegmenter<R>(
                     return@withContext Result.failure(CancellationException("Coroutine cancelled"))
                 }
 
-                val output = runner?.run(frame)
+                val output = runner?.run(frame, timing)
                 if (output != null) {
                     Result.success(output)
                 } else {

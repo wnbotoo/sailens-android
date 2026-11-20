@@ -19,10 +19,17 @@ class ModelInputPreprocessor(
         outputArray: FloatArray,
     ): InputPreprocessBackend = preprocessFloatWithMapping(frame, rotationDegrees, outputArray).backend
 
-    fun preprocessFloatWithMapping(frame: ImageFrame, rotationDegrees: Int, outputArray: FloatArray): PreparedImage {
+    fun preprocessFloatWithMapping(
+        frame: ImageFrame,
+        rotationDegrees: Int,
+        outputArray: FloatArray,
+        timing: InputPreprocessTiming? = null,
+    ): PreparedImage {
         val cacheKey = InputPreprocessCache.Key.from(frame, rotationDegrees, config)
         val cache = preprocessCache
-        cache?.awaitOrClaim(cacheKey) { cache.copyFloatWithMapping(cacheKey, outputArray, frame) }?.let {
+        cache?.awaitOrClaim(cacheKey, timing = timing) {
+            cache.copyFloatWithMapping(cacheKey, outputArray, frame, timing)
+        }?.let {
             return it
         }
         try {
@@ -62,16 +69,21 @@ class ModelInputPreprocessor(
         outputArray: ByteArray,
     ): InputPreprocessBackend = preprocessInt8WithMapping(frame, rotationDegrees, outputArray).backend
 
-    fun preprocessInt8WithMapping(frame: ImageFrame, rotationDegrees: Int, outputArray: ByteArray): PreparedImage {
+    fun preprocessInt8WithMapping(
+        frame: ImageFrame,
+        rotationDegrees: Int,
+        outputArray: ByteArray,
+        timing: InputPreprocessTiming? = null,
+    ): PreparedImage {
         val cacheKey = InputPreprocessCache.Key.from(frame, rotationDegrees, config)
         val expectedSize = config.inputWidth * config.inputHeight * 3
         if (fallbackFloatInput.size != expectedSize) {
             fallbackFloatInput = FloatArray(expectedSize)
         }
         val cache = preprocessCache
-        cache?.awaitOrClaim(cacheKey) {
-            cache.copyInt8WithMapping(cacheKey, inputQuantization, outputArray, frame)
-                ?: cache.copyFloatWithMapping(cacheKey, fallbackFloatInput, frame)?.let { prepared ->
+        cache?.awaitOrClaim(cacheKey, timing = timing) {
+            cache.copyInt8WithMapping(cacheKey, inputQuantization, outputArray, frame, timing)
+                ?: cache.copyFloatWithMapping(cacheKey, fallbackFloatInput, frame, timing)?.let { prepared ->
                     quantizeFloatInput(fallbackFloatInput, outputArray)
                     val quantizedBackend = prepared.backend.asSharedQuantizedCacheHit()
                     cache.storeInt8Input(cacheKey, inputQuantization, outputArray, quantizedBackend, prepared.mapping, frame)
@@ -117,12 +129,17 @@ class ModelInputPreprocessor(
         outputArray: ByteArray,
     ): InputPreprocessBackend = preprocessUint8WithMapping(frame, rotationDegrees, outputArray).backend
 
-    fun preprocessUint8WithMapping(frame: ImageFrame, rotationDegrees: Int, outputArray: ByteArray): PreparedImage {
+    fun preprocessUint8WithMapping(
+        frame: ImageFrame,
+        rotationDegrees: Int,
+        outputArray: ByteArray,
+        timing: InputPreprocessTiming? = null,
+    ): PreparedImage {
         val expectedSize = config.inputWidth * config.inputHeight * 3
         if (fallbackFloatInput.size != expectedSize) {
             fallbackFloatInput = FloatArray(expectedSize)
         }
-        val prepared = preprocessFloatWithMapping(frame, rotationDegrees, fallbackFloatInput)
+        val prepared = preprocessFloatWithMapping(frame, rotationDegrees, fallbackFloatInput, timing)
         quantizeFloatInputUnsigned(fallbackFloatInput, outputArray)
         return prepared
     }

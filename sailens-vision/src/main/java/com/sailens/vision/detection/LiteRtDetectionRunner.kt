@@ -11,6 +11,8 @@ import com.sailens.runtime.InputPreprocessBackend
 import com.sailens.runtime.InputImageMapping
 import com.sailens.runtime.PreparedImage
 import com.sailens.runtime.InputPreprocessCache
+import com.sailens.runtime.InputPreprocessTiming
+import com.sailens.vision.ModelRunTiming
 import com.sailens.runtime.ModelInputDataType
 import com.sailens.runtime.ModelInputPreprocessor
 import com.sailens.runtime.ModelSourceResolver
@@ -152,17 +154,18 @@ class LiteRtDetectionRunner(
         method.invoke(buffer) as Long
     }.getOrDefault(0L)
 
-    suspend fun detect(frame: ImageFrame): DetectionOutput {
+    suspend fun detect(frame: ImageFrame, timing: ModelRunTiming? = null): DetectionOutput {
         if (!_isInitialized) return DetectionOutput(emptyList())
 
         return withContext(singleThreadDispatcher) {
             if (!isActive) throw CancellationException("Coroutine cancelled")
 
-            detectInitialized(frame)
+            detectInitialized(frame, timing)
         }
     }
 
-    private fun detectInitialized(frame: ImageFrame): DetectionOutput {
+    private fun detectInitialized(frame: ImageFrame, timing: ModelRunTiming?): DetectionOutput {
+        timing?.startRunner()
         val activeInputBuffer = inputBuffer ?: return DetectionOutput(emptyList())
         val activeDetectionBuffer = detectionBuffer ?: return DetectionOutput(emptyList())
         val activeSession = session ?: return DetectionOutput(emptyList())
@@ -172,11 +175,15 @@ class LiteRtDetectionRunner(
         val activeInputDataType = inputDataType
 
         val startTime = SystemClock.uptimeMillis()
-        val prepared = preprocessInput(activeProcessor, frame, activeInputDataType)
+        timing?.preprocessStartedNanos = timing?.now()
+        val prepared = preprocessInput(activeProcessor, frame, activeInputDataType, timing?.input)
+        timing?.finishPreprocess(prepared.backend.traceName)
         val afterPreprocessTime = SystemClock.uptimeMillis()
 
         writeInput(activeInputBuffer, activeInputDataType)
+        timing?.inferenceStartedNanos = timing?.now()
         activeSession.run()
+        timing?.inferenceReturnedNanos = timing?.now()
         val afterModelTime = SystemClock.uptimeMillis()
 
         // Zero-copy realtime path: decode straight from the output buffer handle, skipping the
@@ -190,16 +197,19 @@ class LiteRtDetectionRunner(
                     frame = frame,
                     tensorBufferHandle = detectionBufferHandle,
                     rawElementCount = activeTensorBindings.detectionElementCount,
+                    outputAccessNanos = timing?.nativeOutputAccess,
                 )
                 TfliteTensorElementType.INT8 -> activePostProcessor.postProcessInt8FromHandle(
                     frame = frame,
                     tensorBufferHandle = detectionBufferHandle,
                     rawElementCount = activeTensorBindings.detectionElementCount,
                     quantization = activeTensorBindings.detectionOutputQuantization,
+                    outputAccessNanos = timing?.nativeOutputAccess,
                 )
                 else -> null
             }
             if (handleOutput != null) {
+                timing?.finishPostprocess(handleOutput.backend)
                 val afterPostprocessTime = SystemClock.uptimeMillis()
                 if (!hasLoggedTensorInfo) {
                     logService.info(
@@ -225,12 +235,14 @@ class LiteRtDetectionRunner(
             }
         }
 
+        val reading = timing?.now() ?: 0L
         val detectionTensor = readOutputTensor(
             tensorBuffer = activeDetectionBuffer,
             elementType = activeTensorBindings.detectionOutputElementType,
             quantization = activeTensorBindings.detectionOutputQuantization,
             tensorName = activeTensorBindings.detectionOutputTensorName,
         )
+        timing?.let { it.outputCopyNanos = it.now() - reading }
         val afterOutputReadTime = SystemClock.uptimeMillis()
 
         if (!hasLoggedTensorInfo) {
@@ -253,6 +265,7 @@ class LiteRtDetectionRunner(
                 quantization = detectionTensor.quantization,
             )
         }
+        timing?.finishPostprocess(postProcessOutput.backend)
         val afterPostprocessTime = SystemClock.uptimeMillis()
 
         return DetectionOutput(
@@ -411,24 +424,28 @@ class LiteRtDetectionRunner(
         processor: ModelInputPreprocessor,
         frame: ImageFrame,
         activeInputDataType: ModelInputDataType,
+        timing: InputPreprocessTiming?,
     ): PreparedImage {
         return when (activeInputDataType) {
             ModelInputDataType.FLOAT32 -> processor.preprocessFloatWithMapping(
                 frame = frame,
                 rotationDegrees = frame.rotationDegrees,
                 outputArray = cachedFloatInput,
+                timing = timing,
             )
 
             ModelInputDataType.INT8 -> processor.preprocessInt8WithMapping(
                 frame = frame,
                 rotationDegrees = frame.rotationDegrees,
                 outputArray = cachedInt8Input,
+                timing = timing,
             )
 
             ModelInputDataType.UINT8 -> processor.preprocessUint8WithMapping(
                 frame = frame,
                 rotationDegrees = frame.rotationDegrees,
                 outputArray = cachedInt8Input,
+                timing = timing,
             )
 
             ModelInputDataType.AUTO -> error("AUTO input type must be resolved before detection")

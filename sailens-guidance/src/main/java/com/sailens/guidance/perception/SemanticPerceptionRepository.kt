@@ -11,6 +11,7 @@ import com.sailens.runtime.InputPreprocessCache
 import com.sailens.runtime.ModelSourceResolver
 import com.sailens.vision.semantic.LiteRtSemanticSegmenter
 import com.sailens.vision.semantic.SemanticModelConfig
+import com.sailens.vision.ModelRunTiming
 
 /**
  * The navigation side of semantic segmentation.
@@ -44,8 +45,10 @@ class SemanticPerceptionRepository(
         segmenter.initialize()
     }
 
-    override suspend fun segment(frame: ImageFrame): Result<SegmentationOutput> =
-        segmenter.segment(frame).map { run ->
+    override suspend fun segment(frame: ImageFrame): Result<SegmentationOutput> = segment(frame, null)
+
+    override suspend fun segment(frame: ImageFrame, timing: ModelRunTiming?): Result<SegmentationOutput> =
+        segmenter.segment(frame, timing).map { run ->
             SegmentationOutput(
                 mask = run.value.mask,
                 preprocessTimeMs = run.preprocessTimeMs,

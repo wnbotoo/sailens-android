@@ -5,6 +5,7 @@ import com.sailens.camera.Camera
 import com.sailens.camera.CameraCharacteristicsProvider
 import com.sailens.camera.CameraViewModel
 import com.sailens.camera.ImageFrameAnalyzer
+import com.sailens.core.frame.PipelineTimingConfig
 import com.sailens.camera.FrameSnapshotProvider
 import com.sailens.camera.FrameSource
 import org.koin.core.module.dsl.viewModel
@@ -14,8 +15,8 @@ import org.koin.core.module.Module
 import org.koin.dsl.module
 
 public val cameraModule: Module = module {
-    single { Camera() } bind CameraCharacteristicsProvider::class
-    single { ImageFrameAnalyzer() }
+    single { Camera(measureFrameTiming = getOrNull<PipelineTimingConfig>()?.enabled == true) } bind CameraCharacteristicsProvider::class
+    single { ImageFrameAnalyzer(measureFrameTiming = getOrNull<PipelineTimingConfig>()?.enabled == true) }
         .binds(arrayOf(
             ImageAnalysis.Analyzer::class,
             FrameSource::class,

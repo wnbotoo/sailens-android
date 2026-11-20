@@ -239,6 +239,7 @@ class NavigationScorePostprocessor(
         channels: Int,
         scoreLayout: ImageTensorLayout,
         content: SemanticContentRegion = SemanticContentRegion(0, 0, width, height),
+        outputAccessNanos: LongArray? = null,
     ): SemanticPostprocessResult? {
         if (tensorBufferHandle == 0L) return null
         if (width <= 0 || height <= 0 || channels <= 0) return null
@@ -267,6 +268,7 @@ class NavigationScorePostprocessor(
                  groundTypeCounts = scratch.groundTypeCounts,
                  intOutputs = scratch.intOutputs,
                 contentRegion = scratch.contentRegion,
+                outputAccessNanos = outputAccessNanos,
             )
         }
     }
@@ -280,6 +282,7 @@ class NavigationScorePostprocessor(
         channels: Int,
         scoreLayout: ImageTensorLayout,
         content: SemanticContentRegion = SemanticContentRegion(0, 0, width, height),
+        outputAccessNanos: LongArray? = null,
     ): SemanticPostprocessResult? {
         if (tensorBufferHandle == 0L) return null
         if (width <= 0 || height <= 0 || channels <= 0) return null
@@ -308,6 +311,7 @@ class NavigationScorePostprocessor(
                 groundTypeCounts = scratch.groundTypeCounts,
                 intOutputs = scratch.intOutputs,
                 contentRegion = scratch.contentRegion,
+                outputAccessNanos = outputAccessNanos,
             )
         }
     }
@@ -336,6 +340,7 @@ class NavigationScorePostprocessor(
                 channels = spec.channels,
                 scoreLayout = spec.layout,
                 content = spec.content,
+                outputAccessNanos = scores.outputAccessNanos,
             )
             is SemanticScores.Int8Handle -> postprocessInt8ScoresFromHandle(
                 tensorBufferHandle = scores.tensorBufferHandle,
@@ -344,6 +349,7 @@ class NavigationScorePostprocessor(
                 channels = spec.channels,
                 scoreLayout = spec.layout,
                 content = spec.content,
+                outputAccessNanos = scores.outputAccessNanos,
             )
             is SemanticScores.FloatValues -> postprocessScores(
                 scores = scores.values,
@@ -556,6 +562,7 @@ class NavigationScorePostprocessor(
         groundTypeCounts: IntArray,
         intOutputs: IntArray,
         contentRegion: IntArray,
+        outputAccessNanos: LongArray?,
     ): Boolean
 
     private external fun nativePostprocessInt8ScoresFromHandle(
@@ -579,6 +586,7 @@ class NavigationScorePostprocessor(
         groundTypeCounts: IntArray,
         intOutputs: IntArray,
         contentRegion: IntArray,
+        outputAccessNanos: LongArray?,
     ): Boolean
 
     private fun SemanticContentRegion.fitsIn(gridWidth: Int, gridHeight: Int): Boolean =

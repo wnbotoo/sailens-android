@@ -1,5 +1,7 @@
 package com.sailens.app
 
+import com.sailens.core.frame.PipelineTimingConfig
+
 import com.sailens.shell.guidance.settings.PhoneGeometryStore
 import com.sailens.BuildConfig
 import com.sailens.guidance.config.AnalysisConfig
@@ -168,6 +170,7 @@ val domainBindingsModule = module {
             depthSwitch = get(),
             depthConfig = get(),
             localWorldBuilder = get(),
+            measureFrameTiming = getOrNull<PipelineTimingConfig>()?.enabled == true,
         )
     }
     // One coordinator for every accelerator user this host composes (docs/architecture.md §6.9): the depth

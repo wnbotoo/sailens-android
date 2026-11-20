@@ -13,6 +13,7 @@ import com.sailens.runtime.InputPreprocessCache
 import com.sailens.runtime.ModelSourceResolver
 import com.sailens.vision.detection.DetectionModelConfig
 import com.sailens.vision.detection.LiteRtDetectionRunner
+import com.sailens.vision.ModelRunTiming
 
 /**
  * The navigation side of object detection.
@@ -50,8 +51,10 @@ class DetectorObstacleProvider(
         runner.initialize()
     }
 
-    override suspend fun detect(frame: ImageFrame): ObstacleModelOutput {
-        val output = runner.detect(frame)
+    override suspend fun detect(frame: ImageFrame): ObstacleModelOutput = detect(frame, null)
+
+    override suspend fun detect(frame: ImageFrame, timing: ModelRunTiming?): ObstacleModelOutput {
+        val output = runner.detect(frame, timing)
         return ObstacleModelOutput(
             detections = output.detections.toObstacleDetections(navigationSemantics),
             preprocessTimeMs = output.preprocessTimeMs,

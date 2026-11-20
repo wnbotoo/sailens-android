@@ -36,3 +36,35 @@ changes the device load, so never use it for performance numbers.
 
 Tests: `python3 -m unittest discover -s scripts/capture` (synthetic captures in the app's format,
 including a burst with a known offset).
+
+## Guidance pipeline performance
+
+A debug install can enable profiling with a local `files/pipeline-timing` marker. Create it before
+launching the app. Timing uses ordinary Guidance JSONL and does not need field capture.
+Stop Guidance so the session summary is written before pulling the trace.
+
+```sh
+adb shell "run-as com.sailens sh -c 'mkdir -p files && echo race > files/pipeline-timing'"
+adb shell am force-stop com.sailens
+# Launch the app, run Guidance, then stop Guidance.
+adb logcat -d -s Camera:I
+adb exec-out run-as com.sailens cat files/traces/trace_SESSION_ID.jsonl > trace.jsonl
+python scripts/experiments/pipeline_performance.py trace.jsonl --warmup 15
+```
+
+Use `com.sailens.reference` for the platform reference host. Remove the marker and restart the
+process to turn timing off. The `CameraX negotiated` log reports the bound sizes for analysis and
+preview. The trace report shows the buffer dimensions delivered to Guidance.
+
+Each timing record follows one dequeued camera frame and can include completed model calls even
+when that frame produced no decision. Rates use completion events in the elapsed-realtime window.
+Loss uses the half-open interval of camera frame IDs bracketed by dequeued frames in the
+uncapped Guidance stream. ID gaps are lost in the mailbox. Dequeued frames without a decision
+are counted separately. CameraX may discard images before the analyzer, outside that interval's
+denominator. Copy durations sample dequeued frames. Sensor ages require a REALTIME camera
+timestamp source. Semantic age follows the analysis used by the decision. Detection age follows
+the latest adopted detector measurement, including tracker-only frames.
+
+Sem and det can overlap. A model's input write, LiteRT call, output access and remaining
+postprocessing durations are distinct. A zero-copy read lock can include waiting for the
+accelerator and mapping the output. The end of output postprocessing counts one new model result.
