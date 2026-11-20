@@ -56,6 +56,7 @@ class SegmentationRunner<R>(
     preprocessCache: InputPreprocessCache? = null,
     private val postprocessor: SemanticPostprocessor<R>,
     private val scoreGridSpansInput: Boolean = false,
+    directFloatNchw: Boolean = false,
 ) {
     val accelerator: Accelerator get() = session.accelerator
     private val inputBuffer = session.inputBuffers.single()
@@ -87,6 +88,7 @@ class SegmentationRunner<R>(
         inputQuantization = inputQuantization,
         preferNativeYuvPreprocessing = preferNativeYuvPreprocessing,
         preprocessCache = preprocessCache,
+        directFloatNchw = directFloatNchw,
     )
     private val argmaxPostprocessor = ArgmaxPostprocessor(
         config = config,
@@ -142,7 +144,7 @@ class SegmentationRunner<R>(
         //    failure, lock failure, validation error), copy the tensor out and offer it again,
         //    then fall back to generic argmax.
         val scoreTiming = timing?.takeIf { outputBufferHandle != 0L }?.let {
-            SemanticScoreTiming.forFrame(rawFrame.sequenceNumber, it.pipelineTimingMode).also { phases ->
+            SemanticScoreTiming.forFrame(rawFrame.sequenceNumber, it.sampleSemanticPixels).also { phases ->
                 it.semanticScoreTiming = phases
             }
         }

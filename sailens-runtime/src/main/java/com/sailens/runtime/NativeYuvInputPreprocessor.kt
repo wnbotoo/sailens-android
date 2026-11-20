@@ -6,7 +6,15 @@ import com.sailens.core.frame.ImagePixelFormat
 internal class NativeYuvInputPreprocessor(
     private val config: ModelTensorConfig,
     private val inputQuantization: ModelInputQuantization,
+    directFloatNchw: Boolean = false,
 ) {
+    private val floatOutputLayout = if (
+        directFloatNchw && config.inputLayout == ImageTensorLayout.NCHW && config.resizeFilter == ResizeFilter.NEAREST
+    ) {
+        ImageTensorLayout.NCHW
+    } else {
+        ImageTensorLayout.NHWC
+    }
     private val mapping = FloatArray(7)
 
     fun imageMapping(frame: ImageFrame, rotationDegrees: Int): InputImageMapping {
@@ -36,10 +44,7 @@ internal class NativeYuvInputPreprocessor(
         val expectedSize = config.inputWidth * config.inputHeight * CHANNELS_RGB
         if (outputArray.size != expectedSize) return false
 
-        val directNchw = timing?.requestDirectNchw == true &&
-            config.inputLayout == ImageTensorLayout.NCHW && config.resizeFilter == ResizeFilter.NEAREST
-        val nativeLayout = if (directNchw) ImageTensorLayout.NCHW else ImageTensorLayout.NHWC
-        val transpose = config.inputLayout != nativeLayout
+        val transpose = config.inputLayout != floatOutputLayout
         val nativeOutput = if (transpose) {
             nhwcFloatScratch.withMinSize(expectedSize).also { nhwcFloatScratch = it }
         } else {
@@ -69,10 +74,10 @@ internal class NativeYuvInputPreprocessor(
                 stdG = config.std.second,
                 stdB = config.std.third,
                 resizeFilter = config.resizeFilter.nativeValue,
-                outputLayout = nativeLayout.nativeValue,
+                outputLayout = floatOutputLayout.nativeValue,
                 output = nativeOutput,
                 mapping = mapping,
-                timingNanos = timing?.beginNativeYuv(config.resizeFilter, nativeLayout),
+                timingNanos = timing?.beginNativeYuv(config.resizeFilter, floatOutputLayout),
             )
         }.getOrDefault(false)
         if (success && transpose) {

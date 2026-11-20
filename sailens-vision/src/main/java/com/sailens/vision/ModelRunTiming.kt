@@ -1,7 +1,6 @@
 package com.sailens.vision
 
 import android.os.SystemClock
-import com.sailens.core.frame.PipelineTimingMode
 import com.sailens.runtime.InputPreprocessTiming
 import com.sailens.vision.semantic.SemanticScoreTiming
 
@@ -11,9 +10,9 @@ import com.sailens.vision.semantic.SemanticScoreTiming
  */
 class ModelRunTiming(
     val queuedNanos: Long,
-    internal val pipelineTimingMode: PipelineTimingMode = PipelineTimingMode.RACE,
+    internal val sampleSemanticPixels: Boolean = false,
 ) {
-    val input = InputPreprocessTiming(requestDirectNchw = pipelineTimingMode == PipelineTimingMode.SEM_NCHW)
+    val input = InputPreprocessTiming()
     internal val nativeOutputAccess = LongArray(2) { -1L }
 
     var runnerStartedNanos: Long? = null

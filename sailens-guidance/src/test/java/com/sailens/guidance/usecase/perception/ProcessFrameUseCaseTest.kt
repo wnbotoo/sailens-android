@@ -29,6 +29,7 @@ import com.sailens.guidance.model.perception.SegmentationAnalysisStats
 import com.sailens.guidance.model.perception.SegmentationMask
 import com.sailens.guidance.model.perception.SegmentationMaskPool
 import com.sailens.guidance.model.perception.SegmentationOutput
+import com.sailens.guidance.model.trace.PipelineFrameTiming
 import com.sailens.guidance.processor.perception.ObstacleExtractor
 import com.sailens.guidance.processor.perception.ObstacleTracker
 import com.sailens.guidance.processor.perception.PerceptionProfileManager
@@ -228,7 +229,7 @@ class ProcessFrameUseCaseTest {
     }
 
     @Test
-    fun `the experiment reserves only a matching scheduled pair and releases on semantic failure`() = runBlocking {
+    fun `semantic priority reserves matching inputs with or without profiling and releases on failure`() = runBlocking {
         val frame = createFrame(sequenceNumber = 1)
         val config = ModelTensorConfig(
             inputWidth = 4,
@@ -256,7 +257,13 @@ class ProcessFrameUseCaseTest {
             }
         }
 
-        suspend fun verify(probe: Boolean, semanticFps: Int, input: InputPreprocessCache.SharedFloatInput, expected: Boolean) {
+        suspend fun verify(
+            preferSemantic: Boolean,
+            semanticFps: Int,
+            input: InputPreprocessCache.SharedFloatInput,
+            expected: Boolean,
+            measure: Boolean,
+        ) {
             val detector = object : ObstacleProvider by FakeObstacleProvider() {
                 override fun sharedFloatInput(frame: ImageFrame) = input
             }
@@ -266,17 +273,21 @@ class ProcessFrameUseCaseTest {
                 realtimeObstacleProvider = detector,
                 perceptionRepository = semantic,
                 semanticTargetFps = semanticFps,
-                preferSemanticPreprocess = probe,
+                preferSemanticPreprocess = preferSemantic,
             )
-            assertTrue(useCase(frame).isFailure)
+            val timing = if (measure) PipelineFrameTiming("test", frame, dequeuedNanos = 0L) else null
+            assertTrue(useCase(frame, timing = timing).isFailure)
             assertEquals(expected, reserved)
+            timing?.let { assertEquals(expected, it.preferredPreprocessReserved) }
             share.reserveProducer().use { assertNotNull(it) }
         }
 
-        verify(probe = false, semanticFps = 0, input = share, expected = false)
-        verify(probe = true, semanticFps = 0, input = share, expected = true)
-        verify(probe = true, semanticFps = 0, input = different, expected = false)
-        verify(probe = true, semanticFps = 10, input = share, expected = false)
+        for (measure in listOf(false, true)) {
+            verify(preferSemantic = false, semanticFps = 0, input = share, expected = false, measure = measure)
+            verify(preferSemantic = true, semanticFps = 0, input = share, expected = true, measure = measure)
+            verify(preferSemantic = true, semanticFps = 0, input = different, expected = false, measure = measure)
+            verify(preferSemantic = true, semanticFps = 10, input = share, expected = false, measure = measure)
+        }
     }
 
     private class ThrowingObstacleProvider : ObstacleProvider {

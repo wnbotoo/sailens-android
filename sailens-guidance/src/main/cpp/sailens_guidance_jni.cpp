@@ -149,16 +149,19 @@ struct SemanticPixelSamples {
     }
 };
 
+enum SemanticScoreKernel : jint {
+    kScoreKernelFailed = -1,
+    kScoreKernelScalar = 0,
+    kScoreKernelNeon = 1,
+};
+
 class SemanticScoreTiming {
 public:
-    SemanticScoreTiming(JNIEnv* env, jlongArray destination) {
+    SemanticScoreTiming(JNIEnv* env, jlongArray destination, jint sampleOffset) {
         if (destination == nullptr || env->GetArrayLength(destination) < kCount) return;
         destination_ = destination;
-        jlong request = -1;
-        env->GetLongArrayRegion(destination_, 0, 1, &request);
-        requestNeon_ = request == kRequestNeon;
-        if (0 <= request && request < SemanticPixelSamples::kStride) {
-            pixels_.nextPixel = static_cast<int>(request);
+        if (0 <= sampleOffset && sampleOffset < SemanticPixelSamples::kStride) {
+            pixels_.nextPixel = sampleOffset;
         }
     }
 
@@ -166,38 +169,41 @@ public:
         return destination_ == nullptr ? 0 : elapsedNanos();
     }
 
-    template <typename Score, typename Run>
-    void kernel(int layout, int width, Run run) {
-#if defined(__aarch64__)
-        if constexpr (std::is_same_v<Score, jfloat>) {
-            if (requestNeon_ && layout == sailens::kTensorLayoutNchw && width >= kNeonLanes) {
-                usedNeon_ = run(std::false_type{}, std::true_type{}, nullptr);
-                if (usedNeon_) return;
-                // The scalar kernel rewrites every output when a score is non-finite.
-            }
-        }
-#endif
-        if (pixels_.nextPixel >= 0) run(std::true_type{}, std::false_type{}, &pixels_);
-        else run(std::false_type{}, std::false_type{}, nullptr);
+    SemanticPixelSamples* pixelSamples() {
+        return pixels_.nextPixel >= 0 ? &pixels_ : nullptr;
     }
 
-    void record(JNIEnv* env, jlong arraysGet, jlong fusedKernel, jlong arraysRelease) const {
+    void record(JNIEnv* env, jlong arraysGet, jlong fusedKernel, jlong arraysRelease, SemanticScoreKernel kernel) const {
         if (destination_ == nullptr) return;
         const jlong values[kCount] = {
                 arraysGet, fusedKernel, arraysRelease, pixels_.count, pixels_.argmaxNanos,
-                pixels_.maskNanos, pixels_.statsNanos, pixels_.clockNanos, usedNeon_ ? 1 : 0,
+                pixels_.maskNanos, pixels_.statsNanos, pixels_.clockNanos, kernel,
         };
         env->SetLongArrayRegion(destination_, 0, kCount, values);
     }
 
 private:
     static constexpr int kCount = 9;
-    static constexpr jlong kRequestNeon = -2;
     jlongArray destination_ = nullptr;
     SemanticPixelSamples pixels_;
-    bool requestNeon_ = false;
-    bool usedNeon_ = false;
 };
+
+template <typename Score, typename Run>
+SemanticScoreKernel runSemanticScoreKernel(
+        bool requestNeon, int layout, int width, SemanticPixelSamples* pixels, Run run) {
+#if defined(__aarch64__)
+    if constexpr (std::is_same_v<Score, jfloat>) {
+        if (requestNeon && layout == sailens::kTensorLayoutNchw && width >= kNeonLanes &&
+            run(std::false_type{}, std::true_type{}, nullptr)) {
+            return kScoreKernelNeon;
+        }
+        // The scalar kernel rewrites every output when a score is non-finite.
+    }
+#endif
+    if (pixels != nullptr) run(std::true_type{}, std::false_type{}, pixels);
+    else run(std::false_type{}, std::false_type{}, nullptr);
+    return kScoreKernelScalar;
+}
 
 template <typename Score, bool SamplePixels = false, bool NeonArgmax = false>
 static bool postprocessSemanticScoresCore(
@@ -693,7 +699,7 @@ nativePostprocessInt8Scores(
 // TensorBuffer.readFloat() would trigger for a 640x640x19 semantic output.
 // Only call this when outputElementType == FLOAT32; for INT8 use
 // nativePostprocessInt8ScoresFromHandle instead.
-jboolean JNICALL
+jint JNICALL
 nativePostprocessScoresFromHandle(
         JNIEnv* env,
         jobject,
@@ -717,9 +723,11 @@ nativePostprocessScoresFromHandle(
         jintArray groundTypeCounts,
         jintArray intOutputs,
         jintArray contentRegion,
+        jboolean requestNeon,
+        jint sampleOffset,
         jlongArray outputAccessNanos,
         jlongArray scoreTimingNanos) {
-    if (!sailens::liteRtZeroCopyAvailable()) return JNI_FALSE;
+    if (!sailens::liteRtZeroCopyAvailable()) return kScoreKernelFailed;
     if (tensorBufferHandle == 0 ||
         resultMask == nullptr ||
         passableLookup == nullptr ||
@@ -736,11 +744,11 @@ nativePostprocessScoresFromHandle(
         height <= 0 ||
         channels <= 0 ||
         !isValidTensorLayout(scoreLayout)) {
-        return JNI_FALSE;
+        return kScoreKernelFailed;
     }
     ContentRegion region{};
     if (!readContentRegion(env, contentRegion, width, height, &region)) {
-        return JNI_FALSE;
+        return kScoreKernelFailed;
     }
 
     // Lock the LiteRT tensor buffer to obtain a CPU-accessible float pointer.
@@ -750,7 +758,7 @@ nativePostprocessScoresFromHandle(
             tensorBufferHandle,
             static_cast<size_t>(width) * static_cast<size_t>(height) * static_cast<size_t>(channels) * sizeof(jfloat));
     if (hostPtr == nullptr) {
-        return JNI_FALSE;
+        return kScoreKernelFailed;
     }
     const jfloat* scoreData = static_cast<const jfloat*>(hostPtr);
 
@@ -772,10 +780,10 @@ nativePostprocessScoresFromHandle(
         channels > classCount ||
         groundTypeCount <= 0) {
         access.unlock(tensorBufferHandle);
-        return JNI_FALSE;
+        return kScoreKernelFailed;
     }
 
-    SemanticScoreTiming timings(env, scoreTimingNanos);
+    SemanticScoreTiming timings(env, scoreTimingNanos, sampleOffset);
     const jlong gettingArrays = timings.now();
     jint*     resultData        = env->GetIntArrayElements(resultMask, nullptr);
     jboolean* passableData      = env->GetBooleanArrayElements(passableLookup, nullptr);
@@ -806,19 +814,21 @@ nativePostprocessScoresFromHandle(
         if (groundTypeCountData) env->ReleaseIntArrayElements(groundTypeCounts, groundTypeCountData, JNI_ABORT);
         if (outputData)         env->ReleaseIntArrayElements(intOutputs, outputData, JNI_ABORT);
         access.unlock(tensorBufferHandle);
-        return JNI_FALSE;
+        return kScoreKernelFailed;
     }
 
     const jlong kernelStarted = timings.now();
-    timings.kernel<jfloat>(scoreLayout, region.width, [&](auto sample, auto neon, SemanticPixelSamples* pixels) {
-        return postprocessSemanticScoresCore<jfloat, decltype(sample)::value, decltype(neon)::value>(
-                scoreData, resultData, width, height, scoreLayout, region, channels,
-                passableData, obstacleData, roadData, trafficLightData, groundTypeData,
-                bottomRatio, centerRatio, navigationRegionRatio,
-                passableWordData, obstacleWordData,
-                classCountData, classCount, groundTypeCountData, groundTypeCount,
-                outputData, pixels);
-    });
+    const auto kernel = runSemanticScoreKernel<jfloat>(
+            requestNeon == JNI_TRUE, scoreLayout, region.width, timings.pixelSamples(),
+            [&](auto sample, auto neon, SemanticPixelSamples* pixels) {
+                return postprocessSemanticScoresCore<jfloat, decltype(sample)::value, decltype(neon)::value>(
+                        scoreData, resultData, width, height, scoreLayout, region, channels,
+                        passableData, obstacleData, roadData, trafficLightData, groundTypeData,
+                        bottomRatio, centerRatio, navigationRegionRatio,
+                        passableWordData, obstacleWordData,
+                        classCountData, classCount, groundTypeCountData, groundTypeCount,
+                        outputData, pixels);
+            });
     const jlong kernelFinished = timings.now();
 
     access.unlock(tensorBufferHandle);
@@ -835,8 +845,8 @@ nativePostprocessScoresFromHandle(
     env->ReleaseIntArrayElements(classCounts, classCountData, 0);
     env->ReleaseIntArrayElements(groundTypeCounts, groundTypeCountData, 0);
     env->ReleaseIntArrayElements(intOutputs, outputData, 0);
-    timings.record(env, gotArrays - gettingArrays, kernelFinished - kernelStarted, timings.now() - releasingArrays);
-    return JNI_TRUE;
+    timings.record(env, gotArrays - gettingArrays, kernelFinished - kernelStarted, timings.now() - releasingArrays, kernel);
+    return kernel;
 }
 
 // Zero-copy INT8 variant: same as nativePostprocessScoresFromHandle but interprets
@@ -867,6 +877,7 @@ nativePostprocessInt8ScoresFromHandle(
         jintArray groundTypeCounts,
         jintArray intOutputs,
         jintArray contentRegion,
+        jint sampleOffset,
         jlongArray outputAccessNanos,
         jlongArray scoreTimingNanos) {
     if (!sailens::liteRtZeroCopyAvailable()) return JNI_FALSE;
@@ -923,7 +934,7 @@ nativePostprocessInt8ScoresFromHandle(
         return JNI_FALSE;
     }
 
-    SemanticScoreTiming timings(env, scoreTimingNanos);
+    SemanticScoreTiming timings(env, scoreTimingNanos, sampleOffset);
     const jlong gettingArrays = timings.now();
     jint*     resultData        = env->GetIntArrayElements(resultMask, nullptr);
     jboolean* passableData      = env->GetBooleanArrayElements(passableLookup, nullptr);
@@ -958,15 +969,17 @@ nativePostprocessInt8ScoresFromHandle(
     }
 
     const jlong kernelStarted = timings.now();
-    timings.kernel<jbyte>(scoreLayout, region.width, [&](auto sample, auto neon, SemanticPixelSamples* pixels) {
-        return postprocessSemanticScoresCore<jbyte, decltype(sample)::value, decltype(neon)::value>(
-                scoreData, resultData, width, height, scoreLayout, region, channels,
-                passableData, obstacleData, roadData, trafficLightData, groundTypeData,
-                bottomRatio, centerRatio, navigationRegionRatio,
-                passableWordData, obstacleWordData,
-                classCountData, classCount, groundTypeCountData, groundTypeCount,
-                outputData, pixels);
-    });
+    const auto kernel = runSemanticScoreKernel<jbyte>(
+            false, scoreLayout, region.width, timings.pixelSamples(),
+            [&](auto sample, auto neon, SemanticPixelSamples* pixels) {
+                return postprocessSemanticScoresCore<jbyte, decltype(sample)::value, decltype(neon)::value>(
+                        scoreData, resultData, width, height, scoreLayout, region, channels,
+                        passableData, obstacleData, roadData, trafficLightData, groundTypeData,
+                        bottomRatio, centerRatio, navigationRegionRatio,
+                        passableWordData, obstacleWordData,
+                        classCountData, classCount, groundTypeCountData, groundTypeCount,
+                        outputData, pixels);
+            });
     const jlong kernelFinished = timings.now();
 
     access.unlock(tensorBufferHandle);
@@ -983,7 +996,7 @@ nativePostprocessInt8ScoresFromHandle(
     env->ReleaseIntArrayElements(classCounts, classCountData, 0);
     env->ReleaseIntArrayElements(groundTypeCounts, groundTypeCountData, 0);
     env->ReleaseIntArrayElements(intOutputs, outputData, 0);
-    timings.record(env, gotArrays - gettingArrays, kernelFinished - kernelStarted, timings.now() - releasingArrays);
+    timings.record(env, gotArrays - gettingArrays, kernelFinished - kernelStarted, timings.now() - releasingArrays, kernel);
     return JNI_TRUE;
 }
 
@@ -1372,10 +1385,10 @@ const JNINativeMethod kSemanticScorePostprocessorMethods[] = {
          "([B[IIIII[Z[Z[Z[Z[IFFF[J[J[I[I[I[I)Z",
          reinterpret_cast<void*>(nativePostprocessInt8Scores)},
         {"nativePostprocessScoresFromHandle",
-         "(J[IIIII[Z[Z[Z[Z[IFFF[J[J[I[I[I[I[J[J)Z",
+         "(J[IIIII[Z[Z[Z[Z[IFFF[J[J[I[I[I[IZI[J[J)I",
          reinterpret_cast<void*>(nativePostprocessScoresFromHandle)},
         {"nativePostprocessInt8ScoresFromHandle",
-         "(J[IIIII[Z[Z[Z[Z[IFFF[J[J[I[I[I[I[J[J)Z",
+         "(J[IIIII[Z[Z[Z[Z[IFFF[J[J[I[I[I[II[J[J)Z",
          reinterpret_cast<void*>(nativePostprocessInt8ScoresFromHandle)},
 };
 

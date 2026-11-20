@@ -42,6 +42,7 @@ class LiteRtSemanticSegmenter<R>(
     private val modelSourceResolver: ModelSourceResolver,
     private val preprocessCache: InputPreprocessCache? = null,
     private val logService: LogService,
+    private val directFloatNchw: Boolean = false,
 ) {
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -169,6 +170,7 @@ class LiteRtSemanticSegmenter<R>(
                 preprocessCache = preprocessCache,
                 postprocessor = postprocessor,
                 scoreGridSpansInput = modelConfig.scoreGridSpansInput,
+                directFloatNchw = directFloatNchw,
             )
         } catch (error: CancellationException) {
             session.close()

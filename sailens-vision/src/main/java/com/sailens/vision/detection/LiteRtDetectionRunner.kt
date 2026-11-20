@@ -58,6 +58,7 @@ class LiteRtDetectionRunner(
     private val logService: LogService,
     /** Supplies human-readable labels for class ids. A dataset fact, not a product decision. */
     private val taxonomy: Taxonomy = CocoTaxonomy,
+    private val directFloatNchw: Boolean = false,
 ) {
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -358,6 +359,7 @@ class LiteRtDetectionRunner(
             inputQuantization = inputMetadata.quantization?.toInputQuantization() ?: modelConfig.inputQuantization,
             preferNativeYuvPreprocessing = modelConfig.preferNativeYuvPreprocessing,
             preprocessCache = preprocessCache,
+            directFloatNchw = directFloatNchw,
         )
         postProcessor = DetectionPostProcessor(
             taxonomy = taxonomy,

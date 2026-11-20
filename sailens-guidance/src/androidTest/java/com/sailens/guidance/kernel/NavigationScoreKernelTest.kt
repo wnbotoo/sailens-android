@@ -10,6 +10,7 @@ import com.sailens.guidance.semantics.CityscapesNavigationSemantics
 import com.sailens.vision.taxonomy.CityscapesTaxonomy
 import com.sailens.runtime.ImageTensorLayout
 import com.sailens.runtime.ModelTensorConfig
+import com.sailens.runtime.nativeValue
 import com.sailens.vision.semantic.SemanticContentRegion
 import com.sailens.vision.semantic.SemanticScoreSpec
 import com.sailens.vision.semantic.SemanticScores
@@ -241,11 +242,15 @@ class NavigationScoreKernelTest {
                                 input.writeFloat(scores)
                                 model.run(listOf(input), listOf(output))
                                 val expected = referenceArgmax(scores, layout)
+                                val handle = handleOf(output)
+                                if (layout == ImageTensorLayout.NCHW && nonFinite == null) {
+                                    assertUntimedFloatKernelSelection(handle, wide)
+                                }
                                 for (content in listOf(wide, narrow)) {
                                     val containsNonFinite = nonFinite != null &&
                                         nonFinite.x in content.x until content.x + content.width
                                     assertFloatHandleKernel(
-                                        handleOf(output), layout, content, expected.takeUnless { containsNonFinite },
+                                        handle, layout, content, expected.takeUnless { containsNonFinite },
                                     )
                                 }
                             }
@@ -347,20 +352,28 @@ class NavigationScoreKernelTest {
         expectedClassMap: IntArray?,
     ) {
         val spec = SemanticScoreSpec(WIDTH, HEIGHT, CLASS_COUNT, layout, content)
-        fun run(requestNeon: Boolean): NavigationSemanticResult {
-            val postprocessor = NavigationScorePostprocessor(analysisConfig, navigationSemantics, SilentLogService)
-            val timing = SemanticScoreTiming(useNeonArgmax = requestNeon)
+        fun run(requestNeon: Boolean, measure: Boolean): NavigationSemanticResult {
+            val postprocessor = NavigationScorePostprocessor(
+                analysisConfig, navigationSemantics, SilentLogService, useNeonArgmax = requestNeon,
+            )
+            val timing = if (measure) SemanticScoreTiming(sampleOffset = 0) else null
             val outcome = checkNotNull(postprocessor.postprocessScores(
-                SemanticScores.FloatHandle(handle, LongArray(2), timing), spec, IntArray(content.pixelCount),
+                SemanticScores.FloatHandle(handle, timing?.let { LongArray(2) }, timing),
+                spec,
+                IntArray(content.pixelCount),
             ))
-            val neon = requestNeon && expectedClassMap != null && layout == ImageTensorLayout.NCHW && content.width >= 4
-            assertEquals(if (neon) "neon" else "scalar", timing.argmaxImplementation)
             assertEquals("native_score", outcome.backend)
-            assertEquals(0L, timing.sampledPixels)
+            if (timing != null) {
+                val neon = requestNeon && expectedClassMap != null &&
+                    layout == ImageTensorLayout.NCHW && content.width >= 4
+                assertEquals(if (neon) "neon" else "scalar", timing.argmaxImplementation)
+                if (neon) assertEquals(0L, timing.sampledPixels)
+                else assertTrue(timing.sampledPixels > 0L)
+            }
             return outcome.value
         }
 
-        val baseline = run(requestNeon = false)
+        val baseline = run(requestNeon = false, measure = false)
         baseline.maskLease.use {
             // For non-finite scores, preserve the result of the existing fast-math scalar kernel.
             if (expectedClassMap != null) {
@@ -372,11 +385,36 @@ class NavigationScoreKernelTest {
                 assertArrayEquals(cropped, baseline.mask.classMap)
                 assertEquals(expectedStats, baseline.stats)
             }
-            val candidate = run(requestNeon = true)
-            candidate.maskLease.use {
-                assertArrayEquals(baseline.mask.classMap, candidate.mask.classMap)
-                assertEquals(baseline.stats, candidate.stats)
+            for ((requestNeon, measure) in listOf(false to true, true to false, true to true)) {
+                val candidate = run(requestNeon, measure)
+                candidate.maskLease.use {
+                    assertArrayEquals(baseline.mask.classMap, candidate.mask.classMap)
+                    assertEquals(baseline.stats, candidate.stats)
+                }
             }
+        }
+    }
+
+    private fun assertUntimedFloatKernelSelection(handle: Long, content: SemanticContentRegion) {
+        val postprocessor = NavigationScorePostprocessor(analysisConfig, navigationSemantics, SilentLogService)
+        val native = NavigationScorePostprocessor::class.java.declaredMethods
+            .single { it.name == "nativePostprocessScoresFromHandle" }
+            .apply { isAccessible = true }
+        val lookup = BooleanArray(CLASS_COUNT)
+        val words = (content.pixelCount + 63) / 64
+        for ((requestNeon, expected) in listOf(false to 0, true to 1)) {
+            // Both instrumentation arrays are null. The JNI return identifies the kernel that ran.
+            val kernel = native.invoke(
+                postprocessor,
+                handle, IntArray(content.pixelCount),
+                WIDTH, HEIGHT, CLASS_COUNT, ImageTensorLayout.NCHW.nativeValue,
+                lookup, lookup, lookup, lookup, IntArray(CLASS_COUNT) { -1 },
+                0.3f, 0.3f, 0.3f,
+                LongArray(words), LongArray(words), IntArray(CLASS_COUNT), IntArray(1), IntArray(13),
+                intArrayOf(content.x, content.y, content.width, content.height),
+                requestNeon, -1, null, null,
+            )
+            assertEquals(expected, kernel)
         }
     }
 

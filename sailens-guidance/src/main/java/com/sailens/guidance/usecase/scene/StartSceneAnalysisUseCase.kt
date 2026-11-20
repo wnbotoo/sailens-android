@@ -27,7 +27,7 @@ import com.sailens.guidance.model.trace.PipelineFrameTiming
 import com.sailens.guidance.model.trace.SessionTraceAccumulator
 import com.sailens.guidance.model.trace.SessionTraceMetadata
 import com.sailens.core.frame.ImageFrame
-import com.sailens.core.frame.PipelineTimingMode
+import com.sailens.core.frame.PipelineTimingConfig
 import com.sailens.guidance.model.scene.SceneDebugInfo
 import com.sailens.guidance.model.perception.SegmentationMask
 import com.sailens.guidance.model.scene.SceneResult
@@ -101,7 +101,7 @@ class StartSceneAnalysisUseCase(
     private val depthSwitch: DepthGeometrySwitch = DepthGeometrySwitch(),
     private val depthConfig: DepthGeometryConfig = DepthGeometryConfig(),
     private val localWorldBuilder: LocalWorldModelBuilder? = null,
-    private val pipelineTimingMode: PipelineTimingMode? = null,
+    private val pipelineTiming: PipelineTimingConfig? = null,
 ) {
     /**
      * @param releaseFrame hands each frame back to its source once this pipeline is done reading
@@ -177,7 +177,7 @@ class StartSceneAnalysisUseCase(
                     startedAt = sessionStartedAt,
                     pipelineMode = perceptionConfig.profile.name.lowercase(),
                     targetHardwareProfile = perceptionConfig.targetHardwareProfile,
-                    pipelineTimingMode = pipelineTimingMode?.traceName,
+                    pipelineTimingMode = pipelineTiming?.traceName,
                 )
             )
             traceSessionStarted = true
@@ -232,7 +232,7 @@ class StartSceneAnalysisUseCase(
             .mapNotNullReleasing(
                 release = releaseFrame,
                 timingSessionId = sessionId.takeIf { traceSessionStarted },
-                timingMode = pipelineTimingMode,
+                timingConfig = pipelineTiming,
                 recordTiming = traceService::recordPipelineTiming,
             ) { frame, timing ->
                 val pipelineStart = Timestamp.now()
@@ -685,12 +685,12 @@ internal class SegmentationMaskSnapshots {
 private fun <R : Any> Flow<ImageFrame>.mapNotNullReleasing(
     release: (ImageFrame) -> Unit,
     timingSessionId: String?,
-    timingMode: PipelineTimingMode?,
+    timingConfig: PipelineTimingConfig?,
     recordTiming: (PipelineFrameTiming) -> Unit,
     process: suspend (ImageFrame, PipelineFrameTiming?) -> R?,
 ): Flow<R> = transform { frame ->
-    val timing = if (timingSessionId != null && timingMode != null) {
-        PipelineFrameTiming(timingSessionId, frame, SystemClock.elapsedRealtimeNanos(), timingMode)
+    val timing = if (timingSessionId != null && timingConfig?.enabled == true) {
+        PipelineFrameTiming(timingSessionId, frame, SystemClock.elapsedRealtimeNanos(), timingConfig.sampleSemanticPixels)
     } else {
         null
     }

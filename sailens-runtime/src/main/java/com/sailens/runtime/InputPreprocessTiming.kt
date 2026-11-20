@@ -4,11 +4,8 @@ import android.os.SystemClock
 
 /** Timed only for a profiled model call, on the thread doing its preprocessing. */
 class InputPreprocessTiming(
-    internal val requestDirectNchw: Boolean,
     private val clock: () -> Long = SystemClock::elapsedRealtimeNanos,
 ) {
-    constructor(clock: () -> Long = SystemClock::elapsedRealtimeNanos) : this(false, clock)
-
     var cacheWaitNanos: Long = 0L
         private set
     var cacheAwaitNanos: Long = 0L

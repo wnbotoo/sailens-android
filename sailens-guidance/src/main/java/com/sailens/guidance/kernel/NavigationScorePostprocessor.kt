@@ -50,6 +50,7 @@ class NavigationScorePostprocessor(
     navigationSemantics: NavigationSemantics,
     private val logService: LogService,
     private val maskPool: SegmentationMaskPool = SegmentationMaskPool(),
+    private val useNeonArgmax: Boolean = false,
 ) : SemanticPostprocessor<NavigationSemanticResult> {
     private val lookup = SemanticClassLookup.from(navigationSemantics)
     private var hasLoggedBackend = false
@@ -273,11 +274,13 @@ class NavigationScorePostprocessor(
                  obstacleWords = scratch.obstacleWords,
                  classCounts = scratch.classCounts,
                  groundTypeCounts = scratch.groundTypeCounts,
-                 intOutputs = scratch.intOutputs,
+                intOutputs = scratch.intOutputs,
                 contentRegion = scratch.contentRegion,
+                requestNeon = useNeonArgmax,
+                sampleOffset = timing?.sampleOffset ?: -1,
                 outputAccessNanos = outputAccessNanos,
                 scoreTimingNanos = timing?.nativeNanos,
-            )
+            ) >= 0
         }
     }
 
@@ -321,6 +324,7 @@ class NavigationScorePostprocessor(
                 groundTypeCounts = scratch.groundTypeCounts,
                 intOutputs = scratch.intOutputs,
                 contentRegion = scratch.contentRegion,
+                sampleOffset = timing?.sampleOffset ?: -1,
                 outputAccessNanos = outputAccessNanos,
                 scoreTimingNanos = timing?.nativeNanos,
             )
@@ -554,6 +558,7 @@ class NavigationScorePostprocessor(
         contentRegion: IntArray,
     ): Boolean
 
+    // The native return is the kernel that completed the frame. A negative value indicates failure.
     private external fun nativePostprocessScoresFromHandle(
         tensorBufferHandle: Long,
         resultMask: IntArray,
@@ -575,9 +580,11 @@ class NavigationScorePostprocessor(
         groundTypeCounts: IntArray,
         intOutputs: IntArray,
         contentRegion: IntArray,
+        requestNeon: Boolean,
+        sampleOffset: Int,
         outputAccessNanos: LongArray?,
         scoreTimingNanos: LongArray?,
-    ): Boolean
+    ): Int
 
     private external fun nativePostprocessInt8ScoresFromHandle(
         tensorBufferHandle: Long,
@@ -600,6 +607,7 @@ class NavigationScorePostprocessor(
         groundTypeCounts: IntArray,
         intOutputs: IntArray,
         contentRegion: IntArray,
+        sampleOffset: Int,
         outputAccessNanos: LongArray?,
         scoreTimingNanos: LongArray?,
     ): Boolean

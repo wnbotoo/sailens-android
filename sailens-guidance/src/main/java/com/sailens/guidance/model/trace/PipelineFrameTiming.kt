@@ -2,7 +2,6 @@ package com.sailens.guidance.model.trace
 
 import android.os.SystemClock
 import com.sailens.core.frame.ImageFrame
-import com.sailens.core.frame.PipelineTimingMode
 import com.sailens.guidance.geometry.CameraClock
 import com.sailens.vision.ModelRunTiming
 
@@ -11,7 +10,7 @@ class PipelineFrameTiming internal constructor(
     val sessionId: String,
     frame: ImageFrame,
     val dequeuedNanos: Long,
-    internal val mode: PipelineTimingMode = PipelineTimingMode.RACE,
+    internal val sampleSemanticPixels: Boolean = false,
 ) {
     val frameId: Long = frame.sequenceNumber
     val cameraTimestampNanos: Long = frame.timestamp

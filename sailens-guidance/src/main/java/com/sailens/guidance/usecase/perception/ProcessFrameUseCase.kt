@@ -148,7 +148,7 @@ class ProcessFrameUseCase(
         // det 以异常报错（sem 用 Result）。在这里收成 Result：单帧 det 失败应当和 sem 失败一样被计为
         // 一帧失败、交给上层按连续失败次数处置，而不是直接冲垮整条 flow。
         val obstacleDeferred = obstacleRun?.let { run ->
-            val runTiming = timing?.let { ModelRunTiming(it.now(), it.mode) }
+            val runTiming = timing?.let { ModelRunTiming(it.now()) }
             timing?.detectionRun = runTiming
             async {
                 try {
@@ -315,7 +315,11 @@ class ProcessFrameUseCase(
             )
         }
 
-        val runTiming = if (queuedNanos != null && timing != null) ModelRunTiming(queuedNanos, timing.mode) else null
+        val runTiming = if (queuedNanos != null && timing != null) {
+            ModelRunTiming(queuedNanos, timing.sampleSemanticPixels)
+        } else {
+            null
+        }
         timing?.semanticRun = runTiming
         val segmentationOutput = perceptionRepository.segment(frame, runTiming, preferredProducer).getOrElse {
             if (regressionRecorder.isRecording) regressionRecorder.onSemantic(frame, ran = true, output = null, failure = it)

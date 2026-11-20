@@ -55,8 +55,9 @@ python scripts/experiments/pipeline_performance.py trace.jsonl --warmup 15
 ```
 
 Use `com.sailens.reference` for the platform reference host. Remove the marker and restart the
-process to turn timing off. The `CameraX negotiated` log reports the bound sizes for analysis and
-preview. The trace report shows the buffer dimensions delivered to Guidance.
+process for the default path with profiling off. Use `sem-nchw-untimed` for the three combined
+optimizations with profiling off. The `CameraX negotiated` log reports the bound sizes for
+analysis and preview. The trace report shows the buffer dimensions delivered to Guidance.
 The camera service dump taken during the run shows the active preview and YUV streams.
 
 Use `race` for the existing order and `sem-first` for the preferred producer, with the same
@@ -91,8 +92,9 @@ accelerator and mapping the output. The end of output postprocessing counts one 
 
 On the semantic handle path, `sem.score` reports Kotlin scratch preparation, JNI array
 acquisition, the fused kernel, JNI array release, and Kotlin assembly of the masks and
-statistics. LiteRT lock and unlock keep their own clocks. Every eighth camera frame ID enables
-pixel sampling with a rotating offset and a stride of 257 content pixels. That sample estimates
+statistics. LiteRT lock and unlock keep their own clocks. With `race` or `sem-first`, every
+eighth camera frame ID enables scalar pixel sampling with a rotating offset and a stride of 257
+content pixels. That sample estimates
 argmax, class map and packed-mask writes, and the intervening lookups and statistics, with a
 back-to-back clock measurement subtracted from each sampled interval. These per-pixel estimates
 help rank work inside the fused loop. Use the full kernel duration to compare runs, and compare

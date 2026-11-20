@@ -1,19 +1,14 @@
 package com.sailens.vision.semantic
 
 import android.os.SystemClock
-import com.sailens.core.frame.PipelineTimingMode
 
 /** Timing for one scored tensor read through a LiteRT handle. */
-class SemanticScoreTiming(sampleOffset: Int? = null, useNeonArgmax: Boolean = false) {
+class SemanticScoreTiming(val sampleOffset: Int? = null) {
     init {
         require(sampleOffset == null || sampleOffset in 0 until PIXEL_SAMPLE_STRIDE)
-        require(!useNeonArgmax || sampleOffset == null)
     }
 
-    /** Slot zero carries the kernel request until JNI writes the timing record. */
-    val nativeNanos = LongArray(9) { -1L }.also {
-        it[0] = if (useNeonArgmax) REQUEST_NEON else sampleOffset?.toLong() ?: -1L
-    }
+    val nativeNanos = LongArray(9) { -1L }
     val fusedKernelNanos: Long? get() = nativeNanos[1].takeIf { it >= 0 }
     val arraysGetNanos: Long get() = nativeNanos[0]
     val arraysReleaseNanos: Long get() = nativeNanos[2]
@@ -47,15 +42,14 @@ class SemanticScoreTiming(sampleOffset: Int? = null, useNeonArgmax: Boolean = fa
     internal companion object {
         const val PIXEL_SAMPLE_STRIDE = 257
         private const val FRAME_SAMPLE_INTERVAL = 8
-        private const val REQUEST_NEON = -2L
 
-        fun forFrame(frameId: Long, mode: PipelineTimingMode): SemanticScoreTiming = when (mode) {
-            PipelineTimingMode.SEM_SIMD, PipelineTimingMode.SEM_NCHW -> SemanticScoreTiming(useNeonArgmax = true)
-            PipelineTimingMode.RACE_UNSAMPLED, PipelineTimingMode.SEM_SCALAR -> SemanticScoreTiming()
-            PipelineTimingMode.RACE, PipelineTimingMode.SEM_FIRST -> {
-                val offset = if (frameId % FRAME_SAMPLE_INTERVAL == 0L) frameId.mod(PIXEL_SAMPLE_STRIDE) else null
-                SemanticScoreTiming(offset)
+        fun forFrame(frameId: Long, samplePixels: Boolean): SemanticScoreTiming {
+            val offset = if (samplePixels && frameId % FRAME_SAMPLE_INTERVAL == 0L) {
+                frameId.mod(PIXEL_SAMPLE_STRIDE)
+            } else {
+                null
             }
+            return SemanticScoreTiming(offset)
         }
     }
 }
