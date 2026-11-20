@@ -41,7 +41,7 @@ class ModelInputPreprocessor(
         }
         try {
             if (preferNativeYuvPreprocessing &&
-                nativeProcessor.preprocessFloat(frame, rotationDegrees, outputArray)
+                nativeProcessor.preprocessFloat(frame, rotationDegrees, outputArray, timing)
             ) {
                 val backend = InputPreprocessBackend.NATIVE_YUV
                 val mapping = nativeProcessor.imageMapping(frame, rotationDegrees)
@@ -102,7 +102,7 @@ class ModelInputPreprocessor(
 
         try {
             if (preferNativeYuvPreprocessing &&
-                nativeProcessor.preprocessInt8(frame, rotationDegrees, outputArray)
+                nativeProcessor.preprocessInt8(frame, rotationDegrees, outputArray, timing)
             ) {
                 val backend = InputPreprocessBackend.NATIVE_YUV
                 val mapping = nativeProcessor.imageMapping(frame, rotationDegrees)

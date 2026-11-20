@@ -64,6 +64,7 @@ class InputPreprocessCacheTest {
 
         assertEquals(InputPreprocessBackend.SHARED_NATIVE_YUV, hit?.backend)
         assertEquals(10L, timing.cacheWaitNanos)
+        assertEquals(0L, timing.cacheAwaitNanos)
         assertEquals(10L, timing.cacheCopyNanos)
         assertArrayEquals(values, output, 0f)
     }
@@ -115,14 +116,18 @@ class InputPreprocessCacheTest {
         stuck.start()
         claimed.await()
 
+        val timing = InputPreprocessTiming(System::nanoTime)
         val started = System.nanoTime()
-        val hit = cache.awaitOrClaim(key, waitMs = 30) { cache.copyFloatInput(key, FloatArray(3)) }
+        val hit = cache.awaitOrClaim(key, waitMs = 30, timing = timing) { cache.copyFloatInput(key, FloatArray(3)) }
         val waitedMs = (System.nanoTime() - started) / 1_000_000
 
         done.countDown()
         stuck.join()
         assertNull(hit)
         assertTrue("waited $waitedMs ms", waitedMs in 25..500)
+        assertTrue(timing.cacheAwaitNanos > 0L)
+        assertTrue(timing.cacheWaitNanos >= timing.cacheAwaitNanos)
+        assertEquals(0L, timing.cacheCopyNanos)
     }
 
     @Test

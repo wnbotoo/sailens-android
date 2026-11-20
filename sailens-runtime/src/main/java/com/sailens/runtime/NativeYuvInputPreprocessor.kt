@@ -29,6 +29,7 @@ internal class NativeYuvInputPreprocessor(
         frame: ImageFrame,
         rotationDegrees: Int,
         outputArray: FloatArray,
+        timing: InputPreprocessTiming? = null,
     ): Boolean {
         val yuv = frame.takeYuvDataOrNull() ?: return false
         if (!NativeRuntimeLibrary.isAvailable) return false
@@ -67,15 +68,18 @@ internal class NativeYuvInputPreprocessor(
                 resizeFilter = config.resizeFilter.nativeValue,
                 output = nativeOutput,
                 mapping = mapping,
+                timingNanos = timing?.beginNativeYuv(config.resizeFilter),
             )
         }.getOrDefault(false)
         if (success && config.inputLayout == ImageTensorLayout.NCHW) {
+            val transposing = timing?.now() ?: 0L
             nativeOutput.copyHwcToNchw(
                 output = outputArray,
                 width = config.inputWidth,
                 height = config.inputHeight,
                 channels = CHANNELS_RGB,
             )
+            timing?.transposedSince(transposing)
         }
         return success
     }
@@ -84,6 +88,7 @@ internal class NativeYuvInputPreprocessor(
         frame: ImageFrame,
         rotationDegrees: Int,
         outputArray: ByteArray,
+        timing: InputPreprocessTiming? = null,
     ): Boolean {
         val yuv = frame.takeYuvDataOrNull() ?: return false
         if (!NativeRuntimeLibrary.isAvailable) return false
@@ -124,15 +129,18 @@ internal class NativeYuvInputPreprocessor(
                 quantZeroPoint = inputQuantization.zeroPoint,
                 output = nativeOutput,
                 mapping = mapping,
+                timingNanos = timing?.beginNativeYuv(config.resizeFilter),
             )
         }.getOrDefault(false)
         if (success && config.inputLayout == ImageTensorLayout.NCHW) {
+            val transposing = timing?.now() ?: 0L
             nativeOutput.copyHwcToNchw(
                 output = outputArray,
                 width = config.inputWidth,
                 height = config.inputHeight,
                 channels = CHANNELS_RGB,
             )
+            timing?.transposedSince(transposing)
         }
         return success
     }
@@ -181,6 +189,7 @@ internal class NativeYuvInputPreprocessor(
         resizeFilter: Int,
         output: FloatArray,
         mapping: FloatArray,
+        timingNanos: LongArray?,
     ): Boolean
 
     private external fun nativePreprocessYuvToInt8(
@@ -209,6 +218,7 @@ internal class NativeYuvInputPreprocessor(
         quantZeroPoint: Int,
         output: ByteArray,
         mapping: FloatArray,
+        timingNanos: LongArray?,
     ): Boolean
 
     private val ResizeFilter.nativeValue: Int

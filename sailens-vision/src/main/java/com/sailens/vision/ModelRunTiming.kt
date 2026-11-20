@@ -8,7 +8,7 @@ import com.sailens.runtime.InputPreprocessTiming
  * has completed. Missing checkpoints distinguish an incomplete call from a zero-duration stage.
  */
 class ModelRunTiming(val queuedNanos: Long) {
-    internal val input = InputPreprocessTiming()
+    val input = InputPreprocessTiming()
     internal val nativeOutputAccess = LongArray(2)
 
     var runnerStartedNanos: Long? = null
@@ -30,8 +30,6 @@ class ModelRunTiming(val queuedNanos: Long) {
     var postprocessBackend: String? = null
         internal set
 
-    val cacheWaitNanos: Long get() = input.cacheWaitNanos
-    val cacheCopyNanos: Long get() = input.cacheCopyNanos
     val outputLockNanos: Long get() = nativeOutputAccess[0]
     val outputUnlockNanos: Long get() = nativeOutputAccess[1]
 

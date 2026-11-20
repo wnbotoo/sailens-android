@@ -64,6 +64,15 @@ the number of reservations, and which preprocessing backend each model actually 
 Reservations apply to uncapped semantic runs with identical resolved float inputs in the same
 cache. Detection uses the existing bounded wait and can still compute on timeout.
 
+Within preprocessing, `cacheAwait` is the wait for a producer and `cacheMonitorWait` is the
+initial cache monitor acquisition. Both are already in `cacheWait`. `cacheCopy` measures
+`copyInto` on hits. Native YUV producers also report JNI array acquisition and release,
+the body of `preprocessYuv` under the selected resize filter, and the Kotlin HWC-to-NCHW
+transpose when applicable. The JNI access total includes acquisition and release.
+`jni_copy_counts` tallies the JNI `isCopy` flag separately for Y, U, V and the output.
+These producer-only stages omit cache hits. `preprocessOther` is the remaining time,
+including fallback paths and untimed stages in older traces.
+
 Each timing record follows one dequeued camera frame and can include completed model calls even
 when that frame produced no decision. Rates use completion events in the elapsed-realtime window.
 Loss uses the half-open interval of camera frame IDs bracketed by dequeued frames in the

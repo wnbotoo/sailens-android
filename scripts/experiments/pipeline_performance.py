@@ -76,6 +76,7 @@ def measure(metadata, frames, warmup_seconds, window_seconds=None):
     timings = defaultdict(list)
     dims = Counter()
     backends = defaultdict(Counter)
+    jni_copy_counts = defaultdict(Counter)
 
     def within(timestamp):
         return timestamp is not None and begin <= timestamp < end
@@ -150,10 +151,28 @@ def measure(metadata, frames, warmup_seconds, window_seconds=None):
             between(f"{label}.inferenceCall", run, "inferenceStartedNanos", "inferenceReturnedNanos")
             if "preprocessFinishedNanos" in run:
                 duration = run["preprocessFinishedNanos"] - run["preprocessStartedNanos"]
+                phases = {
+                    "cacheWait": run["cacheWaitNanos"],
+                    "cacheCopy": run["cacheCopyNanos"],
+                }
+                if "cacheAwaitNanos" in run:
+                    sample(f"{label}.cacheAwait", run["cacheAwaitNanos"])
+                    sample(f"{label}.cacheMonitorWait", phases["cacheWait"] - run["cacheAwaitNanos"])
+                if "jniArrayGetNanos" in run and "jniArrayReleaseNanos" in run:
+                    sample(f"{label}.jniArrayGet", run["jniArrayGetNanos"])
+                    sample(f"{label}.jniArrayRelease", run["jniArrayReleaseNanos"])
+                    phases["jniArrayLockRelease"] = run["jniArrayGetNanos"] + run["jniArrayReleaseNanos"]
+                if "nativeYuvBodyNanos" in run:
+                    resize_filter = run["nativeResizeFilter"].title()
+                    phases[f"native{resize_filter}Body"] = run["nativeYuvBodyNanos"]
+                if "kotlinHwcToNchwNanos" in run:
+                    phases["kotlinHwcToNchw"] = run["kotlinHwcToNchwNanos"]
+                for array, is_copy in run.get("jniArrayIsCopy", {}).items():
+                    jni_copy_counts[f"{label}.{array}"]["copy" if is_copy else "direct"] += 1
                 sample(f"{label}.preprocess", duration)
-                sample(f"{label}.cacheWait", run["cacheWaitNanos"])
-                sample(f"{label}.cacheCopy", run["cacheCopyNanos"])
-                sample(f"{label}.preprocessOther", duration - run["cacheWaitNanos"] - run["cacheCopyNanos"])
+                for phase, elapsed in phases.items():
+                    sample(f"{label}.{phase}", elapsed)
+                sample(f"{label}.preprocessOther", duration - sum(phases.values()))
             if "postprocessFinishedNanos" in run:
                 output_access = 0
                 for field in ("outputLock", "outputUnlock", "outputCopy"):
@@ -185,6 +204,7 @@ def measure(metadata, frames, warmup_seconds, window_seconds=None):
         "drop_percent": round(100 * (offered - decided) / offered, 3),
         "analysis_frame_dimensions": dims,
         "backends": dict(backends),
+        "jni_copy_counts": dict(jni_copy_counts),
         "timing_ms": {key: stats_ns(samples) for key, samples in sorted(timings.items())},
     }
 

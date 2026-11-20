@@ -83,7 +83,7 @@ class InputPreprocessCache {
                         (this as Object).wait(remainingMs)
                     }
                 } finally {
-                    timing?.waitedSince(waiting)
+                    timing?.awaitedProducerSince(waiting)
                 }
                 // The producer stored it, gave up, or ran out of time.
                 return tryCopy()

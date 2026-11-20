@@ -26,13 +26,39 @@ class PipelinePerformanceTest(unittest.TestCase):
         frames = [frame(20, 1000), frame(22, 1066), frame(23, 1100), frame(26, 1200)]
         first, failed, reused, _ = frames
         first["sem"] = {
+            "preprocessStartedNanos": 1_002_000_000,
+            "preprocessFinishedNanos": 1_022_000_000,
+            "preprocessBackend": "native_yuv",
+            "cacheWaitNanos": 2_000_000,
+            "cacheAwaitNanos": 1_500_000,
+            "cacheCopyNanos": 0,
+            "jniArrayGetNanos": 2_000_000,
+            "jniArrayReleaseNanos": 3_000_000,
+            "nativeYuvBodyNanos": 8_000_000,
+            "nativeResizeFilter": "NEAREST",
+            "kotlinHwcToNchwNanos": 4_000_000,
+            "jniArrayIsCopy": {"y": True, "u": False, "v": False, "output": True},
             "inferenceReturnedNanos": 1_025_000_000,
             "outputLockNanos": 4_000_000,
             "outputUnlockNanos": 100_000,
             "postprocessFinishedNanos": 1_035_000_000,
         }
+        first["det"] = {
+            "preprocessStartedNanos": 1_002_000_000,
+            "preprocessFinishedNanos": 1_023_000_000,
+            "preprocessBackend": "shared_native_yuv",
+            "cacheWaitNanos": 20_000_000,
+            "cacheAwaitNanos": 19_500_000,
+            "cacheCopyNanos": 1_000_000,
+        }
         first["decidedNanos"] = 1_040_000_000
-        failed["sem"] = {"inferenceReturnedNanos": 1_090_000_000}
+        failed["sem"] = {
+            "preprocessStartedNanos": 1_067_000_000,
+            "preprocessFinishedNanos": 1_087_000_000,
+            "cacheWaitNanos": 0,
+            "cacheCopyNanos": 0,
+            "inferenceReturnedNanos": 1_090_000_000,
+        }
         reused["decidedNanos"] = 1_125_000_000
         source = {key: first[key] for key in ("frameId", "receivedNanos", "cameraTimestampNanos", "cameraClock")}
         first["semSource"] = reused["semSource"] = source
@@ -49,6 +75,20 @@ class PipelinePerformanceTest(unittest.TestCase):
         self.assertEqual(report["timing_ms"]["sem.postprocess"]["p95"], 5.9)
         self.assertEqual(report["timing_ms"]["sem.sourceReceiptToDecision"]["p95"], 125.0)
         self.assertEqual(report["timing_ms"]["sem.sourceSensorToDecision"]["p95"], 135.0)
+        timing = report["timing_ms"]
+        self.assertEqual(timing["sem.jniArrayLockRelease"]["p95"], 5.0)
+        self.assertEqual(timing["sem.nativeNearestBody"]["n"], 1)
+        self.assertEqual(timing["sem.nativeNearestBody"]["p95"], 8.0)
+        self.assertEqual(timing["sem.kotlinHwcToNchw"]["p95"], 4.0)
+        self.assertEqual(timing["sem.preprocessOther"]["p50"], 10.5)
+        self.assertEqual(timing["det.cacheAwait"]["p95"], 19.5)
+        self.assertEqual(timing["det.cacheMonitorWait"]["p95"], 0.5)
+        self.assertEqual(timing["det.cacheCopy"]["p95"], 1.0)
+        self.assertEqual(timing["det.preprocessOther"]["p95"], 0.0)
+        self.assertNotIn("det.nativeNearestBody", timing)
+        self.assertNotIn("det.kotlinHwcToNchw", timing)
+        self.assertEqual(report["jni_copy_counts"]["sem.output"], {"copy": 1})
+        self.assertEqual(report["jni_copy_counts"]["sem.u"], {"direct": 1})
 
     def test_rejects_missing_timing_rows_before_computing_drops(self):
         rows = [

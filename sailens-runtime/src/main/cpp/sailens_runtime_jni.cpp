@@ -1,6 +1,7 @@
 #include <jni.h>
 
 #include <android/log.h>
+#include <time.h>
 
 #include <algorithm>
 #include <cmath>
@@ -235,6 +236,34 @@ static bool preprocessYuv(
 // without a rename silently surviving until the method is first called.
 // ---------------------------------------------------------------------------
 
+class YuvPreprocessTiming {
+public:
+    explicit YuvPreprocessTiming(jlongArray destination) : destination_(destination) {}
+
+    jlong now() const {
+        if (destination_ == nullptr) return 0;
+        timespec time{};
+        clock_gettime(CLOCK_BOOTTIME, &time);
+        return static_cast<jlong>(time.tv_sec) * 1'000'000'000 + time.tv_nsec;
+    }
+
+    jboolean* isCopy(int index) {
+        return destination_ == nullptr ? nullptr : &copied_[index];
+    }
+
+    void record(JNIEnv* env, jlong getNanos, jlong releaseNanos, jlong bodyNanos) const {
+        if (destination_ == nullptr) return;
+        // The flags follow the acquisitions in Y, U, V, output order.
+        const jlong copyMask = copied_[0] | (copied_[1] << 1) | (copied_[2] << 2) | (copied_[3] << 3);
+        const jlong sample[] = {getNanos, releaseNanos, bodyNanos, copyMask};
+        env->SetLongArrayRegion(destination_, 0, 4, sample);
+    }
+
+private:
+    jlongArray destination_;
+    jboolean copied_[4]{};
+};
+
 jboolean JNICALL
 nativePreprocessYuvToFloat(
         JNIEnv* env,
@@ -261,7 +290,8 @@ nativePreprocessYuvToFloat(
         jfloat stdB,
         jint resizeFilter,
         jfloatArray output,
-        jfloatArray mapping) {
+        jfloatArray mapping,
+        jlongArray timingNanos) {
     if (y == nullptr || u == nullptr || v == nullptr || output == nullptr ||
         mapping == nullptr || env->GetArrayLength(mapping) != 7 ||
         yRowStride <= 0 || yPixelStride <= 0 ||
@@ -273,10 +303,13 @@ nativePreprocessYuvToFloat(
         return JNI_FALSE;
     }
 
-    jbyte* yData = env->GetByteArrayElements(y, nullptr);
-    jbyte* uData = env->GetByteArrayElements(u, nullptr);
-    jbyte* vData = env->GetByteArrayElements(v, nullptr);
-    jfloat* outputData = env->GetFloatArrayElements(output, nullptr);
+    YuvPreprocessTiming timing(timingNanos);
+    const jlong getting = timing.now();
+    jbyte* yData = env->GetByteArrayElements(y, timing.isCopy(0));
+    jbyte* uData = env->GetByteArrayElements(u, timing.isCopy(1));
+    jbyte* vData = env->GetByteArrayElements(v, timing.isCopy(2));
+    jfloat* outputData = env->GetFloatArrayElements(output, timing.isCopy(3));
+    const jlong getNanos = timing.now() - getting;
     if (yData == nullptr || uData == nullptr || vData == nullptr || outputData == nullptr) {
         if (yData != nullptr) env->ReleaseByteArrayElements(y, yData, JNI_ABORT);
         if (uData != nullptr) env->ReleaseByteArrayElements(u, uData, JNI_ABORT);
@@ -314,6 +347,7 @@ nativePreprocessYuvToFloat(
     };
 
     float imageMapping[7];
+    const jlong bodyStarted = timing.now();
     const bool success = preprocessYuv(
             yPlane,
             uPlane,
@@ -335,10 +369,12 @@ nativePreprocessYuvToFloat(
                 outputData[index] = value;
             });
 
+    const jlong releasing = timing.now();
     env->ReleaseFloatArrayElements(output, outputData, success ? 0 : JNI_ABORT);
     env->ReleaseByteArrayElements(v, vData, JNI_ABORT);
     env->ReleaseByteArrayElements(u, uData, JNI_ABORT);
     env->ReleaseByteArrayElements(y, yData, JNI_ABORT);
+    timing.record(env, getNanos, timing.now() - releasing, releasing - bodyStarted);
     if (success) env->SetFloatArrayRegion(mapping, 0, 7, imageMapping);
     return success ? JNI_TRUE : JNI_FALSE;
 }
@@ -371,7 +407,8 @@ nativePreprocessYuvToInt8(
         jfloat quantScale,
         jint quantZeroPoint,
         jbyteArray output,
-        jfloatArray mapping) {
+        jfloatArray mapping,
+        jlongArray timingNanos) {
     if (y == nullptr || u == nullptr || v == nullptr || output == nullptr ||
         mapping == nullptr || env->GetArrayLength(mapping) != 7 ||
         yRowStride <= 0 || yPixelStride <= 0 ||
@@ -384,10 +421,13 @@ nativePreprocessYuvToInt8(
         return JNI_FALSE;
     }
 
-    jbyte* yData = env->GetByteArrayElements(y, nullptr);
-    jbyte* uData = env->GetByteArrayElements(u, nullptr);
-    jbyte* vData = env->GetByteArrayElements(v, nullptr);
-    jbyte* outputData = env->GetByteArrayElements(output, nullptr);
+    YuvPreprocessTiming timing(timingNanos);
+    const jlong getting = timing.now();
+    jbyte* yData = env->GetByteArrayElements(y, timing.isCopy(0));
+    jbyte* uData = env->GetByteArrayElements(u, timing.isCopy(1));
+    jbyte* vData = env->GetByteArrayElements(v, timing.isCopy(2));
+    jbyte* outputData = env->GetByteArrayElements(output, timing.isCopy(3));
+    const jlong getNanos = timing.now() - getting;
     if (yData == nullptr || uData == nullptr || vData == nullptr || outputData == nullptr) {
         if (yData != nullptr) env->ReleaseByteArrayElements(y, yData, JNI_ABORT);
         if (uData != nullptr) env->ReleaseByteArrayElements(u, uData, JNI_ABORT);
@@ -426,6 +466,7 @@ nativePreprocessYuvToInt8(
 
     const float inverseQuantScale = 1.0f / quantScale;
     float imageMapping[7];
+    const jlong bodyStarted = timing.now();
     const bool success = preprocessYuv(
             yPlane,
             uPlane,
@@ -448,10 +489,12 @@ nativePreprocessYuvToInt8(
                 outputData[index] = static_cast<jbyte>(std::clamp(quantized, -128, 127));
             });
 
+    const jlong releasing = timing.now();
     env->ReleaseByteArrayElements(output, outputData, success ? 0 : JNI_ABORT);
     env->ReleaseByteArrayElements(v, vData, JNI_ABORT);
     env->ReleaseByteArrayElements(u, uData, JNI_ABORT);
     env->ReleaseByteArrayElements(y, yData, JNI_ABORT);
+    timing.record(env, getNanos, timing.now() - releasing, releasing - bodyStarted);
     if (success) env->SetFloatArrayRegion(mapping, 0, 7, imageMapping);
     return success ? JNI_TRUE : JNI_FALSE;
 }
@@ -506,10 +549,10 @@ nativeQuantizeFloatToInt8(
 
 const JNINativeMethod kYuvInputPreprocessorMethods[] = {
         {"nativePreprocessYuvToFloat",
-         "([B[B[BIIIIIIIIIIIFFFFFFI[F[F)Z",
+         "([B[B[BIIIIIIIIIIIFFFFFFI[F[F[J)Z",
          reinterpret_cast<void*>(nativePreprocessYuvToFloat)},
         {"nativePreprocessYuvToInt8",
-         "([B[B[BIIIIIIIIIIIFFFFFFIFI[B[F)Z",
+         "([B[B[BIIIIIIIIIIIFFFFFFIFI[B[F[J)Z",
          reinterpret_cast<void*>(nativePreprocessYuvToInt8)},
         {"nativeQuantizeFloatToInt8",
          "([F[BFI)Z",

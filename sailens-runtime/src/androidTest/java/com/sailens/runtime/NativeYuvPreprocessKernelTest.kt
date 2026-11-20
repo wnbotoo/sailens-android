@@ -101,6 +101,37 @@ class NativeYuvPreprocessKernelTest {
     }
 
     @Test
+    fun profilingPreservesNchwFloatAndInt8Tensors() {
+        val frame = syntheticFrame(width = 80, height = 48, uvPixelStride = 2)
+        val config = tensorConfig(inputWidth = 64, inputHeight = 64).copy(inputLayout = ImageTensorLayout.NCHW)
+        val preprocessor = NativeYuvInputPreprocessor(config, ModelInputQuantization(scale = 1f / 255f, zeroPoint = -128))
+        val size = config.inputWidth * config.inputHeight * 3
+
+        val floatBaseline = FloatArray(size)
+        val floatProfiled = FloatArray(size)
+        val floatTiming = InputPreprocessTiming()
+        assertTrue(preprocessor.preprocessFloat(frame, 90, floatBaseline))
+        assertTrue(preprocessor.preprocessFloat(frame, 90, floatProfiled, floatTiming))
+        assertArrayEquals(floatBaseline, floatProfiled, 0f)
+
+        val int8Baseline = ByteArray(size)
+        val int8Profiled = ByteArray(size)
+        val int8Timing = InputPreprocessTiming()
+        assertTrue(preprocessor.preprocessInt8(frame, 90, int8Baseline))
+        assertTrue(preprocessor.preprocessInt8(frame, 90, int8Profiled, int8Timing))
+        assertArrayEquals(int8Baseline, int8Profiled)
+
+        for (timing in listOf(floatTiming, int8Timing)) {
+            assertEquals(ResizeFilter.NEAREST, timing.nativeResizeFilter)
+            assertTrue(checkNotNull(timing.jniArrayGetNanos) >= 0L)
+            assertTrue(checkNotNull(timing.jniArrayReleaseNanos) >= 0L)
+            assertTrue(checkNotNull(timing.nativeYuvBodyNanos) > 0L)
+            assertTrue(checkNotNull(timing.kotlinHwcToNchwNanos) > 0L)
+            assertTrue(checkNotNull(timing.jniArrayCopyMask) in 0..15)
+        }
+    }
+
+    @Test
     fun quantizeFloatToInt8RoundsAndSaturates() {
         val quantization = ModelInputQuantization(scale = 1f / 255f, zeroPoint = -128)
         val preprocessor = NativeYuvInputPreprocessor(
