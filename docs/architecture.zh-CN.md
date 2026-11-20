@@ -777,9 +777,7 @@ VLM runtime 成本。即使暂时不拆 Gradle module，logical boundary 也已�
 ### 12.2 Native 验证分三层
 
 当前代码一共有 13 个 JNI entry point：9 个 array-based kernel，加上 4 个 LiteRT
-TensorBuffer-handle 路径。A 在没有真实 compiled model 的情况下无法制造合法 LiteRT handle，
-所以“在 A 中把 13 个 JNI entry 全部至少调用一次”不能作为 Step 1 的可执行退出条件。验证按
-实际能证明的内容拆成三层：
+TensorBuffer-handle 路径。验证覆盖绑定、内核输出和句柄集成。
 
 A、B 两层是 instrumentation test，跑在 arm64 真机上，不是 JVM unit test：项目只构建
 arm64-v8a，x86 模拟器加载不了这些库。因此它们不属于 §12.1 的 171 个测试基线，也不会在只跑
@@ -814,13 +812,14 @@ JVM 的 CI 里执行。
 因为洪泛的提前终止判据用的就是同一个 retention。这是既有的产品级分歧，不是重构造成的，
 已记录在 `NativeConnectivityKernelTest`，留作单独的行为决策。
 
-**C. Handle integration —— 需要真实模型**
+**C. Handle integration —— 使用编译后模型**
 
+- A 在 LiteRT CPU 上运行无权重的 INT8 reshape 图，取得真实输出句柄。语义内核在 NCHW 和
+  NHWC 两种布局下分别与独立预期值比对裁剪后的类别图及统计；
 - B 使用实际打包的 float 模型覆盖两条 float handle 热路径：
   native_score 与 native_bbox_nms_float_handle；
 - 同时保住 §12.3 的两条性能红线；
-- 两条 int8 handle 路径暂时明确记录为 known coverage gap，直到某个 edition 提供合适的
-  int8 model fixture。不要仅为了满足本次重构，就向 A 引入第三方 model weights。
+- INT8 检测输出句柄的模型集成测试由提供相应测试模型的发行版覆盖。
 
 如果以后 B 或其他 edition 正式声明/支持 int8 handle execution，那么对应 model-backed
 integration coverage 就升级为该 edition 的 release gate。
