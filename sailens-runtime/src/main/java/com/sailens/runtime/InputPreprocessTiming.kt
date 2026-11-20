@@ -3,7 +3,12 @@ package com.sailens.runtime
 import android.os.SystemClock
 
 /** Timed only for a profiled model call, on the thread doing its preprocessing. */
-class InputPreprocessTiming(private val clock: () -> Long = SystemClock::elapsedRealtimeNanos) {
+class InputPreprocessTiming(
+    internal val requestDirectNchw: Boolean,
+    private val clock: () -> Long = SystemClock::elapsedRealtimeNanos,
+) {
+    constructor(clock: () -> Long = SystemClock::elapsedRealtimeNanos) : this(false, clock)
+
     var cacheWaitNanos: Long = 0L
         private set
     var cacheAwaitNanos: Long = 0L
@@ -14,6 +19,7 @@ class InputPreprocessTiming(private val clock: () -> Long = SystemClock::elapsed
         private set
     private var nativeYuv: LongArray? = null
     private var resizeFilter: ResizeFilter? = null
+    private var outputLayout: ImageTensorLayout? = null
 
     val jniArrayGetNanos: Long? get() = nativeYuv?.get(0)?.takeIf { it >= 0L }
     val jniArrayReleaseNanos: Long? get() = nativeYuv?.get(1)?.takeIf { it >= 0L }
@@ -21,6 +27,7 @@ class InputPreprocessTiming(private val clock: () -> Long = SystemClock::elapsed
     /** The four JNI isCopy flags in Y, U, V and output order from least to most significant bit. */
     val jniArrayCopyMask: Int? get() = nativeYuv?.get(3)?.takeIf { it >= 0L }?.toInt()
     val nativeResizeFilter: ResizeFilter? get() = resizeFilter.takeIf { nativeYuvBodyNanos != null }
+    val nativeOutputLayout: ImageTensorLayout? get() = outputLayout.takeIf { nativeYuvBodyNanos != null }
 
     internal fun now(): Long = clock()
 
@@ -38,8 +45,9 @@ class InputPreprocessTiming(private val clock: () -> Long = SystemClock::elapsed
         cacheCopyNanos += now() - started
     }
 
-    internal fun beginNativeYuv(filter: ResizeFilter): LongArray {
+    internal fun beginNativeYuv(filter: ResizeFilter, layout: ImageTensorLayout = ImageTensorLayout.NHWC): LongArray {
         resizeFilter = filter
+        outputLayout = layout
         return LongArray(4) { -1L }.also { nativeYuv = it }
     }
 

@@ -144,7 +144,7 @@ def measure(metadata, frames, warmup_seconds, window_seconds=None):
             run = frame.get(label)
             if run is None:
                 continue
-            for field in ("preprocessBackend", "postprocessBackend"):
+            for field in ("preprocessBackend", "postprocessBackend", "nativeOutputLayout"):
                 if field in run:
                     backends[f"{label}.{field}"][run[field]] += 1
             between(f"{label}.dispatch", run, "queuedNanos", "runnerStartedNanos")

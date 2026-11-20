@@ -49,7 +49,7 @@ class NativeRuntimeBindingCoverageTest {
         NativeBinding(
             NativeYuvInputPreprocessor::class.java,
             "nativePreprocessYuvToFloat",
-            "([B[B[BIIIIIIIIIIIFFFFFFI[F[F[J)Z",
+            "([B[B[BIIIIIIIIIIIFFFFFFII[F[F[J)Z",
         ),
         NativeBinding(
             NativeYuvInputPreprocessor::class.java,

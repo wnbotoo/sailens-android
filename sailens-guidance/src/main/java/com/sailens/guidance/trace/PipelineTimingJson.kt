@@ -54,6 +54,7 @@ private fun ModelRunTiming.toJson(): JSONObject = JSONObject().apply {
     put("jniArrayReleaseNanos", input.jniArrayReleaseNanos)
     put("nativeYuvBodyNanos", input.nativeYuvBodyNanos)
     put("nativeResizeFilter", input.nativeResizeFilter?.name)
+    put("nativeOutputLayout", input.nativeOutputLayout?.name)
     put("kotlinHwcToNchwNanos", input.kotlinHwcToNchwNanos)
     input.jniArrayCopyMask?.let { mask ->
         put("jniArrayIsCopy", JSONObject().apply {

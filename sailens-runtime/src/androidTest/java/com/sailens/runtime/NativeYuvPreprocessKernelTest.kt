@@ -116,19 +116,48 @@ class NativeYuvPreprocessKernelTest {
 
         val int8Baseline = ByteArray(size)
         val int8Profiled = ByteArray(size)
-        val int8Timing = InputPreprocessTiming()
+        val int8Timing = InputPreprocessTiming(requestDirectNchw = true)
         assertTrue(preprocessor.preprocessInt8(frame, 90, int8Baseline))
         assertTrue(preprocessor.preprocessInt8(frame, 90, int8Profiled, int8Timing))
         assertArrayEquals(int8Baseline, int8Profiled)
 
         for (timing in listOf(floatTiming, int8Timing)) {
             assertEquals(ResizeFilter.NEAREST, timing.nativeResizeFilter)
+            assertEquals(ImageTensorLayout.NHWC, timing.nativeOutputLayout)
             assertTrue(checkNotNull(timing.jniArrayGetNanos) >= 0L)
             assertTrue(checkNotNull(timing.jniArrayReleaseNanos) >= 0L)
             assertTrue(checkNotNull(timing.nativeYuvBodyNanos) > 0L)
             assertTrue(checkNotNull(timing.kotlinHwcToNchwNanos) > 0L)
             assertTrue(checkNotNull(timing.jniArrayCopyMask) in 0..15)
         }
+    }
+
+    @Test
+    fun directFloatNchwPreservesEveryInputBitAndTheLetterboxMapping() {
+        val landscape = syntheticFrame(width = 87, height = 49, uvPixelStride = 1)
+        val portrait = syntheticFrame(width = 49, height = 87, uvPixelStride = 2)
+        val liveSize = syntheticFrame(width = 1280, height = 720, uvPixelStride = 2)
+        val oddSize = tensorConfig(inputWidth = 63, inputHeight = 51).copy(inputLayout = ImageTensorLayout.NCHW)
+        val square = tensorConfig(inputWidth = 640, inputHeight = 640).copy(
+            inputLayout = ImageTensorLayout.NCHW,
+            mean = Triple(0f, 0f, 0f),
+            std = Triple(1f, 1f, 1f),
+        )
+        for ((frame, config) in listOf(landscape to oddSize, portrait to oddSize, liveSize to square)) {
+            assertFloatLayoutMatchesLegacy(frame, config, expectedNativeLayout = ImageTensorLayout.NCHW)
+        }
+    }
+
+    @Test
+    fun directFloatRequestKeepsNhwcAndBilinearOnTheirExistingNativeLayout() {
+        val frame = syntheticFrame(width = 87, height = 49, uvPixelStride = 2)
+        val config = tensorConfig(inputWidth = 63, inputHeight = 51)
+        assertFloatLayoutMatchesLegacy(frame, config, expectedNativeLayout = ImageTensorLayout.NHWC)
+        assertFloatLayoutMatchesLegacy(
+            frame,
+            config.copy(inputLayout = ImageTensorLayout.NCHW, resizeFilter = ResizeFilter.BILINEAR),
+            expectedNativeLayout = ImageTensorLayout.NHWC,
+        )
     }
 
     @Test
@@ -167,6 +196,36 @@ class NativeYuvPreprocessKernelTest {
     // ---------------------------------------------------------------------------------------
     // Fixtures
     // ---------------------------------------------------------------------------------------
+
+    private fun assertFloatLayoutMatchesLegacy(
+        frame: ImageFrame,
+        config: ModelTensorConfig,
+        expectedNativeLayout: ImageTensorLayout,
+    ) {
+        val preprocessor = NativeYuvInputPreprocessor(config, ModelInputQuantization())
+        val size = config.inputWidth * config.inputHeight * 3
+        val legacy = FloatArray(size)
+        val candidate = FloatArray(size)
+        for (rotation in listOf(0, 90, 180, 270)) {
+            val legacyTiming = InputPreprocessTiming()
+            assertTrue(preprocessor.preprocessFloat(frame, rotation, legacy, legacyTiming))
+            val legacyMapping = preprocessor.imageMapping(frame, rotation)
+            assertEquals(ImageTensorLayout.NHWC, legacyTiming.nativeOutputLayout)
+
+            candidate.fill(Float.NaN)
+            val candidateTiming = InputPreprocessTiming(requestDirectNchw = true)
+            assertTrue(preprocessor.preprocessFloat(frame, rotation, candidate, candidateTiming))
+            assertEquals(expectedNativeLayout, candidateTiming.nativeOutputLayout)
+            assertEquals(config.inputLayout != expectedNativeLayout, candidateTiming.kotlinHwcToNchwNanos != null)
+            assertEquals(legacyMapping, preprocessor.imageMapping(frame, rotation))
+            val mismatch = legacy.indices.firstOrNull { legacy[it].toRawBits() != candidate[it].toRawBits() }
+            assertEquals(
+                "${config.inputLayout} ${config.resizeFilter}, ${frame.width}x${frame.height}, rotation $rotation",
+                null,
+                mismatch,
+            )
+        }
+    }
 
     private fun tensorConfig(inputWidth: Int, inputHeight: Int) = ModelTensorConfig(
         inputWidth = inputWidth,

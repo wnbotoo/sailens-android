@@ -13,7 +13,7 @@ class ModelRunTiming(
     val queuedNanos: Long,
     internal val pipelineTimingMode: PipelineTimingMode = PipelineTimingMode.RACE,
 ) {
-    val input = InputPreprocessTiming()
+    val input = InputPreprocessTiming(requestDirectNchw = pipelineTimingMode == PipelineTimingMode.SEM_NCHW)
     internal val nativeOutputAccess = LongArray(2)
 
     var runnerStartedNanos: Long? = null

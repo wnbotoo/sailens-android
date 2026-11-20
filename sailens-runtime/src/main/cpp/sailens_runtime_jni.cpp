@@ -6,11 +6,17 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <limits>
+#include <type_traits>
 #include <vector>
+
+#include "tensor_layout.h"
 
 constexpr const char* kLogTag = "SailensRuntimeJni";
 
 namespace {
+
+constexpr int kRgbChannels = 3;
 
 struct YuvPlane {
     const jbyte* data;
@@ -114,7 +120,7 @@ static RgbPixel sampleYuvAsRgbNearest(
     return yuvToRgb(yValue, uValue, vValue);
 }
 
-template <typename Writer>
+template <bool Planar = false, typename Writer>
 static bool preprocessYuv(
         const YuvPlane& yPlane,
         const YuvPlane& uPlane,
@@ -161,29 +167,30 @@ static bool preprocessYuv(
     mapping[4] = static_cast<float>(activeEndX);
     mapping[5] = static_cast<float>(activeStartY);
     mapping[6] = static_cast<float>(activeEndY);
-    const float padR = (0.0f - meanR) / stdR;
-    const float padG = (0.0f - meanG) / stdG;
-    const float padB = (0.0f - meanB) / stdB;
+    const RgbPixel pad{(0.0f - meanR) / stdR, (0.0f - meanG) / stdG, (0.0f - meanB) / stdB};
     const bool useNearestResize = resizeFilter == 0;
 
-    auto writePadPixel = [&writer, padR, padG, padB](int& outIndex) {
-        writer(outIndex++, padR);
-        writer(outIndex++, padG);
-        writer(outIndex++, padB);
+    constexpr int pixelStride = Planar ? 1 : kRgbChannels;
+    const int channelStride = Planar ? targetWidth * targetHeight : 1;
+    const auto writePixel = [&writer, channelStride](int& outIndex, const RgbPixel& rgb) {
+        writer(outIndex, rgb.r);
+        writer(outIndex + channelStride, rgb.g);
+        writer(outIndex + 2 * channelStride, rgb.b);
+        outIndex += pixelStride;
     };
 
     for (int y = 0; y < targetHeight; ++y) {
-        int outIndex = y * targetWidth * 3;
+        int outIndex = y * targetWidth * pixelStride;
 
         if (y < activeStartY || y >= activeEndY) {
             for (int x = 0; x < targetWidth; ++x) {
-                writePadPixel(outIndex);
+                writePixel(outIndex, pad);
             }
             continue;
         }
 
         for (int x = 0; x < activeStartX; ++x) {
-            writePadPixel(outIndex);
+            writePixel(outIndex, pad);
         }
 
         const float rotatedY = (static_cast<float>(y) - padY + 0.5f) / scale - 0.5f;
@@ -212,13 +219,15 @@ static bool preprocessYuv(
             const RgbPixel pixel = useNearestResize
                     ? sampleYuvAsRgbNearest(yPlane, uPlane, vPlane, sourceX, sourceY)
                     : sampleYuvAsRgb(yPlane, uPlane, vPlane, sourceX, sourceY);
-            writer(outIndex++, (pixel.r / 255.0f - meanR) / stdR);
-            writer(outIndex++, (pixel.g / 255.0f - meanG) / stdG);
-            writer(outIndex++, (pixel.b / 255.0f - meanB) / stdB);
+            writePixel(outIndex, {
+                    (pixel.r / 255.0f - meanR) / stdR,
+                    (pixel.g / 255.0f - meanG) / stdG,
+                    (pixel.b / 255.0f - meanB) / stdB,
+            });
         }
 
         for (int x = activeEndX; x < targetWidth; ++x) {
-            writePadPixel(outIndex);
+            writePixel(outIndex, pad);
         }
     }
 
@@ -289,6 +298,7 @@ nativePreprocessYuvToFloat(
         jfloat stdG,
         jfloat stdB,
         jint resizeFilter,
+        jint outputLayout,
         jfloatArray output,
         jfloatArray mapping,
         jlongArray timingNanos) {
@@ -299,7 +309,13 @@ nativePreprocessYuvToFloat(
         vRowStride <= 0 || vPixelStride <= 0 ||
         sourceWidth <= 0 || sourceHeight <= 0 ||
         targetWidth <= 0 || targetHeight <= 0 ||
-        env->GetArrayLength(output) != targetWidth * targetHeight * 3) {
+        !sailens::isValidTensorLayout(outputLayout) ||
+        (outputLayout == sailens::kTensorLayoutNchw && resizeFilter != 0)) {
+        return JNI_FALSE;
+    }
+    const jlong targetPixels = static_cast<jlong>(targetWidth) * targetHeight;
+    if (targetPixels > std::numeric_limits<jsize>::max() / kRgbChannels ||
+        env->GetArrayLength(output) != targetPixels * kRgbChannels) {
         return JNI_FALSE;
     }
 
@@ -348,26 +364,16 @@ nativePreprocessYuvToFloat(
 
     float imageMapping[7];
     const jlong bodyStarted = timing.now();
-    const bool success = preprocessYuv(
-            yPlane,
-            uPlane,
-            vPlane,
-            sourceWidth,
-            sourceHeight,
-            rotationDegrees,
-            targetWidth,
-            targetHeight,
-            meanR,
-            meanG,
-            meanB,
-            stdR,
-            stdG,
-            stdB,
-            resizeFilter,
-            imageMapping,
-            [outputData](int index, float value) {
-                outputData[index] = value;
-            });
+    const auto preprocess = [&](auto planar) {
+        return preprocessYuv<decltype(planar)::value>(
+                yPlane, uPlane, vPlane, sourceWidth, sourceHeight, rotationDegrees,
+                targetWidth, targetHeight, meanR, meanG, meanB, stdR, stdG, stdB,
+                resizeFilter, imageMapping,
+                [outputData](int index, float value) { outputData[index] = value; });
+    };
+    const bool success = outputLayout == sailens::kTensorLayoutNchw
+            ? preprocess(std::true_type{})
+            : preprocess(std::false_type{});
 
     const jlong releasing = timing.now();
     env->ReleaseFloatArrayElements(output, outputData, success ? 0 : JNI_ABORT);
@@ -549,7 +555,7 @@ nativeQuantizeFloatToInt8(
 
 const JNINativeMethod kYuvInputPreprocessorMethods[] = {
         {"nativePreprocessYuvToFloat",
-         "([B[B[BIIIIIIIIIIIFFFFFFI[F[F[J)Z",
+         "([B[B[BIIIIIIIIIIIFFFFFFII[F[F[J)Z",
          reinterpret_cast<void*>(nativePreprocessYuvToFloat)},
         {"nativePreprocessYuvToInt8",
          "([B[B[BIIIIIIIIIIIFFFFFFIFI[B[F[J)Z",

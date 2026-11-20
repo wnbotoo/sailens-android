@@ -50,7 +50,7 @@ class SemanticScoreTiming(sampleOffset: Int? = null, useNeonArgmax: Boolean = fa
         private const val REQUEST_NEON = -2L
 
         fun forFrame(frameId: Long, mode: PipelineTimingMode): SemanticScoreTiming = when (mode) {
-            PipelineTimingMode.SEM_SIMD -> SemanticScoreTiming(useNeonArgmax = true)
+            PipelineTimingMode.SEM_SIMD, PipelineTimingMode.SEM_NCHW -> SemanticScoreTiming(useNeonArgmax = true)
             PipelineTimingMode.SEM_SCALAR -> SemanticScoreTiming()
             PipelineTimingMode.RACE, PipelineTimingMode.SEM_FIRST -> {
                 val offset = if (frameId % FRAME_SAMPLE_INTERVAL == 0L) frameId.mod(PIXEL_SAMPLE_STRIDE) else null

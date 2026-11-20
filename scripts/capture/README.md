@@ -101,3 +101,9 @@ NEON for finite NCHW FLOAT32 LiteRT output handles with at least four content co
 Non-finite scores use the scalar kernel. Trace rows report the actual kernel in
 `argmaxImplementation`. Verify it in
 `backends["sem.score.argmaxImplementation"]` before comparing the arms.
+
+For the native NCHW input A/B, use `sem-simd, sem-nchw, sem-nchw, sem-simd`. Both modes
+use the preferred semantic producer and the same argmax selection. `sem-nchw` writes
+NEAREST FLOAT32 NCHW tensors in the native YUV preprocessor, so no Kotlin transpose follows
+that native call. Check the producer's `nativeOutputLayout` counts and compare total
+preprocessing time as well as `nativeNearestBody` and `kotlinHwcToNchw`.

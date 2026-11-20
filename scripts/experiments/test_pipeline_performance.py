@@ -36,6 +36,7 @@ class PipelinePerformanceTest(unittest.TestCase):
             "jniArrayReleaseNanos": 3_000_000,
             "nativeYuvBodyNanos": 8_000_000,
             "nativeResizeFilter": "NEAREST",
+            "nativeOutputLayout": "NHWC",
             "kotlinHwcToNchwNanos": 4_000_000,
             "jniArrayIsCopy": {"y": True, "u": False, "v": False, "output": True},
             "inferenceReturnedNanos": 1_025_000_000,
@@ -104,6 +105,7 @@ class PipelinePerformanceTest(unittest.TestCase):
         self.assertEqual(report["jni_copy_counts"]["sem.u"], {"direct": 1})
         self.assertEqual(timing["sem.score.fusedKernel"]["p95"], 4.8)
         self.assertEqual(report["backends"]["sem.score.argmaxImplementation"], {"scalar": 1})
+        self.assertEqual(report["backends"]["sem.nativeOutputLayout"], {"NHWC": 1})
         self.assertEqual(timing["sem.score.other"]["p95"], 0.5)
         self.assertEqual(timing["sem.score.sampledKernel"]["n"], 1)
         self.assertNotIn("sem.score.unsampledKernel", timing)

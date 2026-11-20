@@ -148,7 +148,7 @@ class ProcessFrameUseCase(
         // det 以异常报错（sem 用 Result）。在这里收成 Result：单帧 det 失败应当和 sem 失败一样被计为
         // 一帧失败、交给上层按连续失败次数处置，而不是直接冲垮整条 flow。
         val obstacleDeferred = obstacleRun?.let { run ->
-            val runTiming = timing?.let { ModelRunTiming(it.now()) }
+            val runTiming = timing?.let { ModelRunTiming(it.now(), it.mode) }
             timing?.detectionRun = runTiming
             async {
                 try {

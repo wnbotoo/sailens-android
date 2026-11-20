@@ -20,4 +20,5 @@ public enum class PipelineTimingMode(
     SEM_FIRST("sem-first", true),
     SEM_SCALAR("sem-scalar", true),
     SEM_SIMD("sem-simd", true),
+    SEM_NCHW("sem-nchw", true),
 }

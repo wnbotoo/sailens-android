@@ -36,11 +36,14 @@ internal class NativeYuvInputPreprocessor(
         val expectedSize = config.inputWidth * config.inputHeight * CHANNELS_RGB
         if (outputArray.size != expectedSize) return false
 
-        val nativeOutput = when (config.inputLayout) {
-            ImageTensorLayout.NHWC -> outputArray
-            ImageTensorLayout.NCHW -> nhwcFloatScratch.withMinSize(expectedSize).also {
-                nhwcFloatScratch = it
-            }
+        val directNchw = timing?.requestDirectNchw == true &&
+            config.inputLayout == ImageTensorLayout.NCHW && config.resizeFilter == ResizeFilter.NEAREST
+        val nativeLayout = if (directNchw) ImageTensorLayout.NCHW else ImageTensorLayout.NHWC
+        val transpose = config.inputLayout != nativeLayout
+        val nativeOutput = if (transpose) {
+            nhwcFloatScratch.withMinSize(expectedSize).also { nhwcFloatScratch = it }
+        } else {
+            outputArray
         }
 
         val success = runCatching {
@@ -66,12 +69,13 @@ internal class NativeYuvInputPreprocessor(
                 stdG = config.std.second,
                 stdB = config.std.third,
                 resizeFilter = config.resizeFilter.nativeValue,
+                outputLayout = nativeLayout.nativeValue,
                 output = nativeOutput,
                 mapping = mapping,
-                timingNanos = timing?.beginNativeYuv(config.resizeFilter),
+                timingNanos = timing?.beginNativeYuv(config.resizeFilter, nativeLayout),
             )
         }.getOrDefault(false)
-        if (success && config.inputLayout == ImageTensorLayout.NCHW) {
+        if (success && transpose) {
             val transposing = timing?.now() ?: 0L
             nativeOutput.copyHwcToNchw(
                 output = outputArray,
@@ -187,6 +191,7 @@ internal class NativeYuvInputPreprocessor(
         stdG: Float,
         stdB: Float,
         resizeFilter: Int,
+        outputLayout: Int,
         output: FloatArray,
         mapping: FloatArray,
         timingNanos: LongArray?,
