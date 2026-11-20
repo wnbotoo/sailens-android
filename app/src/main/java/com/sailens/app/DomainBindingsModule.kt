@@ -192,6 +192,7 @@ val domainBindingsModule = module {
             groundRecognitionAnalyzer = get(),
             cooldownManager = get(),
             logService = get(),
+            preprocessCache = get(),
         )
     }
     // Which VLM engine an edition ships is an edition decision (architecture.md §6.11), so the

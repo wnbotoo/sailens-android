@@ -64,6 +64,9 @@ class PipelinePerformanceTest(unittest.TestCase):
             "cacheWaitNanos": 20_000_000,
             "cacheAwaitNanos": 19_500_000,
             "cacheCopyNanos": 1_000_000,
+            "inferenceReturnedNanos": 1_026_000_000,
+            "outputCopyNanos": 3_000_000,
+            "postprocessFinishedNanos": 1_033_000_000,
         }
         first["decidedNanos"] = 1_040_000_000
         failed["sem"] = {
@@ -72,6 +75,12 @@ class PipelinePerformanceTest(unittest.TestCase):
             "cacheWaitNanos": 0,
             "cacheCopyNanos": 0,
             "inferenceReturnedNanos": 1_090_000_000,
+        }
+        failed["det"] = {
+            "inferenceReturnedNanos": 1_095_000_000,
+            "outputLockNanos": 2_000_000,
+            "outputCopyNanos": 4_000_000,
+            "postprocessFinishedNanos": 1_107_000_000,
         }
         reused["decidedNanos"] = 1_125_000_000
         source = {key: first[key] for key in ("frameId", "receivedNanos", "cameraTimestampNanos", "cameraClock")}
@@ -99,6 +108,12 @@ class PipelinePerformanceTest(unittest.TestCase):
         self.assertEqual(timing["det.cacheMonitorWait"]["p95"], 0.5)
         self.assertEqual(timing["det.cacheCopy"]["p95"], 1.0)
         self.assertEqual(timing["det.preprocessOther"]["p95"], 0.0)
+        self.assertEqual(timing["det.outputLock"]["n"], 1)
+        self.assertEqual(timing["det.outputCopy"]["n"], 2)
+        self.assertNotIn("det.outputUnlock", timing)
+        self.assertNotIn("sem.outputCopy", timing)
+        self.assertEqual(timing["det.outputAccess"]["p95"], 6.0)
+        self.assertEqual(timing["det.postprocess"]["p95"], 6.0)
         self.assertNotIn("det.nativeNearestBody", timing)
         self.assertNotIn("det.kotlinHwcToNchw", timing)
         self.assertEqual(report["jni_copy_counts"]["sem.output"], {"copy": 1})

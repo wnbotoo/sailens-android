@@ -178,9 +178,9 @@ def measure(metadata, frames, warmup_seconds, window_seconds=None):
             if "postprocessFinishedNanos" in run:
                 output_access = 0
                 for field in ("outputLock", "outputUnlock", "outputCopy"):
-                    duration = run.get(f"{field}Nanos", 0)
-                    sample(f"{label}.{field}", duration)
-                    output_access += duration
+                    if (duration := run.get(f"{field}Nanos")) is not None:
+                        sample(f"{label}.{field}", duration)
+                        output_access += duration
                 sample(f"{label}.outputAccess", output_access)
                 duration = run["postprocessFinishedNanos"] - run["inferenceReturnedNanos"]
                 postprocess = duration - output_access

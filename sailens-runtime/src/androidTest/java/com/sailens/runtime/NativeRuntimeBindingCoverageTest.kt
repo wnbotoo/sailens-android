@@ -1,6 +1,7 @@
 package com.sailens.runtime
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
@@ -114,6 +115,34 @@ class NativeRuntimeBindingCoverageTest {
                 fail("${binding.key} rejected its guard-clause arguments instead of returning: $cause")
             }
         }
+    }
+
+    @Test
+    fun aShortTimingArrayDoesNotPreventPreprocessing() {
+        nativeLibraryLoads()
+        val binding = expectedBindings.single { it.methodName == "nativePreprocessYuvToFloat" }
+        val method = binding.owner.declaredNativeMethods().single { it.name == binding.methodName }
+        method.isAccessible = true
+        val y = ByteArray(4) { 16 }
+        val uv = byteArrayOf(128.toByte())
+        val output = FloatArray(12) { -1f }
+        val mapping = FloatArray(7)
+        val timing = longArrayOf(-1L)
+
+        val success = method.invoke(
+            binding.receiver(),
+            y, uv, uv,
+            2, 1, 1, 1, 1, 1,
+            2, 2, 0, 2, 2,
+            0f, 0f, 0f, 1f, 1f, 1f,
+            0, ImageTensorLayout.NHWC.nativeValue,
+            output, mapping, timing,
+        )
+
+        assertEquals(true, success)
+        assertArrayEquals(FloatArray(12), output, 0f)
+        assertEquals(1f, mapping[0], 0f)
+        assertArrayEquals(longArrayOf(-1L), timing)
     }
 
     private data class NativeBinding(

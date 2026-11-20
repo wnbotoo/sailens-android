@@ -247,7 +247,9 @@ static bool preprocessYuv(
 
 class YuvPreprocessTiming {
 public:
-    explicit YuvPreprocessTiming(jlongArray destination) : destination_(destination) {}
+    YuvPreprocessTiming(JNIEnv* env, jlongArray destination)
+        : destination_(destination != nullptr && env->GetArrayLength(destination) >= kSampleSize
+                      ? destination : nullptr) {}
 
     jlong now() const {
         if (destination_ == nullptr) return 0;
@@ -265,10 +267,11 @@ public:
         // The flags follow the acquisitions in Y, U, V, output order.
         const jlong copyMask = copied_[0] | (copied_[1] << 1) | (copied_[2] << 2) | (copied_[3] << 3);
         const jlong sample[] = {getNanos, releaseNanos, bodyNanos, copyMask};
-        env->SetLongArrayRegion(destination_, 0, 4, sample);
+        env->SetLongArrayRegion(destination_, 0, kSampleSize, sample);
     }
 
 private:
+    static constexpr jsize kSampleSize = 4;
     jlongArray destination_;
     jboolean copied_[4]{};
 };
@@ -319,7 +322,7 @@ nativePreprocessYuvToFloat(
         return JNI_FALSE;
     }
 
-    YuvPreprocessTiming timing(timingNanos);
+    YuvPreprocessTiming timing(env, timingNanos);
     const jlong getting = timing.now();
     jbyte* yData = env->GetByteArrayElements(y, timing.isCopy(0));
     jbyte* uData = env->GetByteArrayElements(u, timing.isCopy(1));
@@ -380,8 +383,10 @@ nativePreprocessYuvToFloat(
     env->ReleaseByteArrayElements(v, vData, JNI_ABORT);
     env->ReleaseByteArrayElements(u, uData, JNI_ABORT);
     env->ReleaseByteArrayElements(y, yData, JNI_ABORT);
-    timing.record(env, getNanos, timing.now() - releasing, releasing - bodyStarted);
-    if (success) env->SetFloatArrayRegion(mapping, 0, 7, imageMapping);
+    if (success) {
+        timing.record(env, getNanos, timing.now() - releasing, releasing - bodyStarted);
+        env->SetFloatArrayRegion(mapping, 0, 7, imageMapping);
+    }
     return success ? JNI_TRUE : JNI_FALSE;
 }
 
@@ -427,7 +432,7 @@ nativePreprocessYuvToInt8(
         return JNI_FALSE;
     }
 
-    YuvPreprocessTiming timing(timingNanos);
+    YuvPreprocessTiming timing(env, timingNanos);
     const jlong getting = timing.now();
     jbyte* yData = env->GetByteArrayElements(y, timing.isCopy(0));
     jbyte* uData = env->GetByteArrayElements(u, timing.isCopy(1));
@@ -500,8 +505,10 @@ nativePreprocessYuvToInt8(
     env->ReleaseByteArrayElements(v, vData, JNI_ABORT);
     env->ReleaseByteArrayElements(u, uData, JNI_ABORT);
     env->ReleaseByteArrayElements(y, yData, JNI_ABORT);
-    timing.record(env, getNanos, timing.now() - releasing, releasing - bodyStarted);
-    if (success) env->SetFloatArrayRegion(mapping, 0, 7, imageMapping);
+    if (success) {
+        timing.record(env, getNanos, timing.now() - releasing, releasing - bodyStarted);
+        env->SetFloatArrayRegion(mapping, 0, 7, imageMapping);
+    }
     return success ? JNI_TRUE : JNI_FALSE;
 }
 

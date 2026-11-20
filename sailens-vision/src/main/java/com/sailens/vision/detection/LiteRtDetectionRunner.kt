@@ -75,6 +75,10 @@ class LiteRtDetectionRunner(
     private var detectionBufferHandle: Long = 0L
     private var hasLoggedTensorInfo: Boolean = false
 
+    // Publish the resolved float preprocessor to the producer selector as a single reference.
+    @Volatile
+    private var sharedFloatPreprocessor: ModelInputPreprocessor? = null
+
     @Volatile
     private var _isInitialized = false
 
@@ -88,6 +92,7 @@ class LiteRtDetectionRunner(
             cleanupInternal()
             try {
                 initializeSession()
+                sharedFloatPreprocessor = processor.takeIf { inputDataType == ModelInputDataType.FLOAT32 }
                 _isInitialized = true
                 logService.info(TAG, "Detection model initialized with ${session?.accelerator}")
             } catch (error: CancellationException) {
@@ -154,10 +159,8 @@ class LiteRtDetectionRunner(
         method.invoke(buffer) as Long
     }.getOrDefault(0L)
 
-    fun sharedFloatInput(frame: ImageFrame): InputPreprocessCache.SharedFloatInput? {
-        if (inputDataType != ModelInputDataType.FLOAT32) return null
-        return processor?.sharedFloatInput(frame)
-    }
+    fun sharedFloatInput(frame: ImageFrame): InputPreprocessCache.SharedFloatInput? =
+        sharedFloatPreprocessor?.sharedFloatInput(frame)
 
     suspend fun detect(frame: ImageFrame, timing: ModelRunTiming? = null): DetectionOutput {
         if (!_isInitialized) return DetectionOutput(emptyList())
@@ -471,6 +474,7 @@ class LiteRtDetectionRunner(
     }
 
     private fun cleanupInternal() {
+        sharedFloatPreprocessor = null
         processor?.close()
         processor = null
         cachedFloatInput = FloatArray(0)

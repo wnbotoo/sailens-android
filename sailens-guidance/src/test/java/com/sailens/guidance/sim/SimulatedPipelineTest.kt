@@ -4,6 +4,10 @@ import com.sailens.core.frame.ImageFrame
 import com.sailens.guidance.model.analysis.FrameQuality
 import com.sailens.guidance.processor.analysis.FrameQualityAnalyzer
 import com.sailens.guidance.model.scene.SceneResult
+import com.sailens.runtime.InputPreprocessBackend
+import com.sailens.runtime.InputPreprocessCache
+import com.sailens.runtime.ModelInputQuantization
+import com.sailens.runtime.ModelTensorConfig
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -17,6 +21,7 @@ import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
@@ -125,12 +130,26 @@ class SimulatedPipelineTest {
     }
 
     @Test
-    fun `stopping releases both models once`() = runBlocking {
-        val pipeline = SimulatedPipeline(scenario)
+    fun `releasing both models drops their shared input tensors`() = runBlocking {
+        val cache = InputPreprocessCache()
+        val pipeline = SimulatedPipeline(scenario, preprocessCache = cache)
+        val frame = pipeline.cameraFrame(0)
+        val config = ModelTensorConfig(
+            inputWidth = 1, inputHeight = 1, outputWidth = 1, outputHeight = 1, outputChannels = 1,
+            mean = Triple(0f, 0f, 0f), std = Triple(1f, 1f, 1f),
+        )
+        val key = InputPreprocessCache.Key.from(frame, frame.rotationDegrees, config)
+        val quantization = ModelInputQuantization()
+        cache.storeFloatInput(key, FloatArray(3), InputPreprocessBackend.NATIVE_YUV)
+        cache.storeInt8Input(key, quantization, ByteArray(3), InputPreprocessBackend.NATIVE_YUV)
+
         pipeline.stop()
         pipeline.stop.release()
+
         assertEquals(1, pipeline.segmentation.releases.get())
         assertEquals(1, pipeline.detector.releases.get())
+        assertNull(cache.copyFloatInput(key, FloatArray(3)))
+        assertNull(cache.copyInt8Input(key, quantization, ByteArray(3)))
     }
 
     @Test

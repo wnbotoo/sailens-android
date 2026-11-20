@@ -46,8 +46,10 @@ Stop Guidance so the session summary is written before pulling the trace.
 ```sh
 adb shell "run-as com.sailens sh -c 'mkdir -p files && echo race > files/pipeline-timing'"
 adb shell am force-stop com.sailens
-# Launch the app, run Guidance, then stop Guidance.
+# Launch the app and run Guidance.
 adb logcat -d -s Camera:I
+adb shell dumpsys media.camera > camera-service.txt
+# Stop Guidance.
 adb exec-out run-as com.sailens cat files/traces/trace_SESSION_ID.jsonl > trace.jsonl
 python scripts/experiments/pipeline_performance.py trace.jsonl --warmup 15
 ```
@@ -55,6 +57,7 @@ python scripts/experiments/pipeline_performance.py trace.jsonl --warmup 15
 Use `com.sailens.reference` for the platform reference host. Remove the marker and restart the
 process to turn timing off. The `CameraX negotiated` log reports the bound sizes for analysis and
 preview. The trace report shows the buffer dimensions delivered to Guidance.
+The camera service dump taken during the run shows the active preview and YUV streams.
 
 Use `race` for the existing order and `sem-first` for the preferred producer, with the same
 APK and model files. Alternate arms in `race, sem-first, sem-first, race` order under the same

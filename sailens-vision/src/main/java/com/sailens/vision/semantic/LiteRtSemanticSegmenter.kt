@@ -47,6 +47,8 @@ class LiteRtSemanticSegmenter<R>(
     @OptIn(ExperimentalCoroutinesApi::class)
     private val singleThreadDispatcher = Dispatchers.IO.limitedParallelism(1)
 
+    // Producer selection reads the runner's input specification outside the model dispatcher.
+    @Volatile
     private var runner: SegmentationRunner<R>? = null
 
     @Volatile
@@ -59,9 +61,7 @@ class LiteRtSemanticSegmenter<R>(
         if (_isInitialized) return
 
         withContext(singleThreadDispatcher) {
-            runner?.cleanup()
-            runner = null
-            _isInitialized = false
+            cleanupRunner()
 
             try {
                 val initializedRunner = createRunner()
@@ -114,10 +114,15 @@ class LiteRtSemanticSegmenter<R>(
 
     suspend fun release() {
         withContext(singleThreadDispatcher) {
-            runner?.cleanup()
-            runner = null
-            _isInitialized = false
+            cleanupRunner()
         }
+    }
+
+    private fun cleanupRunner() {
+        val releasedRunner = runner
+        runner = null
+        _isInitialized = false
+        releasedRunner?.cleanup()
     }
 
     private fun createRunner(): SegmentationRunner<R> {

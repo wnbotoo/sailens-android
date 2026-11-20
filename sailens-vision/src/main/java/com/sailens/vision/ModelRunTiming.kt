@@ -14,7 +14,7 @@ class ModelRunTiming(
     internal val pipelineTimingMode: PipelineTimingMode = PipelineTimingMode.RACE,
 ) {
     val input = InputPreprocessTiming(requestDirectNchw = pipelineTimingMode == PipelineTimingMode.SEM_NCHW)
-    internal val nativeOutputAccess = LongArray(2)
+    internal val nativeOutputAccess = LongArray(2) { -1L }
 
     var runnerStartedNanos: Long? = null
         internal set
@@ -37,8 +37,8 @@ class ModelRunTiming(
     var semanticScoreTiming: SemanticScoreTiming? = null
         internal set
 
-    val outputLockNanos: Long get() = nativeOutputAccess[0]
-    val outputUnlockNanos: Long get() = nativeOutputAccess[1]
+    val outputLockNanos: Long? get() = nativeOutputAccess[0].takeIf { it >= 0L }
+    val outputUnlockNanos: Long? get() = nativeOutputAccess[1].takeIf { it >= 0L }
 
     internal fun startRunner() {
         runnerStartedNanos = now()

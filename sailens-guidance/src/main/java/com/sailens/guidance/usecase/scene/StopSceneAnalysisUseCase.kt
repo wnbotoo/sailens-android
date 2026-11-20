@@ -13,6 +13,7 @@ import com.sailens.guidance.repository.ObstacleProvider
 import com.sailens.guidance.repository.PerceptionRepository
 import com.sailens.core.log.LogService
 import com.sailens.guidance.usecase.perception.ProcessFrameUseCase
+import com.sailens.runtime.InputPreprocessCache
 
 /**
  * 停止导航用例
@@ -31,6 +32,7 @@ class StopSceneAnalysisUseCase(
     private val groundRecognitionAnalyzer: GroundRecognitionAnalyzer,
     private val cooldownManager: CooldownManager,
     private val logService: LogService,
+    private val preprocessCache: InputPreprocessCache? = null,
 ) {
     operator fun invoke() {
         logService.info("Navigation", "Navigation stopped")
@@ -51,8 +53,12 @@ class StopSceneAnalysisUseCase(
     }
 
     suspend fun release() {
-        perceptionRepository.release()
-        realtimeObstacleProvider.release()
+        try {
+            perceptionRepository.release()
+            realtimeObstacleProvider.release()
+        } finally {
+            preprocessCache?.clear()
+        }
         logService.info("Navigation", "Resources released")
     }
 }

@@ -192,7 +192,7 @@ private:
 
     JNIEnv* env_;
     jlongArray destination_;
-    jlong durations_[2]{};
+    jlong durations_[2]{-1, -1};
 };
 
 }  // namespace sailens

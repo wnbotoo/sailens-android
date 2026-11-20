@@ -78,9 +78,9 @@ class InputPreprocessCache {
                 val waiting = timing?.now() ?: 0L
                 try {
                     while (claimedKey == key || reservedProducer?.key == key) {
-                        val remainingMs = (deadline - System.nanoTime()) / 1_000_000L
-                        if (remainingMs <= 0) break
-                        (this as Object).wait(remainingMs)
+                        val remainingNanos = deadline - System.nanoTime()
+                        if (remainingNanos <= 0L) break
+                        (this as Object).wait(remainingNanos / 1_000_000L, (remainingNanos % 1_000_000L).toInt())
                     }
                 } finally {
                     timing?.awaitedProducerSince(waiting)

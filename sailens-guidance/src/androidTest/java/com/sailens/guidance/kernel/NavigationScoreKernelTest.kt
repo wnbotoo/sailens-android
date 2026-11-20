@@ -215,21 +215,35 @@ class NavigationScoreKernelTest {
         val fixture = File.createTempFile("semantic-float-", ".tflite", cache)
         val wide = SemanticContentRegion(x = 3, y = 2, width = 33, height = HEIGHT - 4)
         val narrow = wide.copy(width = 3)
+        data class ScoreOverride(val x: Int, val channel: Int, val value: Float)
+        val cases = listOf(
+            null,
+            ScoreOverride(wide.x + 2, 0, Float.NaN),
+            ScoreOverride(wide.x + wide.width - 1, 8, Float.POSITIVE_INFINITY),
+            ScoreOverride(wide.x + 2, 8, Float.NEGATIVE_INFINITY),
+            ScoreOverride(wide.x + 2, 8, Float.NaN),
+            ScoreOverride(wide.x - 1, 8, Float.NaN),
+            ScoreOverride(wide.x + wide.width, 8, Float.POSITIVE_INFINITY),
+        )
         try {
             fixture.writeBytes(Base64.decode(FLOAT_RESHAPE_GRAPH, Base64.DEFAULT))
             CompiledModel.create(fixture.absolutePath, CompiledModel.Options(Accelerator.CPU)).use { model ->
                 model.createInputBuffers().single().use { input ->
                     model.createOutputBuffers().single().use { output ->
                         for (layout in ImageTensorLayout.entries) {
-                            for (nonFiniteColumn in listOf(null, wide.x + 2, wide.x + wide.width - 1)) {
+                            for (nonFinite in cases) {
                                 val scores = syntheticScores(layout)
-                                setArgmaxEdgeCases(scores, layout, wide, nonFiniteColumn)
+                                setTiedScores(scores, layout, wide)
+                                if (nonFinite != null) {
+                                    val pixel = wide.y * WIDTH + nonFinite.x
+                                    scores[scoreIndex(pixel, nonFinite.channel, WIDTH * HEIGHT, layout)] = nonFinite.value
+                                }
                                 input.writeFloat(scores)
                                 model.run(listOf(input), listOf(output))
                                 val expected = referenceArgmax(scores, layout)
                                 for (content in listOf(wide, narrow)) {
-                                    val containsNonFinite = nonFiniteColumn != null &&
-                                        nonFiniteColumn in content.x until content.x + content.width
+                                    val containsNonFinite = nonFinite != null &&
+                                        nonFinite.x in content.x until content.x + content.width
                                     assertFloatHandleKernel(
                                         handleOf(output), layout, content, expected.takeUnless { containsNonFinite },
                                     )
@@ -308,11 +322,10 @@ class NavigationScoreKernelTest {
     // Fixtures
     // ---------------------------------------------------------------------------------------
 
-    private fun setArgmaxEdgeCases(
+    private fun setTiedScores(
         scores: FloatArray,
         layout: ImageTensorLayout,
         content: SemanticContentRegion,
-        nonFiniteColumn: Int?,
     ) {
         fun setPixel(x: Int, score: (Int) -> Float) {
             val pixel = content.y * WIDTH + x
@@ -325,9 +338,6 @@ class NavigationScoreKernelTest {
             setPixel(x) { if (it == 1 || it == 8) 2f else -1f }
         }
         setPixel(content.x + 1) { if (it == 0) -0f else 0f }
-        if (nonFiniteColumn != null) {
-            setPixel(nonFiniteColumn) { if (it == 0) Float.NaN else Float.POSITIVE_INFINITY }
-        }
     }
 
     private fun assertFloatHandleKernel(

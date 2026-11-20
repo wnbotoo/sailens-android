@@ -7,6 +7,8 @@ import com.sailens.core.frame.Yuv420FrameData
 import com.sailens.core.frame.YuvPlaneData
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -129,6 +131,28 @@ class NativeYuvPreprocessKernelTest {
             assertTrue(checkNotNull(timing.nativeYuvBodyNanos) > 0L)
             assertTrue(checkNotNull(timing.kotlinHwcToNchwNanos) > 0L)
             assertTrue(checkNotNull(timing.jniArrayCopyMask) in 0..15)
+        }
+    }
+
+    @Test
+    fun rejectedYuvConversionDoesNotReportANativeResult() {
+        val frame = syntheticFrame(width = 8, height = 8, uvPixelStride = 1)
+        val config = tensorConfig(inputWidth = 8, inputHeight = 8).copy(std = Triple(0f, 1f, 1f))
+        val preprocessor = NativeYuvInputPreprocessor(config, ModelInputQuantization())
+        val floatTiming = InputPreprocessTiming()
+        val int8Timing = InputPreprocessTiming()
+        val size = 8 * 8 * 3
+
+        assertFalse(preprocessor.preprocessFloat(frame, 0, FloatArray(size), floatTiming))
+        assertFalse(preprocessor.preprocessInt8(frame, 0, ByteArray(size), int8Timing))
+
+        for (timing in listOf(floatTiming, int8Timing)) {
+            assertNull(timing.jniArrayGetNanos)
+            assertNull(timing.jniArrayReleaseNanos)
+            assertNull(timing.jniArrayCopyMask)
+            assertNull(timing.nativeYuvBodyNanos)
+            assertNull(timing.nativeResizeFilter)
+            assertNull(timing.nativeOutputLayout)
         }
     }
 
