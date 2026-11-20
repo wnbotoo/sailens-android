@@ -43,6 +43,7 @@ class PipelinePerformanceTest(unittest.TestCase):
             "outputUnlockNanos": 100_000,
             "postprocessFinishedNanos": 1_035_000_000,
             "semanticScorePhases": {
+                "argmaxImplementation": "scalar",
                 "arraysGetNanos": 100_000,
                 "fusedKernelNanos": 4_800_000,
                 "arraysReleaseNanos": 200_000,
@@ -102,6 +103,7 @@ class PipelinePerformanceTest(unittest.TestCase):
         self.assertEqual(report["jni_copy_counts"]["sem.output"], {"copy": 1})
         self.assertEqual(report["jni_copy_counts"]["sem.u"], {"direct": 1})
         self.assertEqual(timing["sem.score.fusedKernel"]["p95"], 4.8)
+        self.assertEqual(report["backends"]["sem.score.argmaxImplementation"], {"scalar": 1})
         self.assertEqual(timing["sem.score.other"]["p95"], 0.5)
         self.assertEqual(timing["sem.score.sampledKernel"]["n"], 1)
         self.assertNotIn("sem.score.unsampledKernel", timing)

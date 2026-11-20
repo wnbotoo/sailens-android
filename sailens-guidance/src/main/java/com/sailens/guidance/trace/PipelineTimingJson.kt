@@ -75,6 +75,7 @@ private fun ModelRunTiming.toJson(): JSONObject = JSONObject().apply {
             put("semanticScorePhases", JSONObject().apply {
                 put("arraysGetNanos", timing.arraysGetNanos)
                 put("fusedKernelNanos", kernel)
+                put("argmaxImplementation", timing.argmaxImplementation)
                 put("arraysReleaseNanos", timing.arraysReleaseNanos)
                 put("kotlinPrepareNanos", timing.kotlinPrepareNanos)
                 put("kotlinAssembleNanos", timing.kotlinAssembleNanos)

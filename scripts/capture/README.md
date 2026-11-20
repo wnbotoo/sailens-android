@@ -94,3 +94,9 @@ argmax, class map and packed-mask writes, and the intervening lookups and statis
 back-to-back clock measurement subtracted from each sampled interval. These per-pixel estimates
 help rank work inside the fused loop. Use the full kernel duration to compare runs, and compare
 sampled and unsampled kernel durations to check the cost of sampling.
+
+For the semantic argmax A/B, use `sem-scalar, sem-simd, sem-simd, sem-scalar`. Both modes
+use the preferred semantic producer and disable pixel sampling. `sem-simd` requests ARM
+NEON for NCHW FLOAT32 LiteRT output handles with at least four content columns. Trace rows
+report the actual kernel in `argmaxImplementation`. Verify it in
+`backends["sem.score.argmaxImplementation"]` before comparing the arms.

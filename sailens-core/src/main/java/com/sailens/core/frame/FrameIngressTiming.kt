@@ -12,7 +12,12 @@ public data class PipelineTimingConfig(val mode: PipelineTimingMode?) {
     public val enabled: Boolean get() = mode != null
 }
 
-public enum class PipelineTimingMode(public val traceName: String) {
-    RACE("race"),
-    SEM_FIRST("sem-first"),
+public enum class PipelineTimingMode(
+    public val traceName: String,
+    public val preferSemanticPreprocess: Boolean,
+) {
+    RACE("race", false),
+    SEM_FIRST("sem-first", true),
+    SEM_SCALAR("sem-scalar", true),
+    SEM_SIMD("sem-simd", true),
 }

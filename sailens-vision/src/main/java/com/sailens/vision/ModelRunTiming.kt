@@ -1,6 +1,7 @@
 package com.sailens.vision
 
 import android.os.SystemClock
+import com.sailens.core.frame.PipelineTimingMode
 import com.sailens.runtime.InputPreprocessTiming
 import com.sailens.vision.semantic.SemanticScoreTiming
 
@@ -8,7 +9,10 @@ import com.sailens.vision.semantic.SemanticScoreTiming
  * Checkpoints for one profiled model call. Written by the runner and read after its coroutine
  * has completed. Missing checkpoints distinguish an incomplete call from a zero-duration stage.
  */
-class ModelRunTiming(val queuedNanos: Long) {
+class ModelRunTiming(
+    val queuedNanos: Long,
+    internal val pipelineTimingMode: PipelineTimingMode = PipelineTimingMode.RACE,
+) {
     val input = InputPreprocessTiming()
     internal val nativeOutputAccess = LongArray(2)
 

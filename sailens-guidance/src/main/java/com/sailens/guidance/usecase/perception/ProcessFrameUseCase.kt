@@ -315,7 +315,7 @@ class ProcessFrameUseCase(
             )
         }
 
-        val runTiming = queuedNanos?.let(::ModelRunTiming)
+        val runTiming = if (queuedNanos != null && timing != null) ModelRunTiming(queuedNanos, timing.mode) else null
         timing?.semanticRun = runTiming
         val segmentationOutput = perceptionRepository.segment(frame, runTiming, preferredProducer).getOrElse {
             if (regressionRecorder.isRecording) regressionRecorder.onSemantic(frame, ran = true, output = null, failure = it)

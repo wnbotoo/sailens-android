@@ -1,6 +1,9 @@
 #include <jni.h>
 
 #include <android/log.h>
+#if defined(__aarch64__)
+#include <arm_neon.h>
+#endif
 #include <time.h>
 
 #include <algorithm>
@@ -95,6 +98,23 @@ static int bestSemanticClass(const Score* scores, int channels, int channelStrid
     return classId;
 }
 
+#if defined(__aarch64__)
+constexpr int kNeonLanes = 4;
+
+static void bestSemanticClassesNeon(const jfloat* scores, int channels, int planeSize, jint* classes) {
+    float32x4_t best = vld1q_f32(scores);
+    int32x4_t classIds = vdupq_n_s32(0);
+    for (int channel = 1; channel < channels; ++channel) {
+        const float32x4_t values = vld1q_f32(scores + channel * planeSize);
+        // Each lane is one column. Strict comparison keeps the first class on ties.
+        const uint32x4_t higher = vcgtq_f32(values, best);
+        best = vbslq_f32(higher, values, best);
+        classIds = vbslq_s32(higher, vdupq_n_s32(channel), classIds);
+    }
+    vst1q_s32(classes, classIds);
+}
+#endif
+
 static jlong elapsedNanos() {
     timespec time{};
     clock_gettime(CLOCK_BOOTTIME, &time);
@@ -128,10 +148,11 @@ public:
     SemanticScoreTiming(JNIEnv* env, jlongArray destination) {
         if (destination == nullptr || env->GetArrayLength(destination) < kCount) return;
         destination_ = destination;
-        jlong offset = -1;
-        env->GetLongArrayRegion(destination_, 0, 1, &offset);
-        if (0 <= offset && offset < SemanticPixelSamples::kStride) {
-            pixels_.nextPixel = static_cast<int>(offset);
+        jlong request = -1;
+        env->GetLongArrayRegion(destination_, 0, 1, &request);
+        requestNeon_ = request == kRequestNeon;
+        if (0 <= request && request < SemanticPixelSamples::kStride) {
+            pixels_.nextPixel = static_cast<int>(request);
         }
     }
 
@@ -139,28 +160,40 @@ public:
         return destination_ == nullptr ? 0 : elapsedNanos();
     }
 
-    template <typename Run>
-    void kernel(Run run) {
-        if (pixels_.nextPixel >= 0) run(std::true_type{}, &pixels_);
-        else run(std::false_type{}, nullptr);
+    template <typename Score, typename Run>
+    void kernel(int layout, int width, Run run) {
+#if defined(__aarch64__)
+        if constexpr (std::is_same_v<Score, jfloat>) {
+            if (requestNeon_ && layout == sailens::kTensorLayoutNchw && width >= kNeonLanes) {
+                usedNeon_ = true;
+                run(std::false_type{}, std::true_type{}, nullptr);
+                return;
+            }
+        }
+#endif
+        if (pixels_.nextPixel >= 0) run(std::true_type{}, std::false_type{}, &pixels_);
+        else run(std::false_type{}, std::false_type{}, nullptr);
     }
 
     void record(JNIEnv* env, jlong arraysGet, jlong fusedKernel, jlong arraysRelease) const {
         if (destination_ == nullptr) return;
         const jlong values[kCount] = {
                 arraysGet, fusedKernel, arraysRelease, pixels_.count, pixels_.argmaxNanos,
-                pixels_.maskNanos, pixels_.statsNanos, pixels_.clockNanos,
+                pixels_.maskNanos, pixels_.statsNanos, pixels_.clockNanos, usedNeon_ ? 1 : 0,
         };
         env->SetLongArrayRegion(destination_, 0, kCount, values);
     }
 
 private:
-    static constexpr int kCount = 8;
+    static constexpr int kCount = 9;
+    static constexpr jlong kRequestNeon = -2;
     jlongArray destination_ = nullptr;
     SemanticPixelSamples pixels_;
+    bool requestNeon_ = false;
+    bool usedNeon_ = false;
 };
 
-template <typename Score, bool SamplePixels = false>
+template <typename Score, bool SamplePixels = false, bool NeonArgmax = false>
 static void postprocessSemanticScoresCore(
         const Score* scoreData,
         jint* resultData,
@@ -220,6 +253,10 @@ static void postprocessSemanticScoresCore(
 
     for (int y = 0; y < height; ++y) {
         int currentRunStart = -1;
+#if defined(__aarch64__)
+        jint neonClasses[kNeonLanes];
+        const int vectorWidth = width - width % kNeonLanes;
+#endif
 
         for (int x = 0; x < width; ++x) {
             const int pixelIndex = y * width + x;
@@ -227,9 +264,23 @@ static void postprocessSemanticScoresCore(
             const jlong clockStarted = sample ? elapsedNanos() : 0;
             const jlong started = sample ? elapsedNanos() : 0;
             const int sourcePixel = (region.y + y) * gridWidth + (region.x + x);
-            const int classId = channelMajor
-                    ? bestSemanticClass(scoreData + sourcePixel, channels, planeSize)
-                    : bestSemanticClass(scoreData + sourcePixel * channels, channels, 1);
+            int classId;
+#if defined(__aarch64__)
+            if constexpr (NeonArgmax) {
+                if (x < vectorWidth) {
+                    const int lane = x % kNeonLanes;
+                    if (lane == 0) bestSemanticClassesNeon(scoreData + sourcePixel, channels, planeSize, neonClasses);
+                    classId = neonClasses[lane];
+                } else {
+                    classId = bestSemanticClass(scoreData + sourcePixel, channels, planeSize);
+                }
+            } else
+#endif
+            {
+                classId = channelMajor
+                        ? bestSemanticClass(scoreData + sourcePixel, channels, planeSize)
+                        : bestSemanticClass(scoreData + sourcePixel * channels, channels, 1);
+            }
             const jlong argmaxDone = sample ? elapsedNanos() : 0;
 
             resultData[pixelIndex] = classId;
@@ -752,8 +803,8 @@ nativePostprocessScoresFromHandle(
     }
 
     const jlong kernelStarted = timings.now();
-    timings.kernel([&](auto sample, SemanticPixelSamples* pixels) {
-        postprocessSemanticScoresCore<jfloat, decltype(sample)::value>(
+    timings.kernel<jfloat>(scoreLayout, region.width, [&](auto sample, auto neon, SemanticPixelSamples* pixels) {
+        postprocessSemanticScoresCore<jfloat, decltype(sample)::value, decltype(neon)::value>(
                 scoreData, resultData, width, height, scoreLayout, region, channels,
                 passableData, obstacleData, roadData, trafficLightData, groundTypeData,
                 bottomRatio, centerRatio, navigationRegionRatio,
@@ -900,8 +951,8 @@ nativePostprocessInt8ScoresFromHandle(
     }
 
     const jlong kernelStarted = timings.now();
-    timings.kernel([&](auto sample, SemanticPixelSamples* pixels) {
-        postprocessSemanticScoresCore<jbyte, decltype(sample)::value>(
+    timings.kernel<jbyte>(scoreLayout, region.width, [&](auto sample, auto neon, SemanticPixelSamples* pixels) {
+        postprocessSemanticScoresCore<jbyte, decltype(sample)::value, decltype(neon)::value>(
                 scoreData, resultData, width, height, scoreLayout, region, channels,
                 passableData, obstacleData, roadData, trafficLightData, groundTypeData,
                 bottomRatio, centerRatio, navigationRegionRatio,

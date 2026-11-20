@@ -142,7 +142,9 @@ class SegmentationRunner<R>(
         //    failure, lock failure, validation error), copy the tensor out and offer it again,
         //    then fall back to generic argmax.
         val scoreTiming = timing?.takeIf { outputBufferHandle != 0L }?.let {
-            SemanticScoreTiming.forFrame(rawFrame.sequenceNumber).also { phases -> it.semanticScoreTiming = phases }
+            SemanticScoreTiming.forFrame(rawFrame.sequenceNumber, it.pipelineTimingMode).also { phases ->
+                it.semanticScoreTiming = phases
+            }
         }
         val handleOutcome: SemanticPostprocessOutcome<R>? = when {
             outputBufferHandle == 0L -> null

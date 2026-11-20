@@ -186,6 +186,8 @@ def measure(metadata, frames, warmup_seconds, window_seconds=None):
                 postprocess = duration - output_access
                 sample(f"{label}.postprocess", postprocess)
                 if detail := run.get("semanticScorePhases"):
+                    if implementation := detail.get("argmaxImplementation"):
+                        backends[f"{label}.score.argmaxImplementation"][implementation] += 1
                     phases = ("arraysGet", "fusedKernel", "arraysRelease", "kotlinPrepare", "kotlinAssemble")
                     for phase in phases:
                         sample(f"{label}.score.{phase}", detail[f"{phase}Nanos"])

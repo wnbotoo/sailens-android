@@ -231,7 +231,8 @@ class StartSceneAnalysisUseCase(
             frameFlow
             .mapNotNullReleasing(
                 release = releaseFrame,
-                timingSessionId = sessionId.takeIf { traceSessionStarted && pipelineTimingMode != null },
+                timingSessionId = sessionId.takeIf { traceSessionStarted },
+                timingMode = pipelineTimingMode,
                 recordTiming = traceService::recordPipelineTiming,
             ) { frame, timing ->
                 val pipelineStart = Timestamp.now()
@@ -684,10 +685,15 @@ internal class SegmentationMaskSnapshots {
 private fun <R : Any> Flow<ImageFrame>.mapNotNullReleasing(
     release: (ImageFrame) -> Unit,
     timingSessionId: String?,
+    timingMode: PipelineTimingMode?,
     recordTiming: (PipelineFrameTiming) -> Unit,
     process: suspend (ImageFrame, PipelineFrameTiming?) -> R?,
 ): Flow<R> = transform { frame ->
-    val timing = timingSessionId?.let { PipelineFrameTiming(it, frame, SystemClock.elapsedRealtimeNanos()) }
+    val timing = if (timingSessionId != null && timingMode != null) {
+        PipelineFrameTiming(timingSessionId, frame, SystemClock.elapsedRealtimeNanos(), timingMode)
+    } else {
+        null
+    }
     val result = try {
         process(frame, timing)
     } finally {
