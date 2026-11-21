@@ -59,6 +59,7 @@ class LiteRtDetectionRunner(
     /** Supplies human-readable labels for class ids. A dataset fact, not a product decision. */
     private val taxonomy: Taxonomy = CocoTaxonomy,
     private val directFloatNchw: Boolean = false,
+    private val precomputeNearestIndices: Boolean = false,
 ) {
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -360,6 +361,7 @@ class LiteRtDetectionRunner(
             preferNativeYuvPreprocessing = modelConfig.preferNativeYuvPreprocessing,
             preprocessCache = preprocessCache,
             directFloatNchw = directFloatNchw,
+            precomputeNearestIndices = precomputeNearestIndices,
         )
         postProcessor = DetectionPostProcessor(
             taxonomy = taxonomy,

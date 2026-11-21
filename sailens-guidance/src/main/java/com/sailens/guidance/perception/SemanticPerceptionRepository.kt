@@ -28,6 +28,7 @@ class SemanticPerceptionRepository(
     preprocessCache: InputPreprocessCache? = null,
     logService: LogService,
     directFloatNchw: Boolean = false,
+    precomputeNearestIndices: Boolean = false,
 ) : PerceptionRepository {
 
     private val segmenter = LiteRtSemanticSegmenter<NavigationSemanticResult>(
@@ -38,6 +39,7 @@ class SemanticPerceptionRepository(
         preprocessCache = preprocessCache,
         logService = logService,
         directFloatNchw = directFloatNchw,
+        precomputeNearestIndices = precomputeNearestIndices,
     )
 
     override val isInitialized: Boolean

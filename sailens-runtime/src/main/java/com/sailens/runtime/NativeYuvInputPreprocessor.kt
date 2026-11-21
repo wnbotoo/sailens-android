@@ -7,6 +7,7 @@ internal class NativeYuvInputPreprocessor(
     private val config: ModelTensorConfig,
     private val inputQuantization: ModelInputQuantization,
     directFloatNchw: Boolean = false,
+    private val precomputeNearestIndices: Boolean = false,
 ) {
     private val floatOutputLayout = if (
         directFloatNchw && config.inputLayout == ImageTensorLayout.NCHW && config.resizeFilter == ResizeFilter.NEAREST
@@ -75,6 +76,7 @@ internal class NativeYuvInputPreprocessor(
                 stdB = config.std.third,
                 resizeFilter = config.resizeFilter.nativeValue,
                 outputLayout = floatOutputLayout.nativeValue,
+                precomputeNearestIndices = precomputeNearestIndices,
                 output = nativeOutput,
                 mapping = mapping,
                 timingNanos = timing?.beginNativeYuv(config.resizeFilter, floatOutputLayout),
@@ -197,6 +199,7 @@ internal class NativeYuvInputPreprocessor(
         stdB: Float,
         resizeFilter: Int,
         outputLayout: Int,
+        precomputeNearestIndices: Boolean,
         output: FloatArray,
         mapping: FloatArray,
         timingNanos: LongArray?,

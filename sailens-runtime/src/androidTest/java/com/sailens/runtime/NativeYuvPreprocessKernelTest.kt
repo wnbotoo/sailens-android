@@ -10,6 +10,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -187,6 +188,40 @@ class NativeYuvPreprocessKernelTest {
     }
 
     @Test
+    fun indexedNearestPreservesEveryTensorAndMappingBit() {
+        val landscape = syntheticFrame(width = 87, height = 49, uvPixelStride = 1)
+        val portrait = syntheticFrame(width = 49, height = 87, uvPixelStride = 2)
+        val live = syntheticFrame(width = 1280, height = 720, uvPixelStride = 2)
+        val interleaved = checkNotNull(syntheticFrame(87, 49, uvPixelStride = 2).yuvData)
+        val planes = checkNotNull(landscape.yuvData)
+        val truncated = landscape.copy(
+            yuvData = planes.copy(
+                y = planes.y.copy(bytes = planes.y.bytes.copyOf(planes.y.bytes.size - 48)),
+                v = interleaved.v.copy(bytes = interleaved.v.bytes.copyOf(interleaved.v.bytes.size - 56)),
+            ),
+        )
+        val liveConfig = tensorConfig(640, 640).copy(
+            mean = Triple(0f, 0f, 0f),
+            std = Triple(1f, 1f, 1f),
+        )
+        val cases = listOf(
+            live to liveConfig,
+            landscape to tensorConfig(63, 51),
+            portrait to tensorConfig(92, 117),
+            truncated to tensorConfig(141, 95),
+            syntheticFrame(33, 27, uvPixelStride = 1) to tensorConfig(66, 54),
+            syntheticFrame(1, 7, uvPixelStride = 2) to tensorConfig(13, 27),
+            landscape to tensorConfig(63, 51).copy(resizeFilter = ResizeFilter.BILINEAR),
+        )
+
+        for ((frame, config) in cases) {
+            for (layout in ImageTensorLayout.entries) {
+                assertIndexedFloatMatchesLegacy(frame, config.copy(inputLayout = layout))
+            }
+        }
+    }
+
+    @Test
     fun quantizeFloatToInt8RoundsAndSaturates() {
         val quantization = ModelInputQuantization(scale = 1f / 255f, zeroPoint = -128)
         val preprocessor = NativeYuvInputPreprocessor(
@@ -222,6 +257,39 @@ class NativeYuvPreprocessKernelTest {
     // ---------------------------------------------------------------------------------------
     // Fixtures
     // ---------------------------------------------------------------------------------------
+
+    private fun assertIndexedFloatMatchesLegacy(frame: ImageFrame, config: ModelTensorConfig) {
+        val quantization = ModelInputQuantization()
+        val legacy = NativeYuvInputPreprocessor(config, quantization, directFloatNchw = true)
+        val indexed = NativeYuvInputPreprocessor(
+            config, quantization, directFloatNchw = true, precomputeNearestIndices = true,
+        )
+        val rawMapping = NativeYuvInputPreprocessor::class.java.getDeclaredField("mapping").apply {
+            isAccessible = true
+        }
+        val expected = FloatArray(config.inputWidth * config.inputHeight * 3)
+        val actual = FloatArray(expected.size)
+        for (rotation in listOf(0, 90, 180, 270, -90)) {
+            val description = "${frame.width}x${frame.height} to ${config.inputWidth}x${config.inputHeight}, " +
+                "${config.inputLayout}, ${config.resizeFilter}, rotation $rotation"
+            expected.fill(Float.NaN)
+            actual.fill(Float.NaN)
+            assertTrue(description, legacy.preprocessFloat(frame, rotation, expected))
+            assertTrue(description, indexed.preprocessFloat(frame, rotation, actual))
+            assertArrayEquals(
+                "Letterbox mapping for $description",
+                (rawMapping.get(legacy) as FloatArray).map(Float::toRawBits).toIntArray(),
+                (rawMapping.get(indexed) as FloatArray).map(Float::toRawBits).toIntArray(),
+            )
+            val mismatch = expected.indices.firstOrNull {
+                !expected[it].isFinite() || expected[it].toRawBits() != actual[it].toRawBits()
+            }
+            if (mismatch != null) {
+                fail("Tensor for $description, slot $mismatch: expected ${expected[mismatch].toRawBits()}, " +
+                    "got ${actual[mismatch].toRawBits()}")
+            }
+        }
+    }
 
     private fun assertFloatLayoutMatchesLegacy(
         frame: ImageFrame,

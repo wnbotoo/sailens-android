@@ -22,6 +22,11 @@ internal enum class PipelineExperiment(
     SEM_SIMD("sem-simd", semanticNeon),
     SEM_NCHW("sem-nchw", combinedOptimizations),
     SEM_NCHW_UNTIMED("sem-nchw-untimed", combinedOptimizations, measure = false),
+    SEM_NCHW_INDEXED_UNTIMED(
+        "sem-nchw-indexed-untimed",
+        combinedOptimizations.copy(precomputeNearestIndices = true),
+        measure = false,
+    ),
     ;
 
     val timing = PipelineTimingConfig(marker.takeIf { measure }, sampleSemanticPixels)

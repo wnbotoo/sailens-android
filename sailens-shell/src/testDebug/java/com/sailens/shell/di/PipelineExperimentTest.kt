@@ -23,6 +23,11 @@ class PipelineExperimentTest {
             Triple("sem-simd", PipelineTimingConfig("sem-simd"), semanticNeon),
             Triple("sem-nchw", PipelineTimingConfig("sem-nchw"), combined),
             Triple("sem-nchw-untimed", PipelineTimingConfig(), combined),
+            Triple(
+                "sem-nchw-indexed-untimed",
+                PipelineTimingConfig(),
+                combined.copy(precomputeNearestIndices = true),
+            ),
         )
 
         for ((marker, timing, optimizations) in presets) {

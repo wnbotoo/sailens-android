@@ -9,9 +9,15 @@ class ModelInputPreprocessor(
     private val preferNativeYuvPreprocessing: Boolean,
     private val preprocessCache: InputPreprocessCache? = null,
     directFloatNchw: Boolean = false,
+    precomputeNearestIndices: Boolean = false,
 ) : AutoCloseable {
     private val fallbackProcessor = OpenCVImageProcessor(config)
-    private val nativeProcessor = NativeYuvInputPreprocessor(config, inputQuantization, directFloatNchw)
+    private val nativeProcessor = NativeYuvInputPreprocessor(
+        config,
+        inputQuantization,
+        directFloatNchw = directFloatNchw,
+        precomputeNearestIndices = precomputeNearestIndices,
+    )
     private var fallbackFloatInput = FloatArray(0)
 
     fun sharedFloatInput(frame: ImageFrame): InputPreprocessCache.SharedFloatInput? = preprocessCache?.let {

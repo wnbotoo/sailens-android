@@ -55,8 +55,10 @@ python scripts/experiments/pipeline_performance.py trace.jsonl --warmup 15
 ```
 
 Use `com.sailens.reference` for the platform reference host. Remove the marker and restart the
-process for the default path with profiling off. Use `sem-nchw-untimed` for the three combined
-optimizations with profiling off. The `CameraX negotiated` log reports the bound sizes for
+process for the default path with profiling off. Use `sem-nchw-untimed` for semantic-first
+preprocessing, NEON argmax, and direct NCHW output with profiling off. Compare it with
+`sem-nchw-indexed-untimed` to isolate precomputed nearest-neighbour offsets in the shared
+float preprocessing path. The `CameraX negotiated` log reports the bound sizes for
 analysis and preview. The trace report shows the buffer dimensions delivered to Guidance.
 The camera service dump taken during the run shows the active preview and YUV streams.
 

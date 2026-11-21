@@ -57,6 +57,7 @@ class SegmentationRunner<R>(
     private val postprocessor: SemanticPostprocessor<R>,
     private val scoreGridSpansInput: Boolean = false,
     directFloatNchw: Boolean = false,
+    precomputeNearestIndices: Boolean = false,
 ) {
     val accelerator: Accelerator get() = session.accelerator
     private val inputBuffer = session.inputBuffers.single()
@@ -89,6 +90,7 @@ class SegmentationRunner<R>(
         preferNativeYuvPreprocessing = preferNativeYuvPreprocessing,
         preprocessCache = preprocessCache,
         directFloatNchw = directFloatNchw,
+        precomputeNearestIndices = precomputeNearestIndices,
     )
     private val argmaxPostprocessor = ArgmaxPostprocessor(
         config = config,
