@@ -12,6 +12,7 @@ class PipelineExperimentTest {
         val semanticProducer = GuidanceOptimizationConfig(preferSemanticPreprocess = true)
         val semanticNeon = semanticProducer.copy(useNeonArgmax = true)
         val combined = semanticNeon.copy(directFloatNchw = true)
+        val indexed = combined.copy(precomputeNearestIndices = true)
 
         val presets = listOf(
             Triple(null, PipelineTimingConfig(), noOptimizations),
@@ -23,11 +24,8 @@ class PipelineExperimentTest {
             Triple("sem-simd", PipelineTimingConfig("sem-simd"), semanticNeon),
             Triple("sem-nchw", PipelineTimingConfig("sem-nchw"), combined),
             Triple("sem-nchw-untimed", PipelineTimingConfig(), combined),
-            Triple(
-                "sem-nchw-indexed-untimed",
-                PipelineTimingConfig(),
-                combined.copy(precomputeNearestIndices = true),
-            ),
+            Triple("sem-nchw-indexed", PipelineTimingConfig("sem-nchw-indexed"), indexed),
+            Triple("sem-nchw-indexed-untimed", PipelineTimingConfig(), indexed),
         )
 
         for ((marker, timing, optimizations) in presets) {

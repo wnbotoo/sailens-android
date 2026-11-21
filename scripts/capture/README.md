@@ -58,7 +58,8 @@ Use `com.sailens.reference` for the platform reference host. Remove the marker a
 process for the default path with profiling off. Use `sem-nchw-untimed` for semantic-first
 preprocessing, NEON argmax, and direct NCHW output with profiling off. Compare it with
 `sem-nchw-indexed-untimed` to isolate precomputed nearest-neighbour offsets in the shared
-float preprocessing path. The `CameraX negotiated` log reports the bound sizes for
+float preprocessing path. Use `sem-nchw-indexed` with stage timing on and pixel sampling off.
+The `CameraX negotiated` log reports the bound sizes for
 analysis and preview. The trace report shows the buffer dimensions delivered to Guidance.
 The camera service dump taken during the run shows the active preview and YUV streams.
 
