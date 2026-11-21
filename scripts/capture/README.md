@@ -95,7 +95,10 @@ accelerator and mapping the output. The end of output postprocessing counts one 
 
 On the semantic handle path, `sem.score` reports Kotlin scratch preparation, JNI array
 acquisition, the fused kernel, JNI array release, and Kotlin assembly of the masks and
-statistics. LiteRT lock and unlock keep their own clocks. With `race` or `sem-first`, every
+statistics. LiteRT lock and unlock keep their own clocks. With `sem-nchw-indexed`, the fused
+NEON kernel also records the scoring thread's CPU time in `fusedKernelThreadCpuNanos`.
+`sem.score.fusedKernelOffCpu` is the per-frame difference between kernel wall time and
+thread CPU time, including the overhead of reading the clocks. With `race` or `sem-first`, every
 eighth camera frame ID enables scalar pixel sampling with a rotating offset and a stride of 257
 content pixels. That sample estimates
 argmax, class map and packed-mask writes, and the intervening lookups and statistics, with a

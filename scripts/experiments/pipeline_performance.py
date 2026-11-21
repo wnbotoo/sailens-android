@@ -192,6 +192,9 @@ def measure(metadata, frames, warmup_seconds, window_seconds=None):
                     for phase in phases:
                         sample(f"{label}.score.{phase}", detail[f"{phase}Nanos"])
                     sample(f"{label}.score.other", postprocess - sum(detail[f"{phase}Nanos"] for phase in phases))
+                    if (thread_cpu := detail.get("fusedKernelThreadCpuNanos")) is not None:
+                        sample(f"{label}.score.fusedKernelThreadCpu", thread_cpu)
+                        sample(f"{label}.score.fusedKernelOffCpu", detail["fusedKernelNanos"] - thread_cpu)
                     sampled = detail.get("sampledPixels", 0)
                     kind = "sampledKernel" if sampled else "unsampledKernel"
                     sample(f"{label}.score.{kind}", detail["fusedKernelNanos"])

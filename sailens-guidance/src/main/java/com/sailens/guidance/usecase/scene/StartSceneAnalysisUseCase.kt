@@ -690,7 +690,13 @@ private fun <R : Any> Flow<ImageFrame>.mapNotNullReleasing(
     process: suspend (ImageFrame, PipelineFrameTiming?) -> R?,
 ): Flow<R> = transform { frame ->
     val timing = if (timingSessionId != null && timingConfig?.enabled == true) {
-        PipelineFrameTiming(timingSessionId, frame, SystemClock.elapsedRealtimeNanos(), timingConfig.sampleSemanticPixels)
+        PipelineFrameTiming(
+            timingSessionId,
+            frame,
+            SystemClock.elapsedRealtimeNanos(),
+            sampleSemanticPixels = timingConfig.sampleSemanticPixels,
+            measureSemanticScoreThreadCpu = timingConfig.measureSemanticScoreThreadCpu,
+        )
     } else {
         null
     }

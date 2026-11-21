@@ -158,8 +158,11 @@ enum SemanticScoreKernel : jint {
 class SemanticScoreTiming {
 public:
     SemanticScoreTiming(JNIEnv* env, jlongArray destination, jint sampleOffset) {
-        if (destination == nullptr || env->GetArrayLength(destination) < kCount) return;
+        if (destination == nullptr) return;
+        const jsize size = env->GetArrayLength(destination);
+        if (size < kBaseCount) return;
         destination_ = destination;
+        measureThreadCpu_ = size >= kCount;
         if (0 <= sampleOffset && sampleOffset < SemanticPixelSamples::kStride) {
             pixels_.nextPixel = sampleOffset;
         }
@@ -169,22 +172,33 @@ public:
         return destination_ == nullptr ? 0 : elapsedNanos();
     }
 
+    jlong threadCpuNow() const {
+        if (!measureThreadCpu_) return -1;
+        timespec time{};
+        if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &time) != 0) return -1;
+        return static_cast<jlong>(time.tv_sec) * 1'000'000'000 + time.tv_nsec;
+    }
+
     SemanticPixelSamples* pixelSamples() {
         return pixels_.nextPixel >= 0 ? &pixels_ : nullptr;
     }
 
-    void record(JNIEnv* env, jlong arraysGet, jlong fusedKernel, jlong arraysRelease, SemanticScoreKernel kernel) const {
+    void record(
+            JNIEnv* env, jlong arraysGet, jlong fusedKernel, jlong arraysRelease,
+            SemanticScoreKernel kernel, jlong fusedKernelThreadCpu = -1) const {
         if (destination_ == nullptr) return;
         const jlong values[kCount] = {
                 arraysGet, fusedKernel, arraysRelease, pixels_.count, pixels_.argmaxNanos,
-                pixels_.maskNanos, pixels_.statsNanos, pixels_.clockNanos, kernel,
+                pixels_.maskNanos, pixels_.statsNanos, pixels_.clockNanos, kernel, fusedKernelThreadCpu,
         };
-        env->SetLongArrayRegion(destination_, 0, kCount, values);
+        env->SetLongArrayRegion(destination_, 0, measureThreadCpu_ ? kCount : kBaseCount, values);
     }
 
 private:
-    static constexpr int kCount = 9;
+    static constexpr int kBaseCount = 9;
+    static constexpr int kCount = kBaseCount + 1;
     jlongArray destination_ = nullptr;
+    bool measureThreadCpu_ = false;
     SemanticPixelSamples pixels_;
 };
 
@@ -817,7 +831,9 @@ nativePostprocessScoresFromHandle(
         return kScoreKernelFailed;
     }
 
+    // The wall-clock interval encloses both thread CPU clock reads around the same kernel call.
     const jlong kernelStarted = timings.now();
+    const jlong cpuStarted = requestNeon == JNI_TRUE ? timings.threadCpuNow() : -1;
     const auto kernel = runSemanticScoreKernel<jfloat>(
             requestNeon == JNI_TRUE, scoreLayout, region.width, timings.pixelSamples(),
             [&](auto sample, auto neon, SemanticPixelSamples* pixels) {
@@ -829,7 +845,9 @@ nativePostprocessScoresFromHandle(
                         classCountData, classCount, groundTypeCountData, groundTypeCount,
                         outputData, pixels);
             });
+    const jlong cpuFinished = kernel == kScoreKernelNeon && cpuStarted >= 0 ? timings.threadCpuNow() : -1;
     const jlong kernelFinished = timings.now();
+    const jlong kernelThreadCpu = cpuStarted >= 0 && cpuFinished >= cpuStarted ? cpuFinished - cpuStarted : -1;
 
     access.unlock(tensorBufferHandle);
 
@@ -845,7 +863,8 @@ nativePostprocessScoresFromHandle(
     env->ReleaseIntArrayElements(classCounts, classCountData, 0);
     env->ReleaseIntArrayElements(groundTypeCounts, groundTypeCountData, 0);
     env->ReleaseIntArrayElements(intOutputs, outputData, 0);
-    timings.record(env, gotArrays - gettingArrays, kernelFinished - kernelStarted, timings.now() - releasingArrays, kernel);
+    timings.record(env, gotArrays - gettingArrays, kernelFinished - kernelStarted,
+                   timings.now() - releasingArrays, kernel, kernelThreadCpu);
     return kernel;
 }
 

@@ -23,6 +23,7 @@ import com.sailens.guidance.processor.perception.KotlinSegmentationStatsExtracto
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -352,11 +353,11 @@ class NavigationScoreKernelTest {
         expectedClassMap: IntArray?,
     ) {
         val spec = SemanticScoreSpec(WIDTH, HEIGHT, CLASS_COUNT, layout, content)
-        fun run(requestNeon: Boolean, measure: Boolean): NavigationSemanticResult {
+        fun run(requestNeon: Boolean, measure: Boolean, measureThreadCpu: Boolean = false): NavigationSemanticResult {
             val postprocessor = NavigationScorePostprocessor(
                 analysisConfig, navigationSemantics, SilentLogService, useNeonArgmax = requestNeon,
             )
-            val timing = if (measure) SemanticScoreTiming(sampleOffset = 0) else null
+            val timing = if (measure) SemanticScoreTiming(sampleOffset = 0, measureThreadCpu = measureThreadCpu) else null
             val outcome = checkNotNull(postprocessor.postprocessScores(
                 SemanticScores.FloatHandle(handle, timing?.let { LongArray(2) }, timing),
                 spec,
@@ -369,6 +370,12 @@ class NavigationScoreKernelTest {
                 assertEquals(if (neon) "neon" else "scalar", timing.argmaxImplementation)
                 if (neon) assertEquals(0L, timing.sampledPixels)
                 else assertTrue(timing.sampledPixels > 0L)
+                if (neon && measureThreadCpu) {
+                    val cpuNanos = checkNotNull(timing.fusedKernelThreadCpuNanos)
+                    assertTrue(cpuNanos in 1..checkNotNull(timing.fusedKernelNanos))
+                } else {
+                    assertNull(timing.fusedKernelThreadCpuNanos)
+                }
             }
             return outcome.value
         }
@@ -385,8 +392,13 @@ class NavigationScoreKernelTest {
                 assertArrayEquals(cropped, baseline.mask.classMap)
                 assertEquals(expectedStats, baseline.stats)
             }
-            for ((requestNeon, measure) in listOf(false to true, true to false, true to true)) {
-                val candidate = run(requestNeon, measure)
+            for ((requestNeon, measure, measureThreadCpu) in listOf(
+                Triple(false, true, false),
+                Triple(true, false, false),
+                Triple(true, true, false),
+                Triple(true, true, true),
+            )) {
+                val candidate = run(requestNeon, measure, measureThreadCpu)
                 candidate.maskLease.use {
                     assertArrayEquals(baseline.mask.classMap, candidate.mask.classMap)
                     assertEquals(baseline.stats, candidate.stats)

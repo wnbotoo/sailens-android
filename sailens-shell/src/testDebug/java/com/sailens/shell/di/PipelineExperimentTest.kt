@@ -24,7 +24,11 @@ class PipelineExperimentTest {
             Triple("sem-simd", PipelineTimingConfig("sem-simd"), semanticNeon),
             Triple("sem-nchw", PipelineTimingConfig("sem-nchw"), combined),
             Triple("sem-nchw-untimed", PipelineTimingConfig(), combined),
-            Triple("sem-nchw-indexed", PipelineTimingConfig("sem-nchw-indexed"), indexed),
+            Triple(
+                "sem-nchw-indexed",
+                PipelineTimingConfig("sem-nchw-indexed", measureSemanticScoreThreadCpu = true),
+                indexed,
+            ),
             Triple("sem-nchw-indexed-untimed", PipelineTimingConfig(), indexed),
         )
 

@@ -124,6 +124,7 @@ class PipelinePerformanceTest(unittest.TestCase):
         self.assertEqual(timing["sem.score.other"]["p95"], 0.5)
         self.assertEqual(timing["sem.score.sampledKernel"]["n"], 1)
         self.assertNotIn("sem.score.unsampledKernel", timing)
+        self.assertNotIn("sem.score.fusedKernelThreadCpu", timing)
         self.assertEqual(report["semantic_score_pixel_sampling"], {
             "frames": 1,
             "pixels": 20,
@@ -134,6 +135,28 @@ class PipelinePerformanceTest(unittest.TestCase):
                 "clockFloor": 20.0,
             },
         })
+
+    def test_pairs_wall_and_thread_cpu_for_the_same_scored_frame(self):
+        first = {"frameId": 1, "width": 1280, "height": 720, "receivedNanos": 0, "offeredNanos": 1}
+        first["sem"] = {
+            "inferenceReturnedNanos": 2_000_000,
+            "postprocessFinishedNanos": 11_000_000,
+            "semanticScorePhases": {
+                "argmaxImplementation": "neon",
+                "fusedKernelNanos": 8_200_000,
+                "fusedKernelThreadCpuNanos": 6_700_000,
+                "arraysGetNanos": 100_000,
+                "arraysReleaseNanos": 100_000,
+                "kotlinPrepareNanos": 100_000,
+                "kotlinAssembleNanos": 100_000,
+            },
+        }
+        last = {"frameId": 2, "receivedNanos": 33_000_000, "offeredNanos": 33_000_001}
+        report = measure({"pipelineTimingMode": "sem-nchw-indexed", "targetHardwareProfile": "test"}, [first, last], 0)
+        timing = report["timing_ms"]
+        self.assertEqual(timing["sem.score.fusedKernel"]["p50"], 8.2)
+        self.assertEqual(timing["sem.score.fusedKernelThreadCpu"]["p50"], 6.7)
+        self.assertEqual(timing["sem.score.fusedKernelOffCpu"]["p50"], 1.5)
 
     def test_rejects_missing_timing_rows_before_computing_drops(self):
         rows = [

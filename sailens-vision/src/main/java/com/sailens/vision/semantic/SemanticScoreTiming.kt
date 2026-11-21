@@ -3,13 +3,18 @@ package com.sailens.vision.semantic
 import android.os.SystemClock
 
 /** Timing for one scored tensor read through a LiteRT handle. */
-class SemanticScoreTiming(val sampleOffset: Int? = null) {
+class SemanticScoreTiming(
+    val sampleOffset: Int? = null,
+    measureThreadCpu: Boolean = false,
+) {
     init {
         require(sampleOffset == null || sampleOffset in 0 until PIXEL_SAMPLE_STRIDE)
     }
 
-    val nativeNanos = LongArray(9) { -1L }
+    // The optional final slot enables the thread CPU clock for the NEON kernel.
+    val nativeNanos = LongArray(if (measureThreadCpu) THREAD_CPU_SLOT + 1 else THREAD_CPU_SLOT) { -1L }
     val fusedKernelNanos: Long? get() = nativeNanos[1].takeIf { it >= 0 }
+    val fusedKernelThreadCpuNanos: Long? get() = nativeNanos.getOrNull(THREAD_CPU_SLOT)?.takeIf { it >= 0 }
     val arraysGetNanos: Long get() = nativeNanos[0]
     val arraysReleaseNanos: Long get() = nativeNanos[2]
     val sampledPixels: Long get() = nativeNanos[3]
@@ -42,14 +47,15 @@ class SemanticScoreTiming(val sampleOffset: Int? = null) {
     internal companion object {
         const val PIXEL_SAMPLE_STRIDE = 257
         private const val FRAME_SAMPLE_INTERVAL = 8
+        private const val THREAD_CPU_SLOT = 9
 
-        fun forFrame(frameId: Long, samplePixels: Boolean): SemanticScoreTiming {
+        fun forFrame(frameId: Long, samplePixels: Boolean, measureThreadCpu: Boolean): SemanticScoreTiming {
             val offset = if (samplePixels && frameId % FRAME_SAMPLE_INTERVAL == 0L) {
                 frameId.mod(PIXEL_SAMPLE_STRIDE)
             } else {
                 null
             }
-            return SemanticScoreTiming(offset)
+            return SemanticScoreTiming(offset, measureThreadCpu = measureThreadCpu)
         }
     }
 }

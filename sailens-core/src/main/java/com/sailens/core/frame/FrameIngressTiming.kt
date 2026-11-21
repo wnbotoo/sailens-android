@@ -11,6 +11,7 @@ public data class FrameIngressTiming(
 public data class PipelineTimingConfig(
     val traceName: String? = null,
     val sampleSemanticPixels: Boolean = false,
+    val measureSemanticScoreThreadCpu: Boolean = false,
 ) {
     public val enabled: Boolean get() = traceName != null
 }

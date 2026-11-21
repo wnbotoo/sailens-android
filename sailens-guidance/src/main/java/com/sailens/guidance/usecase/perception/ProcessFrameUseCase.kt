@@ -316,7 +316,11 @@ class ProcessFrameUseCase(
         }
 
         val runTiming = if (queuedNanos != null && timing != null) {
-            ModelRunTiming(queuedNanos, timing.sampleSemanticPixels)
+            ModelRunTiming(
+                queuedNanos,
+                sampleSemanticPixels = timing.sampleSemanticPixels,
+                measureSemanticScoreThreadCpu = timing.measureSemanticScoreThreadCpu,
+            )
         } else {
             null
         }

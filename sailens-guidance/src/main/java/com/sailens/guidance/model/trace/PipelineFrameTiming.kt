@@ -11,6 +11,7 @@ class PipelineFrameTiming internal constructor(
     frame: ImageFrame,
     val dequeuedNanos: Long,
     internal val sampleSemanticPixels: Boolean = false,
+    internal val measureSemanticScoreThreadCpu: Boolean = false,
 ) {
     val frameId: Long = frame.sequenceNumber
     val cameraTimestampNanos: Long = frame.timestamp

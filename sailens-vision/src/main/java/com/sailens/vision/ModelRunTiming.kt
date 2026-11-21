@@ -11,6 +11,7 @@ import com.sailens.vision.semantic.SemanticScoreTiming
 class ModelRunTiming(
     val queuedNanos: Long,
     internal val sampleSemanticPixels: Boolean = false,
+    internal val measureSemanticScoreThreadCpu: Boolean = false,
 ) {
     val input = InputPreprocessTiming()
     internal val nativeOutputAccess = LongArray(2) { -1L }
