@@ -19,7 +19,8 @@ internal class NativeYuvInputPreprocessor(
     private val mapping = FloatArray(7)
 
     fun imageMapping(frame: ImageFrame, rotationDegrees: Int): InputImageMapping {
-        val sideways = rotationDegrees == 90 || rotationDegrees == 270
+        val normalizedRotation = rotationDegrees.mod(360)
+        val sideways = normalizedRotation == 90 || normalizedRotation == 270
         val scale = mapping[0].toDouble()
         return InputImageMapping(
             if (sideways) frame.height else frame.width,

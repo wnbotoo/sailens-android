@@ -78,8 +78,13 @@ class NativeYuvPreprocessKernelTest {
         assertEquals("column 0 should be letterbox padding", padValue, output[0], TOLERANCE)
 
         val quantized = NativeYuvInputPreprocessor(config, ModelInputQuantization(scale = 1f / 255f, zeroPoint = -128))
-        assertTrue(quantized.preprocessInt8(frame, 270, ByteArray(output.size)))
+        val clockwise = ByteArray(output.size)
+        val counterclockwise = ByteArray(output.size)
+        assertTrue(quantized.preprocessInt8(frame, 270, clockwise))
         assertEquals(floatMapping.copy(rotationDegrees = 270), quantized.imageMapping(frame, 270))
+        assertTrue(quantized.preprocessInt8(frame, -90, counterclockwise))
+        assertArrayEquals(clockwise, counterclockwise)
+        assertEquals(floatMapping.copy(rotationDegrees = -90), quantized.imageMapping(frame, -90))
     }
 
     @Test

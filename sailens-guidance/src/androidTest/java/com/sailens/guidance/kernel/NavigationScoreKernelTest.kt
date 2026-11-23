@@ -442,9 +442,16 @@ class NavigationScoreKernelTest {
         expectedClassMap: IntArray?,
     ) {
         val spec = SemanticScoreSpec(WIDTH, HEIGHT, CLASS_COUNT, layout, content)
-        fun run(requestNeon: Boolean, measure: Boolean, measureThreadCpu: Boolean = false): NavigationSemanticResult {
+        fun run(
+            requestNeon: Boolean,
+            measure: Boolean,
+            measureThreadCpu: Boolean = false,
+            requestPairedNeon: Boolean = false,
+        ): NavigationSemanticResult {
             val postprocessor = NavigationScorePostprocessor(
-                analysisConfig, navigationSemantics, SilentLogService, useNeonArgmax = requestNeon,
+                analysisConfig, navigationSemantics, SilentLogService,
+                useNeonArgmax = requestNeon,
+                usePairedNeonArgmax = requestPairedNeon,
             )
             val timing = if (measure) SemanticScoreTiming(sampleOffset = 0, measureThreadCpu = measureThreadCpu) else null
             val outcome = checkNotNull(postprocessor.postprocessScores(
@@ -456,12 +463,17 @@ class NavigationScoreKernelTest {
             if (timing != null) {
                 val neon = requestNeon && expectedClassMap != null &&
                     layout == ImageTensorLayout.NCHW && content.width >= 4
-                assertEquals(if (neon) "neon" else "scalar", timing.argmaxImplementation)
+                val expectedImplementation = when {
+                    !neon -> "scalar"
+                    requestPairedNeon && content.width >= 8 -> "neon_paired"
+                    else -> "neon"
+                }
+                assertEquals(expectedImplementation, timing.argmaxImplementation)
                 if (neon) assertEquals(0L, timing.sampledPixels)
                 else assertTrue(timing.sampledPixels > 0L)
                 if (neon && measureThreadCpu) {
-                    val cpuNanos = checkNotNull(timing.fusedKernelThreadCpuNanos)
-                    assertTrue(cpuNanos in 1..checkNotNull(timing.fusedKernelNanos))
+                    assertTrue(checkNotNull(timing.fusedKernelThreadCpuNanos) > 0)
+                    assertTrue(checkNotNull(timing.fusedKernelNanos) > 0)
                 } else {
                     assertNull(timing.fusedKernelThreadCpuNanos)
                 }
@@ -481,18 +493,23 @@ class NavigationScoreKernelTest {
                 assertArrayEquals(cropped, baseline.mask.classMap)
                 assertEquals(expectedStats, baseline.stats)
             }
+            fun assertMatchesScalar(candidate: NavigationSemanticResult) {
+                candidate.maskLease.use {
+                    assertArrayEquals(baseline.mask.classMap, candidate.mask.classMap)
+                    assertEquals(baseline.stats, candidate.stats)
+                }
+            }
+
             for ((requestNeon, measure, measureThreadCpu) in listOf(
                 Triple(false, true, false),
                 Triple(true, false, false),
                 Triple(true, true, false),
                 Triple(true, true, true),
             )) {
-                val candidate = run(requestNeon, measure, measureThreadCpu)
-                candidate.maskLease.use {
-                    assertArrayEquals(baseline.mask.classMap, candidate.mask.classMap)
-                    assertEquals(baseline.stats, candidate.stats)
-                }
+                assertMatchesScalar(run(requestNeon, measure, measureThreadCpu))
             }
+            assertMatchesScalar(run(requestNeon = false, measure = true, requestPairedNeon = true))
+            assertMatchesScalar(run(requestNeon = true, measure = true, measureThreadCpu = true, requestPairedNeon = true))
         }
     }
 

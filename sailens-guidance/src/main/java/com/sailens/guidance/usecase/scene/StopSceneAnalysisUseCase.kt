@@ -37,6 +37,7 @@ class StopSceneAnalysisUseCase(
     operator fun invoke() {
         logService.info("Navigation", "Navigation stopped")
         resetProcessors()
+        preprocessCache?.clear()
     }
 
     private fun resetProcessors() {

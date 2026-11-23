@@ -158,6 +158,14 @@ class PipelinePerformanceTest(unittest.TestCase):
         self.assertEqual(timing["sem.score.fusedKernelThreadCpu"]["p50"], 6.7)
         self.assertEqual(timing["sem.score.fusedKernelOffCpu"]["p50"], 1.5)
 
+        first["sem"]["semanticScorePhases"]["fusedKernelThreadCpuNanos"] = 8_201_000
+        report = measure({"pipelineTimingMode": "sem-nchw-indexed", "targetHardwareProfile": "test"}, [first, last], 0)
+        timing = report["timing_ms"]
+        self.assertEqual(timing["sem.score.fusedKernel"]["p50"], 8.2)
+        self.assertEqual(timing["sem.score.fusedKernelThreadCpu"]["p50"], 8.201)
+        self.assertEqual(report["counts"]["sem_score_thread_cpu_exceeds_wall"], 1)
+        self.assertNotIn("sem.score.fusedKernelOffCpu", timing)
+
     def test_rejects_missing_timing_rows_before_computing_drops(self):
         rows = [
             {"type": "session_start", "sessionId": "s", "pipelineTimingMode": "race"},

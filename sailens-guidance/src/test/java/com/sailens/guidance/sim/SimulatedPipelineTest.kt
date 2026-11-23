@@ -130,7 +130,7 @@ class SimulatedPipelineTest {
     }
 
     @Test
-    fun `releasing both models drops their shared input tensors`() = runBlocking {
+    fun `stopping or releasing Guidance drops shared input tensors`() = runBlocking {
         val cache = InputPreprocessCache()
         val pipeline = SimulatedPipeline(scenario, preprocessCache = cache)
         val frame = pipeline.cameraFrame(0)
@@ -140,10 +140,17 @@ class SimulatedPipelineTest {
         )
         val key = InputPreprocessCache.Key.from(frame, frame.rotationDegrees, config)
         val quantization = ModelInputQuantization()
-        cache.storeFloatInput(key, FloatArray(3), InputPreprocessBackend.NATIVE_YUV)
-        cache.storeInt8Input(key, quantization, ByteArray(3), InputPreprocessBackend.NATIVE_YUV)
+        fun storeInputs() {
+            cache.storeFloatInput(key, FloatArray(3), InputPreprocessBackend.NATIVE_YUV)
+            cache.storeInt8Input(key, quantization, ByteArray(3), InputPreprocessBackend.NATIVE_YUV)
+        }
 
+        storeInputs()
         pipeline.stop()
+        assertNull(cache.copyFloatInput(key, FloatArray(3)))
+        assertNull(cache.copyInt8Input(key, quantization, ByteArray(3)))
+
+        storeInputs()
         pipeline.stop.release()
 
         assertEquals(1, pipeline.segmentation.releases.get())
