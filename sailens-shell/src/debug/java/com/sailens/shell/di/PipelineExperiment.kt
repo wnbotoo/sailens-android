@@ -6,6 +6,7 @@ import com.sailens.guidance.config.GuidanceOptimizationConfig
 private val semanticProducer = GuidanceOptimizationConfig(preferSemanticPreprocess = true)
 private val semanticNeon = semanticProducer.copy(useNeonArgmax = true)
 private val combinedOptimizations = semanticNeon.copy(directFloatNchw = true)
+private val indexedOptimizations = combinedOptimizations.copy(precomputeNearestIndices = true)
 
 /** Maps the local debug marker to independent execution and profiling settings. */
 internal enum class PipelineExperiment(
@@ -13,6 +14,7 @@ internal enum class PipelineExperiment(
     val optimizations: GuidanceOptimizationConfig = GuidanceOptimizationConfig(),
     measure: Boolean = true,
     sampleSemanticPixels: Boolean = false,
+    measureSemanticScoreThreadCpu: Boolean = false,
 ) {
     OFF(null),
     RACE("race", sampleSemanticPixels = true),
@@ -22,9 +24,20 @@ internal enum class PipelineExperiment(
     SEM_SIMD("sem-simd", semanticNeon),
     SEM_NCHW("sem-nchw", combinedOptimizations),
     SEM_NCHW_UNTIMED("sem-nchw-untimed", combinedOptimizations, measure = false),
+    SEM_NCHW_INDEXED("sem-nchw-indexed", indexedOptimizations, measureSemanticScoreThreadCpu = true),
+    SEM_NCHW_INDEXED_UNTIMED("sem-nchw-indexed-untimed", indexedOptimizations, measure = false),
+    SEM_NCHW_INDEXED_ARGMAX8_UNTIMED(
+        "sem-nchw-indexed-argmax8-untimed",
+        indexedOptimizations.copy(usePairedNeonArgmax = true),
+        measure = false,
+    ),
     ;
 
-    val timing = PipelineTimingConfig(marker.takeIf { measure }, sampleSemanticPixels)
+    val timing = PipelineTimingConfig(
+        traceName = marker.takeIf { measure },
+        sampleSemanticPixels = sampleSemanticPixels,
+        measureSemanticScoreThreadCpu = measureSemanticScoreThreadCpu,
+    )
 
     companion object {
         fun fromMarker(marker: String?): PipelineExperiment = entries.firstOrNull { it.marker == marker } ?: OFF

@@ -100,6 +100,8 @@ static int bestSemanticClass(const Score* scores, int channels, int channelStrid
 
 #if defined(__aarch64__)
 constexpr int kNeonLanes = 4;
+constexpr int kPairedNeonColumns = 2 * kNeonLanes;
+constexpr int kPairedNeonChannels = 19;
 
 static bool bestSemanticClassesNeon(const jfloat* scores, int channels, int planeSize, jint* classes) {
     const uint32x4_t magnitudeMask = vdupq_n_u32(0x7fffffffu);
@@ -117,6 +119,34 @@ static bool bestSemanticClassesNeon(const jfloat* scores, int channels, int plan
     // Inspect exponent bits because fast-math permits the compiler to assume finiteness.
     if (vmaxvq_u32(maxMagnitude) >= 0x7f800000u) return false;
     vst1q_s32(classes, classIds);
+    return true;
+}
+
+static bool bestSemanticClassesNeonPaired(const jfloat* scores, int planeSize, jint* classes) {
+    const uint32x4_t magnitudeMask = vdupq_n_u32(0x7fffffffu);
+    float32x4_t firstBest = vld1q_f32(scores);
+    float32x4_t secondBest = vld1q_f32(scores + kNeonLanes);
+    uint32x4_t firstMagnitude = vandq_u32(vreinterpretq_u32_f32(firstBest), magnitudeMask);
+    uint32x4_t secondMagnitude = vandq_u32(vreinterpretq_u32_f32(secondBest), magnitudeMask);
+    int32x4_t firstClasses = vdupq_n_s32(0);
+    int32x4_t secondClasses = vdupq_n_s32(0);
+    for (int channel = 1; channel < kPairedNeonChannels; ++channel) {
+        scores += planeSize;
+        const float32x4_t first = vld1q_f32(scores);
+        const float32x4_t second = vld1q_f32(scores + kNeonLanes);
+        firstMagnitude = vmaxq_u32(firstMagnitude, vandq_u32(vreinterpretq_u32_f32(first), magnitudeMask));
+        secondMagnitude = vmaxq_u32(secondMagnitude, vandq_u32(vreinterpretq_u32_f32(second), magnitudeMask));
+        const uint32x4_t firstHigher = vcgtq_f32(first, firstBest);
+        const uint32x4_t secondHigher = vcgtq_f32(second, secondBest);
+        const int32x4_t classIds = vdupq_n_s32(channel);
+        firstBest = vbslq_f32(firstHigher, first, firstBest);
+        secondBest = vbslq_f32(secondHigher, second, secondBest);
+        firstClasses = vbslq_s32(firstHigher, classIds, firstClasses);
+        secondClasses = vbslq_s32(secondHigher, classIds, secondClasses);
+    }
+    if (vmaxvq_u32(vmaxq_u32(firstMagnitude, secondMagnitude)) >= 0x7f800000u) return false;
+    vst1q_s32(classes, firstClasses);
+    vst1q_s32(classes + kNeonLanes, secondClasses);
     return true;
 }
 #endif
@@ -153,13 +183,17 @@ enum SemanticScoreKernel : jint {
     kScoreKernelFailed = -1,
     kScoreKernelScalar = 0,
     kScoreKernelNeon = 1,
+    kScoreKernelNeonPaired = 2,
 };
 
 class SemanticScoreTiming {
 public:
     SemanticScoreTiming(JNIEnv* env, jlongArray destination, jint sampleOffset) {
-        if (destination == nullptr || env->GetArrayLength(destination) < kCount) return;
+        if (destination == nullptr) return;
+        const jsize size = env->GetArrayLength(destination);
+        if (size < kBaseCount) return;
         destination_ = destination;
+        measureThreadCpu_ = size >= kCount;
         if (0 <= sampleOffset && sampleOffset < SemanticPixelSamples::kStride) {
             pixels_.nextPixel = sampleOffset;
         }
@@ -169,43 +203,64 @@ public:
         return destination_ == nullptr ? 0 : elapsedNanos();
     }
 
+    jlong threadCpuNow() const {
+        if (!measureThreadCpu_) return -1;
+        timespec time{};
+        if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &time) != 0) return -1;
+        return static_cast<jlong>(time.tv_sec) * 1'000'000'000 + time.tv_nsec;
+    }
+
     SemanticPixelSamples* pixelSamples() {
         return pixels_.nextPixel >= 0 ? &pixels_ : nullptr;
     }
 
-    void record(JNIEnv* env, jlong arraysGet, jlong fusedKernel, jlong arraysRelease, SemanticScoreKernel kernel) const {
+    void record(
+            JNIEnv* env, jlong arraysGet, jlong fusedKernel, jlong arraysRelease,
+            SemanticScoreKernel kernel, jlong fusedKernelThreadCpu = -1) const {
         if (destination_ == nullptr) return;
         const jlong values[kCount] = {
                 arraysGet, fusedKernel, arraysRelease, pixels_.count, pixels_.argmaxNanos,
-                pixels_.maskNanos, pixels_.statsNanos, pixels_.clockNanos, kernel,
+                pixels_.maskNanos, pixels_.statsNanos, pixels_.clockNanos, kernel, fusedKernelThreadCpu,
         };
-        env->SetLongArrayRegion(destination_, 0, kCount, values);
+        env->SetLongArrayRegion(destination_, 0, measureThreadCpu_ ? kCount : kBaseCount, values);
     }
 
 private:
-    static constexpr int kCount = 9;
+    static constexpr int kBaseCount = 9;
+    static constexpr int kCount = kBaseCount + 1;
     jlongArray destination_ = nullptr;
+    bool measureThreadCpu_ = false;
     SemanticPixelSamples pixels_;
 };
 
+template <SemanticScoreKernel Kernel>
+using ScoreKernelTag = std::integral_constant<SemanticScoreKernel, Kernel>;
+
 template <typename Score, typename Run>
 SemanticScoreKernel runSemanticScoreKernel(
-        bool requestNeon, int layout, int width, SemanticPixelSamples* pixels, Run run) {
+        bool requestNeon, bool requestPairedNeon, int layout, int channels, int width,
+        SemanticPixelSamples* pixels, Run run) {
 #if defined(__aarch64__)
     if constexpr (std::is_same_v<Score, jfloat>) {
-        if (requestNeon && layout == sailens::kTensorLayoutNchw && width >= kNeonLanes &&
-            run(std::false_type{}, std::true_type{}, nullptr)) {
-            return kScoreKernelNeon;
+        if (requestNeon && layout == sailens::kTensorLayoutNchw && width >= kNeonLanes) {
+            if (requestPairedNeon && channels == kPairedNeonChannels && width >= kPairedNeonColumns) {
+                if (run(std::false_type{}, ScoreKernelTag<kScoreKernelNeonPaired>{}, nullptr)) {
+                    return kScoreKernelNeonPaired;
+                }
+            } else if (run(std::false_type{}, ScoreKernelTag<kScoreKernelNeon>{}, nullptr)) {
+                return kScoreKernelNeon;
+            }
         }
         // The scalar kernel rewrites every output when a score is non-finite.
     }
 #endif
-    if (pixels != nullptr) run(std::true_type{}, std::false_type{}, pixels);
-    else run(std::false_type{}, std::false_type{}, nullptr);
+    const ScoreKernelTag<kScoreKernelScalar> scalar{};
+    if (pixels != nullptr) run(std::true_type{}, scalar, pixels);
+    else run(std::false_type{}, scalar, nullptr);
     return kScoreKernelScalar;
 }
 
-template <typename Score, bool SamplePixels = false, bool NeonArgmax = false>
+template <typename Score, bool SamplePixels = false, SemanticScoreKernel Kernel = kScoreKernelScalar>
 static bool postprocessSemanticScoresCore(
         const Score* scoreData,
         jint* resultData,
@@ -266,8 +321,10 @@ static bool postprocessSemanticScoresCore(
     for (int y = 0; y < height; ++y) {
         int currentRunStart = -1;
 #if defined(__aarch64__)
-        jint neonClasses[kNeonLanes];
+        constexpr bool paired = Kernel == kScoreKernelNeonPaired;
+        jint neonClasses[paired ? kPairedNeonColumns : kNeonLanes];
         int groupStart = 0;
+        int nextGroupStart = 0;
 #endif
 
         for (int x = 0; x < width; ++x) {
@@ -278,12 +335,20 @@ static bool postprocessSemanticScoresCore(
             const int sourcePixel = (region.y + y) * gridWidth + (region.x + x);
             int classId;
 #if defined(__aarch64__)
-            if constexpr (NeonArgmax) {
-                if (x % kNeonLanes == 0) {
-                    // Overlap the last vector with the previous one to stay inside the crop.
-                    groupStart = std::min(x, width - kNeonLanes);
-                    const jfloat* group = scoreData + sourcePixel - (x - groupStart);
-                    if (!bestSemanticClassesNeon(group, channels, planeSize, neonClasses)) return false;
+            if constexpr (Kernel != kScoreKernelScalar) {
+                const bool startGroup = paired ? x == nextGroupStart : x % kNeonLanes == 0;
+                if (startGroup) {
+                    if (paired && x <= width - kPairedNeonColumns) {
+                        groupStart = x;
+                        nextGroupStart = x + kPairedNeonColumns;
+                        if (!bestSemanticClassesNeonPaired(scoreData + sourcePixel, planeSize, neonClasses)) return false;
+                    } else {
+                        // Overlap the last vector with the previous one to stay inside the crop.
+                        groupStart = std::min(x, width - kNeonLanes);
+                        nextGroupStart = x + kNeonLanes;
+                        const jfloat* group = scoreData + sourcePixel - (x - groupStart);
+                        if (!bestSemanticClassesNeon(group, channels, planeSize, neonClasses)) return false;
+                    }
                 }
                 classId = neonClasses[x - groupStart];
             } else
@@ -724,6 +789,7 @@ nativePostprocessScoresFromHandle(
         jintArray intOutputs,
         jintArray contentRegion,
         jboolean requestNeon,
+        jboolean requestPairedNeon,
         jint sampleOffset,
         jlongArray outputAccessNanos,
         jlongArray scoreTimingNanos) {
@@ -817,11 +883,14 @@ nativePostprocessScoresFromHandle(
         return kScoreKernelFailed;
     }
 
+    // The wall-clock interval encloses both thread CPU clock reads around the same kernel call.
     const jlong kernelStarted = timings.now();
+    const jlong cpuStarted = requestNeon == JNI_TRUE ? timings.threadCpuNow() : -1;
     const auto kernel = runSemanticScoreKernel<jfloat>(
-            requestNeon == JNI_TRUE, scoreLayout, region.width, timings.pixelSamples(),
-            [&](auto sample, auto neon, SemanticPixelSamples* pixels) {
-                return postprocessSemanticScoresCore<jfloat, decltype(sample)::value, decltype(neon)::value>(
+            requestNeon == JNI_TRUE, requestPairedNeon == JNI_TRUE, scoreLayout, channels, region.width,
+            timings.pixelSamples(),
+            [&](auto sample, auto selectedKernel, SemanticPixelSamples* pixels) {
+                return postprocessSemanticScoresCore<jfloat, decltype(sample)::value, decltype(selectedKernel)::value>(
                         scoreData, resultData, width, height, scoreLayout, region, channels,
                         passableData, obstacleData, roadData, trafficLightData, groundTypeData,
                         bottomRatio, centerRatio, navigationRegionRatio,
@@ -829,7 +898,10 @@ nativePostprocessScoresFromHandle(
                         classCountData, classCount, groundTypeCountData, groundTypeCount,
                         outputData, pixels);
             });
+    const bool usedNeon = kernel == kScoreKernelNeon || kernel == kScoreKernelNeonPaired;
+    const jlong cpuFinished = usedNeon && cpuStarted >= 0 ? timings.threadCpuNow() : -1;
     const jlong kernelFinished = timings.now();
+    const jlong kernelThreadCpu = cpuStarted >= 0 && cpuFinished >= cpuStarted ? cpuFinished - cpuStarted : -1;
 
     access.unlock(tensorBufferHandle);
 
@@ -845,7 +917,8 @@ nativePostprocessScoresFromHandle(
     env->ReleaseIntArrayElements(classCounts, classCountData, 0);
     env->ReleaseIntArrayElements(groundTypeCounts, groundTypeCountData, 0);
     env->ReleaseIntArrayElements(intOutputs, outputData, 0);
-    timings.record(env, gotArrays - gettingArrays, kernelFinished - kernelStarted, timings.now() - releasingArrays, kernel);
+    timings.record(env, gotArrays - gettingArrays, kernelFinished - kernelStarted,
+                   timings.now() - releasingArrays, kernel, kernelThreadCpu);
     return kernel;
 }
 
@@ -970,9 +1043,9 @@ nativePostprocessInt8ScoresFromHandle(
 
     const jlong kernelStarted = timings.now();
     const auto kernel = runSemanticScoreKernel<jbyte>(
-            false, scoreLayout, region.width, timings.pixelSamples(),
-            [&](auto sample, auto neon, SemanticPixelSamples* pixels) {
-                return postprocessSemanticScoresCore<jbyte, decltype(sample)::value, decltype(neon)::value>(
+            false, false, scoreLayout, channels, region.width, timings.pixelSamples(),
+            [&](auto sample, auto selectedKernel, SemanticPixelSamples* pixels) {
+                return postprocessSemanticScoresCore<jbyte, decltype(sample)::value, decltype(selectedKernel)::value>(
                         scoreData, resultData, width, height, scoreLayout, region, channels,
                         passableData, obstacleData, roadData, trafficLightData, groundTypeData,
                         bottomRatio, centerRatio, navigationRegionRatio,
@@ -1385,7 +1458,7 @@ const JNINativeMethod kSemanticScorePostprocessorMethods[] = {
          "([B[IIIII[Z[Z[Z[Z[IFFF[J[J[I[I[I[I)Z",
          reinterpret_cast<void*>(nativePostprocessInt8Scores)},
         {"nativePostprocessScoresFromHandle",
-         "(J[IIIII[Z[Z[Z[Z[IFFF[J[J[I[I[I[IZI[J[J)I",
+         "(J[IIIII[Z[Z[Z[Z[IFFF[J[J[I[I[I[IZZI[J[J)I",
          reinterpret_cast<void*>(nativePostprocessScoresFromHandle)},
         {"nativePostprocessInt8ScoresFromHandle",
          "(J[IIIII[Z[Z[Z[Z[IFFF[J[J[I[I[I[II[J[J)Z",

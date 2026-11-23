@@ -74,11 +74,13 @@ val guidanceModule = module {
     }
 
     single {
+        val optimizations = getOrNull<GuidanceOptimizationConfig>()
         NavigationScorePostprocessor(
             config = get(),
             navigationSemantics = get(),
             logService = get(),
-            useNeonArgmax = getOrNull<GuidanceOptimizationConfig>()?.useNeonArgmax == true,
+            useNeonArgmax = optimizations?.useNeonArgmax == true,
+            usePairedNeonArgmax = optimizations?.usePairedNeonArgmax == true,
         )
     }
 
@@ -107,6 +109,7 @@ val guidanceModule = module {
             scorePostprocessor = get<NavigationScorePostprocessor>(),
             preprocessCache = get(),
             directFloatNchw = getOrNull<GuidanceOptimizationConfig>()?.directFloatNchw == true,
+            precomputeNearestIndices = getOrNull<GuidanceOptimizationConfig>()?.precomputeNearestIndices == true,
             logService = get(),
         )
     }
@@ -119,6 +122,7 @@ val guidanceModule = module {
             modelSourceResolver = get(),
             preprocessCache = get(),
             directFloatNchw = getOrNull<GuidanceOptimizationConfig>()?.directFloatNchw == true,
+            precomputeNearestIndices = getOrNull<GuidanceOptimizationConfig>()?.precomputeNearestIndices == true,
             logService = get(),
         )
     }
@@ -188,6 +192,7 @@ private fun createPerceptionRepository(
     scorePostprocessor: NavigationScorePostprocessor,
     preprocessCache: InputPreprocessCache,
     directFloatNchw: Boolean,
+    precomputeNearestIndices: Boolean,
     logService: LogService,
 ): PerceptionRepository = when (providerType) {
     SemanticProviderType.SEGMENTATION_MODEL -> SemanticPerceptionRepository(
@@ -197,6 +202,7 @@ private fun createPerceptionRepository(
         modelSourceResolver = modelSourceResolver,
         preprocessCache = preprocessCache,
         directFloatNchw = directFloatNchw,
+        precomputeNearestIndices = precomputeNearestIndices,
         logService = logService,
     )
 }
@@ -209,6 +215,7 @@ private fun createObstacleProvider(
     modelSourceResolver: ModelSourceResolver,
     preprocessCache: InputPreprocessCache,
     directFloatNchw: Boolean,
+    precomputeNearestIndices: Boolean,
     logService: LogService,
 ): ObstacleProvider = when (providerType) {
     ObstacleProviderType.NONE -> DisabledObstacleProvider()
@@ -219,6 +226,7 @@ private fun createObstacleProvider(
         modelSourceResolver = modelSourceResolver,
         preprocessCache = preprocessCache,
         directFloatNchw = directFloatNchw,
+        precomputeNearestIndices = precomputeNearestIndices,
         logService = logService,
     )
 }

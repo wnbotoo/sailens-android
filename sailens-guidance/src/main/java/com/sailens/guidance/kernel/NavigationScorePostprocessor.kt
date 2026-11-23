@@ -51,6 +51,7 @@ class NavigationScorePostprocessor(
     private val logService: LogService,
     private val maskPool: SegmentationMaskPool = SegmentationMaskPool(),
     private val useNeonArgmax: Boolean = false,
+    private val usePairedNeonArgmax: Boolean = false,
 ) : SemanticPostprocessor<NavigationSemanticResult> {
     private val lookup = SemanticClassLookup.from(navigationSemantics)
     private var hasLoggedBackend = false
@@ -277,6 +278,7 @@ class NavigationScorePostprocessor(
                 intOutputs = scratch.intOutputs,
                 contentRegion = scratch.contentRegion,
                 requestNeon = useNeonArgmax,
+                requestPairedNeon = usePairedNeonArgmax,
                 sampleOffset = timing?.sampleOffset ?: -1,
                 outputAccessNanos = outputAccessNanos,
                 scoreTimingNanos = timing?.nativeNanos,
@@ -581,6 +583,7 @@ class NavigationScorePostprocessor(
         intOutputs: IntArray,
         contentRegion: IntArray,
         requestNeon: Boolean,
+        requestPairedNeon: Boolean,
         sampleOffset: Int,
         outputAccessNanos: LongArray?,
         scoreTimingNanos: LongArray?,

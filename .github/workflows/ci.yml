@@ -18,7 +18,7 @@ jobs:
   build:
     name: build
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 35
 
     steps:
       - name: Checkout
@@ -55,6 +55,7 @@ jobs:
           python3 -m venv /tmp/capture-tools
           /tmp/capture-tools/bin/pip install --quiet -r scripts/capture/requirements.txt
           /tmp/capture-tools/bin/python -m unittest discover -s scripts/capture -v
+          /tmp/capture-tools/bin/python -m unittest discover -s scripts/experiments -p "test_pipeline_performance.py" -v
           /tmp/capture-tools/bin/python -m unittest discover -s scripts -p "test_export_prompt_labels.py" -v
           /tmp/capture-tools/bin/python -m unittest discover -s scripts -p "test_build_identity.py" -v
           /tmp/capture-tools/bin/python -m unittest discover -s scripts -p "test_verify_no_process_history.py" -v

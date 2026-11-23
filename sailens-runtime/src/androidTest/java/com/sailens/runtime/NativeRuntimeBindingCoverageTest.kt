@@ -50,7 +50,7 @@ class NativeRuntimeBindingCoverageTest {
         NativeBinding(
             NativeYuvInputPreprocessor::class.java,
             "nativePreprocessYuvToFloat",
-            "([B[B[BIIIIIIIIIIIFFFFFFII[F[F[J)Z",
+            "([B[B[BIIIIIIIIIIIFFFFFFIIZ[F[F[J)Z",
         ),
         NativeBinding(
             NativeYuvInputPreprocessor::class.java,
@@ -135,7 +135,7 @@ class NativeRuntimeBindingCoverageTest {
             2, 1, 1, 1, 1, 1,
             2, 2, 0, 2, 2,
             0f, 0f, 0f, 1f, 1f, 1f,
-            0, ImageTensorLayout.NHWC.nativeValue,
+            0, ImageTensorLayout.NHWC.nativeValue, false,
             output, mapping, timing,
         )
 

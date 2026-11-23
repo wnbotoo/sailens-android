@@ -5,4 +5,6 @@ data class GuidanceOptimizationConfig(
     val preferSemanticPreprocess: Boolean = false,
     val useNeonArgmax: Boolean = false,
     val directFloatNchw: Boolean = false,
+    val precomputeNearestIndices: Boolean = false,
+    val usePairedNeonArgmax: Boolean = false,
 )

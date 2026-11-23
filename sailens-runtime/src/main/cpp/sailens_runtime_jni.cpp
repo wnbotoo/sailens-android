@@ -7,6 +7,8 @@
 #include <cmath>
 #include <cstddef>
 #include <limits>
+#include <memory>
+#include <new>
 #include <type_traits>
 #include <vector>
 
@@ -86,13 +88,17 @@ static float samplePlaneNearest(const YuvPlane& plane, float x, float y) {
 }
 
 static RgbPixel yuvToRgb(float yValue, float uValue, float vValue) {
+    // Preserve the scalar kernel's rounding when this is inlined into different output layouts.
+#pragma clang fp contract(off) reassociate(off)
     const float c = std::max(yValue - 16.0f, 0.0f);
     const float d = uValue - 128.0f;
     const float e = vValue - 128.0f;
+    const float luma = 1.164f * c;
+    const float greenChroma = std::fma(-0.392f, d, -0.813f * e);
     return {
-            std::clamp(1.164f * c + 1.596f * e, 0.0f, 255.0f),
-            std::clamp(1.164f * c - 0.392f * d - 0.813f * e, 0.0f, 255.0f),
-            std::clamp(1.164f * c + 2.017f * d, 0.0f, 255.0f),
+            std::clamp(std::fma(1.596f, e, luma), 0.0f, 255.0f),
+            std::clamp(luma + greenChroma, 0.0f, 255.0f),
+            std::clamp(std::fma(2.017f, d, luma), 0.0f, 255.0f),
     };
 }
 
@@ -120,7 +126,52 @@ static RgbPixel sampleYuvAsRgbNearest(
     return yuvToRgb(yValue, uValue, vValue);
 }
 
-template <bool Planar = false, typename Writer>
+struct NearestOffsets {
+    jlong y;
+    jlong u;
+    jlong v;
+};
+
+static jlong nearestAxisOffset(const YuvPlane& plane, float coordinate, bool sourceRow) {
+    const int extent = sourceRow ? plane.height : plane.width;
+    const int stride = sourceRow ? plane.rowStride : plane.pixelStride;
+    if (extent <= 0) return plane.size;
+    const int index = std::clamp(static_cast<int>(coordinate + 0.5f), 0, extent - 1);
+    return static_cast<jlong>(index) * stride;
+}
+
+static void fillNearestOffsets(
+        NearestOffsets* offsets,
+        int first,
+        int end,
+        float pad,
+        float scale,
+        bool sourceRow,
+        bool reverse,
+        const YuvPlane& yPlane,
+        const YuvPlane& uPlane,
+        const YuvPlane& vPlane) {
+    const float last = static_cast<float>((sourceRow ? yPlane.height : yPlane.width) - 1);
+    for (int i = first; i < end; ++i) {
+        const float rotated = (static_cast<float>(i) - pad + 0.5f) / scale - 0.5f;
+        const float source = reverse ? last - rotated : rotated;
+        // Chroma is rounded from its own source coordinate.
+        const float chroma = source * 0.5f;
+        offsets[i - first] = {
+                nearestAxisOffset(yPlane, source, sourceRow),
+                nearestAxisOffset(uPlane, chroma, sourceRow),
+                nearestAxisOffset(vPlane, chroma, sourceRow),
+        };
+    }
+}
+
+static float sampleAtOffset(const YuvPlane& plane, jlong offset) {
+    return offset < plane.size
+            ? static_cast<float>(static_cast<unsigned char>(plane.data[offset]))
+            : static_cast<float>(plane.defaultValue);
+}
+
+template <bool Planar = false, bool IndexedNearest = false, typename Writer>
 static bool preprocessYuv(
         const YuvPlane& yPlane,
         const YuvPlane& uPlane,
@@ -138,7 +189,8 @@ static bool preprocessYuv(
         float stdB,
         int resizeFilter,
         float (&mapping)[7],
-        Writer writer) {
+        Writer writer,
+        NearestOffsets* offsets = nullptr) {
     if (sourceWidth <= 0 || sourceHeight <= 0 || targetWidth <= 0 || targetHeight <= 0 ||
         stdR == 0.0f || stdG == 0.0f || stdB == 0.0f) {
         return false;
@@ -169,6 +221,14 @@ static bool preprocessYuv(
     mapping[6] = static_cast<float>(activeEndY);
     const RgbPixel pad{(0.0f - meanR) / stdR, (0.0f - meanG) / stdG, (0.0f - meanB) / stdB};
     const bool useNearestResize = resizeFilter == 0;
+    NearestOffsets* rows = nullptr;
+    if constexpr (IndexedNearest) {
+        rows = offsets + (activeEndX - activeStartX);
+        const bool reverseX = normalizedRotation == 90 || normalizedRotation == 180;
+        const bool reverseY = normalizedRotation == 180 || normalizedRotation == 270;
+        fillNearestOffsets(offsets, activeStartX, activeEndX, padX, scale, rotated, reverseX, yPlane, uPlane, vPlane);
+        fillNearestOffsets(rows, activeStartY, activeEndY, padY, scale, !rotated, reverseY, yPlane, uPlane, vPlane);
+    }
 
     constexpr int pixelStride = Planar ? 1 : kRgbChannels;
     const int channelStride = Planar ? targetWidth * targetHeight : 1;
@@ -195,30 +255,40 @@ static bool preprocessYuv(
 
         const float rotatedY = (static_cast<float>(y) - padY + 0.5f) / scale - 0.5f;
         for (int x = activeStartX; x < activeEndX; ++x) {
-            const float rotatedX = (static_cast<float>(x) - padX + 0.5f) / scale - 0.5f;
-            float sourceX = 0.0f;
-            float sourceY = 0.0f;
-            switch (normalizedRotation) {
-                case 90:
-                    sourceX = rotatedY;
-                    sourceY = static_cast<float>(sourceHeight - 1) - rotatedX;
-                    break;
-                case 180:
-                    sourceX = static_cast<float>(sourceWidth - 1) - rotatedX;
-                    sourceY = static_cast<float>(sourceHeight - 1) - rotatedY;
-                    break;
-                case 270:
-                    sourceX = static_cast<float>(sourceWidth - 1) - rotatedY;
-                    sourceY = rotatedX;
-                    break;
-                default:
-                    sourceX = rotatedX;
-                    sourceY = rotatedY;
-                    break;
+            RgbPixel pixel;
+            if constexpr (IndexedNearest) {
+                const NearestOffsets& row = rows[y - activeStartY];
+                const NearestOffsets& column = offsets[x - activeStartX];
+                pixel = yuvToRgb(
+                        sampleAtOffset(yPlane, row.y + column.y),
+                        sampleAtOffset(uPlane, row.u + column.u),
+                        sampleAtOffset(vPlane, row.v + column.v));
+            } else {
+                const float rotatedX = (static_cast<float>(x) - padX + 0.5f) / scale - 0.5f;
+                float sourceX = 0.0f;
+                float sourceY = 0.0f;
+                switch (normalizedRotation) {
+                    case 90:
+                        sourceX = rotatedY;
+                        sourceY = static_cast<float>(sourceHeight - 1) - rotatedX;
+                        break;
+                    case 180:
+                        sourceX = static_cast<float>(sourceWidth - 1) - rotatedX;
+                        sourceY = static_cast<float>(sourceHeight - 1) - rotatedY;
+                        break;
+                    case 270:
+                        sourceX = static_cast<float>(sourceWidth - 1) - rotatedY;
+                        sourceY = rotatedX;
+                        break;
+                    default:
+                        sourceX = rotatedX;
+                        sourceY = rotatedY;
+                        break;
+                }
+                pixel = useNearestResize
+                        ? sampleYuvAsRgbNearest(yPlane, uPlane, vPlane, sourceX, sourceY)
+                        : sampleYuvAsRgb(yPlane, uPlane, vPlane, sourceX, sourceY);
             }
-            const RgbPixel pixel = useNearestResize
-                    ? sampleYuvAsRgbNearest(yPlane, uPlane, vPlane, sourceX, sourceY)
-                    : sampleYuvAsRgb(yPlane, uPlane, vPlane, sourceX, sourceY);
             writePixel(outIndex, {
                     (pixel.r / 255.0f - meanR) / stdR,
                     (pixel.g / 255.0f - meanG) / stdG,
@@ -302,6 +372,7 @@ nativePreprocessYuvToFloat(
         jfloat stdB,
         jint resizeFilter,
         jint outputLayout,
+        jboolean precomputeNearestIndices,
         jfloatArray output,
         jfloatArray mapping,
         jlongArray timingNanos) {
@@ -367,16 +438,23 @@ nativePreprocessYuvToFloat(
 
     float imageMapping[7];
     const jlong bodyStarted = timing.now();
-    const auto preprocess = [&](auto planar) {
-        return preprocessYuv<decltype(planar)::value>(
+    std::unique_ptr<NearestOffsets[]> offsets;
+    if (precomputeNearestIndices && resizeFilter == 0) {
+        offsets.reset(new (std::nothrow) NearestOffsets[static_cast<size_t>(targetWidth) + targetHeight]);
+    }
+    const auto preprocess = [&](auto planar, auto indexed) {
+        return preprocessYuv<decltype(planar)::value, decltype(indexed)::value>(
                 yPlane, uPlane, vPlane, sourceWidth, sourceHeight, rotationDegrees,
                 targetWidth, targetHeight, meanR, meanG, meanB, stdR, stdG, stdB,
                 resizeFilter, imageMapping,
-                [outputData](int index, float value) { outputData[index] = value; });
+                [outputData](int index, float value) { outputData[index] = value; }, offsets.get());
+    };
+    const auto preprocessLayout = [&](auto planar) {
+        return offsets ? preprocess(planar, std::true_type{}) : preprocess(planar, std::false_type{});
     };
     const bool success = outputLayout == sailens::kTensorLayoutNchw
-            ? preprocess(std::true_type{})
-            : preprocess(std::false_type{});
+            ? preprocessLayout(std::true_type{})
+            : preprocessLayout(std::false_type{});
 
     const jlong releasing = timing.now();
     env->ReleaseFloatArrayElements(output, outputData, success ? 0 : JNI_ABORT);
@@ -562,7 +640,7 @@ nativeQuantizeFloatToInt8(
 
 const JNINativeMethod kYuvInputPreprocessorMethods[] = {
         {"nativePreprocessYuvToFloat",
-         "([B[B[BIIIIIIIIIIIFFFFFFII[F[F[J)Z",
+         "([B[B[BIIIIIIIIIIIFFFFFFIIZ[F[F[J)Z",
          reinterpret_cast<void*>(nativePreprocessYuvToFloat)},
         {"nativePreprocessYuvToInt8",
          "([B[B[BIIIIIIIIIIIFFFFFFIFI[B[F[J)Z",

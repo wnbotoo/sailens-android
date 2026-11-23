@@ -32,6 +32,7 @@ class DetectorObstacleProvider(
     logService: LogService,
     private val navigationSemantics: NavigationSemantics = CocoNavigationSemantics,
     directFloatNchw: Boolean = false,
+    precomputeNearestIndices: Boolean = false,
 ) : ObstacleProvider {
 
     private val runner = LiteRtDetectionRunner(
@@ -44,6 +45,7 @@ class DetectorObstacleProvider(
         preprocessCache = preprocessCache,
         logService = logService,
         directFloatNchw = directFloatNchw,
+        precomputeNearestIndices = precomputeNearestIndices,
     )
 
     override val isInitialized: Boolean

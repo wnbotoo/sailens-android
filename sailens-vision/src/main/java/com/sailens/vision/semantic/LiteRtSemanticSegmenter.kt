@@ -43,6 +43,7 @@ class LiteRtSemanticSegmenter<R>(
     private val preprocessCache: InputPreprocessCache? = null,
     private val logService: LogService,
     private val directFloatNchw: Boolean = false,
+    private val precomputeNearestIndices: Boolean = false,
 ) {
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -171,6 +172,7 @@ class LiteRtSemanticSegmenter<R>(
                 postprocessor = postprocessor,
                 scoreGridSpansInput = modelConfig.scoreGridSpansInput,
                 directFloatNchw = directFloatNchw,
+                precomputeNearestIndices = precomputeNearestIndices,
             )
         } catch (error: CancellationException) {
             session.close()
