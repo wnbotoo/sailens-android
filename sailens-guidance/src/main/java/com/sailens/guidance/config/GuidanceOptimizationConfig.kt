@@ -6,4 +6,5 @@ data class GuidanceOptimizationConfig(
     val useNeonArgmax: Boolean = false,
     val directFloatNchw: Boolean = false,
     val precomputeNearestIndices: Boolean = false,
+    val usePairedNeonArgmax: Boolean = false,
 )

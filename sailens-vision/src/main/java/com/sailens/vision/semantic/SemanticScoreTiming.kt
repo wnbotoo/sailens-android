@@ -26,6 +26,7 @@ class SemanticScoreTiming(
         get() = when (nativeNanos[8]) {
             0L -> "scalar"
             1L -> "neon"
+            2L -> "neon_paired"
             else -> null
         }
 

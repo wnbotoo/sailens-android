@@ -17,6 +17,7 @@ import com.sailens.vision.semantic.SemanticScores
 import com.sailens.vision.semantic.SemanticScoreTiming
 import com.sailens.vision.semantic.cropClassMap
 import com.sailens.guidance.config.AnalysisConfig
+import com.sailens.guidance.model.common.GroundType
 import com.sailens.guidance.model.perception.SegmentationMask
 import com.sailens.guidance.model.perception.SegmentationMaskPool
 import com.sailens.guidance.processor.perception.KotlinSegmentationStatsExtractor
@@ -265,6 +266,94 @@ class NavigationScoreKernelTest {
     }
 
     @Test
+    fun pairedNeonMatchesFourColumnsBitForBitAtLiveCropAndRowTails() {
+        val cache = InstrumentationRegistry.getInstrumentation().targetContext.cacheDir
+        val fixture = File.createTempFile("semantic-paired-", ".tflite", cache)
+        val size = 640
+        val layout = ImageTensorLayout.NCHW
+        val content = SemanticContentRegion.forLetterbox(1280, 720, 90, size, size, size, size)
+        assertEquals(SemanticContentRegion(140, 0, 360, 640), content)
+        val spec = SemanticScoreSpec(size, size, CLASS_COUNT, layout, content)
+        val scores = syntheticScores(layout, width = size, height = size)
+        val planeSize = size * size
+        val tiedColumns = listOf(0, 4, 7, content.width - 1)
+        for (column in tiedColumns) {
+            val pixel = content.x + column
+            for (channel in 0 until CLASS_COUNT) {
+                scores[channel * planeSize + pixel] = if (channel == 1 || channel == 18) 8f else 0f
+            }
+        }
+
+        try {
+            fixture.writeBytes(Base64.decode(FLOAT_LIVE_SHAPE_RESHAPE_GRAPH, Base64.DEFAULT))
+            CompiledModel.create(fixture.absolutePath, CompiledModel.Options(Accelerator.CPU)).use { model ->
+                model.createInputBuffers().single().use { input ->
+                    model.createOutputBuffers().single().use { output ->
+                        fun loadScores() {
+                            input.writeFloat(scores)
+                            model.run(listOf(input), listOf(output))
+                        }
+                        fun compare(
+                            crop: SemanticContentRegion,
+                            fourColumnKernel: Int,
+                            pairedKernel: Int,
+                            tensorSpec: SemanticScoreSpec = spec,
+                        ): IntArray {
+                            val croppedSpec = tensorSpec.copy(content = crop)
+                            val baseline = scoreUntimedHandle(handleOf(output), croppedSpec, true, false)
+                            val candidate = scoreUntimedHandle(handleOf(output), croppedSpec, true, true)
+                            assertEquals("four columns, $crop", fourColumnKernel, baseline.kernel)
+                            assertEquals("paired columns, $crop", pairedKernel, candidate.kernel)
+                            assertArrayEquals(baseline.classMap, candidate.classMap)
+                            assertArrayEquals(baseline.passableWords, candidate.passableWords)
+                            assertArrayEquals(baseline.obstacleWords, candidate.obstacleWords)
+                            assertArrayEquals(baseline.classCounts, candidate.classCounts)
+                            assertArrayEquals(baseline.groundTypeCounts, candidate.groundTypeCounts)
+                            assertArrayEquals(baseline.statistics, candidate.statistics)
+                            return candidate.classMap
+                        }
+
+                        loadScores()
+                        val classMap = compare(content, 1, 2)
+                        for (column in tiedColumns) assertEquals(1, classMap[column])
+                        for (width in 3..15) {
+                            val four = if (width >= 4) 1 else 0
+                            compare(content.copy(width = width, height = 3), four, if (width >= 8) 2 else four)
+                        }
+                        // This 10-channel view has the same packed size as the reshape output.
+                        compare(content.copy(height = 3), 1, 1, spec.copy(height = 1216, channels = 10))
+
+                        val tail = content.copy(width = 13, height = 3)
+                        data class Override(
+                            val crop: SemanticContentRegion,
+                            val column: Int,
+                            val row: Int,
+                            val value: Float,
+                            val inside: Boolean,
+                        )
+                        for (invalid in listOf(
+                            Override(content, 5, 0, Float.NaN, inside = true),
+                            Override(content, 358, 319, Float.NEGATIVE_INFINITY, inside = true),
+                            Override(tail, 12, 1, Float.POSITIVE_INFINITY, inside = true),
+                            Override(content, -1, 0, Float.NaN, inside = false),
+                            Override(tail, 13, 1, Float.POSITIVE_INFINITY, inside = false),
+                        )) {
+                            val index = 18 * planeSize + invalid.row * size + content.x + invalid.column
+                            val original = scores[index]
+                            scores[index] = invalid.value
+                            loadScores()
+                            compare(invalid.crop, if (invalid.inside) 0 else 1, if (invalid.inside) 0 else 2)
+                            scores[index] = original
+                        }
+                    }
+                }
+            }
+        } finally {
+            fixture.delete()
+        }
+    }
+
+    @Test
     fun fusedScoreKernelRejectsAMismatchedScoreCount() {
         val postprocessor = NavigationScorePostprocessor(
             config = analysisConfig,
@@ -408,26 +497,60 @@ class NavigationScoreKernelTest {
     }
 
     private fun assertUntimedFloatKernelSelection(handle: Long, content: SemanticContentRegion) {
+        val spec = SemanticScoreSpec(WIDTH, HEIGHT, CLASS_COUNT, ImageTensorLayout.NCHW, content)
+        for ((requestNeon, expected) in listOf(false to 0, true to 1)) {
+            assertEquals(expected, scoreUntimedHandle(handle, spec, requestNeon, paired = false).kernel)
+        }
+    }
+
+    private data class NativeScoreOutputs(
+        val kernel: Int,
+        val classMap: IntArray,
+        val passableWords: LongArray,
+        val obstacleWords: LongArray,
+        val classCounts: IntArray,
+        val groundTypeCounts: IntArray,
+        val statistics: IntArray,
+    )
+
+    private fun scoreUntimedHandle(
+        handle: Long,
+        spec: SemanticScoreSpec,
+        requestNeon: Boolean,
+        paired: Boolean,
+    ): NativeScoreOutputs {
         val postprocessor = NavigationScorePostprocessor(analysisConfig, navigationSemantics, SilentLogService)
         val native = NavigationScorePostprocessor::class.java.declaredMethods
             .single { it.name == "nativePostprocessScoresFromHandle" }
             .apply { isAccessible = true }
-        val lookup = BooleanArray(CLASS_COUNT)
+        val content = spec.content
         val words = (content.pixelCount + 63) / 64
-        for ((requestNeon, expected) in listOf(false to 0, true to 1)) {
-            // Both instrumentation arrays are null. The JNI return identifies the kernel that ran.
-            val kernel = native.invoke(
-                postprocessor,
-                handle, IntArray(content.pixelCount),
-                WIDTH, HEIGHT, CLASS_COUNT, ImageTensorLayout.NCHW.nativeValue,
-                lookup, lookup, lookup, lookup, IntArray(CLASS_COUNT) { -1 },
-                0.3f, 0.3f, 0.3f,
-                LongArray(words), LongArray(words), IntArray(CLASS_COUNT), IntArray(1), IntArray(13),
-                intArrayOf(content.x, content.y, content.width, content.height),
-                requestNeon, -1, null, null,
-            )
-            assertEquals(expected, kernel)
+        val initial = if (paired) -1 else -2
+        val classMap = IntArray(content.pixelCount) { initial }
+        val passableWords = LongArray(words) { initial.toLong() }
+        val obstacleWords = LongArray(words) { initial.toLong() }
+        val classCounts = IntArray(CLASS_COUNT) { initial }
+        val groundTypeCounts = IntArray(GroundType.entries.size) { initial }
+        val statistics = IntArray(13) { initial }
+        val groundTypes = IntArray(CLASS_COUNT) { index ->
+            navigationSemantics.toGroundType(index).takeIf { it != GroundType.UNKNOWN }?.ordinal ?: -1
         }
+        // The return identifies the completed kernel while both timing arrays are null.
+        val kernel = native.invoke(
+            postprocessor,
+            handle, classMap,
+            spec.width, spec.height, spec.channels, spec.layout.nativeValue,
+            BooleanArray(CLASS_COUNT, navigationSemantics::isPassable),
+            BooleanArray(CLASS_COUNT, navigationSemantics::isObstacle),
+            BooleanArray(CLASS_COUNT, navigationSemantics::isRoad),
+            BooleanArray(CLASS_COUNT, navigationSemantics::isTrafficLight),
+            groundTypes,
+            0.3f, 0.3f, 0.3f,
+            passableWords, obstacleWords, classCounts, groundTypeCounts, statistics,
+            intArrayOf(content.x, content.y, content.width, content.height),
+            requestNeon, paired, -1, null, null,
+        ) as Int
+        return NativeScoreOutputs(kernel, classMap, passableWords, obstacleWords, classCounts, groundTypeCounts, statistics)
     }
 
     private fun croppedScoreFixture(layout: ImageTensorLayout): ByteArray {
@@ -494,15 +617,20 @@ class NavigationScoreKernelTest {
      * of the statistics are actually populated. A fixed seed keeps it reproducible, and the
      * deterministic tilt keeps ties out of the argmax.
      */
-    private fun syntheticScores(layout: ImageTensorLayout, seed: Int = SEED): FloatArray {
+    private fun syntheticScores(
+        layout: ImageTensorLayout,
+        seed: Int = SEED,
+        width: Int = WIDTH,
+        height: Int = HEIGHT,
+    ): FloatArray {
         val random = Random(seed)
-        val scores = FloatArray(WIDTH * HEIGHT * CLASS_COUNT)
-        val pixelCount = WIDTH * HEIGHT
+        val scores = FloatArray(width * height * CLASS_COUNT)
+        val pixelCount = width * height
 
-        for (y in 0 until HEIGHT) {
-            val nearGround = y.toFloat() / HEIGHT
-            for (x in 0 until WIDTH) {
-                val pixelIndex = y * WIDTH + x
+        for (y in 0 until height) {
+            val nearGround = y.toFloat() / height
+            for (x in 0 until width) {
+                val pixelIndex = y * width + x
                 for (channel in 0 until CLASS_COUNT) {
                     val bias = when (channel) {
                         CityscapesTaxonomy.ROAD -> 3f * nearGround
@@ -561,6 +689,14 @@ class NavigationScoreKernelTest {
         const val SEED = 20260920
         const val CROP_GRID_WIDTH = 5
         const val CROP_GRID_HEIGHT = 4
+
+        // TFLite v3 FLOAT32 RESHAPE from [1,19,640,640] to [7782400] with no weights.
+        const val FLOAT_LIVE_SHAPE_RESHAPE_GRAPH =
+            "GAAAAFRGTDMAAA4AFAAQAAwACAAAAAQADgAAABAAAAA8AAAAGAAAAAMAAAABAAAACAAAAAQABAAE" +
+                "AAAAAQAAABAAAAAMAAwABwAAAAAACAAMAAAAAAAAFhYAAAABAAAAEAAAAAwAFAAQAAwACAAEAAwA" +
+                "AAAQAAAASAAAAEwAAABQAAAAAQAAABQAAAAAAA4AFAAAABAADAALAAQADgAAABAAAAAAAAARGAAA" +
+                "ABwAAADC////BAAAAAEAAAAAwHYAAQAAAAEAAAABAAAAAAAAAAIAAAAgAAAABAAAAO7///8EAAAA" +
+                "AQAAAADAdgAAAAYACAAEAAYAAAAEAAAABAAAAAEAAAATAAAAgAIAAIACAAA="
 
         // TFLite v3, one FLOAT32 RESHAPE from [1,19,32,40] to [24320], with no weights.
         const val FLOAT_RESHAPE_GRAPH =

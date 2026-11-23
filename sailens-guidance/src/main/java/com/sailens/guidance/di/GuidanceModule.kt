@@ -74,11 +74,13 @@ val guidanceModule = module {
     }
 
     single {
+        val optimizations = getOrNull<GuidanceOptimizationConfig>()
         NavigationScorePostprocessor(
             config = get(),
             navigationSemantics = get(),
             logService = get(),
-            useNeonArgmax = getOrNull<GuidanceOptimizationConfig>()?.useNeonArgmax == true,
+            useNeonArgmax = optimizations?.useNeonArgmax == true,
+            usePairedNeonArgmax = optimizations?.usePairedNeonArgmax == true,
         )
     }
 

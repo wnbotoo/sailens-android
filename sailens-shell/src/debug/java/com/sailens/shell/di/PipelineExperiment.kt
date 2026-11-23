@@ -26,6 +26,11 @@ internal enum class PipelineExperiment(
     SEM_NCHW_UNTIMED("sem-nchw-untimed", combinedOptimizations, measure = false),
     SEM_NCHW_INDEXED("sem-nchw-indexed", indexedOptimizations, measureSemanticScoreThreadCpu = true),
     SEM_NCHW_INDEXED_UNTIMED("sem-nchw-indexed-untimed", indexedOptimizations, measure = false),
+    SEM_NCHW_INDEXED_ARGMAX8_UNTIMED(
+        "sem-nchw-indexed-argmax8-untimed",
+        indexedOptimizations.copy(usePairedNeonArgmax = true),
+        measure = false,
+    ),
     ;
 
     val timing = PipelineTimingConfig(

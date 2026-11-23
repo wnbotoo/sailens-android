@@ -59,6 +59,9 @@ process for the default path with profiling off. Use `sem-nchw-untimed` for sema
 preprocessing, NEON argmax, and direct NCHW output with profiling off. Compare it with
 `sem-nchw-indexed-untimed` to isolate precomputed nearest-neighbour offsets in the shared
 float preprocessing path. Use `sem-nchw-indexed` with stage timing on and pixel sampling off.
+Compare `sem-nchw-indexed-untimed` with `sem-nchw-indexed-argmax8-untimed` to isolate the
+paired NEON argmax. For 19-channel NCHW FLOAT32 handles it processes two groups of four
+columns per channel loop and uses the four-column kernel at the row tail.
 The `CameraX negotiated` log reports the bound sizes for
 analysis and preview. The trace report shows the buffer dimensions delivered to Guidance.
 The camera service dump taken during the run shows the active preview and YUV streams.

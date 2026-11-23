@@ -30,6 +30,11 @@ class PipelineExperimentTest {
                 indexed,
             ),
             Triple("sem-nchw-indexed-untimed", PipelineTimingConfig(), indexed),
+            Triple(
+                "sem-nchw-indexed-argmax8-untimed",
+                PipelineTimingConfig(),
+                indexed.copy(usePairedNeonArgmax = true),
+            ),
         )
 
         for ((marker, timing, optimizations) in presets) {
