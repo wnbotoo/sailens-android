@@ -7,13 +7,14 @@ import android.text.format.Formatter
 import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.OutlinedTextField
@@ -97,67 +98,77 @@ internal fun FieldCaptureScreen(
         navigateBackContentDescription = stringResource(R.string.cd_navigate_back),
         modifier = modifier,
     ) { innerPadding ->
-        Column(
+        LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
-                .padding(SailensDimens.screenPadding),
+                .padding(innerPadding),
+            contentPadding = PaddingValues(SailensDimens.screenPadding),
             verticalArrangement = Arrangement.spacedBy(SailensDimens.spaceMd),
         ) {
-            // The mode is read once when a Guidance session starts, so changing it mid-session would
-            // not do what the switch shows; it is locked until the recording ends.
-            ToggleRow(
-                label = stringResource(R.string.field_capture_switch),
-                checked = state.enabled,
-                onCheckedChange = viewModel::setEnabled,
-                supportingText = stringResource(R.string.field_capture_switch_supporting),
-                enabled = !state.capturing,
-            )
-            RegressionSection(
-                state = state,
-                onModelRegressionChange = viewModel::setModelRegression,
-                onDepthEvidenceChange = viewModel::setDepthEvidence,
-                onGroupChange = viewModel::setGroup,
-                onSceneLabelChange = viewModel::setSceneLabel,
-                onCapChange = viewModel::setCapGigabytes,
-            )
-            TimingSyncSection(
-                armed = state.timingSyncArmed,
-                enabled = !state.capturing,
-                onArmedChange = viewModel::setTimingSyncArmed,
-            )
+            item {
+                // The mode is read once when a Guidance session starts, so changing it mid-session would
+                // not do what the switch shows; it is locked until the recording ends.
+                ToggleRow(
+                    label = stringResource(R.string.field_capture_switch),
+                    checked = state.enabled,
+                    onCheckedChange = viewModel::setEnabled,
+                    supportingText = stringResource(R.string.field_capture_switch_supporting),
+                    enabled = !state.capturing,
+                )
+            }
+            item {
+                RegressionSection(
+                    state = state,
+                    onModelRegressionChange = viewModel::setModelRegression,
+                    onDepthEvidenceChange = viewModel::setDepthEvidence,
+                    onGroupChange = viewModel::setGroup,
+                    onSceneLabelChange = viewModel::setSceneLabel,
+                    onCapChange = viewModel::setCapGigabytes,
+                )
+            }
+            item {
+                TimingSyncSection(
+                    armed = state.timingSyncArmed,
+                    enabled = !state.capturing,
+                    onArmedChange = viewModel::setTimingSyncArmed,
+                )
+            }
             if (state.capturing) {
-                Text(
-                    text = stringResource(R.string.field_capture_recording_notice),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
-                )
-            }
-            if (state.exporting) {
-                Text(
-                    text = stringResource(R.string.field_capture_exporting_notice),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
-                )
-            }
-            if (state.sessions.isEmpty()) {
-                Text(
-                    text = stringResource(R.string.field_capture_empty),
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-            }
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(SailensDimens.spaceSm)) {
-                items(state.sessions, key = { it.sessionId }) { session ->
-                    CaptureRow(
-                        session = session,
-                        actionsEnabled = !state.capturing && state.busySessionId == null,
-                        onKeep = { viewModel.setKept(session.sessionId, !session.pinned) },
-                        onExport = { viewModel.export(session.sessionId) },
-                        onDelete = { pendingDelete = session.sessionId },
+                item {
+                    Text(
+                        text = stringResource(R.string.field_capture_recording_notice),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
                     )
                 }
+            }
+            if (state.exporting) {
+                item {
+                    Text(
+                        text = stringResource(R.string.field_capture_exporting_notice),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                    )
+                }
+            }
+            if (state.sessions.isEmpty()) {
+                item {
+                    Text(
+                        text = stringResource(R.string.field_capture_empty),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+            }
+            items(state.sessions, key = { it.sessionId }) { session ->
+                CaptureRow(
+                    session = session,
+                    actionsEnabled = !state.capturing && state.busySessionId == null,
+                    onKeep = { viewModel.setKept(session.sessionId, !session.pinned) },
+                    onExport = { viewModel.export(session.sessionId) },
+                    onDelete = { pendingDelete = session.sessionId },
+                )
             }
         }
     }
